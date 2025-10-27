@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: transparent;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #math {
+            padding: 12px;
+            font-size: {{FONT_SIZE}}px;
+            color: {{THEME}} === 'dark' ? '#ffffff' : '#000000';
+        }
+        .katex {
+            font-size: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div id="math"></div>
+    <script>
+        try {
+            const latex = `{{LATEX_CODE}}`;
+            const displayMode = {{DISPLAY_MODE}};
+            katex.render(latex, document.getElementById('math'), {
+                throwOnError: false,
+                displayMode: displayMode,
+                output: 'html',
+                trust: false,
+                strict: false
+            });
+        } catch (e) {
+            document.getElementById('math').innerText = 'LaTeX渲染失败: ' + e.message;
+        }
+    </script>
+</body>
+</html>

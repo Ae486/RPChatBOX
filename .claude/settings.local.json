@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init)",
+      "Bash(git branch -m main)",
+      "Bash(while read f)",
+      "Bash(do git check-ignore -v \"$f\")",
+      "Bash(echo \"✅ $f - will be tracked\")",
+      "Bash(done)",
+      "Bash(for f in *.md)",
+      "Bash(do if git check-ignore -q \"$f\")",
+      "Bash(then echo \"❌ $f - IGNORED\")",
+      "Bash(else echo \"✅ $f - tracked\")",
+      "Bash(fi)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
