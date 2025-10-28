@@ -469,14 +469,7 @@ class _ChatPageState extends State<ChatPage> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => SettingsPage(
-          initialSettings: _settings,
-          onSettingsChanged: (newSettings) {
-            setState(() {
-              _settings = newSettings;
-            });
-          },
-        ),
+        builder: (context) => const SettingsPage(),
       ),
     );
   }

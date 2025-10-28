@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:photo_view/photo_view.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
 import '../models/chat_settings.dart';
+import '../models/attached_file.dart';
 import '../services/openai_service.dart';
 import '../services/export_service.dart';
 import '../utils/token_counter.dart';
@@ -68,6 +72,7 @@ class ConversationViewState extends State<ConversationView>
   // 🆕 新功能相关
   late ConversationSettings _conversationSettings;
   late EnhancedStreamController _streamController;
+  bool _attachmentBarVisible = true; // 附件栏可见性控制
   
   // 🔥 关键：保持页面存活，不销毁
   @override
@@ -298,13 +303,20 @@ class ConversationViewState extends State<ConversationView>
   /// 发送消息（使用新的流式控制器）
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    final hasFiles = _conversationSettings.hasAttachedFiles;
+
+    // 允许：有文本 或 有附件
+    if (text.isEmpty && !hasFiles) return;
 
     // 获取选择的Provider和Model
     final modelId = _conversationSettings.selectedModelId;
     if (modelId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 请先选择模型')),
+        const SnackBar(
+          content: Text('⚠️ 请先选择模型'),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.only(top: 80, left: 20, right: 20),
+        ),
       );
       return;
     }
@@ -312,9 +324,20 @@ class ConversationViewState extends State<ConversationView>
     final modelWithProvider = globalModelServiceManager.getModelWithProvider(modelId);
     if (modelWithProvider == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 模型配置错误')),
+        const SnackBar(
+          content: Text('⚠️ 模型配置错误'),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.only(top: 80, left: 20, right: 20),
+        ),
       );
       return;
+    }
+
+    // 🔥 关键：立即隐藏附件栏（优雅体验）
+    if (hasFiles) {
+      setState(() {
+        _attachmentBarVisible = false;
+      });
     }
 
     // 计算用户消息的 token
@@ -327,6 +350,9 @@ class ConversationViewState extends State<ConversationView>
       isUser: true,
       timestamp: DateTime.now(),
       inputTokens: userInputTokens,
+      attachedFiles: _conversationSettings.attachedFiles
+          .map((f) => AttachedFileSnapshot.fromAttachedFile(f))
+          .toList(),
     );
 
     setState(() {
@@ -399,6 +425,8 @@ class ConversationViewState extends State<ConversationView>
               timestamp: DateTime.now(),
               inputTokens: inputTokens,
               outputTokens: outputTokens,
+              modelName: modelWithProvider.model.displayName,
+              providerName: modelWithProvider.provider.name,
             );
 
             setState(() {
@@ -407,9 +435,12 @@ class ConversationViewState extends State<ConversationView>
               _isLoading = false;
             });
 
-            // 清空附件
+            // 🔥 成功后：清空附件数据并恢复可见性状态
             _conversationSettings = _conversationSettings.clearFiles();
             globalModelServiceManager.updateConversationSettings(_conversationSettings);
+            setState(() {
+              _attachmentBarVisible = true; // 恢复状态，等待下次使用
+            });
 
             widget.onConversationUpdated();
             widget.onTokenUsageUpdated(widget.conversation);
@@ -417,8 +448,10 @@ class ConversationViewState extends State<ConversationView>
           }
         },
         onError: (error) {
+          // 🔥 失败时：恢复附件栏显示（让用户可以重试）
           setState(() {
             _isLoading = false;
+            _attachmentBarVisible = true;
           });
 
           if (mounted) {
@@ -429,8 +462,10 @@ class ConversationViewState extends State<ConversationView>
         },
       );
     } catch (e) {
+      // 🔥 异常时：恢复附件栏显示
       setState(() {
         _isLoading = false;
+        _attachmentBarVisible = true;
       });
 
       if (mounted) {
@@ -446,6 +481,19 @@ class ConversationViewState extends State<ConversationView>
     final content = await _streamController.stop();
 
     if (content.isNotEmpty) {
+      // 获取当前模型信息
+      final modelId = _conversationSettings.selectedModelId;
+      String? modelName;
+      String? providerName;
+
+      if (modelId != null) {
+        final modelWithProvider = globalModelServiceManager.getModelWithProvider(modelId);
+        if (modelWithProvider != null) {
+          modelName = modelWithProvider.model.displayName;
+          providerName = modelWithProvider.provider.name;
+        }
+      }
+
       // 保存部分内容
       final assistantMessage = Message(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -453,6 +501,8 @@ class ConversationViewState extends State<ConversationView>
         isUser: false,
         timestamp: DateTime.now(),
         outputTokens: TokenCounter.estimateTokens(content),
+        modelName: modelName,
+        providerName: providerName,
       );
 
       setState(() {
@@ -894,7 +944,16 @@ class ConversationViewState extends State<ConversationView>
   }) {
     final isEditing = message != null && _editingMessageId == message.id;
     final isHighlighted = message != null && _highlightedMessageId == message.id;
-    final senderName = isUser ? '用户' : widget.settings.model;
+
+    // AI名称：使用消息保存的模型信息
+    String senderName;
+    if (isUser) {
+      senderName = '用户';
+    } else if (message != null && message.modelName != null && message.providerName != null) {
+      senderName = '${message.modelName}|${message.providerName}';
+    } else {
+      senderName = 'AI助手';
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -982,6 +1041,10 @@ class ConversationViewState extends State<ConversationView>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // 用户消息：显示附件
+                        if (isUser && message != null && message.attachedFiles != null && message.attachedFiles!.isNotEmpty)
+                          _buildAttachmentsPreview(message.attachedFiles!),
+
                         // 编辑模式：文本框
                         if (isEditing)
                           TextField(
@@ -1008,7 +1071,7 @@ class ConversationViewState extends State<ConversationView>
                                 : Theme.of(context).colorScheme.surface,
                             isUser: isUser,
                           ),
-                        
+
                         // Token 统计
                         if (message != null && !isEditing)
                           _buildTokenInfo(message, isUser),
@@ -1112,6 +1175,7 @@ class ConversationViewState extends State<ConversationView>
       isStreaming: _streamController.isStreaming,
       serviceManager: globalModelServiceManager,
       conversationSettings: _conversationSettings,
+      attachmentBarVisible: _attachmentBarVisible, // 🔥 传递附件栏可见性
       onSettingsChanged: (settings) {
         setState(() {
           _conversationSettings = settings;
@@ -1119,6 +1183,271 @@ class ConversationViewState extends State<ConversationView>
         globalModelServiceManager.updateConversationSettings(settings);
       },
     );
+  }
+
+  /// 构建附件预览（在用户气泡中显示）
+  Widget _buildAttachmentsPreview(List<AttachedFileSnapshot> files) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ...files.map((file) {
+          return FutureBuilder<bool>(
+            future: file.exists(),
+            builder: (context, snapshot) {
+              final fileExists = snapshot.data ?? false;
+
+              if (file.isImage) {
+                // 图片文件：显示缩略图，可点击查看原图
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: fileExists
+                      ? GestureDetector(
+                          onTap: () => _showImageViewer(file.path, file.name),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              File(file.path),
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return _buildFilePlaceholder(
+                                  file.name,
+                                  '图片加载失败',
+                                  Icons.broken_image,
+                                );
+                              },
+                            ),
+                          ),
+                        )
+                      : _buildFilePlaceholder(
+                          file.name,
+                          '图片已不存在',
+                          Icons.image_not_supported,
+                        ),
+                );
+              } else {
+                // 文档/代码文件：显示可点击的卡片
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: fileExists
+                      ? InkWell(
+                          onTap: () => _openFile(file.path),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outline
+                                    .withOpacity(0.5),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _getFileIconData(file.type),
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 12),
+                                Flexible(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        file.name,
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.primary,
+                                          decoration: TextDecoration.underline,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        file.mimeType,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withOpacity(0.6),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Icon(
+                                  Icons.open_in_new,
+                                  size: 16,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withOpacity(0.5),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : _buildFilePlaceholder(
+                          file.name,
+                          '文件已不存在',
+                          Icons.insert_drive_file_outlined,
+                        ),
+                );
+              }
+            },
+          );
+        }),
+        const SizedBox(height: 8),
+        const Divider(height: 1),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  /// 构建文件占位符（文件不存在时显示）
+  Widget _buildFilePlaceholder(String fileName, String message, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade400),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.grey),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  fileName,
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    decoration: TextDecoration.lineThrough,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 打开文件
+  Future<void> _openFile(String path) async {
+    try {
+      final uri = Uri.file(path);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('无法打开文件: $path'),
+              behavior: SnackBarBehavior.floating,
+              margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('打开文件失败: ${e.toString()}'),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
+          ),
+        );
+      }
+    }
+  }
+
+  /// 显示图片查看器（全屏，支持缩放）
+  void _showImageViewer(String imagePath, String imageName) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            title: Text(imageName),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          body: PhotoView(
+            imageProvider: FileImage(File(imagePath)),
+            minScale: PhotoViewComputedScale.contained,
+            maxScale: PhotoViewComputedScale.covered * 3,
+            initialScale: PhotoViewComputedScale.contained,
+            backgroundDecoration: const BoxDecoration(
+              color: Colors.black,
+            ),
+            loadingBuilder: (context, event) => Center(
+              child: CircularProgressIndicator(
+                value: event == null
+                    ? 0
+                    : event.cumulativeBytesLoaded / (event.expectedTotalBytes ?? 1),
+              ),
+            ),
+            errorBuilder: (context, error, stackTrace) => Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.broken_image, size: 64, color: Colors.white54),
+                  const SizedBox(height: 16),
+                  Text(
+                    '图片加载失败',
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
+  /// 获取文件图标
+  IconData _getFileIconData(FileType type) {
+    switch (type) {
+      case FileType.image:
+        return Icons.image;
+      case FileType.video:
+        return Icons.videocam;
+      case FileType.audio:
+        return Icons.audiotrack;
+      case FileType.document:
+        return Icons.description;
+      case FileType.code:
+        return Icons.code;
+      case FileType.other:
+        return Icons.insert_drive_file;
+    }
   }
 }
 

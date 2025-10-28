@@ -261,3 +261,71 @@ enum FileType {
 
   const FileType(this.displayName);
 }
+
+/// 附件快照模型（轻量级）
+/// 用于消息持久化存储，只保存文件引用路径
+class AttachedFileSnapshot {
+  final String id;
+  final String name;
+  final String path;
+  final String mimeType;
+  final FileType type;
+
+  AttachedFileSnapshot({
+    required this.id,
+    required this.name,
+    required this.path,
+    required this.mimeType,
+    required this.type,
+  });
+
+  /// 从 AttachedFile 创建快照
+  factory AttachedFileSnapshot.fromAttachedFile(AttachedFile file) {
+    return AttachedFileSnapshot(
+      id: file.id,
+      name: file.name,
+      path: file.path,
+      mimeType: file.mimeType,
+      type: file.type,
+    );
+  }
+
+  /// 从 JSON 创建实例
+  factory AttachedFileSnapshot.fromJson(Map<String, dynamic> json) {
+    return AttachedFileSnapshot(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      path: json['path'] as String,
+      mimeType: json['mimeType'] as String,
+      type: FileType.values.firstWhere(
+        (e) => e.name == json['type'],
+        orElse: () => FileType.other,
+      ),
+    );
+  }
+
+  /// 转换为 JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'path': path,
+      'mimeType': mimeType,
+      'type': type.name,
+    };
+  }
+
+  /// 检查文件是否存在
+  Future<bool> exists() async {
+    return await File(path).exists();
+  }
+
+  /// 是否为图片文件
+  bool get isImage => type == FileType.image;
+
+  /// 是否为视频文件
+  bool get isVideo => type == FileType.video;
+
+  /// 是否为文档/代码文件
+  bool get isDocument => type == FileType.document || type == FileType.code;
+}

@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as path;
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
+import '../services/file_content_service.dart';
 import 'ai_provider.dart';
 
 /// OpenAI格式Provider适配器
@@ -84,7 +86,7 @@ class OpenAIProvider extends AIProvider {
     required ModelParameters parameters,
     List<AttachedFileData>? files,
   }) async* {
-    final requestBody = _buildRequestBody(
+    final requestBody = await _buildRequestBody(
       model: model,
       messages: messages,
       parameters: parameters,
@@ -143,7 +145,7 @@ class OpenAIProvider extends AIProvider {
     required ModelParameters parameters,
     List<AttachedFileData>? files,
   }) async {
-    final requestBody = _buildRequestBody(
+    final requestBody = await _buildRequestBody(
       model: model,
       messages: messages,
       parameters: parameters,
@@ -176,16 +178,16 @@ class OpenAIProvider extends AIProvider {
   }
 
   /// 构建请求体
-  Map<String, dynamic> _buildRequestBody({
+  Future<Map<String, dynamic>> _buildRequestBody({
     required String model,
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     required bool stream,
     List<AttachedFileData>? files,
-  }) {
+  }) async {
     final body = <String, dynamic>{
       'model': model,
-      'messages': _convertMessages(messages, files),
+      'messages': await _convertMessages(messages, files),
       'temperature': parameters.temperature,
       'max_tokens': parameters.maxTokens,
       'top_p': parameters.topP,
@@ -198,10 +200,10 @@ class OpenAIProvider extends AIProvider {
   }
 
   /// 转换消息格式，处理多模态内容
-  List<Map<String, dynamic>> _convertMessages(
+  Future<List<Map<String, dynamic>>> _convertMessages(
     List<ChatMessage> messages,
     List<AttachedFileData>? files,
-  ) {
+  ) async {
     final converted = messages.map((msg) => msg.toJson()).toList();
 
     // 如果有附件且最后一条是用户消息，添加多模态内容
@@ -210,26 +212,58 @@ class OpenAIProvider extends AIProvider {
       if (lastMessage['role'] == 'user') {
         final content = <Map<String, dynamic>>[];
 
-        // 添加文本内容
-        if (lastMessage['content'] is String) {
-          content.add({
-            'type': 'text',
-            'text': lastMessage['content'],
-          });
-        }
+        // 准备文档内容
+        final documentContents = <String>[];
+        final imageContents = <Map<String, dynamic>>[];
 
-        // 添加图片
+        // 处理所有文件
         for (var file in files) {
+          final fileName = path.basename(file.path);
+          final extension = path.extension(file.path);
+
           if (file.mimeType.startsWith('image/')) {
+            // 处理图片文件
             final imageData = _readFileAsBase64(file.path);
-            content.add({
+            imageContents.add({
               'type': 'image_url',
               'image_url': {
                 'url': 'data:${file.mimeType};base64,$imageData',
               },
             });
+          } else if (FileContentService.isTextProcessable(file.mimeType, extension)) {
+            // 处理文本文件
+            try {
+              final textContent = await FileContentService.extractTextContent(
+                File(file.path),
+                file.mimeType,
+              );
+              documentContents.add(
+                FileContentService.generateFilePrompt(fileName, file.mimeType, textContent)
+              );
+            } catch (e) {
+              documentContents.add('// 文件 $fileName 处理失败: ${e.toString()}');
+            }
+          } else {
+            // 其他文件类型
+            documentContents.add('// 文件 $fileName (${file.mimeType}) 暂不支持内容提取');
           }
         }
+
+        // 构建文本内容
+        String textContent = lastMessage['content'] as String? ?? '';
+
+        // 如果有文档内容，添加到文本前面
+        if (documentContents.isNotEmpty) {
+          textContent = '${documentContents.join('\n\n')}\n\n---\n\n$textContent';
+        }
+
+        content.add({
+          'type': 'text',
+          'text': textContent,
+        });
+
+        // 添加图片内容
+        content.addAll(imageContents);
 
         lastMessage['content'] = content;
       }

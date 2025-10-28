@@ -6,6 +6,7 @@ import '../models/conversation_settings.dart';
 import '../models/model_config.dart';
 import '../models/provider_config.dart';
 import '../services/model_service_manager.dart';
+import 'conversation_config_dialog.dart';
 
 /// 增强的输入区域组件
 /// 包含文件上传、网络开关、配置按钮、模型选择
@@ -17,6 +18,7 @@ class EnhancedInputArea extends StatefulWidget {
   final ModelServiceManager serviceManager;
   final ConversationSettings conversationSettings;
   final Function(ConversationSettings) onSettingsChanged;
+  final bool attachmentBarVisible; // 🆕 附件栏可见性（由外部控制）
 
   const EnhancedInputArea({
     super.key,
@@ -27,6 +29,7 @@ class EnhancedInputArea extends StatefulWidget {
     required this.serviceManager,
     required this.conversationSettings,
     required this.onSettingsChanged,
+    this.attachmentBarVisible = true,
   });
 
   @override
@@ -35,8 +38,6 @@ class EnhancedInputArea extends StatefulWidget {
 
 class _EnhancedInputAreaState extends State<EnhancedInputArea> {
   final FocusNode _focusNode = FocusNode();
-  int _currentLines = 1;
-  static const int _maxLines = 6;
 
   @override
   void dispose() {
@@ -46,10 +47,26 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
 
   Future<void> _pickFiles() async {
     try {
+      // 支持更多文件类型，包括文档和代码文件
       final result = await file_picker.FilePicker.platform.pickFiles(
         allowMultiple: true,
         type: file_picker.FileType.custom,
-        allowedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'txt', 'md', 'doc', 'docx'],
+        allowedExtensions: [
+          // 图片文件
+          'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg',
+          // 文档文件
+          'pdf', 'doc', 'docx', 'txt', 'md', 'rtf',
+          // 代码文件
+          'js', 'ts', 'dart', 'py', 'java', 'cpp', 'c', 'h', 'hpp',
+          'cs', 'php', 'rb', 'go', 'rs', 'swift', 'kt',
+          'html', 'htm', 'css', 'scss', 'less', 'sass',
+          'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
+          'sql', 'sh', 'bat', 'ps1', 'dockerfile',
+          // 数据文件
+          'csv', 'tsv', 'xls', 'xlsx',
+          // 其他
+          'log', 'gitignore', 'env', 'config'
+        ],
       );
 
       if (result != null && result.files.isNotEmpty) {
@@ -74,7 +91,11 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('已添加 ${attachedFiles.length} 个文件')),
+              SnackBar(
+                content: Text('已添加 ${attachedFiles.length} 个文件'),
+                behavior: SnackBarBehavior.floating,
+                margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
+              ),
             );
           }
         }
@@ -82,16 +103,25 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('文件选择失败: ${e.toString()}')),
+          SnackBar(
+            content: Text('文件选择失败: ${e.toString()}'),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
+          ),
         );
       }
     }
   }
 
   void _showConfigDialog() {
-    // TODO: 显示对话配置面板
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('配置面板开发中...')),
+    showDialog(
+      context: context,
+      builder: (context) => ConversationConfigDialog(
+        settings: widget.conversationSettings,
+        onSave: (updatedSettings) {
+          widget.onSettingsChanged(updatedSettings);
+        },
+      ),
     );
   }
 
@@ -149,152 +179,129 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 附件预览区
-            if (hasFiles) _buildAttachedFilesPreview(),
+            // 附件预览区 - 使用外部传入的可见性控制
+            if (hasFiles && widget.attachmentBarVisible) _buildAttachedFilesPreview(),
 
-            // 输入区域
+            // 🆕 两层布局结构
             Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 左侧按钮组
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // 文件上传按钮
-                      IconButton(
-                        icon: const Icon(Icons.attach_file),
-                        onPressed: currentModel?.model.hasCapability(ModelCapability.vision) == true
-                            ? _pickFiles
-                            : null,
-                        tooltip: '上传文件',
-                        color: hasFiles ? Theme.of(context).colorScheme.primary : null,
+                  // 🆕 上层：多行文本输入框
+                  Container(
+                    constraints: const BoxConstraints(
+                      minHeight: 48,
+                      maxHeight: 48 * 5, // 最大 5 行
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
                       ),
-
-                      // 网络开关（预留）
-                      IconButton(
-                        icon: Icon(
-                          widget.conversationSettings.enableNetwork
-                              ? Icons.public
-                              : Icons.public_off,
-                        ),
-                        onPressed: null, // 暂未实现
-                        tooltip: '联网功能（开发中）',
-                        color: widget.conversationSettings.enableNetwork
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.grey,
-                      ),
-
-                      // 配置按钮
-                      IconButton(
-                        icon: const Icon(Icons.settings),
-                        onPressed: _showConfigDialog,
-                        tooltip: '对话配置',
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(width: 8),
-
-                  // 输入框
-                  Expanded(
-                    child: Container(
-                      constraints: BoxConstraints(
-                        minHeight: 48,
-                        maxHeight: 48.0 * _maxLines,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
+                    ),
+                    child: TextField(
+                      controller: widget.textController,
+                      focusNode: _focusNode,
+                      maxLines: 5,
+                      minLines: 1,
+                      decoration: const InputDecoration(
+                        hintText: '在这里输入你的问题...',
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 14,
                         ),
                       ),
-                      child: TextField(
-                        controller: widget.textController,
-                        focusNode: _focusNode,
-                        maxLines: _maxLines,
-                        minLines: 1,
-                        decoration: const InputDecoration(
-                          hintText: '输入消息...',
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 14,
-                          ),
-                        ),
-                        onChanged: (text) {
-                          // 计算行数
-                          final lines = '\n'.allMatches(text).length + 1;
-                          if (lines != _currentLines) {
-                            setState(() {
-                              _currentLines = lines.clamp(1, _maxLines);
-                            });
-                          }
-                        },
-                        onSubmitted: (_) {
-                          if (!widget.isStreaming) {
-                            widget.onSend();
-                          }
-                        },
-                      ),
+                      onSubmitted: (_) {
+                        if (!widget.isStreaming) {
+                          widget.onSend();
+                        }
+                      },
                     ),
                   ),
 
-                  const SizedBox(width: 8),
+                  const SizedBox(height: 8),
 
-                  // 右侧按钮组
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
+                  // 🆕 下层：按钮行
+                  Row(
                     children: [
-                      // 模型选择按钮
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 4),
-                        child: Material(
-                          color: Theme.of(context).colorScheme.secondaryContainer,
-                          borderRadius: BorderRadius.circular(20),
-                          child: InkWell(
-                            onTap: _showModelSelector,
+                      // 左侧按钮组
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline),
+                        onPressed: _pickFiles,
+                        tooltip: '上传文件',
+                        color: hasFiles ? Theme.of(context).colorScheme.primary : null,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.language),
+                        onPressed: null, // 暂未实现
+                        tooltip: '联网功能（开发中）',
+                        color: Colors.grey,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.tune),
+                        onPressed: _showConfigDialog,
+                        tooltip: '对话配置',
+                      ),
+
+                      // 中间弹性空间
+                      const Spacer(),
+
+                      // 模型选择器
+                      InkWell(
+                        onTap: _showModelSelector,
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary,
                             borderRadius: BorderRadius.circular(20),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.psychology,
-                                    size: 16,
-                                    color: Theme.of(context).colorScheme.onSecondaryContainer,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    currentModel?.model.displayName ?? '选择模型',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Theme.of(context).colorScheme.onSecondaryContainer,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Icon(
-                                    Icons.arrow_drop_down,
-                                    size: 16,
-                                    color: Theme.of(context).colorScheme.onSecondaryContainer,
-                                  ),
-                                ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.psychology,
+                                size: 18,
+                                color: Colors.white,
                               ),
-                            ),
+                              const SizedBox(width: 6),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 100),
+                                child: Text(
+                                  currentModel?.model.displayName ?? '选择模型',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.arrow_drop_down,
+                                size: 20,
+                                color: Colors.white,
+                              ),
+                            ],
                           ),
                         ),
                       ),
 
+                      const SizedBox(width: 8),
+
                       // 发送/停止按钮
-                      FloatingActionButton(
-                        mini: true,
-                        onPressed: widget.isStreaming ? widget.onStop : widget.onSend,
-                        child: Icon(
-                          widget.isStreaming ? Icons.stop : Icons.send,
+                      IconButton(
+                        icon: Icon(
+                          widget.isStreaming ? Icons.stop_circle : Icons.arrow_upward,
                         ),
+                        onPressed: widget.isStreaming ? widget.onStop : widget.onSend,
+                        iconSize: 28,
+                        color: Theme.of(context).colorScheme.primary,
+                        tooltip: widget.isStreaming ? '停止' : '发送',
                       ),
                     ],
                   ),
@@ -309,6 +316,7 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
 
   Widget _buildAttachedFilesPreview() {
     return Container(
+      width: double.infinity, // 固定为全屏宽度
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         border: Border(
@@ -331,9 +339,15 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
             children: widget.conversationSettings.attachedFiles.map((file) {
               return Chip(
                 avatar: Icon(_getFileIcon(file.type), size: 18),
-                label: Text(
-                  file.name,
-                  style: const TextStyle(fontSize: 12),
+                label: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width - 150, // 限制最大宽度
+                  ),
+                  child: Text(
+                    file.name,
+                    style: const TextStyle(fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 deleteIcon: const Icon(Icons.close, size: 16),
                 onDeleted: () => _removeFile(file),
