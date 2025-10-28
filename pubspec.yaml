@@ -47,7 +47,8 @@ dependencies:
   
   # 数学公式渲染（LaTeX）
   flutter_math_fork: ^0.7.2
-  # 注：flutter_math_fork 支持基础 LaTeX，复杂公式可能需要 WebView 方案
+  # latext包不存在或版本不兼容，使用增强的flutter_math_fork方案
+  # 注：使用优化的flutter_math_fork方案，提供更好的LaTeX支持
   
   # 代码语法高亮
   flutter_highlight: ^0.7.0
@@ -65,6 +66,12 @@ dependencies:
   webview_flutter: ^4.4.2
   webview_flutter_android: ^3.12.1
   webview_flutter_wkwebview: ^3.9.4
+
+  # UUID 生成
+  uuid: ^4.2.1
+
+  # 文件选择器
+  file_picker: ^6.1.1
 
 dev_dependencies:
   flutter_test:

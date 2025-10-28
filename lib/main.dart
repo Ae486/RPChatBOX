@@ -3,10 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'pages/chat_page.dart';
+import 'services/model_service_manager.dart';
+
+// 全局ModelServiceManager实例
+late ModelServiceManager globalModelServiceManager;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // 初始化 WebView 平台（Windows/Android）
   if (Platform.isWindows) {
     // Windows 平台 WebView 初始化会在第一次使用时自动完成
@@ -14,8 +18,13 @@ void main() async {
   } else if (Platform.isAndroid) {
     // Android 平台也会自动初始化
   }
-  
+
   final prefs = await SharedPreferences.getInstance();
+
+  // 初始化ModelServiceManager
+  globalModelServiceManager = ModelServiceManager(prefs);
+  await globalModelServiceManager.initialize();
+
   final themeMode = prefs.getString('theme_mode') ?? 'system';
   runApp(MyApp(initialThemeMode: themeMode));
 }

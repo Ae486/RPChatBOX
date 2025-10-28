@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -10,6 +11,11 @@ import '../utils/token_counter.dart';
 import 'message_actions.dart';
 import 'smart_content_renderer.dart';
 import 'enhanced_content_renderer.dart';
+import '../models/conversation_settings.dart';
+import '../controllers/stream_output_controller.dart';
+import '../adapters/ai_provider.dart';
+import 'enhanced_input_area.dart';
+import '../main.dart' show globalModelServiceManager;
 
 /// 单个会话视图（保持存活状态）
 class ConversationView extends StatefulWidget {
@@ -44,10 +50,24 @@ class ConversationViewState extends State<ConversationView>
   String _currentAssistantMessage = '';
   String? _editingMessageId;
   String? _highlightedMessageId; // 高亮的消息 ID
-  
+
   // 导出模式相关
   bool _isExportMode = false;
   final Set<String> _selectedMessageIds = {};
+
+  // 🔥 智能滚动相关
+  bool _isUserNearBottom = true; // 用户是否在底部附近
+  bool _showNewMessageButton = false; // 是否显示"新消息"按钮
+  bool _isUserScrolling = false; // 用户是否正在主动滚动
+  bool _autoScrollEnabled = true; // 自动滚动是否启用
+  DateTime? _lastUserScrollTime; // 用户最后一次滚动时间
+  Timer? _scrollDebounceTimer; // 滚动防抖定时器
+  Timer? _autoScrollTimer; // 自动滚动定时器
+  int _lastScrollIndex = -1; // 上次滚动的索引，用于检测变化
+
+  // 🆕 新功能相关
+  late ConversationSettings _conversationSettings;
+  late EnhancedStreamController _streamController;
   
   // 🔥 关键：保持页面存活，不销毁
   @override
@@ -56,10 +76,21 @@ class ConversationViewState extends State<ConversationView>
   @override
   void initState() {
     super.initState();
-    
+
+    // 初始化自动滚动状态
+    _autoScrollEnabled = true;
+    _isUserNearBottom = true;
+
+    // 🆕 初始化对话配置
+    _conversationSettings = globalModelServiceManager
+        .getConversationSettings(widget.conversation.id);
+
+    // 🆕 初始化流式控制器
+    _streamController = EnhancedStreamController();
+
     // 监听滚动位置变化，自动保存
     _itemPositionsListener.itemPositions.addListener(_onScrollPositionChanged);
-    
+
     // 恢复之前保存的滚动位置
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreScrollPosition();
@@ -71,6 +102,9 @@ class ConversationViewState extends State<ConversationView>
     _messageController.dispose();
     _editController.dispose();
     _itemPositionsListener.itemPositions.removeListener(_onScrollPositionChanged);
+    _scrollDebounceTimer?.cancel();
+    _autoScrollTimer?.cancel();
+    _streamController.dispose(); // 🆕 清理流式控制器
     super.dispose();
   }
 
@@ -83,7 +117,23 @@ class ConversationViewState extends State<ConversationView>
           .where((position) => position.itemTrailingEdge > 0)
           .reduce((a, b) => a.index < b.index ? a : b)
           .index;
-      
+
+      // 检测用户是否在主动滚动
+      final currentTime = DateTime.now();
+      final isUserInitiatedScroll = _lastScrollIndex != firstVisibleIndex &&
+          _lastScrollIndex != -1 &&
+          (_lastUserScrollTime == null ||
+           currentTime.difference(_lastUserScrollTime!).inMilliseconds < 1000);
+
+      if (isUserInitiatedScroll) {
+        _markUserScrolling();
+      }
+
+      // 更新用户是否在底部的状态
+      _updateUserNearBottomStatus(positions);
+
+      _lastScrollIndex = firstVisibleIndex;
+
       // 只在位置真正改变时保存（防止频繁写入）
       if (widget.conversation.scrollIndex != firstVisibleIndex) {
         widget.conversation.scrollIndex = firstVisibleIndex;
@@ -92,6 +142,54 @@ class ConversationViewState extends State<ConversationView>
           widget.onConversationUpdated();
         });
       }
+    }
+  }
+
+  /// 标记用户正在滚动
+  void _markUserScrolling() {
+    setState(() {
+      _isUserScrolling = true;
+      _lastUserScrollTime = DateTime.now();
+      // 用户主动滚动时，暂时禁用自动滚动
+      _autoScrollEnabled = false;
+    });
+
+    // 取消之前的防抖定时器
+    _scrollDebounceTimer?.cancel();
+
+    // 设置新的防抖定时器，1秒后恢复自动滚动
+    _scrollDebounceTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) {
+        setState(() {
+          _isUserScrolling = false;
+          // 只有在用户接近底部时才恢复自动滚动
+          _autoScrollEnabled = _isUserNearBottom;
+        });
+      }
+    });
+  }
+
+  /// 更新用户是否在底部的状态
+  void _updateUserNearBottomStatus(Iterable<ItemPosition> positions) {
+    if (positions.isEmpty) return;
+
+    final totalMessages = widget.conversation.messages.length + (_currentAssistantMessage.isEmpty ? 0 : 1);
+    final lastVisibleIndex = positions
+        .where((position) => position.itemLeadingEdge < 1)
+        .reduce((a, b) => a.index > b.index ? a : b)
+        .index;
+
+    // 如果最后可见的消息距离底部2条消息以内，认为用户在底部附近
+    final isNearBottom = totalMessages - lastVisibleIndex <= 2;
+
+    if (_isUserNearBottom != isNearBottom) {
+      setState(() {
+        _isUserNearBottom = isNearBottom;
+        // 用户回到底部时，重新启用自动滚动
+        if (isNearBottom) {
+          _autoScrollEnabled = true;
+        }
+      });
     }
   }
 
@@ -150,27 +248,71 @@ class ConversationViewState extends State<ConversationView>
     }
   }
 
-  /// 滚动到底部
-  void _scrollToBottom() {
+  /// 智能滚动到底部（优化版）
+  void _scrollToBottom({bool smooth = false}) {
+    // 只有在自动滚动启用且用户不在主动滚动时才执行
+    if (!_autoScrollEnabled || _isUserScrolling) {
+      return;
+    }
+
+    // 如果用户不在底部附近，不自动滚动
+    if (!_isUserNearBottom) {
+      return;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_itemScrollController.isAttached) {
-        final lastIndex = widget.conversation.messages.length - 1;
+        final totalItems = widget.conversation.messages.length + (_currentAssistantMessage.isEmpty ? 0 : 1);
+        final lastIndex = totalItems - 1;
+
         if (lastIndex >= 0) {
-          _itemScrollController.jumpTo(index: lastIndex);
+          if (smooth) {
+            // 使用平滑滚动动画
+            _itemScrollController.scrollTo(
+              index: lastIndex,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+            );
+          } else {
+            // 直接跳转（用于流式输出时的频繁更新）
+            _itemScrollController.jumpTo(index: lastIndex);
+          }
         }
       }
     });
   }
 
-  /// 发送消息
+  /// 节流滚动：用于流式输出
+  void _throttledScrollToBottom() {
+    // 取消之前的定时器
+    _autoScrollTimer?.cancel();
+
+    // 设置新的定时器，500ms后执行滚动
+    _autoScrollTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted && _isLoading) {
+        _scrollToBottom(smooth: true);
+      }
+    });
+  }
+
+  /// 发送消息（使用新的流式控制器）
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    // 检查设置
-    if (widget.settings.apiKey.isEmpty) {
+    // 获取选择的Provider和Model
+    final modelId = _conversationSettings.selectedModelId;
+    if (modelId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 请先在设置中配置 API Key')),
+        const SnackBar(content: Text('⚠️ 请先选择模型')),
+      );
+      return;
+    }
+
+    final modelWithProvider = globalModelServiceManager.getModelWithProvider(modelId);
+    if (modelWithProvider == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ 模型配置错误')),
       );
       return;
     }
@@ -198,64 +340,130 @@ class ConversationViewState extends State<ConversationView>
     widget.onConversationUpdated();
 
     try {
-      // 构建消息列表（包含系统提示词）
-      final messages = <Message>[];
-      
-      // 如果有系统提示词，添加到开头
+      // 创建Provider实例
+      final provider = globalModelServiceManager.createProviderInstance(
+        modelWithProvider.provider.id,
+      );
+
+      // 准备消息列表
+      final chatMessages = <ChatMessage>[];
+
+      // 添加系统提示词
       if (widget.conversation.systemPrompt != null) {
-        messages.add(Message(
-          id: 'system',
+        chatMessages.add(ChatMessage(
+          role: 'system',
           content: widget.conversation.systemPrompt!,
-          isUser: false,
-          timestamp: DateTime.now(),
         ));
       }
-      
-      // 添加会话历史
-      messages.addAll(widget.conversation.messages);
 
-      // 调用 API
-      final service = OpenAIService(widget.settings);
-      final stream = service.sendMessage(messages);
-
-      // 接收流式响应
-      await for (var chunk in stream) {
-        setState(() {
-          _currentAssistantMessage += chunk;
-        });
-        _scrollToBottom();
+      // 添加对话历史
+      for (var msg in widget.conversation.messages) {
+        chatMessages.add(ChatMessage(
+          role: msg.isUser ? 'user' : 'assistant',
+          content: msg.content,
+        ));
       }
 
-      // 保存 AI 回复
-      if (_currentAssistantMessage.isNotEmpty) {
-        // 计算 Token 使用量
-        final inputTokens = TokenCounter.estimateTokens(text);
-        final outputTokens = TokenCounter.estimateTokens(_currentAssistantMessage);
+      // 准备附件
+      final files = _conversationSettings.attachedFiles
+          .map((f) => AttachedFileData(
+                path: f.path,
+                mimeType: f.mimeType,
+                name: f.name,
+              ))
+          .toList();
 
-        final assistantMessage = Message(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          content: _currentAssistantMessage,
-          isUser: false,
-          timestamp: DateTime.now(),
-          inputTokens: inputTokens,
-          outputTokens: outputTokens,
-        );
+      // 开始流式输出
+      await _streamController.startStreaming(
+        provider: provider,
+        modelName: modelWithProvider.model.modelName,
+        messages: chatMessages,
+        parameters: _conversationSettings.parameters,
+        files: files.isNotEmpty ? files : null,
+        onChunk: (chunk) {
+          setState(() {
+            _currentAssistantMessage += chunk;
+          });
+          _throttledScrollToBottom();
+        },
+        onDone: () {
+          // 保存助手消息
+          if (_currentAssistantMessage.isNotEmpty) {
+            final inputTokens = TokenCounter.estimateTokens(text);
+            final outputTokens = TokenCounter.estimateTokens(_currentAssistantMessage);
 
-        setState(() {
-          widget.conversation.addMessage(assistantMessage);
-          _currentAssistantMessage = '';
-        });
+            final assistantMessage = Message(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              content: _currentAssistantMessage,
+              isUser: false,
+              timestamp: DateTime.now(),
+              inputTokens: inputTokens,
+              outputTokens: outputTokens,
+            );
 
-        widget.onConversationUpdated();
-        widget.onTokenUsageUpdated(widget.conversation);
-      }
+            setState(() {
+              widget.conversation.addMessage(assistantMessage);
+              _currentAssistantMessage = '';
+              _isLoading = false;
+            });
+
+            // 清空附件
+            _conversationSettings = _conversationSettings.clearFiles();
+            globalModelServiceManager.updateConversationSettings(_conversationSettings);
+
+            widget.onConversationUpdated();
+            widget.onTokenUsageUpdated(widget.conversation);
+            _scrollToBottom();
+          }
+        },
+        onError: (error) {
+          setState(() {
+            _isLoading = false;
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('❌ 错误: ${error.toString()}')),
+            );
+          }
+        },
+      );
     } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('❌ 发送失败: $e')),
         );
       }
-    } finally {
+    }
+  }
+
+  /// 停止流式输出
+  Future<void> _stopStreaming() async {
+    final content = await _streamController.stop();
+
+    if (content.isNotEmpty) {
+      // 保存部分内容
+      final assistantMessage = Message(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        content: content,
+        isUser: false,
+        timestamp: DateTime.now(),
+        outputTokens: TokenCounter.estimateTokens(content),
+      );
+
+      setState(() {
+        widget.conversation.addMessage(assistantMessage);
+        _currentAssistantMessage = '';
+        _isLoading = false;
+      });
+
+      widget.onConversationUpdated();
+      widget.onTokenUsageUpdated(widget.conversation);
+    } else {
       setState(() {
         _isLoading = false;
       });
@@ -541,20 +749,28 @@ class ConversationViewState extends State<ConversationView>
   Widget build(BuildContext context) {
     super.build(context); // 必须调用以启用 KeepAlive
 
-    return Column(
+    return Stack(
       children: [
-        // 导出模式工具栏
-        if (_isExportMode) _buildExportModeToolbar(),
-        
-        // 消息列表
-        Expanded(
-          child: widget.conversation.messages.isEmpty && _currentAssistantMessage.isEmpty
-              ? _buildEmptyState()
-              : _buildMessageList(),
+        Column(
+          children: [
+            // 导出模式工具栏
+            if (_isExportMode) _buildExportModeToolbar(),
+
+            // 消息列表
+            Expanded(
+              child: widget.conversation.messages.isEmpty && _currentAssistantMessage.isEmpty
+                  ? _buildEmptyState()
+                  : _buildMessageList(),
+            ),
+
+            // 输入区域
+            if (!_isExportMode) _buildInputArea(),
+          ],
         ),
 
-        // 输入区域
-        if (!_isExportMode) _buildInputArea(),
+        // 回到底部浮动按钮
+        if (!_isExportMode && !_isUserNearBottom && !_isLoading)
+          _buildScrollToBottomButton(),
       ],
     );
   }
@@ -866,66 +1082,42 @@ class ConversationViewState extends State<ConversationView>
   /// 补零
   String _pad(int n) => n.toString().padLeft(2, '0');
 
-  /// 输入区域
+  /// 回到底部浮动按钮
+  Widget _buildScrollToBottomButton() {
+    return Positioned(
+      right: 16,
+      bottom: 100, // 输入区域上方
+      child: FloatingActionButton.small(
+        heroTag: 'scrollToBottom_${widget.conversation.id}',
+        onPressed: () {
+          setState(() {
+            _autoScrollEnabled = true;
+            _isUserNearBottom = true;
+          });
+          _scrollToBottom(smooth: true);
+        },
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+        child: const Icon(Icons.keyboard_arrow_down),
+      ),
+    );
+  }
+
+  /// 输入区域（使用增强输入框）
   Widget _buildInputArea() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(12),
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxHeight: 150, // 限制输入框最大高度
-                ),
-                child: TextField(
-                  controller: _messageController,
-                  decoration: InputDecoration(
-                    hintText: '输入消息...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                  minLines: 1,
-                  maxLines: 6, // 最多显示6行
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _sendMessage(),
-                  enabled: !_isLoading,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FloatingActionButton(
-              heroTag: 'send_${widget.conversation.id}', // 唯一的 Hero tag
-              onPressed: _isLoading ? null : _sendMessage,
-              child: _isLoading
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.send),
-            ),
-          ],
-        ),
-      ),
+    return EnhancedInputArea(
+      textController: _messageController,
+      onSend: _sendMessage,
+      onStop: _stopStreaming,
+      isStreaming: _streamController.isStreaming,
+      serviceManager: globalModelServiceManager,
+      conversationSettings: _conversationSettings,
+      onSettingsChanged: (settings) {
+        setState(() {
+          _conversationSettings = settings;
+        });
+        globalModelServiceManager.updateConversationSettings(settings);
+      },
     );
   }
 }

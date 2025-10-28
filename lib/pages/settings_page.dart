@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/chat_settings.dart';
 import '../services/storage_service.dart';
 import '../services/openai_service.dart';
+import '../pages/model_services_page.dart';
+import '../main.dart' show globalModelServiceManager;
 
 /// 设置页面
 class SettingsPage extends StatefulWidget {
@@ -135,6 +137,37 @@ class _SettingsPageState extends State<SettingsPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // 模型服务管理入口
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.cloud_outlined, size: 32),
+                title: const Text('模型服务'),
+                subtitle: const Text('管理AI服务提供商和模型配置'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ModelServicesPage(
+                        serviceManager: globalModelServiceManager,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            const Divider(),
+            const SizedBox(height: 8),
+            Text(
+              '传统设置（仅供参考）',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Colors.grey.shade600,
+                  ),
+            ),
+            const SizedBox(height: 8),
+
             // AI 服务商选择
             Card(
               child: Padding(
