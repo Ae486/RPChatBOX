@@ -220,14 +220,19 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
   }
 
   Widget _buildContextLengthSlider() {
-    // 滑块值映射：0-30对应1-30条，31对应500条，32对应无限制
-    double sliderValue;
-    if (_contextLength == -1) {
-      sliderValue = 32; // 无限制
-    } else if (_contextLength == 500) {
-      sliderValue = 31; // 500条
-    } else {
-      sliderValue = _contextLength.toDouble().clamp(1, 30);
+    // 定义合理的渐进式数值: 1, 5, 10, 15, 20, 50, 75, 100, 150, 200, 250, 300, 400, 500, 无限制
+    final List<int> contextValues = [1, 5, 10, 15, 20, 50, 75, 100, 150, 200, 250, 300, 400, 500, -1];
+    
+    // 查找当前值在列表中的索引
+    int sliderIndex = contextValues.indexOf(_contextLength);
+    if (sliderIndex < 0) {
+      // 如果当前值不在预设列表中，找到最接近的值
+      if (_contextLength == -1) {
+        sliderIndex = contextValues.length - 1;
+      } else {
+        sliderIndex = contextValues.indexWhere((v) => v >= _contextLength && v != -1);
+        if (sliderIndex < 0) sliderIndex = contextValues.length - 2; // 500
+      }
     }
 
     String displayValue;
@@ -268,19 +273,13 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
         ),
         const SizedBox(height: 8),
         Slider(
-          value: sliderValue,
-          min: 1,
-          max: 32,
-          divisions: 31,
+          value: sliderIndex.toDouble(),
+          min: 0,
+          max: (contextValues.length - 1).toDouble(),
+          divisions: contextValues.length - 1,
           onChanged: (value) {
             setState(() {
-              if (value >= 32) {
-                _contextLength = -1; // 无限制
-              } else if (value >= 31) {
-                _contextLength = 500; // 500条
-              } else {
-                _contextLength = value.toInt();
-              }
+              _contextLength = contextValues[value.toInt()];
             });
           },
         ),

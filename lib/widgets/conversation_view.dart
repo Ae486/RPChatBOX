@@ -9,11 +9,9 @@ import '../models/message.dart';
 import '../models/conversation.dart';
 import '../models/chat_settings.dart';
 import '../models/attached_file.dart';
-import '../services/openai_service.dart';
 import '../services/export_service.dart';
 import '../utils/token_counter.dart';
 import 'message_actions.dart';
-import 'smart_content_renderer.dart';
 import 'enhanced_content_renderer.dart';
 import '../models/conversation_settings.dart';
 import '../controllers/stream_output_controller.dart';
@@ -751,10 +749,92 @@ class ConversationViewState extends State<ConversationView>
     final messageIndex = widget.conversation.messages.indexOf(message);
     if (messageIndex < 0) return;
 
+    // 🆕 步骤 1: 检查附件是否存在
+    if (message.attachedFiles != null && message.attachedFiles!.isNotEmpty) {
+      final existingFiles = <AttachedFileSnapshot>[];
+      final missingFiles = <String>[];
+
+      for (var fileSnapshot in message.attachedFiles!) {
+        if (await fileSnapshot.exists()) {
+          existingFiles.add(fileSnapshot);
+        } else {
+          missingFiles.add(fileSnapshot.name);
+        }
+      }
+
+      // 🆕 步骤 2: 有文件缺失，询问用户是否继续
+      if (missingFiles.isNotEmpty) {
+        final shouldContinue = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('⚠️ 部分文件已不存在'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('以下文件无法重新发送：'),
+                const SizedBox(height: 8),
+                ...missingFiles.map((name) => Padding(
+                  padding: const EdgeInsets.only(left: 16, top: 4),
+                  child: Text('• $name', style: const TextStyle(fontSize: 13)),
+                )),
+                const SizedBox(height: 16),
+                const Text('是否继续发送其他内容？'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('继续发送'),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldContinue != true) return;
+      }
+
+      // 🆕 步骤 3: 恢复存在的附件到输入框
+      if (existingFiles.isNotEmpty) {
+        final attachedFiles = <AttachedFile>[];
+
+        for (var snapshot in existingFiles) {
+          try {
+            // 将快照转换回 AttachedFile 对象
+            final file = await AttachedFile.fromFile(
+              File(snapshot.path),
+              snapshot.id,
+            );
+            attachedFiles.add(file);
+          } catch (e) {
+            debugPrint('恢复附件失败: ${snapshot.name}, 错误: $e');
+          }
+        }
+
+        if (attachedFiles.isNotEmpty) {
+          // 恢复到输入框状态
+          _conversationSettings = _conversationSettings.copyWith(
+            attachedFiles: attachedFiles,
+          );
+          globalModelServiceManager.updateConversationSettings(_conversationSettings);
+
+          // 确保附件栏可见
+          setState(() {
+            _attachmentBarVisible = true;
+          });
+        }
+      }
+    }
+
+    // 🆕 步骤 4: 处理消息内容和重新发送
     if (message.isUser) {
       // 用户消息：删除该消息及之后的所有消息，然后重新发送
       final userContent = message.content;
-      
+
       setState(() {
         widget.conversation.messages.removeRange(
           messageIndex,
@@ -763,7 +843,7 @@ class ConversationViewState extends State<ConversationView>
       });
       widget.onConversationUpdated();
 
-      // 重新发送
+      // 🔥 关键修改：即使 content 为空，只要有附件也要发送
       _messageController.text = userContent;
       await _sendMessage();
     } else {
@@ -777,20 +857,8 @@ class ConversationViewState extends State<ConversationView>
       }
 
       if (previousUserMessage != null) {
-        final userContent = previousUserMessage.content;
-        
-        setState(() {
-          final userIndex = widget.conversation.messages.indexOf(previousUserMessage!);
-          widget.conversation.messages.removeRange(
-            userIndex,
-            widget.conversation.messages.length,
-          );
-        });
-        widget.onConversationUpdated();
-
-        // 重新发送用户消息
-        _messageController.text = userContent;
-        await _sendMessage();
+        // 递归调用，处理用户消息的重新生成（会自动处理附件）
+        await _regenerateFromMessage(previousUserMessage);
       }
     }
   }

@@ -13,6 +13,36 @@ abstract class AIProvider {
   /// 测试连接
   Future<ProviderTestResult> testConnection();
 
+  /// 测试指定模型（发送实际测试请求）
+  Future<ProviderTestResult> testModel(String modelName) async {
+    // 默认实现：发送简单的测试消息
+    try {
+      final stopwatch = Stopwatch()..start();
+      
+      final testMessage = ChatMessage(
+        role: 'user',
+        content: 'Hi',
+      );
+      
+      await sendMessage(
+        model: modelName,
+        messages: [testMessage],
+        parameters: const ModelParameters(
+          temperature: 0.7,
+          maxTokens: 10,
+        ),
+      );
+      
+      stopwatch.stop();
+      
+      return ProviderTestResult.success(
+        responseTimeMs: stopwatch.elapsedMilliseconds,
+      );
+    } catch (e) {
+      return ProviderTestResult.failure('模型测试失败: ${e.toString()}');
+    }
+  }
+
   /// 获取可用模型列表
   Future<List<String>> listAvailableModels();
 

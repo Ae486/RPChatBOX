@@ -403,13 +403,21 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 打开自定义角色页面
   Future<void> _openCustomRoles() async {
+    // 🔧 修复：从 ConversationDrawer 点击时会自动关闭 Drawer（见 conversation_drawer.dart 第109行）
+    // 所以这里不需要手动关闭
+    
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => const CustomRolesPage(),
       ),
     );
-    await _loadData();
+    
+    // 🔧 修复：只重新加载自定义角色，不触发整个页面重建
+    final customRoles = await _customRoleService.loadCustomRoles();
+    setState(() {
+      _customRoles = customRoles;
+    });
   }
 
   /// 显示主题切换对话框

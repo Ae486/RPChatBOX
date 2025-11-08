@@ -458,10 +458,20 @@ class _ModelSelectorSheet extends StatelessWidget {
                           subtitle: Wrap(
                             spacing: 6,
                             children: model.capabilities.map((cap) {
-                              return Chip(
-                                label: Text(cap.displayName),
-                                visualDensity: VisualDensity.compact,
-                                labelStyle: const TextStyle(fontSize: 10),
+                              return Tooltip(
+                                message: cap.displayName,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: cap.color.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Icon(
+                                    cap.icon,
+                                    size: 14,
+                                    color: cap.color,
+                                  ),
+                                ),
                               );
                             }).toList(),
                           ),

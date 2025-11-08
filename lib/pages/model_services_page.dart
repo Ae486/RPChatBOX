@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
-import '../widgets/add_provider_dialog.dart';
 import '../widgets/provider_card.dart';
+import 'provider_detail_page.dart';
 
 /// 模型服务管理页面
 /// 参照cherrybox界面设计，管理AI服务提供商和模型
@@ -57,10 +57,12 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
   }
 
   Future<void> _showAddProviderDialog() async {
-    final result = await showDialog<ProviderConfig>(
-      context: context,
-      builder: (context) => AddProviderDialog(
-        serviceManager: widget.serviceManager,
+    final result = await Navigator.push<ProviderConfig>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProviderDetailPage(
+          serviceManager: widget.serviceManager,
+        ),
       ),
     );
 
@@ -76,11 +78,13 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
   }
 
   Future<void> _editProvider(ProviderConfig provider) async {
-    final result = await showDialog<ProviderConfig>(
-      context: context,
-      builder: (context) => AddProviderDialog(
-        serviceManager: widget.serviceManager,
-        existingProvider: provider,
+    final result = await Navigator.push<ProviderConfig>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProviderDetailPage(
+          provider: provider,
+          serviceManager: widget.serviceManager,
+        ),
       ),
     );
 

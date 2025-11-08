@@ -173,6 +173,16 @@ class ModelServiceManager {
     return await aiProvider.testConnection();
   }
 
+  /// 测试Provider与指定模型的连接
+  /// 发送实际测试请求来验证模型是否可用
+  Future<ProviderTestResult> testProviderWithModel(
+    ProviderConfig provider,
+    String modelName,
+  ) async {
+    final aiProvider = ProviderFactory.createProvider(provider);
+    return await aiProvider.testModel(modelName);
+  }
+
   // ============ Model管理 ============
 
   /// 获取所有Models
