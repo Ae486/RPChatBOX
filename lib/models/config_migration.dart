@@ -47,7 +47,7 @@ class ConfigMigration {
     if (nameLower.contains('claude') || nameLower.contains('anthropic')) {
       return ProviderType.claude;
     }
-    return ProviderType.custom;
+    return ProviderType.openai; // 🔧 修复：custom已移除，使用openai作为默认
   }
 
   /// 从模型名称推断能力

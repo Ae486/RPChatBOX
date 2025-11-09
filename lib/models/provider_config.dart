@@ -1,3 +1,5 @@
+import '../utils/api_url_helper.dart';
+
 /// AI服务提供商配置模型
 /// 支持多种AI服务提供商(OpenAI, Gemini, Claude等)
 class ProviderConfig {
@@ -34,7 +36,7 @@ class ProviderConfig {
       name: json['name'] as String,
       type: ProviderType.values.firstWhere(
         (e) => e.name == json['type'],
-        orElse: () => ProviderType.custom,
+        orElse: () => ProviderType.openai, // 🔧 修复：custom已移除，使用openai作为默认
       ),
       apiUrl: json['apiUrl'] as String,
       apiKey: json['apiKey'] as String,
@@ -95,6 +97,11 @@ class ProviderConfig {
     return '${apiKey.substring(0, 4)}••••${apiKey.substring(apiKey.length - 4)}';
   }
 
+  /// 🆕 获取实际使用的API地址（应用补全规则）
+  String get actualApiUrl {
+    return ApiUrlHelper.getActualApiUrl(apiUrl, type);
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -110,8 +117,8 @@ enum ProviderType {
   openai('OpenAI格式', 'https://api.openai.com/v1'),
   gemini('Gemini格式', 'https://generativelanguage.googleapis.com/v1'),
   deepseek('DeepSeek格式', 'https://api.deepseek.com/v1'),
-  claude('Claude格式', 'https://api.anthropic.com/v1'),
-  custom('自定义', '');
+  claude('Claude格式', 'https://api.anthropic.com/v1');
+  // 🔧 已移除 custom（自定义）选项
 
   final String displayName;
   final String defaultApiUrl;

@@ -9,9 +9,11 @@ import '../services/model_service_manager.dart';
 class ProviderCard extends StatefulWidget {
   final ProviderConfig provider;
   final List<ModelConfig> models;
+  final bool isManagementMode; // 🆕 是否处于管理模式
   final VoidCallback onToggle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onLongPress; // 🆕 长按回调
   final Function(ModelConfig) onToggleModel;
   final ModelServiceManager serviceManager;
 
@@ -19,9 +21,11 @@ class ProviderCard extends StatefulWidget {
     super.key,
     required this.provider,
     required this.models,
+    this.isManagementMode = false,
     required this.onToggle,
     required this.onEdit,
     required this.onDelete,
+    required this.onLongPress,
     required this.onToggleModel,
     required this.serviceManager,
   });
@@ -31,19 +35,30 @@ class ProviderCard extends StatefulWidget {
 }
 
 class _ProviderCardState extends State<ProviderCard> {
-
-
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      child: InkWell(
-        onTap: widget.onEdit, // 点击卡片进入编辑页面
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: widget.isManagementMode ? null : widget.onEdit,
+          onLongPress: widget.onLongPress,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
             children: [
               // Provider图标
               Container(
@@ -112,22 +127,38 @@ class _ProviderCardState extends State<ProviderCard> {
                 ),
               ),
 
-              // 开关
-              Switch(
-                value: widget.provider.isEnabled,
-                onChanged: (_) => widget.onToggle(),
-              ),
-
-              const SizedBox(width: 8),
-
-              // 箭头图标
-              Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: Colors.grey.shade400,
-              ),
+              // 🆕 管理模式：删除按钮 / 普通模式：开关和箭头
+              if (widget.isManagementMode) ...[
+                // 删除按钮（阻止拖动手势）
+                GestureDetector(
+                  onTapDown: (_) {}, // 🔧 阻止拖动手势传播
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.remove_circle,
+                      color: Colors.red,
+                      size: 28,
+                    ),
+                    onPressed: widget.onDelete,
+                    tooltip: '删除',
+                  ),
+                ),
+              ] else ...[
+                // 开关
+                Switch(
+                  value: widget.provider.isEnabled,
+                  onChanged: (_) => widget.onToggle(),
+                ),
+                const SizedBox(width: 8),
+                // 箭头图标
+                Icon(
+                  Icons.arrow_forward_ios,
+                  size: 16,
+                  color: Colors.grey.shade400,
+                ),
+              ],
             ],
           ),
+        ),
         ),
       ),
     );
@@ -143,8 +174,7 @@ class _ProviderCardState extends State<ProviderCard> {
         return Icons.psychology;
       case ProviderType.claude:
         return Icons.chat_bubble_outline;
-      case ProviderType.custom:
-        return Icons.code;
+      // 🔧 修复：已移除 custom 选项
     }
   }
 }

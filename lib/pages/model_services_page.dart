@@ -23,6 +23,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
   List<ProviderConfig> _providers = [];
   Map<String, List<ModelConfig>> _providerModels = {};
   bool _isLoading = true;
+  bool _isManagementMode = false; // 🆕 是否处于管理模式
 
   @override
   void initState() {
@@ -42,7 +43,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
       }
 
       setState(() {
-        _providers = providers;
+        _providers = providers.toList(); // 🔧 转换为可变列表
         _providerModels = models;
         _isLoading = false;
       });
@@ -130,6 +131,60 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     await _loadData();
   }
 
+  /// 🆕 切换管理模式
+  void _toggleManagementMode() {
+    setState(() {
+      _isManagementMode = !_isManagementMode;
+    });
+  }
+
+  /// 🆕 处理卡片重新排序
+  Future<void> _onReorder(int oldIndex, int newIndex) async {
+    setState(() {
+      // 🔧 Flutter的ReorderableList逻辑：如果新位置大于旧位置，需要-1
+      if (newIndex > oldIndex) {
+        newIndex -= 1;
+      }
+      final provider = _providers.removeAt(oldIndex);
+      _providers.insert(newIndex, provider);
+    });
+
+    // 🆕 保存排序顺序到本地存储
+    await _saveProviderOrder();
+  }
+
+  /// 🆕 保存Provider排序顺序
+  Future<void> _saveProviderOrder() async {
+    // 更新每个Provider的updatedAt时间戳，用于保持顺序
+    for (int i = 0; i < _providers.length; i++) {
+      final provider = _providers[i];
+      // 通过更新时间戳保持顺序
+      final updated = provider.copyWith(
+        updatedAt: DateTime.now().add(Duration(milliseconds: i)),
+      );
+      await widget.serviceManager.updateProvider(updated);
+    }
+  }
+
+  /// 🆕 自定义拖动装饰器（支持x/y轴自由移动）
+  Widget _proxyDecorator(Widget child, int index, Animation<double> animation) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        return Material(
+          elevation: 8,
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: Opacity(
+            opacity: 0.9,
+            child: child,
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -174,6 +229,38 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
       );
     }
 
+    // 🆕 管理模式下使用拖动排序（支持x/y轴移动）
+    if (_isManagementMode) {
+      return ReorderableListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _providers.length,
+        onReorder: _onReorder,
+        buildDefaultDragHandles: false, // 🔧 禁用默认拖动按钮
+        proxyDecorator: _proxyDecorator, // 🆕 自定义拖动装饰器（支持x轴移动）
+        itemBuilder: (context, index) {
+          final provider = _providers[index];
+          final models = _providerModels[provider.id] ?? [];
+
+          return ReorderableDragStartListener(
+            key: ValueKey(provider.id),
+            index: index,
+            child: ProviderCard(
+              provider: provider,
+              models: models,
+              isManagementMode: true,
+              onToggle: () => _toggleProvider(provider),
+              onEdit: () => _editProvider(provider),
+              onDelete: () => _deleteProvider(provider),
+              onToggleModel: _toggleModel,
+              onLongPress: _toggleManagementMode,
+              serviceManager: widget.serviceManager,
+            ),
+          );
+        },
+      );
+    }
+
+    // 普通模式下使用普通ListView
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _providers.length,
@@ -184,10 +271,12 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
         return ProviderCard(
           provider: provider,
           models: models,
+          isManagementMode: false,
           onToggle: () => _toggleProvider(provider),
           onEdit: () => _editProvider(provider),
           onDelete: () => _deleteProvider(provider),
           onToggleModel: _toggleModel,
+          onLongPress: _toggleManagementMode,
           serviceManager: widget.serviceManager,
         );
       },
@@ -212,11 +301,9 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: () {
-                  // TODO: 打开管理界面（批量操作等）
-                },
-                icon: const Icon(Icons.settings),
-                label: const Text('管理'),
+                onPressed: _toggleManagementMode, // 🆕 点击切换管理模式
+                icon: Icon(_isManagementMode ? Icons.close : Icons.settings),
+                label: Text(_isManagementMode ? '退出' : '管理'),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -225,7 +312,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
             const SizedBox(width: 12),
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: _showAddProviderDialog,
+                onPressed: _isManagementMode ? null : _showAddProviderDialog, // 🆕 管理模式下禁用
                 icon: const Icon(Icons.add),
                 label: const Text('添加'),
                 style: ElevatedButton.styleFrom(

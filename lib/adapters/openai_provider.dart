@@ -25,10 +25,12 @@ class OpenAIProvider extends AIProvider {
   Future<ProviderTestResult> testConnection() async {
     try {
       final stopwatch = Stopwatch()..start();
+      // 🔧 使用actualApiUrl获取实际API地址
+      final baseUrl = config.actualApiUrl.replaceAll('/chat/completions', '').replaceAll('/messages', '');
 
       final response = await http
           .get(
-            Uri.parse('${config.apiUrl}/models'),
+            Uri.parse('$baseUrl/models'),
             headers: buildHeaders(),
           )
           .timeout(const Duration(seconds: 10));
@@ -61,8 +63,10 @@ class OpenAIProvider extends AIProvider {
   @override
   Future<List<String>> listAvailableModels() async {
     try {
+      // 🔧 使用actualApiUrl获取实际API地址
+      final baseUrl = config.actualApiUrl.replaceAll('/chat/completions', '').replaceAll('/messages', '');
       final response = await http.get(
-        Uri.parse('${config.apiUrl}/models'),
+        Uri.parse('$baseUrl/models'),
         headers: buildHeaders(),
       );
 
@@ -94,9 +98,10 @@ class OpenAIProvider extends AIProvider {
       files: files,
     );
 
+    // 🔧 使用actualApiUrl获取实际API地址
     final request = http.Request(
       'POST',
-      Uri.parse('${config.apiUrl}/chat/completions'),
+      Uri.parse(config.actualApiUrl),
     );
     request.headers.addAll(buildHeaders());
     request.body = json.encode(requestBody);
@@ -154,8 +159,9 @@ class OpenAIProvider extends AIProvider {
     );
 
     try {
+      // 🔧 使用actualApiUrl获取实际API地址
       final response = await http.post(
-        Uri.parse('${config.apiUrl}/chat/completions'),
+        Uri.parse(config.actualApiUrl),
         headers: buildHeaders(),
         body: json.encode(requestBody),
       );

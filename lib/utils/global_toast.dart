@@ -75,6 +75,31 @@ class GlobalToast {
     });
   }
 
+  /// 🆕 显示信息提示
+  static void showInfo(
+    BuildContext context,
+    String message, {
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    if (_isShowing) {
+      hide(); // 先隐藏之前的
+    }
+
+    _isShowing = true;
+    _currentEntry = _createToastEntry(
+      context: context,
+      message: message,
+      type: _ToastType.info,
+    );
+
+    Overlay.of(context).insert(_currentEntry!);
+
+    // 自动隐藏
+    Future.delayed(duration, () {
+      hide();
+    });
+  }
+
   /// 隐藏提示框
   static void hide() {
     if (_currentEntry != null && _isShowing) {
@@ -105,6 +130,7 @@ enum _ToastType {
   loading,
   success,
   error,
+  info, // 🆕 信息提示
 }
 
 /// 全局提示框 Widget
@@ -194,6 +220,11 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
         iconData = Icons.error;
         iconColor = Colors.red;
         break;
+      case _ToastType.info: // 🆕 信息提示
+        backgroundColor = Colors.orange.shade50;
+        iconData = Icons.info_outline;
+        iconColor = Colors.orange;
+        break;
     }
 
     return Positioned(
@@ -216,7 +247,9 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
                       ? Colors.blue.shade200
                       : (widget.type == _ToastType.success
                           ? Colors.green.shade200
-                          : Colors.red.shade200),
+                          : (widget.type == _ToastType.error
+                              ? Colors.red.shade200
+                              : Colors.orange.shade200)), // 🆕 info 边框颜色
                   width: 1.5,
                 ),
                 boxShadow: [

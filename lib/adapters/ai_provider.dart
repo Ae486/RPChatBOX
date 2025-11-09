@@ -196,10 +196,9 @@ class AttachedFileData {
     required this.name,
   });
 }
-
 /// Provider工厂
 class ProviderFactory {
-  /// 创建Provider实例
+  /// 创建 Provider实例
   static AIProvider createProvider(ProviderConfig config) {
     switch (config.type) {
       case ProviderType.openai:
@@ -210,8 +209,7 @@ class ProviderFactory {
         return DeepSeekProvider(config);
       case ProviderType.claude:
         return ClaudeProvider(config);
-      case ProviderType.custom:
-        return CustomProvider(config);
+      // 🔧 修复：已移除 custom 选项
     }
   }
 }
@@ -318,36 +316,4 @@ class ClaudeProvider extends AIProvider {
   }
 }
 
-class CustomProvider extends AIProvider {
-  CustomProvider(super.config);
-
-  @override
-  Future<ProviderTestResult> testConnection() {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<List<String>> listAvailableModels() {
-    throw UnimplementedError();
-  }
-
-  @override
-  Stream<String> sendMessageStream({
-    required String model,
-    required List<ChatMessage> messages,
-    required ModelParameters parameters,
-    List<AttachedFileData>? files,
-  }) {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<String> sendMessage({
-    required String model,
-    required List<ChatMessage> messages,
-    required ModelParameters parameters,
-    List<AttachedFileData>? files,
-  }) {
-    throw UnimplementedError();
-  }
-}
+// 🔧 修复：已移除 CustomProvider 类

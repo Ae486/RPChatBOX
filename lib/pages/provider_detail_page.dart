@@ -4,6 +4,9 @@ import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
 import '../widgets/add_model_dialog.dart';
 import '../utils/global_toast.dart';
+import '../utils/api_url_helper.dart';
+import '../data/model_capability_presets.dart';
+import 'model_edit_page.dart';
 
 /// Provider详情编辑页面
 /// 包含管理区（服务商类型、名称、API配置）和模型区（模型列表、检测、添加）
@@ -28,6 +31,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   late TextEditingController _apiKeyController;
   late ProviderType _selectedType;
   late bool _isEnabled;
+  bool _isApiKeyVisible = false; // 🆕 API密钥是否可见
 
   List<ModelConfig> _models = [];
   bool _isTestingMode = false; // 是否处于检测模式
@@ -81,6 +85,22 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     if (mounted) {
       Navigator.pop(context, newProvider);
     }
+  }
+
+  /// 🆕 获取实际使用的API地址预览
+  String get _apiUrlPreview {
+    return ApiUrlHelper.getDisplayUrl(_apiUrlController.text, _selectedType);
+  }
+
+  /// 🆕 获取API地址提示文本
+  String get _apiUrlHint {
+    return ApiUrlHelper.getHintText(_apiUrlController.text, _selectedType);
+  }
+
+  /// 🆕 判断是否显示API预览（仅支持补全的服务商类型）
+  bool _shouldShowApiPreview() {
+    // 只有 OpenAI 和 Claude 类型支持补全
+    return _selectedType == ProviderType.openai || _selectedType == ProviderType.claude;
   }
 
   void _enterTestMode() {
@@ -138,7 +158,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
         if (result.success) {
           GlobalToast.showSuccess(
             context,
-            '✅ 测试成功\n响应时间: ${result.responseTimeMs}ms\n可用模型数: ${result.availableModels?.length ?? 0}',
+            '响应时间: ${result.responseTimeMs}ms',
           );
         } else {
           GlobalToast.showError(
@@ -166,51 +186,108 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   }
 
   Future<void> _addModel() async {
-    final modelId = await showDialog<String>(
+    final provider = widget.provider;
+    if (provider == null) {
+      // 新建Provider时暂存模型，保存Provider后再添加
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先保存Provider配置')),
+        );
+      }
+      return;
+    }
+
+    final result = await showDialog<String>(
       context: context,
-      builder: (context) => const AddModelDialog(),
+      builder: (context) => AddModelDialog(provider: provider),
     );
 
-    if (modelId != null && modelId.isNotEmpty) {
-      final provider = widget.provider;
-      if (provider == null) {
-        // 新建Provider时暂存模型，保存Provider后再添加
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('请先保存Provider配置')),
-          );
-        }
-        return;
+    if (result != null && result.isNotEmpty) {
+      // 🆕 支持批量添加：用逗号分隔的模型ID列表
+      final modelIds = result.split(',').map((id) => id.trim()).where((id) => id.isNotEmpty).toList();
+      
+      if (modelIds.isEmpty) return;
+      
+      for (final modelId in modelIds) {
+        // 🆕 使用预设能力数据库自动识别模型能力
+        final presetCapabilities = ModelCapabilityPresets.getCapabilities(modelId);
+        
+        final newModel = ModelConfig(
+          id: widget.serviceManager.generateId(),
+          providerId: provider.id,
+          modelName: modelId,
+          displayName: modelId,
+          capabilities: presetCapabilities,
+        );
+
+        await widget.serviceManager.addModel(newModel);
       }
-
-      final newModel = ModelConfig(
-        id: widget.serviceManager.generateId(),
-        providerId: provider.id,
-        modelName: modelId,
-        displayName: modelId,
-        capabilities: {ModelCapability.text}, // 默认只有文本能力
-      );
-
-      await widget.serviceManager.addModel(newModel);
       
       setState(() {
         _models = widget.serviceManager.getModelsByProvider(provider.id);
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已添加模型: $modelId')),
-        );
+        if (modelIds.length == 1) {
+          GlobalToast.showSuccess(context, '已添加模型: ${modelIds[0]}');
+        } else {
+          GlobalToast.showSuccess(context, '已批量添加 ${modelIds.length} 个模型');
+        }
       }
     }
   }
 
-  Future<void> _toggleModel(ModelConfig model) async {
-    final updated = model.copyWith(isEnabled: !model.isEnabled);
-    await widget.serviceManager.updateModel(updated);
-    setState(() {
-      _models = widget.serviceManager.getModelsByProvider(widget.provider!.id);
-    });
+  /// 🆕 打开模型设置页面
+  Future<void> _openModelSettings(ModelConfig model) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ModelEditPage(
+          model: model,
+          serviceManager: widget.serviceManager,
+        ),
+      ),
+    );
+
+    // 如果有更新，刷新模型列表
+    if (result != null && mounted) {
+      setState(() {
+        _models = widget.serviceManager.getModelsByProvider(widget.provider!.id);
+      });
+    }
+  }
+
+  /// 🆕 删除模型
+  Future<void> _deleteModel(ModelConfig model) async {
+    // 🚧 TODO: 第四批 - 实现确认对话框
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除模型 "${model.displayName}" 吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await widget.serviceManager.deleteModel(model.id);
+      setState(() {
+        _models = widget.serviceManager.getModelsByProvider(widget.provider!.id);
+      });
+      if (mounted) {
+        GlobalToast.showSuccess(context, '已删除模型: ${model.displayName}');
+      }
+    }
   }
 
   @override
@@ -241,26 +318,8 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
               title: '管理',
               child: Column(
                 children: [
-                  // 服务商类型下拉
-                  DropdownButtonFormField<ProviderType>(
-                    initialValue: _selectedType,
-                    decoration: const InputDecoration(
-                      labelText: '服务商类型',
-                      border: OutlineInputBorder(),
-                    ),
-                    isExpanded: true, // 🔧 修复：让下拉框占满容器宽度
-                    items: ProviderType.values.map((type) {
-                      return DropdownMenuItem(
-                        value: type,
-                        child: Text(type.displayName),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedType = value);
-                      }
-                    },
-                  ),
+                  // 🆕 现代化服务商类型选择器
+                  _buildModernTypeSelector(),
                   const SizedBox(height: 16),
 
                   // 名称
@@ -280,35 +339,89 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  // API地址
-                  TextFormField(
-                    controller: _apiUrlController,
-                    decoration: const InputDecoration(
-                      labelText: 'API 地址',
-                      border: OutlineInputBorder(),
-                      hintText: 'https://api.openai.com/v1',
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return '请输入API地址';
-                      }
-                      if (!Uri.tryParse(value)!.isAbsolute) {
-                        return 'API地址格式不正确';
-                      }
-                      return null;
-                    },
+                  // 🆕 API地址输入框（带预览）
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextFormField(
+                        controller: _apiUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'API 地址',
+                          border: OutlineInputBorder(),
+                          hintText: 'https://api.openai.com/v1',
+                          helperText: '结尾添加 "/" 忽略v1版本，"#" 强制使用输入地址',
+                        ),
+                        onChanged: (_) => setState(() {}), // 🔧 更新预览
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return '请输入API地址';
+                          }
+                          // 🔧 移除#和/后验证
+                          final cleanValue = value.trim().replaceAll(RegExp(r'[#/]+$'), '');
+                          if (cleanValue.isNotEmpty && !Uri.tryParse(cleanValue)!.isAbsolute) {
+                            return 'API地址格式不正确';
+                          }
+                          return null;
+                        },
+                      ),
+                      // 🆕 实际使用地址预览（仅在支持补全时显示）
+                      if (_shouldShowApiPreview()) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.link,
+                                size: 16,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _apiUrlPreview,
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 16),
 
                   // API密钥
                   TextFormField(
                     controller: _apiKeyController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'API 密钥',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       hintText: 'sk-...',
+                      // 🆕 添加显示/隐藏按钮
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _isApiKeyVisible ? Icons.visibility_off : Icons.visibility,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _isApiKeyVisible = !_isApiKeyVisible;
+                          });
+                        },
+                        tooltip: _isApiKeyVisible ? '隐藏密钥' : '显示密钥',
+                      ),
                     ),
-                    obscureText: true,
+                    obscureText: !_isApiKeyVisible, // 🔧 根据状态切换
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
                         return '请输入API密钥';
@@ -413,6 +526,62 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     );
   }
 
+  /// 🆕 现代化下拉框选择器
+  Widget _buildModernTypeSelector() {
+    return DropdownButtonFormField<ProviderType>(
+      value: _selectedType,
+      decoration: const InputDecoration(
+        labelText: '服务商类型',
+        border: OutlineInputBorder(),
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      ),
+      isExpanded: true,
+      icon: const Icon(Icons.arrow_drop_down, size: 24),
+      items: ProviderType.values.map((type) {
+        return DropdownMenuItem(
+          value: type,
+          child: Row(
+            children: [
+              Icon(
+                _getProviderIcon(type),
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                type.displayName,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+      onChanged: (value) {
+        if (value != null) {
+          setState(() {
+            _selectedType = value;
+          });
+        }
+      },
+    );
+  }
+
+  /// 🆕 获取Provider图标
+  IconData _getProviderIcon(ProviderType type) {
+    switch (type) {
+      case ProviderType.openai:
+        return Icons.auto_awesome;
+      case ProviderType.gemini:
+        return Icons.stars;
+      case ProviderType.deepseek:
+        return Icons.psychology;
+      case ProviderType.claude:
+        return Icons.chat_bubble_outline;
+    }
+  }
+
   Widget _buildModelCard(ModelConfig model) {
     final isTestingThis = _testingModelId == model.id;
     final isInTestMode = _isTestingMode && !isTestingThis;
@@ -440,10 +609,12 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                           ),
                     ),
                     const SizedBox(height: 8),
-                    // 🔧 修复：移除图标旋转动画
+                    // 🔧 能力图标（移除文本能力）
                     Wrap(
                       spacing: 6,
-                      children: model.capabilities.map((cap) {
+                      children: model.capabilities
+                          .where((cap) => cap != ModelCapability.text) // 🔧 移除文本图标
+                          .map((cap) {
                         return Tooltip(
                           message: cap.displayName,
                           child: Container(
@@ -465,16 +636,32 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 ),
               ),
 
-              // 开关
-              if (!_isTestingMode)
-                Switch(
-                  value: model.isEnabled,
-                  onChanged: (_) => _toggleModel(model),
+              // 🆕 设置和删除按钮（非测试模式）
+              if (!_isTestingMode) ...[
+                IconButton(
+                  icon: const Icon(Icons.settings, size: 20),
+                  onPressed: () => _openModelSettings(model),
+                  tooltip: '模型设置',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline, size: 20, color: Colors.red),
+                  onPressed: () => _deleteModel(model),
+                  tooltip: '删除模型',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
 
               // 测试模式下的箭头
               if (_isTestingMode && !isTestingThis)
-                const Icon(Icons.touch_app, color: Colors.blue, size: 20),
+                Icon(
+                  Icons.touch_app,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 20,
+                ),
             ],
           ),
         ),
@@ -542,26 +729,31 @@ class _BreathingBorderCardState extends State<_BreathingBorderCard>
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primaryColor = theme.colorScheme.primary;
+    final surfaceColor = theme.colorScheme.surface;
+    final outlineColor = theme.colorScheme.outline;
+
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
         return Container(
           margin: widget.margin,
           decoration: BoxDecoration(
-            color: Colors.grey.shade50,
+            color: surfaceColor,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: widget.isSelected
-                  ? Colors.blue
+                  ? primaryColor
                   : (widget.isBreathing
-                      ? Colors.blue.withValues(alpha: _animation.value)
-                      : Colors.grey.shade200),
+                      ? primaryColor.withValues(alpha: _animation.value)
+                      : outlineColor.withOpacity(0.3)),
               width: widget.isSelected ? 2 : 1,
             ),
             boxShadow: widget.isBreathing
                 ? [
                     BoxShadow(
-                      color: Colors.blue.withValues(alpha: _animation.value * 0.3),
+                      color: primaryColor.withValues(alpha: _animation.value * 0.3),
                       blurRadius: 8,
                       spreadRadius: 1,
                     )
