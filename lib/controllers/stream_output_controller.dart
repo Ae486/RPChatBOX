@@ -1,7 +1,6 @@
 import 'dart:async';
 import '../adapters/ai_provider.dart';
 import '../models/model_config.dart';
-import '../models/conversation_settings.dart';
 
 /// 流式输出控制器
 /// 负责管理AI响应的流式输出、中断和状态控制

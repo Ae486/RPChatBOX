@@ -7,7 +7,13 @@ import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/github.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import '../utils/content_detector.dart';
+import '../utils/markdown_preprocessor.dart';
 import 'webview_math_widget.dart';
+import '../rendering/widgets/enhanced_code_block.dart';
+import '../rendering/core/render_cache.dart';
+import '../rendering/utils/performance_monitor.dart';
+import '../rendering/utils/markdown_style_helper.dart';
+import '../rendering/widgets/latex_error_widget.dart';
 
 /// 优化的LaTeX渲染器
 /// 基于flutter_math_fork，通过预处理和语法转换提供更好的LaTeX支持
@@ -31,26 +37,62 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // 🆕 开始性能监控
+    final timer = RenderTimer(
+      contentType: 'latex_renderer',
+      contentLength: content.length,
+    );
+    timer.start();
+
+    // 🆕 生成缓存键
+    final cacheKey = RenderCache.generateKey(
+      content,
+      type: 'latex_renderer',
+      options: {
+        'isDark': isDark,
+        'isUser': isUser,
+        'preferNative': preferNative,
+      },
+    );
+
+    // 🆕 尝试从缓存获取
+    final cache = RenderCache();
+    final cached = cache.get(cacheKey);
+    if (cached != null) {
+      timer.markCacheHit();
+      timer.stop();
+      return cached;
+    }
+
     // 检测内容是否包含LaTeX公式
+    Widget result;
     if (!content.contains('\$') && !ContentDetector.containsStandardLatex(content)) {
       // 没有LaTeX公式，使用标准Markdown渲染
-      return _buildMarkdown(content, isDark);
-    }
-
-    // 检测复杂度，选择渲染方式
-    final hasComplexLatex = ContentDetector.containsComplexLatex(content);
-    final hasStandardLatex = ContentDetector.containsStandardLatex(content);
-
-    if (preferNative && !hasComplexLatex && hasStandardLatex) {
-      // 优先使用原生渲染，处理标准LaTeX
-      return _buildOptimizedNativeRenderer(content, isDark);
-    } else if (hasComplexLatex) {
-      // 复杂公式，降级到WebView
-      return _buildWebViewRenderer(content, isDark);
+      result = _buildMarkdown(content, isDark);
     } else {
-      // 基础公式，使用flutter_math_fork
-      return _buildFlutterMathRenderer(content, isDark);
+      // 检测复杂度，选择渲染方式
+      final hasComplexLatex = ContentDetector.containsComplexLatex(content);
+      final hasStandardLatex = ContentDetector.containsStandardLatex(content);
+
+      if (preferNative && !hasComplexLatex && hasStandardLatex) {
+        // 优先使用原生渲染，处理标准LaTeX
+        result = _buildOptimizedNativeRenderer(content, isDark);
+      } else if (hasComplexLatex) {
+        // 复杂公式，降级到WebView
+        result = _buildWebViewRenderer(content, isDark);
+      } else {
+        // 基础公式，使用flutter_math_fork
+        result = _buildFlutterMathRenderer(content, isDark);
+      }
     }
+
+    // 🆕 存入缓存
+    cache.set(cacheKey, result);
+    
+    // 🆕 停止性能监控
+    timer.stop();
+    
+    return result;
   }
 
   /// 使用优化的原生渲染器
@@ -153,7 +195,7 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
 
       // 其他符号
       r'\angle': r'\angle',
-      r'\degree': '^{\circ}',
+      r'\degree': r'^{\circ}',
       r'\prime': r'\prime',
       r'\backslash': r'\backslash',
       r'\ell': r'\ell',
@@ -162,7 +204,6 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
       r'\Im': r'\Im',
       r'\aleph': r'\aleph',
       r'\hbar': r'\hbar',
-      r'\nabla': r'\nabla',
       r'\clubsuit': r'\clubsuit',
       r'\diamondsuit': r'\diamondsuit',
       r'\heartsuit': r'\heartsuit',
@@ -214,10 +255,10 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
 
         var result = command;
         if (subscript != null) {
-          result += '_{' + subscript + '}';
+          result += '_{$subscript}';
         }
         if (superscript != null) {
-          result += '^{' + superscript + '}';
+          result += '^{$superscript}';
         }
         return result;
       },
@@ -291,16 +332,16 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
           case _LaTeXSegmentType.text:
             return _buildMarkdown(segment.content, isDark);
           case _LaTeXSegmentType.inlineMath:
-            return _buildInlineMath(segment.content);
+            return _buildInlineMath(segment.content, isDark);
           case _LaTeXSegmentType.blockMath:
-            return _buildBlockMath(segment.content);
+            return _buildBlockMath(segment.content, isDark);
         }
       }).toList(),
     );
   }
 
   /// 构建内联数学公式
-  Widget _buildInlineMath(String latex) {
+  Widget _buildInlineMath(String latex, bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       child: Math.tex(
@@ -309,17 +350,10 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
         textStyle: textStyle ?? const TextStyle(fontSize: 15),
         onErrorFallback: (err) {
           debugPrint('LaTeX rendering error: ${err.messageWithType}');
-          // 显示原始LaTeX代码作为降级
-          return Text(
-            '\$$latex\$',
-            style: textStyle?.copyWith(
-              fontFamily: 'monospace',
-              backgroundColor: Colors.orange.withValues(alpha: 0.1),
-            ) ?? const TextStyle(
-              fontSize: 15,
-              fontFamily: 'monospace',
-              backgroundColor: Color.fromARGB(25, 255, 152, 0),
-            ),
+          // 🆕 使用增强的错误组件
+          return InlineLaTeXErrorWidget(
+            latex: latex,
+            isDark: isDark,
           );
         },
       ),
@@ -327,58 +361,42 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
   }
 
   /// 构建块级数学公式
-  Widget _buildBlockMath(String latex) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: Center(
-        child: Math.tex(
-          latex,
-          mathStyle: MathStyle.display,
-          textStyle: textStyle ?? const TextStyle(fontSize: 16),
-          onErrorFallback: (err) {
-            debugPrint('LaTeX rendering error: ${err.messageWithType}');
-            // 显示原始LaTeX代码作为降级
-            return Text(
-              '\$\$$latex\$\$',
-              style: textStyle?.copyWith(
-                fontFamily: 'monospace',
-                backgroundColor: Colors.orange.withValues(alpha: 0.1),
-              ) ?? const TextStyle(
-                fontSize: 16,
-                fontFamily: 'monospace',
-                backgroundColor: Color.fromARGB(25, 255, 152, 0),
-              ),
-            );
-          },
-        ),
-      ),
+  Widget _buildBlockMath(String latex, bool isDark) {
+    return Math.tex(
+      latex,
+      mathStyle: MathStyle.display,
+      textStyle: textStyle ?? const TextStyle(fontSize: 16),
+      onErrorFallback: (err) {
+        debugPrint('LaTeX rendering error: ${err.messageWithType}');
+        // 🆕 使用增强的错误组件
+        return LaTeXErrorWidget(
+          latex: latex,
+          errorMessage: err.messageWithType,
+          isBlockMath: true,
+          isDark: isDark,
+        );
+      },
     );
   }
 
   /// 标准Markdown渲染器
   Widget _buildMarkdown(String content, bool isDark) {
+    // 🐛 修复：使用预处理器，只识别三反引号代码块
+    final processedContent = MarkdownPreprocessor.preprocess(content);
+    
     return MarkdownBody(
-      data: content,
+      data: processedContent,
       selectable: true,
-      styleSheet: MarkdownStyleSheet(
-        p: textStyle,
-        code: TextStyle(
-          backgroundColor: backgroundColor,
-          fontFamily: 'monospace',
-          fontSize: 13,
-        ),
-        codeblockPadding: const EdgeInsets.all(12),
-        codeblockDecoration: BoxDecoration(
-          color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
-          ),
-        ),
+      // 启用GitHub风格扩展（包含表格支持）
+      extensionSet: md.ExtensionSet.gitHubWeb,
+      // 🆕 使用增强的样式配置
+      styleSheet: MarkdownStyleHelper.getCompactStyleSheet(
+        isDark: isDark,
+        baseTextStyle: textStyle,
       ),
       builders: {
         'code': CodeBlockBuilder(isDark: isDark),
+        // 不需要codespan builder，因为我们在预处理中已经处理了
       },
     );
   }
@@ -532,106 +550,16 @@ class _CodeBlockWithCopyState extends State<_CodeBlockWithCopy> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: widget.isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: widget.isDark ? const Color(0xFF353535) : const Color(0xFFD0D7DE),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: widget.isDark ? const Color(0xFF2D2D2D) : const Color(0xFFEEF1F4),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(7),
-                topRight: Radius.circular(7),
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (widget.language != 'plaintext')
-                  Text(
-                    widget.language.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: widget.isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                      letterSpacing: 0.5,
-                    ),
-                  )
-                else
-                  const SizedBox.shrink(),
-
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => _copyToClipboard(context),
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _copied ? Icons.check : Icons.content_copy,
-                            size: 14,
-                            color: _copied
-                                ? Colors.green
-                                : (widget.isDark ? Colors.grey.shade400 : Colors.grey.shade600),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _copied ? '已复制' : '复制',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: _copied
-                                  ? Colors.green
-                                  : (widget.isDark ? Colors.grey.shade400 : Colors.grey.shade600),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: widget.isDark ? const Color(0xFF353535) : const Color(0xFFD0D7DE),
-          ),
-
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: HighlightView(
-                widget.code,
-                language: widget.language,
-                theme: widget.isDark ? monokaiSublimeTheme : githubTheme,
-                padding: EdgeInsets.zero,
-                textStyle: const TextStyle(
-                  fontFamily: 'Consolas, Monaco, monospace',
-                  fontSize: 13.5,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    // 🆕 使用新的增强代码块（带行号和折叠功能）
+    return EnhancedCodeBlock(
+      code: widget.code,
+      language: widget.language,
+      isDark: widget.isDark,
+      showLineNumbers: true,
+      collapsible: true,
+      maxVisibleLines: 20,
     );
+    
+    // 旧版本代码已移除，现在只使用 EnhancedCodeBlock
   }
 }

@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'package:hive/hive.dart';
+
+part 'attached_file.g.dart';
 
 /// 附件文件模型
 /// 用于多模态对话中的文件上传和管理
@@ -249,12 +252,19 @@ class AttachedFile {
 }
 
 /// 文件类型枚举
+@HiveType(typeId: 2)
 enum FileType {
+  @HiveField(0)
   image('图片'),
+  @HiveField(1)
   video('视频'),
+  @HiveField(2)
   audio('音频'),
+  @HiveField(3)
   document('文档'),
+  @HiveField(4)
   code('代码'),
+  @HiveField(5)
   other('其他');
 
   final String displayName;
@@ -264,11 +274,17 @@ enum FileType {
 
 /// 附件快照模型（轻量级）
 /// 用于消息持久化存储，只保存文件引用路径
+@HiveType(typeId: 3)
 class AttachedFileSnapshot {
+  @HiveField(0)
   final String id;
+  @HiveField(1)
   final String name;
+  @HiveField(2)
   final String path;
+  @HiveField(3)
   final String mimeType;
+  @HiveField(4)
   final FileType type;
 
   AttachedFileSnapshot({

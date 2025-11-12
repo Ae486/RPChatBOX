@@ -1,15 +1,28 @@
+import 'package:hive/hive.dart';
 import 'message.dart';
 
+part 'conversation.g.dart';
+
 /// 会话模型
+@HiveType(typeId: 0)
 class Conversation {
+  @HiveField(0)
   final String id;
+  @HiveField(1)
   String title;
+  @HiveField(2)
   final List<Message> messages;
+  @HiveField(3)
   final DateTime createdAt;
+  @HiveField(4)
   DateTime updatedAt;
+  @HiveField(5)
   String? systemPrompt; // 系统提示词（角色设定）
+  @HiveField(6)
   int? scrollIndex; // 滚动位置（消息索引）
+  @HiveField(7)
   String? roleId; // 角色ID（用于精确匹配角色）
+  @HiveField(8)
   String? roleType; // 角色类型：'preset'（内置）或 'custom'（自定义）
 
   Conversation({

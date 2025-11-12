@@ -42,10 +42,7 @@ class EnhancedLaTeXRenderer extends StatelessWidget {
     final hasComplexLatex = ContentDetector.containsComplexLatex(content);
     final hasBasicLatex = content.contains('\$');
 
-    if (preferNative && (!hasComplexLatex || _shouldUseNative(content))) {
-      // 优先使用原生渲染，支持复杂公式
-      return _buildLatextRenderer(content, isDark);
-    } else if (hasComplexLatex) {
+    if (hasComplexLatex) {
       // 复杂公式，降级到WebView
       return _buildWebViewRenderer(content, isDark);
     } else {
@@ -87,29 +84,6 @@ class EnhancedLaTeXRenderer extends StatelessWidget {
     ];
 
     return supportedPatterns.any((pattern) => content.contains(pattern));
-  }
-
-  /// 使用latext渲染器（推荐方案）
-  Widget _buildLatextRenderer(String content, bool isDark) {
-    try {
-      return LaTeXT(
-        content: content,
-        delimiter: LatexDelimiter.all,
-        style: textStyle ?? const TextStyle(fontSize: 15),
-        mathStyle: MathStyle.text,
-        textDirection: TextDirection.ltr,
-        renderOptions: LaTeXTOptions(
-          throwOnError: false,
-          macrons: true,
-          strict: false,
-          enableFancyUnicode: true,
-        ),
-      );
-    } catch (e) {
-      debugPrint('LaTeX rendering failed with latext: $e');
-      // 降级到WebView渲染
-      return _buildWebViewRenderer(content, isDark);
-    }
   }
 
   /// 使用WebView渲染器（备用方案）

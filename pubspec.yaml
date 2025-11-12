@@ -36,7 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   
   # HTTP 请求
-  http: ^1.2.0
+  http: ^1.2.0  # 保留，逐步迁移到 dio
+  dio: ^5.4.0   # 新增：更强大的网络请求库
   
   # 本地存储
   shared_preferences: ^2.2.2
@@ -56,8 +57,12 @@ dependencies:
   # JSON 序列化
   json_annotation: ^4.8.1
   
+  # 加密哈希（用于缓存键生成）
+  crypto: ^3.0.3
+  
   # 文件路径
   path_provider: ^2.1.2
+  path: ^1.9.0
   
   # 可滚动定位列表（精确跳转到任意索引）
   scrollable_positioned_list: ^0.3.8
@@ -78,6 +83,19 @@ dependencies:
 
   # 图片查看器（支持缩放、手势）
   photo_view: ^0.14.0
+  
+  # 图片缓存（自动缓存网络和本地图片）
+  cached_network_image: ^3.3.0
+  
+  # 高性能本地数据库
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  
+  # PDF 文本提取
+  syncfusion_flutter_pdf: ^27.2.5
+  
+  # ZIP/压缩文件处理（用于解析 .docx 文件）
+  archive: ^3.4.0
 
 dev_dependencies:
   flutter_test:
@@ -89,6 +107,10 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  
+  # Hive 代码生成器
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.6
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

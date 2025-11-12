@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart' as picker;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:photo_view/photo_view.dart';
+import 'cached_image_widget.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
 import '../models/chat_settings.dart';
@@ -14,10 +17,11 @@ import '../utils/token_counter.dart';
 import 'message_actions.dart';
 import 'enhanced_content_renderer.dart';
 import '../models/conversation_settings.dart';
-import '../controllers/stream_output_controller.dart';
-import '../adapters/ai_provider.dart';
+import '../utils/global_toast.dart';
 import 'enhanced_input_area.dart';
 import '../main.dart' show globalModelServiceManager;
+import '../controllers/stream_output_controller.dart';
+import '../adapters/ai_provider.dart';
 
 /// 单个会话视图（保持存活状态）
 class ConversationView extends StatefulWidget {
@@ -71,6 +75,7 @@ class ConversationViewState extends State<ConversationView>
   late ConversationSettings _conversationSettings;
   late EnhancedStreamController _streamController;
   bool _attachmentBarVisible = true; // 附件栏可见性控制
+  AIProvider? _currentProvider; // 🔥 当前流式输出的 Provider，用于取消请求
   
   // 🔥 关键：保持页面存活，不销毁
   @override
@@ -309,24 +314,20 @@ class ConversationViewState extends State<ConversationView>
     // 获取选择的Provider和Model
     final modelId = _conversationSettings.selectedModelId;
     if (modelId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ 请先选择模型'),
-          behavior: SnackBarBehavior.floating,
-          margin: EdgeInsets.only(top: 80, left: 20, right: 20),
-        ),
+      // 🆕 使用全局提示框
+      GlobalToast.showInfo(
+        context,
+        '⚠️ 请先选择一个模型',
       );
       return;
     }
 
     final modelWithProvider = globalModelServiceManager.getModelWithProvider(modelId);
     if (modelWithProvider == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ 模型配置错误'),
-          behavior: SnackBarBehavior.floating,
-          margin: EdgeInsets.only(top: 80, left: 20, right: 20),
-        ),
+      // 🆕 使用全局提示框
+      GlobalToast.showError(
+        context,
+        '❌ 无法找到指定的模型',
       );
       return;
     }
@@ -364,10 +365,13 @@ class ConversationViewState extends State<ConversationView>
     widget.onConversationUpdated();
 
     try {
-      // 创建Provider实例
+      // 创建 Provider 实例
       final provider = globalModelServiceManager.createProviderInstance(
         modelWithProvider.provider.id,
       );
+      
+      // 🔥 保存 Provider 实例以便取消请求
+      _currentProvider = provider;
 
       // 准备消息列表
       final chatMessages = <ChatMessage>[];
@@ -453,8 +457,10 @@ class ConversationViewState extends State<ConversationView>
           });
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('❌ 错误: ${error.toString()}')),
+            // 🆕 使用全局提示框
+            GlobalToast.showError(
+              context,
+              '❌ 消息发送失败\n${error.toString()}',
             );
           }
         },
@@ -467,8 +473,10 @@ class ConversationViewState extends State<ConversationView>
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ 发送失败: $e')),
+        // 🆕 使用全局提示框
+        GlobalToast.showError(
+          context,
+          '❌ 消息发送失败\n${e.toString()}',
         );
       }
     }
@@ -476,9 +484,39 @@ class ConversationViewState extends State<ConversationView>
 
   /// 停止流式输出
   Future<void> _stopStreaming() async {
-    final content = await _streamController.stop();
+    debugPrint('🛡️ [Stop] 开始停止，当前内容长度: ${_currentAssistantMessage.length}');
+    debugPrint('🛡️ [Stop] _isLoading: $_isLoading, isStreaming: ${_streamController.isStreaming}');
+    
+    // 🔥 关键：先取消 Provider 的网络请求
+    if (_currentProvider != null) {
+      debugPrint('🛡️ [Stop] 调用 Provider.cancelRequest()');
+      try {
+        // 尝试调用 cancelRequest 方法（如果 Provider 支持）
+        final providerType = _currentProvider.runtimeType.toString();
+        debugPrint('🛡️ [Stop] Provider 类型: $providerType');
+        
+        // OpenAIProvider 有 cancelRequest 方法
+        if (_currentProvider.runtimeType.toString().contains('OpenAI')) {
+          (_currentProvider as dynamic).cancelRequest();
+          debugPrint('🛡️ [Stop] OpenAIProvider.cancelRequest() 已调用');
+        }
+      } catch (e) {
+        debugPrint('⚠️ [Stop] cancelRequest 失败: $e');
+      }
+      _currentProvider = null;
+    }
+    
+    // 停止流控制器（不要 await，因为请求已经被取消）
+    debugPrint('🛡️ [Stop] 调用 _streamController.stop()');
+    _streamController.stop().then((_) {
+      debugPrint('🛡️ [Stop] 流已停止， isStreaming: ${_streamController.isStreaming}');
+    }).catchError((e) {
+      debugPrint('⚠️ [Stop] 流停止时出错: $e');
+    });
 
-    if (content.isNotEmpty) {
+    // 使用 _currentAssistantMessage，因为它包含所有已显示的内容
+    if (_currentAssistantMessage.isNotEmpty) {
+      debugPrint('🛡️ [Stop] 准备保存消息，内容: ${_currentAssistantMessage.substring(0, _currentAssistantMessage.length > 50 ? 50 : _currentAssistantMessage.length)}...');
       // 获取当前模型信息
       final modelId = _conversationSettings.selectedModelId;
       String? modelName;
@@ -492,28 +530,55 @@ class ConversationViewState extends State<ConversationView>
         }
       }
 
-      // 保存部分内容
+      // 保存被截断的部分内容
       final assistantMessage = Message(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        content: content,
+        content: _currentAssistantMessage,
         isUser: false,
         timestamp: DateTime.now(),
-        outputTokens: TokenCounter.estimateTokens(content),
+        outputTokens: TokenCounter.estimateTokens(_currentAssistantMessage),
         modelName: modelName,
         providerName: providerName,
       );
 
+      // 🔥 关键：先添加消息，但不立即清空 _currentAssistantMessage
       setState(() {
         widget.conversation.addMessage(assistantMessage);
-        _currentAssistantMessage = '';
         _isLoading = false;
+        // 不要立即清空，避免渲染竞争
+      });
+      debugPrint('🛡️ [Stop] 消息已添加，总消息数: ${widget.conversation.messages.length}');
+      debugPrint('🛡️ [Stop] _currentAssistantMessage 还未清空，长度: ${_currentAssistantMessage.length}');
+
+      // 下一帧再清空临时消息，确保正式消息已渲染
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          debugPrint('🛡️ [Stop] postFrameCallback: 清空 _currentAssistantMessage');
+          setState(() {
+            _currentAssistantMessage = '';
+          });
+          debugPrint('🛡️ [Stop] postFrameCallback: 已清空，总消息数: ${widget.conversation.messages.length}');
+        }
+      });
+
+      // 🔥 手动停止后：清空附件数据并恢复可见性状态
+      _conversationSettings = _conversationSettings.clearFiles();
+      globalModelServiceManager.updateConversationSettings(_conversationSettings);
+      setState(() {
+        _attachmentBarVisible = true; // 恢复状态，等待下次使用
       });
 
       widget.onConversationUpdated();
       widget.onTokenUsageUpdated(widget.conversation);
     } else {
+      // 没有内容，但仍需清空附件
+      _conversationSettings = _conversationSettings.clearFiles();
+      globalModelServiceManager.updateConversationSettings(_conversationSettings);
+      
       setState(() {
+        _currentAssistantMessage = '';
         _isLoading = false;
+        _attachmentBarVisible = true;
       });
     }
   }
@@ -521,8 +586,10 @@ class ConversationViewState extends State<ConversationView>
   /// 复制消息内容
   void _copyMessage(String content) {
     Clipboard.setData(ClipboardData(text: content));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ 已复制到剪贴板')),
+    // 🆕 使用全局提示框
+    GlobalToast.showSuccess(
+      context,
+      '✅ 已复制到剪贴板',
     );
   }
 
@@ -728,15 +795,16 @@ class ConversationViewState extends State<ConversationView>
 
     widget.onConversationUpdated();
 
-    // 删除该消息之后的所有消息
+    // 🔥 删除该消息及之后的所有消息（包括当前消息）
     final messageIndex = widget.conversation.messages.indexOf(message);
     if (messageIndex >= 0) {
       setState(() {
         widget.conversation.messages.removeRange(
-          messageIndex + 1,
+          messageIndex,  // 🔥 从当前消息开始删除，而不是 messageIndex + 1
           widget.conversation.messages.length,
         );
       });
+      widget.onConversationUpdated();
     }
 
     // 重新发送
@@ -1273,8 +1341,8 @@ class ConversationViewState extends State<ConversationView>
                           onTap: () => _showImageViewer(file.path, file.name),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: Image.file(
-                              File(file.path),
+                            child: CachedImageWidget(
+                              path: file.path,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) {
                                 return _buildFilePlaceholder(

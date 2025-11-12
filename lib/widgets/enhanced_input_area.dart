@@ -2,11 +2,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart' as file_picker;
 import '../models/attached_file.dart';
-import '../models/conversation_settings.dart';
 import '../models/model_config.dart';
 import '../models/provider_config.dart';
 import '../services/model_service_manager.dart';
 import 'conversation_config_dialog.dart';
+import '../models/conversation_settings.dart';
+import '../utils/global_toast.dart';
 
 /// 增强的输入区域组件
 /// 包含文件上传、网络开关、配置按钮、模型选择
@@ -90,24 +91,20 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
           widget.onSettingsChanged(updatedSettings);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('已添加 ${attachedFiles.length} 个文件'),
-                behavior: SnackBarBehavior.floating,
-                margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
-              ),
+            // 🆕 使用全局提示框
+            GlobalToast.showSuccess(
+              context,
+              '成功添加 ${attachedFiles.length} 个文件',
             );
           }
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('文件选择失败: ${e.toString()}'),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
-          ),
+        // 🆕 使用全局提示框
+        GlobalToast.showError(
+          context,
+          '❌ 文件添加失败\n${e.toString()}',
         );
       }
     }

@@ -1,16 +1,24 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:http/http.dart' as http;
+import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:path/path.dart' as path;
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
+import '../models/api_error.dart';
 import '../services/file_content_service.dart';
+import '../services/dio_service.dart';
 import 'ai_provider.dart';
 
 /// OpenAI格式Provider适配器
 /// 支持OpenAI官方API和兼容格式的第三方服务
 class OpenAIProvider extends AIProvider {
+  // Dio 实例和取消令牌
+  final _dio = DioService().dio;
+  CancelToken? _currentCancelToken;
+  
   OpenAIProvider(super.config);
 
   @override
@@ -28,17 +36,19 @@ class OpenAIProvider extends AIProvider {
       // 🔧 使用actualApiUrl获取实际API地址
       final baseUrl = config.actualApiUrl.replaceAll('/chat/completions', '').replaceAll('/messages', '');
 
-      final response = await http
-          .get(
-            Uri.parse('$baseUrl/models'),
-            headers: buildHeaders(),
-          )
-          .timeout(const Duration(seconds: 10));
+      // 使用 dio 发送请求
+      final response = await _dio.get(
+        '$baseUrl/models',
+        options: Options(
+          headers: buildHeaders(),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
 
       stopwatch.stop();
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
+        final data = response.data as Map<String, dynamic>;
         final models = (data['data'] as List?)
             ?.map((m) => m['id'] as String)
             .toList();
@@ -48,13 +58,17 @@ class OpenAIProvider extends AIProvider {
           availableModels: models,
         );
       } else {
-        final error = _parseErrorMessage(response);
-        return ProviderTestResult.failure(error);
+        return ProviderTestResult.failure('请求失败: ${response.statusCode}');
       }
-    } on TimeoutException {
-      return ProviderTestResult.failure('连接超时');
-    } on SocketException {
-      return ProviderTestResult.failure('网络连接失败');
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        return ProviderTestResult.failure('连接超时');
+      } else if (e.type == DioExceptionType.connectionError) {
+        return ProviderTestResult.failure('网络连接失败');
+      } else {
+        return ProviderTestResult.failure('测试失败: ${e.message}');
+      }
     } catch (e) {
       return ProviderTestResult.failure('测试失败: ${e.toString()}');
     }
@@ -65,13 +79,17 @@ class OpenAIProvider extends AIProvider {
     try {
       // 🔧 使用actualApiUrl获取实际API地址
       final baseUrl = config.actualApiUrl.replaceAll('/chat/completions', '').replaceAll('/messages', '');
-      final response = await http.get(
-        Uri.parse('$baseUrl/models'),
-        headers: buildHeaders(),
+      
+      // 使用 dio 发送请求
+      final response = await _dio.get(
+        '$baseUrl/models',
+        options: Options(
+          headers: buildHeaders(),
+        ),
       );
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
+        final data = response.data as Map<String, dynamic>;
         return (data['data'] as List?)
                 ?.map((m) => m['id'] as String)
                 .toList() ??
@@ -90,6 +108,10 @@ class OpenAIProvider extends AIProvider {
     required ModelParameters parameters,
     List<AttachedFileData>? files,
   }) async* {
+    // 取消之前的请求（如果有）
+    _currentCancelToken?.cancel('新请求开始');
+    _currentCancelToken = DioService().createCancelToken();
+    
     final requestBody = await _buildRequestBody(
       model: model,
       messages: messages,
@@ -97,25 +119,38 @@ class OpenAIProvider extends AIProvider {
       stream: true,
       files: files,
     );
-
-    // 🔧 使用actualApiUrl获取实际API地址
-    final request = http.Request(
-      'POST',
-      Uri.parse(config.actualApiUrl),
-    );
-    request.headers.addAll(buildHeaders());
-    request.body = json.encode(requestBody);
+    
+    // 🐛 调试输出：请求详情
+    _debugPrintRequest(config.actualApiUrl, requestBody);
 
     try {
-      final streamedResponse = await request.send();
+      // 使用 dio 发送流式请求
+      final response = await _dio.post(
+        config.actualApiUrl,
+        data: requestBody,
+        options: Options(
+          headers: buildHeaders(),
+          responseType: ResponseType.stream, // 流式响应
+        ),
+        cancelToken: _currentCancelToken,
+      );
 
-      if (streamedResponse.statusCode != 200) {
-        final responseBody = await streamedResponse.stream.bytesToString();
-        final error = _parseErrorFromBody(responseBody);
-        throw Exception('API错误: $error');
+      if (response.statusCode != 200) {
+        final responseBody = response.data.toString();
+        final apiError = ApiErrorParser.parseFromResponse(
+          statusCode: response.statusCode!,
+          responseBody: responseBody,
+          apiProvider: config.name,
+        );
+        _debugPrintError(apiError);
+        throw apiError;
       }
 
-      await for (var chunk in streamedResponse.stream
+      // 处理流式响应
+      // response.data 是 ResponseBody，需要访问其 stream 属性
+      final responseStream = (response.data as ResponseBody).stream;
+      await for (var chunk in responseStream
+          .cast<List<int>>()  // Cast to List<int> first
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
         if (chunk.isEmpty || !chunk.startsWith('data: ')) continue;
@@ -138,8 +173,16 @@ class OpenAIProvider extends AIProvider {
           continue;
         }
       }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        throw Exception('请求已取消');
+      } else {
+        throw Exception('流式请求失败: ${e.message}');
+      }
     } catch (e) {
       throw Exception('流式请求失败: ${e.toString()}');
+    } finally {
+      _currentCancelToken = null;
     }
   }
 
@@ -157,17 +200,22 @@ class OpenAIProvider extends AIProvider {
       stream: false,
       files: files,
     );
+    
+    // 🐛 调试输出：请求详情
+    _debugPrintRequest(config.actualApiUrl, requestBody);
 
     try {
-      // 🔧 使用actualApiUrl获取实际API地址
-      final response = await http.post(
-        Uri.parse(config.actualApiUrl),
-        headers: buildHeaders(),
-        body: json.encode(requestBody),
+      // 使用 dio 发送请求
+      final response = await _dio.post(
+        config.actualApiUrl,
+        data: requestBody,
+        options: Options(
+          headers: buildHeaders(),
+        ),
       );
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
+        final data = response.data as Map<String, dynamic>;
         final choices = data['choices'] as List?;
         if (choices != null && choices.isNotEmpty) {
           final message = choices[0]['message'] as Map<String, dynamic>?;
@@ -175,15 +223,43 @@ class OpenAIProvider extends AIProvider {
         }
         return '';
       } else {
-        final error = _parseErrorMessage(response);
-        throw Exception(error);
+        // 🐛 使用新的错误处理系统
+        final apiError = ApiErrorParser.parseFromResponse(
+          statusCode: response.statusCode!,
+          responseBody: response.data.toString(),
+          apiProvider: config.name,
+        );
+        _debugPrintError(apiError);
+        throw apiError;
+      }
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final apiError = ApiErrorParser.parseFromResponse(
+          statusCode: e.response!.statusCode!,
+          responseBody: e.response!.data.toString(),
+          apiProvider: config.name,
+        );
+        throw apiError;
+      } else {
+        throw Exception('请求失败: ${e.message}');
       }
     } catch (e) {
       throw Exception('请求失败: ${e.toString()}');
     }
   }
 
-  /// 构建请求体
+  /// 取消当前请求
+  /// 用于用户点击停止按钮时真正中断网络请求
+  void cancelRequest() {
+    if (_currentCancelToken != null && !_currentCancelToken!.isCancelled) {
+      _currentCancelToken!.cancel('用户取消');
+      if (kDebugMode) {
+        debugPrint('✅ [OpenAIProvider] 请求已取消');
+      }
+    }
+  }
+
+  /// 构建请求体（根据Provider类型定制参数）
   Future<Map<String, dynamic>> _buildRequestBody({
     required String model,
     required List<ChatMessage> messages,
@@ -191,18 +267,60 @@ class OpenAIProvider extends AIProvider {
     required bool stream,
     List<AttachedFileData>? files,
   }) async {
+    // 🔧 基础参数（所有Provider都支持）
     final body = <String, dynamic>{
       'model': model,
       'messages': await _convertMessages(messages, files),
-      'temperature': parameters.temperature,
-      'max_tokens': parameters.maxTokens,
-      'top_p': parameters.topP,
-      'frequency_penalty': parameters.frequencyPenalty,
-      'presence_penalty': parameters.presencePenalty,
       'stream': stream,
     };
 
+    // 🆕 根据Provider类型添加支持的参数
+    switch (config.type) {
+      case ProviderType.openai:
+        // OpenAI官方API - 支持所有参数
+        _addIfNotDefault(body, 'temperature', parameters.temperature, 1.0);
+        _addIfNotNull(body, 'max_tokens', parameters.maxTokens);
+        _addIfNotDefault(body, 'top_p', parameters.topP, 1.0);
+        _addIfNotDefault(body, 'frequency_penalty', parameters.frequencyPenalty, 0.0);
+        _addIfNotDefault(body, 'presence_penalty', parameters.presencePenalty, 0.0);
+        break;
+
+      case ProviderType.deepseek:
+        // DeepSeek - 不支持frequency_penalty和presence_penalty
+        _addIfNotDefault(body, 'temperature', parameters.temperature, 1.0);
+        _addIfNotNull(body, 'max_tokens', parameters.maxTokens);
+        _addIfNotDefault(body, 'top_p', parameters.topP, 1.0);
+        break;
+
+      case ProviderType.gemini:
+        // Gemini - 只支持基础参数
+        _addIfNotDefault(body, 'temperature', parameters.temperature, 1.0);
+        _addIfNotNull(body, 'max_tokens', parameters.maxTokens);
+        break;
+
+      case ProviderType.claude:
+        // Claude - 使用max_tokens而不是max_completion_tokens
+        _addIfNotDefault(body, 'temperature', parameters.temperature, 1.0);
+        _addIfNotNull(body, 'max_tokens', parameters.maxTokens);
+        _addIfNotDefault(body, 'top_p', parameters.topP, 1.0);
+        break;
+    }
+
     return body;
+  }
+
+  /// 添加非默认值的参数
+  void _addIfNotDefault(Map<String, dynamic> body, String key, double value, double defaultValue) {
+    if (value != defaultValue) {
+      body[key] = value;
+    }
+  }
+
+  /// 添加非null且有效的参数
+  void _addIfNotNull(Map<String, dynamic> body, String key, int? value) {
+    if (value != null && value > 0) {
+      body[key] = value;
+    }
   }
 
   /// 转换消息格式，处理多模态内容
@@ -211,6 +329,12 @@ class OpenAIProvider extends AIProvider {
     List<AttachedFileData>? files,
   ) async {
     final converted = messages.map((msg) => msg.toJson()).toList();
+
+    // 🆕 过滤空system消息（很多API不接受空的system消息）
+    converted.removeWhere((msg) => 
+      msg['role'] == 'system' && 
+      (msg['content'] == null || (msg['content'] as String).trim().isEmpty)
+    );
 
     // 如果有附件且最后一条是用户消息，添加多模态内容
     if (files != null && files.isNotEmpty && converted.isNotEmpty) {
@@ -289,25 +413,89 @@ class OpenAIProvider extends AIProvider {
     }
   }
 
-  /// 解析错误消息
-  String _parseErrorMessage(http.Response response) {
-    try {
-      final data = json.decode(response.body) as Map<String, dynamic>;
-      final error = data['error'] as Map<String, dynamic>?;
-      return error?['message'] as String? ?? '未知错误';
-    } catch (e) {
-      return '状态码: ${response.statusCode}';
+  /// 🐛 调试方法：打印请求内容
+  void _debugPrintRequest(String url, Map<String, dynamic> requestBody) {
+    // 仅在调试模式启用详细日志
+    if (!kDebugMode) return;
+    
+    debugPrint('\n╔═══════════════════════════════════════════════════════════════');
+    debugPrint('║ 🐛 API 请求调试信息');
+    debugPrint('╠═══════════════════════════════════════════════════════════════');
+    debugPrint('║ 📍 API 地址: $url');
+    debugPrint('║ 🏢 Provider: ${config.name} (${config.type.toString().split('.').last})');
+    debugPrint('║ 🔑 API Key: ${config.apiKey.substring(0, math.min(10, config.apiKey.length))}...****');
+    debugPrint('╠═══════════════════════════════════════════════════════════════');
+    debugPrint('║ 📤 完整请求体:');
+    debugPrint('║');
+    
+    // 格式化输出JSON（截断过长的messages）
+    final displayBody = Map<String, dynamic>.from(requestBody);
+    if (displayBody.containsKey('messages')) {
+      final messages = displayBody['messages'] as List?;
+      if (messages != null && messages.length > 3) {
+        // 只显示前2条和最后1条消息
+        final summary = [
+          messages[0],
+          messages[1],
+          {'role': '...', 'content': '(${messages.length - 3}条消息已隐藏)'},
+          messages.last,
+        ];
+        displayBody['messages'] = summary;
+      }
     }
+    
+    final prettyJson = const JsonEncoder.withIndent('  ').convert(displayBody);
+    for (var line in prettyJson.split('\n')) {
+      debugPrint('║   $line');
+    }
+    
+    debugPrint('║');
+    debugPrint('╠══════════════════════════════════════════════════════════════╗');
+    debugPrint('║ 📊 参数摘要:');
+    debugPrint('║   • 模型: ${requestBody['model']}');
+    debugPrint('║   • 流式模式: ${requestBody['stream']}');
+    if (requestBody.containsKey('temperature')) {
+      debugPrint('║   • Temperature: ${requestBody['temperature']}');
+    }
+    if (requestBody.containsKey('max_tokens')) {
+      debugPrint('║   • Max Tokens: ${requestBody['max_tokens']}');
+    }
+    if (requestBody.containsKey('top_p')) {
+      debugPrint('║   • Top P: ${requestBody['top_p']}');
+    }
+    if (requestBody.containsKey('frequency_penalty')) {
+      debugPrint('║   • Frequency Penalty: ${requestBody['frequency_penalty']}');
+    }
+    if (requestBody.containsKey('presence_penalty')) {
+      debugPrint('║   • Presence Penalty: ${requestBody['presence_penalty']}');
+    }
+    final messages = requestBody['messages'] as List?;
+    if (messages != null) {
+      debugPrint('║   • 消息数: ${messages.length}');
+    }
+    debugPrint('╚══════════════════════════════════════════════════════════════╗\n');
   }
-
-  /// 从响应体解析错误
-  String _parseErrorFromBody(String body) {
-    try {
-      final data = json.decode(body) as Map<String, dynamic>;
-      final error = data['error'] as Map<String, dynamic>?;
-      return error?['message'] as String? ?? '未知错误';
-    } catch (e) {
-      return body;
+  
+  /// 🐛 调试方法：打印错误信息
+  void _debugPrintError(ApiError error) {
+    if (!kDebugMode) return;
+    
+    debugPrint('\n╔══════════════════════════════════════════════════════════════╗');
+    debugPrint('║ ${error.title}');
+    debugPrint('╠══════════════════════════════════════════════════════════════╗');
+    debugPrint('║ 🔴 状态码: ${error.statusCode}');
+    debugPrint('║ 📝 消息: ${error.message}');
+    if (error.errorCode != null) {
+      debugPrint('║ 🎯 错误代码: ${error.errorCode}');
     }
+    if (error.details != null) {
+      debugPrint('║ ℹ️ 详情: ${error.details}');
+    }
+    debugPrint('║ 🕒 时间: ${error.timestamp}');
+    debugPrint('║ ♾️ 可重试: ${error.isRetryable}');
+    if (error.isRetryable) {
+      debugPrint('║ ✇️ 建议延迟: ${error.retryDelayMs}ms');
+    }
+    debugPrint('╚══════════════════════════════════════════════════════════════╗\n');
   }
 }

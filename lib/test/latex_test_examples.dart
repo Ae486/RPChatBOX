@@ -86,18 +86,18 @@ class LaTeXTestExamples {
   /// 物理学公式测试用例
   static const List<String> physicsFormulas = [
     // 经典力学
-    r'Newton\'s second law: $F = ma$.',
-    r'Kinetic energy: $E_k = \frac{1}{2}mv^2$.',
-    r'Momentum: $p = mv$.',
+    r"Newton's second law: \$F = ma\$.",
+    r'Kinetic energy: \$E_k = \frac{1}{2}mv^2\$.',
+    r'Momentum: \$p = mv\$.',
 
     // 电磁学
-    r'Coulomb\'s law: $F = k\frac{q_1 q_2}{r^2}$.',
-    r'Maxwell\'s equations: $\nabla \cdot \vec{E} = \frac{\rho}{\varepsilon_0}$.',
+    r"Coulomb's law: \$F = k\frac{q_1 q_2}{r^2}\$.",
+    r"Maxwell's equations: \$\nabla \cdot \vec{E} = \frac{\rho}{\varepsilon_0}\$.",
 
     // 量子力学
-    r'Schrödinger equation: $i\hbar\frac{\partial\psi}{\partial t} = \hat{H}\psi$.',
-    r'Planck\'s relation: $E = h\nu$.',
-    r'Uncertainty principle: $\Delta x \Delta p \geq \frac{\hbar}{2}$.',
+    r'Schrödinger equation: \$i\hbar\frac{\partial\psi}{\partial t} = \hat{H}\psi\$.',
+    r"Planck's relation: \$E = h\nu\$.",
+    r'Uncertainty principle: \$\Delta x \Delta p \geq \frac{\hbar}{2}\$.',
   ];
 
   /// 复杂公式测试用例（这些可能需要WebView渲染）

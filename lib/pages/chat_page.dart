@@ -4,7 +4,7 @@ import '../models/conversation.dart';
 import '../models/role_preset.dart';
 import '../models/custom_role.dart';
 import '../services/storage_service.dart';
-import '../services/conversation_service.dart';
+import '../services/hive_conversation_service.dart';
 import '../services/custom_role_service.dart';
 import '../utils/token_counter.dart';
 import '../widgets/conversation_drawer.dart';
@@ -24,7 +24,7 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   final _storageService = StorageService();
-  final _conversationService = ConversationService();
+  late HiveConversationService _conversationService;
   final _customRoleService = CustomRoleService();
 
   List<Conversation> _conversations = [];
@@ -37,7 +37,14 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initServices();
+  }
+  
+  /// 初始化服务
+  Future<void> _initServices() async {
+    _conversationService = HiveConversationService();
+    await _conversationService.initialize();
+    await _loadData();
   }
 
   @override

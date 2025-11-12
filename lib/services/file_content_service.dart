@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as path;
+import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:archive/archive.dart';
 
 /// 文件内容提取服务
 /// 支持从各种文件类型中提取文本内容
@@ -50,6 +52,9 @@ class FileContentService {
       'text/csv',
       'application/json',
       'application/xml',
+      'application/pdf', // PDF 文档
+      'application/msword', // .doc
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
     ];
 
     final textExtensions = [
@@ -58,6 +63,7 @@ class FileContentService {
       '.js', '.ts', '.dart', '.py', '.java', '.cpp', '.c', '.h',
       '.css', '.scss', '.less', '.sql', '.sh', '.bat', '.ps1',
       '.gitignore', '.dockerfile', 'Dockerfile', '.env',
+      '.pdf', '.doc', '.docx', // 文档文件
     ];
 
     return textMimeTypes.contains(mimeType) ||
@@ -144,40 +150,95 @@ class FileContentService {
     return await file.readAsString();
   }
 
-  /// 从PDF文件提取内容
+  /// 从 PDF 文件提取内容
   static Future<String> _extractFromPdf(File file) async {
-    // 注意：Flutter没有内置的PDF解析库
-    // 这里提供一个占位符实现，实际使用时需要添加PDF处理依赖
     try {
-      // 由于没有PDF库，我们只能提供基本信息
-      final fileSize = await file.length();
-      final lastModified = await file.lastModified();
-
-      return '''PDF文档信息:
-文件路径: ${file.path}
-文件大小: ${_formatFileSize(fileSize)}
-最后修改: ${lastModified.toLocal()}
-[注意: PDF内容提取需要额外的库支持，如pdf或syncfusion_flutter_pdf]''';
+      // 使用 Syncfusion PDF 库提取文本
+      final bytes = await file.readAsBytes();
+      final PdfDocument document = PdfDocument(inputBytes: bytes);
+      
+      final StringBuffer textBuffer = StringBuffer();
+      
+      // 提取每一页的文本
+      final PdfTextExtractor extractor = PdfTextExtractor(document);
+      
+      for (int i = 0; i < document.pages.count; i++) {
+        if (i > 0) textBuffer.writeln('\n--- 第 ${i + 1} 页 ---\n');
+        
+        final String pageText = extractor.extractText(startPageIndex: i, endPageIndex: i);
+        textBuffer.write(pageText);
+        
+        // 限制提取的页数（防止过大的PDF占用太多token）
+        if (i >= 49) { // 最多50页
+          textBuffer.writeln('\n\n... (还有 ${document.pages.count - 50} 页未提取)');
+          break;
+        }
+      }
+      
+      document.dispose();
+      
+      final extractedText = textBuffer.toString().trim();
+      
+      if (extractedText.isEmpty) {
+        return 'PDF文档信息: ${file.path}\n\n[注意: 该PDF文件为空白或无法提取文本，可能是扫描的图片PDF]';
+      }
+      
+      return extractedText;
     } catch (e) {
-      return '// PDF文件处理失败: ${e.toString()}';
+      return 'PDF文件处理失败: ${e.toString()}\n\n文件: ${file.path}';
     }
   }
 
-  /// 从Word文档提取内容
+  /// 从 Word 文档提取内容
   static Future<String> _extractFromWord(File file) async {
-    // 注意：Flutter没有内置的Word文档解析库
-    // 这里提供一个占位符实现
     try {
-      final fileSize = await file.length();
-      final lastModified = await file.lastModified();
-
-      return '''Word文档信息:
+      final extension = path.extension(file.path).toLowerCase();
+      
+      if (extension == '.docx') {
+        // DOCX 是 ZIP 格式，可以解析
+        final bytes = await file.readAsBytes();
+        final archive = ZipDecoder().decodeBytes(bytes);
+        
+        // 查找 word/document.xml 文件
+        final documentXml = archive.findFile('word/document.xml');
+        
+        if (documentXml != null) {
+          final content = utf8.decode(documentXml.content as List<int>);
+          
+          // 简单的XML文本提取（提取<w:t>标签内的文本）
+          final textRegex = RegExp(r'<w:t[^>]*>([^<]*)</w:t>');
+          final matches = textRegex.allMatches(content);
+          
+          final StringBuffer textBuffer = StringBuffer();
+          for (final match in matches) {
+            if (match.group(1) != null) {
+              textBuffer.write(match.group(1));
+            }
+          }
+          
+          // 处理段落分隔
+          String extractedText = textBuffer.toString();
+          extractedText = extractedText.replaceAll(RegExp(r'(\w)(<w:p[^>]*>)'), r'\1\n\2');
+          
+          if (extractedText.trim().isEmpty) {
+            return 'Word文档信息: ${file.path}\n\n[注意: 该Word文档为空白或无法提取文本]';
+          }
+          
+          return extractedText.trim();
+        } else {
+          return 'Word文档信息: ${file.path}\n\n[注意: 无法找到文档内容]';
+        }
+      } else {
+        // .doc 格式需要更复杂的解析，暂不支持
+        final fileSize = await file.length();
+        return '''Word文档信息 (.doc):
 文件路径: ${file.path}
 文件大小: ${_formatFileSize(fileSize)}
-最后修改: ${lastModified.toLocal()}
-[注意: Word文档内容提取需要额外的库支持]''';
+
+[注意: 旧版 .doc 格式暂不支持提取，请转换为 .docx 格式]''';
+      }
     } catch (e) {
-      return '// Word文档处理失败: ${e.toString()}';
+      return 'Word文档处理失败: ${e.toString()}\n\n文件: ${file.path}';
     }
   }
 

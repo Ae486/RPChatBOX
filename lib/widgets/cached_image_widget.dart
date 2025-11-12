@@ -1,0 +1,96 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+
+/// 缓存图片组件
+/// 
+/// 支持本地文件和网络图片的显示，自动缓存以提升性能
+class CachedImageWidget extends StatelessWidget {
+  final String path;
+  final BoxFit? fit;
+  final double? width;
+  final double? height;
+  final Widget Function(BuildContext, Object, StackTrace?)? errorBuilder;
+  final Widget? placeholder;
+
+  const CachedImageWidget({
+    super.key,
+    required this.path,
+    this.fit,
+    this.width,
+    this.height,
+    this.errorBuilder,
+    this.placeholder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // 判断是网络图片还是本地文件
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      // 网络图片：使用 CachedNetworkImage
+      return CachedNetworkImage(
+        imageUrl: path,
+        width: width,
+        height: height,
+        fit: fit ?? BoxFit.cover,
+        placeholder: placeholder != null 
+            ? (context, url) => placeholder!
+            : (context, url) => Container(
+                color: Colors.grey.shade200,
+                child: const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+        errorWidget: errorBuilder != null
+            ? (context, url, error) => errorBuilder!(context, error, null)
+            : (context, url, error) => Container(
+                color: Colors.grey.shade300,
+                child: const Icon(
+                  Icons.broken_image,
+                  color: Colors.grey,
+                  size: 48,
+                ),
+              ),
+      );
+    } else {
+      // 本地文件：使用 Image.file with MemoryCache
+      // Flutter 已经对 Image.file 进行了内存缓存
+      // 我们只需要添加错误处理
+      final file = File(path);
+      
+      return Image.file(
+        file,
+        width: width,
+        height: height,
+        fit: fit ?? BoxFit.cover,
+        // 使用缓存策略
+        cacheWidth: width?.toInt(),
+        cacheHeight: height?.toInt(),
+        errorBuilder: errorBuilder ??
+            (context, error, stackTrace) => Container(
+                  width: width,
+                  height: height,
+                  color: Colors.grey.shade300,
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.broken_image,
+                        color: Colors.grey,
+                        size: 48,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        '图片加载失败',
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+      );
+    }
+  }
+}

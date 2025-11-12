@@ -1,0 +1,65 @@
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
+part of 'conversation.dart';
+
+// **************************************************************************
+// TypeAdapterGenerator
+// **************************************************************************
+
+class ConversationAdapter extends TypeAdapter<Conversation> {
+  @override
+  final int typeId = 0;
+
+  @override
+  Conversation read(BinaryReader reader) {
+    final numOfFields = reader.readByte();
+    final fields = <int, dynamic>{
+      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
+    };
+    return Conversation(
+      id: fields[0] as String,
+      title: fields[1] as String,
+      messages: (fields[2] as List?)?.cast<Message>(),
+      createdAt: fields[3] as DateTime?,
+      updatedAt: fields[4] as DateTime?,
+      systemPrompt: fields[5] as String?,
+      scrollIndex: fields[6] as int?,
+      roleId: fields[7] as String?,
+      roleType: fields[8] as String?,
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, Conversation obj) {
+    writer
+      ..writeByte(9)
+      ..writeByte(0)
+      ..write(obj.id)
+      ..writeByte(1)
+      ..write(obj.title)
+      ..writeByte(2)
+      ..write(obj.messages)
+      ..writeByte(3)
+      ..write(obj.createdAt)
+      ..writeByte(4)
+      ..write(obj.updatedAt)
+      ..writeByte(5)
+      ..write(obj.systemPrompt)
+      ..writeByte(6)
+      ..write(obj.scrollIndex)
+      ..writeByte(7)
+      ..write(obj.roleId)
+      ..writeByte(8)
+      ..write(obj.roleType);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ConversationAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}

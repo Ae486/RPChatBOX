@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'pages/chat_page.dart';
+import 'package:flutter/services.dart';
 import 'services/model_service_manager.dart';
+import 'services/data_migration_service.dart';
+import 'pages/chat_page.dart';
 
 // 全局ModelServiceManager实例
 late ModelServiceManager globalModelServiceManager;
@@ -20,6 +21,16 @@ void main() async {
   }
 
   final prefs = await SharedPreferences.getInstance();
+
+  // 执行数据迁移（如果需要）
+  final migrationService = DataMigrationService();
+  if (await migrationService.needsMigration()) {
+    try {
+      await migrationService.migrate();
+    } catch (e) {
+      print('⚠️ 数据迁移失败，将继续使用旧数据: $e');
+    }
+  }
 
   // 初始化ModelServiceManager
   globalModelServiceManager = ModelServiceManager(prefs);

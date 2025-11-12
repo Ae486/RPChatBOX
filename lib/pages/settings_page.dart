@@ -1,10 +1,79 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../pages/model_services_page.dart';
 import '../main.dart' show globalModelServiceManager;
 
 /// 设置页面
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  bool _isClearing = false;
+
+  /// 清除图片缓存
+  Future<void> _clearImageCache(BuildContext context) async {
+    // 显示确认对话框
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认清除缓存'),
+        content: const Text('确定要清除所有缓存的图片吗？此操作无法撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isClearing = true;
+    });
+
+    try {
+      // 清除 cached_network_image 的缓存
+      await DefaultCacheManager().emptyCache();
+      
+      // 清除 Flutter 的图片缓存
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ 图片缓存已清除'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ 清除缓存失败: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isClearing = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +101,24 @@ class SettingsPage extends StatelessWidget {
                   ),
                 );
               },
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 缓存管理
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.cleaning_services_outlined, size: 32),
+              title: const Text('清除图片缓存'),
+              subtitle: const Text('清除应用内所有缓存的图片数据'),
+              trailing: _isClearing
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.chevron_right),
+              onTap: _isClearing ? null : () => _clearImageCache(context),
             ),
           ),
           const SizedBox(height: 16),
