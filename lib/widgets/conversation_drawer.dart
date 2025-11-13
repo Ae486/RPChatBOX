@@ -34,6 +34,10 @@ class ConversationDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     // 按角色分组会话
     final groupedConversations = _groupByRole(conversations);
+    
+    // 计算实际显示的会话数（排除被删除角色的对话）
+    final displayedConversationsCount = groupedConversations.values
+        .fold<int>(0, (sum, group) => sum + group.conversations.length);
 
     return Drawer(
       child: Column(
@@ -62,7 +66,7 @@ class ConversationDrawer extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${conversations.length} 个会话',
+                  '$displayedConversationsCount 个会话',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(context)
                             .colorScheme
@@ -289,10 +293,10 @@ class ConversationDrawer extends StatelessWidget {
             (r) => r.id == conv.roleId,
             orElse: () => CustomRole(
               id: '',
-              name: '未知角色',
+              name: '',
               description: '',
               systemPrompt: '',
-              icon: '❓',
+              icon: '',
             ),
           );
 
@@ -301,9 +305,8 @@ class ConversationDrawer extends StatelessWidget {
             roleIcon = matchedCustom.icon;
             customRole = matchedCustom;
           } else {
-            // 自定义角色已被删除
-            roleName = '已删除的角色';
-            roleIcon = '❓';
+            // 🔴 自定义角色已被删除，跳过此对话（不显示）
+            continue;
           }
         } else {
           // 未知类型，使用默认
@@ -343,9 +346,8 @@ class ConversationDrawer extends StatelessWidget {
               roleIcon = matchedCustom.icon;
               customRole = matchedCustom;
             } else {
-              // 未匹配到任何角色
-              roleName = '自定义角色';
-              roleIcon = '✨';
+              // 🔴 未匹配到任何角色，跳过此对话（不显示）
+              continue;
             }
           }
         } else {

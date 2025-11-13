@@ -53,26 +53,15 @@ class MarkdownStyleHelper {
         height: 1.4,
       ),
       
-      // 内联代码
-      code: TextStyle(
-        backgroundColor: isDark 
-          ? Colors.grey.shade800.withValues(alpha: 0.5)
-          : Colors.grey.shade300.withValues(alpha: 0.5),
+      // 内联代码（由 CodespanBuilder 处理，这里保持简单）
+      code: base.copyWith(
         fontFamily: 'monospace',
-        fontSize: 13,
-        color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
-        letterSpacing: 0,
+        fontSize: base.fontSize! * 0.9,
       ),
       
       // 代码块
       codeblockPadding: const EdgeInsets.all(12),
       codeblockDecoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isDark ? const Color(0xFF353535) : const Color(0xFFD0D7DE),
-          width: 1,
-        ),
       ),
       
       // 引用块

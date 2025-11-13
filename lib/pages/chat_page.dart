@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../models/chat_settings.dart';
 import '../models/conversation.dart';
 import '../models/role_preset.dart';
@@ -420,11 +421,58 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
     
-    // 🔧 修复：只重新加载自定义角色，不触发整个页面重建
+    // 🔥 关键修复：重新加载自定义角色和对话列表
+    // 因为删除角色时会级联删除对话，所以必须同步更新
     final customRoles = await _customRoleService.loadCustomRoles();
+    final conversations = await _conversationService.loadConversations();
+    
+    // 检查当前对话是否被删除
+    final currentConv = _conversations[_currentIndex];
+    final stillExists = conversations.any((c) => c.id == currentConv.id);
+    
+    // 🔧 关键优化：只更新被删除的对话的 keys，保留现有的 keys
+    final oldConversationIds = _conversations.map((c) => c.id).toSet();
+    final newConversationIds = conversations.map((c) => c.id).toSet();
+    final deletedIds = oldConversationIds.difference(newConversationIds);
+    
+    // 构建新的 keys 列表，保留未被删除的对话的 key
+    final oldKeysMap = <String, GlobalKey<ConversationViewState>>{};
+    for (var i = 0; i < _conversations.length; i++) {
+      if (!deletedIds.contains(_conversations[i].id)) {
+        oldKeysMap[_conversations[i].id] = _conversationKeys[i];
+      }
+    }
+    
+    final newKeys = <GlobalKey<ConversationViewState>>[];
+    for (var conv in conversations) {
+      if (oldKeysMap.containsKey(conv.id)) {
+        // 保留现有的 key，避免重建 widget
+        newKeys.add(oldKeysMap[conv.id]!);
+      } else {
+        // 新对话，生成新 key
+        newKeys.add(GlobalKey<ConversationViewState>());
+      }
+    }
+    
     setState(() {
       _customRoles = customRoles;
+      _conversations = conversations;
+      _conversationKeys = newKeys;
+      
+      // 如果当前对话被删除，切换到第一个对话
+      if (!stillExists) {
+        _currentIndex = 0;
+      } else {
+        // 更新当前索引（因为对话列表可能变化）
+        _currentIndex = conversations.indexWhere((c) => c.id == currentConv.id);
+        if (_currentIndex < 0) _currentIndex = 0;
+      }
     });
+    
+    // 保存当前对话 ID
+    if (conversations.isNotEmpty) {
+      await _conversationService.saveCurrentConversationId(conversations[_currentIndex].id);
+    }
   }
 
   /// 显示主题切换对话框
@@ -492,8 +540,13 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     if (_conversations.isEmpty) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        body: Center(
+          child: SpinKitFadingCircle(
+            color: Theme.of(context).colorScheme.primary,
+            size: 50.0,
+          ),
+        ),
       );
     }
 

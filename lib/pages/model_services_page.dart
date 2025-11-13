@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
@@ -193,7 +194,12 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: SpinKitFadingCircle(
+                color: Theme.of(context).colorScheme.primary,
+                size: 50.0,
+              ),
+            )
           : _buildBody(),
       bottomNavigationBar: _buildBottomBar(),
     );

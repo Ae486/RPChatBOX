@@ -87,6 +87,9 @@ dependencies:
   # 图片缓存（自动缓存网络和本地图片）
   cached_network_image: ^3.3.0
   
+  # 美观的加载动画
+  flutter_spinkit: ^5.2.1
+  
   # 高性能本地数据库
   hive: ^2.2.3
   hive_flutter: ^1.1.0

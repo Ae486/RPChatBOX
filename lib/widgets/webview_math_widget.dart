@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 /// WebView LaTeX 渲染器
 /// 用于渲染复杂 LaTeX 公式（矩阵、多行、特殊符号等）
@@ -136,11 +137,10 @@ class _WebViewMathWidgetState extends State<WebViewMathWidget> {
             children: [
               WebViewWidget(controller: _controller),
               if (_isLoading)
-                const Center(
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                Center(
+                  child: SpinKitThreeBounce(
+                    color: Colors.grey,
+                    size: 16.0,
                   ),
                 ),
             ],
@@ -155,11 +155,10 @@ class _WebViewMathWidgetState extends State<WebViewMathWidget> {
           children: [
             WebViewWidget(controller: _controller),
             if (_isLoading)
-              const Center(
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+              Center(
+                child: SpinKitThreeBounce(
+                  color: Colors.grey,
+                  size: 12.0,
                 ),
               ),
           ],

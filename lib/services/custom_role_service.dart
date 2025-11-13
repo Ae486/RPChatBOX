@@ -38,6 +38,8 @@ class CustomRoleService {
   }
 
   /// 删除自定义角色
+  /// 注意：此方法只删除角色本身，不删除关联的对话
+  /// 对话的删除应该由调用方（如 CustomRolesPage）通过 HiveConversationService 处理
   Future<void> deleteCustomRole(String roleId) async {
     final roles = await loadCustomRoles();
     roles.removeWhere((r) => r.id == roleId);

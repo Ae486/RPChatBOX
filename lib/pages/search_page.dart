@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../models/conversation.dart';
 import '../models/message.dart';
 
@@ -127,7 +128,12 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     if (_isSearching) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(
+        child: SpinKitThreeBounce(
+          color: Theme.of(context).colorScheme.primary,
+          size: 30.0,
+        ),
+      );
     }
 
     if (_results.isEmpty) {

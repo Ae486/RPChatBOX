@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 /// 缓存图片组件
 /// 
@@ -37,8 +38,11 @@ class CachedImageWidget extends StatelessWidget {
             ? (context, url) => placeholder!
             : (context, url) => Container(
                 color: Colors.grey.shade200,
-                child: const Center(
-                  child: CircularProgressIndicator(),
+                child: Center(
+                  child: SpinKitFadingCircle(
+                    color: Colors.grey.shade400,
+                    size: 40.0,
+                  ),
                 ),
               ),
         errorWidget: errorBuilder != null

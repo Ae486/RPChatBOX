@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/custom_role.dart';
 import '../services/custom_role_service.dart';
+import '../services/hive_conversation_service.dart';
+import '../models/conversation.dart';
 
 /// 自定义角色管理页面
 class CustomRolesPage extends StatefulWidget {
@@ -12,12 +14,33 @@ class CustomRolesPage extends StatefulWidget {
 
 class _CustomRolesPageState extends State<CustomRolesPage> {
   final _service = CustomRoleService();
+  final _conversationService = HiveConversationService();
   List<CustomRole> _customRoles = [];
+  bool _isInitialized = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRoles();
+    _initialize();
+  }
+  
+  /// 初始化 Hive 和加载角色
+  Future<void> _initialize() async {
+    try {
+      await _conversationService.initialize();
+      _isInitialized = true;
+      await _loadRoles();
+    } catch (e) {
+      debugPrint('⚠️ 初始化失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('初始化失败: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _loadRoles() async {
@@ -136,11 +159,29 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     );
 
     if (result == true) {
+      final name = nameController.text.trim();
+      final description = descController.text.trim();
+      final prompt = promptController.text.trim();
+      
+      // 验证：角色名称不能为空
+      if (name.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ 角色名称不能为空'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+      
       final role = CustomRole(
         id: editRole?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        name: nameController.text.trim(),
-        description: descController.text.trim(),
-        systemPrompt: promptController.text.trim(),
+        name: name,
+        description: description,
+        // prompt 为空时使用默认值
+        systemPrompt: prompt.isEmpty ? 'You are a helpful assistant.' : prompt,
         icon: selectedIcon,
       );
 
@@ -211,13 +252,74 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     );
   }
 
-  /// 删除角色
+  /// 删除角色（级联删除关联的对话）
   Future<void> _deleteRole(CustomRole role) async {
+    // 查找关联的对话
+    List<Conversation> allConversations = [];
+    List<Conversation> relatedConversations = [];
+    
+    if (!_isInitialized) {
+      debugPrint('⚠️ Hive 未初始化，无法查找关联对话');
+    } else {
+      try {
+        allConversations = await _conversationService.loadConversations();
+        relatedConversations = allConversations
+            .where((conv) => conv.roleId == role.id && conv.roleType == 'custom')
+            .toList();
+      } catch (e) {
+        debugPrint('⚠️ 查找关联对话失败: $e');
+      }
+    }
+    
+    // 构建确认对话框内容
+    final hasRelatedConversations = relatedConversations.isNotEmpty;
+    final conversationCount = relatedConversations.length;
+    
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除角色'),
-        content: Text('确定要删除"${role.name}"吗？'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('确定要删除「${role.name}」吗？'),
+            if (hasRelatedConversations)
+              const SizedBox(height: 16),
+            if (hasRelatedConversations)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.warning, color: Colors.orange.shade700, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          '关联对话警告',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '此角色有 $conversationCount 个关联对话，删除后这些对话也会被删除！',
+                      style: TextStyle(color: Colors.orange.shade900),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -226,15 +328,51 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('删除'),
+            child: Text(hasRelatedConversations ? '确认删除' : '删除'),
           ),
         ],
       ),
     );
 
     if (confirmed == true) {
+      // 删除关联的对话
+      if (hasRelatedConversations) {
+        try {
+          for (final conv in relatedConversations) {
+            await _conversationService.deleteConversation(allConversations, conv.id);
+          }
+          debugPrint('✅ 已删除 $conversationCount 个关联对话');
+        } catch (e) {
+          debugPrint('⚠️ 删除关联对话失败: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('删除关联对话失败: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+      }
+      
+      // 删除角色
       await _service.deleteCustomRole(role.id);
       await _loadRoles();
+      
+      // 显示成功提示
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              hasRelatedConversations 
+                ? '✅ 已删除角色和 $conversationCount 个关联对话' 
+                : '✅ 已删除角色',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     }
   }
 

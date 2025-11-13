@@ -26,15 +26,9 @@ class MarkdownPreprocessor {
       return placeholder;
     });
 
-    // 🔥 处理单反引号
-    // 将 `content` 转换为 {{BACKTICK_content}} 来避免被识别为代码
-    final singleBacktickRegex = RegExp(r'`([^`\n]+)`');
-    result = result.replaceAllMapped(singleBacktickRegex, (match) {
-      final content = match.group(1)!;
-      // 保持原样，但标记为已处理
-      return '`$content`'; // 保留原样，flutter_markdown 会正确处理
-    });
-
+    // 注意：单反引号 `code` 是标准Markdown语法，应该被渲染为行内代码
+    // 由 CodespanBuilder 处理，不需要在预处理器中特殊处理
+    
     // 恢复代码块
     codeBlocks.forEach((placeholder, codeBlock) {
       result = result.replaceAll(placeholder, codeBlock);

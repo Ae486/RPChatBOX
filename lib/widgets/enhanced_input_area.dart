@@ -204,7 +204,7 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
                       maxLines: 5,
                       minLines: 1,
                       decoration: const InputDecoration(
-                        hintText: '在这里输入你的问题...',
+                        hintText: '请在这里输入你的问题...',
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.symmetric(
                           horizontal: 20,

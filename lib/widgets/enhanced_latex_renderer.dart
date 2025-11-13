@@ -148,11 +148,9 @@ class EnhancedLaTeXRenderer extends StatelessWidget {
       selectable: true,
       styleSheet: MarkdownStyleSheet(
         p: textStyle,
-        code: TextStyle(
-          backgroundColor: backgroundColor,
-          fontFamily: 'monospace',
-          fontSize: 13,
-        ),
+        code: textStyle?.copyWith(
+          fontWeight: FontWeight.bold,
+        ) ?? const TextStyle(fontWeight: FontWeight.bold),
         codeblockPadding: const EdgeInsets.all(12),
         codeblockDecoration: BoxDecoration(
           color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
@@ -400,6 +398,7 @@ class _CodeBlockWithCopyState extends State<_CodeBlockWithCopy> {
 
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: HighlightView(
@@ -408,8 +407,8 @@ class _CodeBlockWithCopyState extends State<_CodeBlockWithCopy> {
                 theme: widget.isDark ? monokaiSublimeTheme : githubTheme,
                 padding: EdgeInsets.zero,
                 textStyle: const TextStyle(
-                  fontFamily: 'Consolas, Monaco, monospace',
-                  fontSize: 13.5,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
                   height: 1.5,
                 ),
               ),

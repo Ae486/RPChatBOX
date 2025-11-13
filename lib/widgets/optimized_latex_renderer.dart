@@ -3,9 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:flutter_math_fork/flutter_math.dart';
-import 'package:flutter_highlight/flutter_highlight.dart';
-import 'package:flutter_highlight/themes/github.dart';
-import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import '../utils/content_detector.dart';
 import '../utils/markdown_preprocessor.dart';
 import 'webview_math_widget.dart';
@@ -396,7 +393,7 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
       ),
       builders: {
         'code': CodeBlockBuilder(isDark: isDark),
-        // 不需要codespan builder，因为我们在预处理中已经处理了
+        'codespan': CodespanBuilder(isDark: isDark),
       },
     );
   }
@@ -491,9 +488,39 @@ class CodeBlockBuilder extends MarkdownElementBuilder {
   Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
     final code = element.textContent;
 
-    String language = 'plaintext';
+    // 检查是否有language class属性，这是三反引号代码块的特征
     final className = element.attributes['class'];
-    if (className != null && className.startsWith('language-')) {
+    final hasLanguageClass = className != null && className.startsWith('language-');
+    
+    // 如果没有language class，这可能是单反引号行内代码
+    // 但为了保险，我们也检查代码长度和换行符
+    final isLikelyInlineCode = !hasLanguageClass && 
+                                code.length < 100 && 
+                                !code.contains('\n');
+    
+    if (isLikelyInlineCode) {
+      // 这是单反引号行内代码，使用简单样式
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF0F0F0),
+          borderRadius: BorderRadius.circular(2),
+        ),
+        child: Text(
+          code,
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: (preferredStyle?.fontSize ?? 15) * 0.88,
+            color: isDark ? const Color.fromARGB(255, 255, 255, 255) : const Color.fromARGB(255, 52, 52, 52),
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      );
+    }
+
+    // 这是三反引号代码块
+    String language = 'plaintext';
+    if (hasLanguageClass) {
       language = className.substring(9);
     }
 
@@ -550,16 +577,40 @@ class _CodeBlockWithCopyState extends State<_CodeBlockWithCopy> {
 
   @override
   Widget build(BuildContext context) {
-    // 🆕 使用新的增强代码块（带行号和折叠功能）
+    // 使用简化的增强代码块（只有 Header + 代码内容）
     return EnhancedCodeBlock(
       code: widget.code,
       language: widget.language,
       isDark: widget.isDark,
-      showLineNumbers: true,
-      collapsible: true,
-      maxVisibleLines: 20,
     );
-    
-    // 旧版本代码已移除，现在只使用 EnhancedCodeBlock
+  }
+}
+
+/// 单反引号行内代码构建器
+class CodespanBuilder extends MarkdownElementBuilder {
+  final bool isDark;
+
+  CodespanBuilder({required this.isDark});
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    final code = element.textContent;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF0F0F0),
+        borderRadius: BorderRadius.circular(2),
+      ),
+      child: Text(
+        code,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: (preferredStyle?.fontSize ?? 15) * 0.88,
+          color: isDark ? const Color(0xFFE06C75) : const Color(0xFFD73A49),
+          fontWeight: FontWeight.w400,
+        ),
+      ),
+    );
   }
 }

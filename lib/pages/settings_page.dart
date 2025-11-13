@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../pages/model_services_page.dart';
 import '../main.dart' show globalModelServiceManager;
 
@@ -112,10 +113,9 @@ class _SettingsPageState extends State<SettingsPage> {
               title: const Text('清除图片缓存'),
               subtitle: const Text('清除应用内所有缓存的图片数据'),
               trailing: _isClearing
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                  ? SpinKitThreeBounce(
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 16.0,
                     )
                   : const Icon(Icons.chevron_right),
               onTap: _isClearing ? null : () => _clearImageCache(context),

@@ -2,11 +2,10 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
-import 'package:file_picker/file_picker.dart' as picker;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'cached_image_widget.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
@@ -22,6 +21,8 @@ import 'enhanced_input_area.dart';
 import '../main.dart' show globalModelServiceManager;
 import '../controllers/stream_output_controller.dart';
 import '../adapters/ai_provider.dart';
+import '../utils/chunk_buffer.dart';
+import '../utils/smart_scroll_controller.dart';
 
 /// 单个会话视图（保持存活状态）
 class ConversationView extends StatefulWidget {
@@ -76,6 +77,11 @@ class ConversationViewState extends State<ConversationView>
   late EnhancedStreamController _streamController;
   bool _attachmentBarVisible = true; // 附件栏可见性控制
   AIProvider? _currentProvider; // 🔥 当前流式输出的 Provider，用于取消请求
+  bool _isInitializing = true; // 初始化加载状态
+  
+  // 🆕 流式输出优化组件
+  ChunkBuffer? _chunkBuffer;
+  SmartScrollController? _smartScrollController;
   
   // 🔥 关键：保持页面存活，不销毁
   @override
@@ -96,12 +102,66 @@ class ConversationViewState extends State<ConversationView>
     // 🆕 初始化流式控制器
     _streamController = EnhancedStreamController();
 
+    // 🆕 初始化 Chunk 缓冲器
+    _chunkBuffer = ChunkBuffer(
+      onFlush: (content) {
+        setState(() {
+          _currentAssistantMessage += content;
+        });
+        
+        if (_smartScrollController != null) {
+          final messagesCount = widget.conversation.messages.length;
+          final hasCurrentMessage = _currentAssistantMessage.isNotEmpty;
+          final totalItems = messagesCount + (hasCurrentMessage ? 1 : 0) + 1;
+          
+          _smartScrollController!.autoScrollToBottom(
+            messageCount: totalItems,
+            smooth: false,
+          );
+        }
+      },
+      flushInterval: const Duration(milliseconds: 50),
+      flushThreshold: 30,
+      enableDebugLog: true,
+    );
+
+    // 🆕 初始化智能滚动控制器
+    _smartScrollController = SmartScrollController(
+      scrollController: _itemScrollController,
+      positionsListener: _itemPositionsListener,
+      lockThreshold: 10.0,
+      unlockThreshold: 50.0,
+      enableDebugLog: true,
+    );
+
     // 监听滚动位置变化，自动保存
     _itemPositionsListener.itemPositions.addListener(_onScrollPositionChanged);
 
-    // 恢复之前保存的滚动位置
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _restoreScrollPosition();
+    // 🔴 已禁用：恢复之前保存的滚动位置（默认显示最新消息）
+    // WidgetsBinding.instance.addPostFrameCallback((_) {
+    //   _restoreScrollPosition();
+    // });
+    
+    // ✅ 初始化时滚动到底部，显示最新消息
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_itemScrollController.isAttached && widget.conversation.messages.isNotEmpty) {
+        // 计算总项数：消息 + 当前生成中的消息 + 底部占位符
+        final messagesCount = widget.conversation.messages.length;
+        final hasCurrentMessage = _currentAssistantMessage.isNotEmpty;
+        final totalItems = messagesCount + (hasCurrentMessage ? 1 : 0) + 1; // +1 为底部占位符
+        final spacerIndex = totalItems - 1;
+        
+        _itemScrollController.jumpTo(index: spacerIndex);
+        debugPrint('✅ 初始化滚动到底部占位符，索引: $spacerIndex (messagesCount: $messagesCount)');
+      }
+      
+      // 等待一帧后隐藏加载页面
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
     });
   }
 
@@ -113,6 +173,11 @@ class ConversationViewState extends State<ConversationView>
     _scrollDebounceTimer?.cancel();
     _autoScrollTimer?.cancel();
     _streamController.dispose(); // 🆕 清理流式控制器
+    
+    // 🆕 清理优化组件
+    _chunkBuffer?.dispose();
+    _smartScrollController?.dispose();
+    
     super.dispose();
   }
 
@@ -142,14 +207,14 @@ class ConversationViewState extends State<ConversationView>
 
       _lastScrollIndex = firstVisibleIndex;
 
-      // 只在位置真正改变时保存（防止频繁写入）
-      if (widget.conversation.scrollIndex != firstVisibleIndex) {
-        widget.conversation.scrollIndex = firstVisibleIndex;
-        // 延迟保存，避免滚动时频繁触发
-        Future.delayed(const Duration(milliseconds: 500), () {
-          widget.onConversationUpdated();
-        });
-      }
+      // 🔴 已禁用：只在位置真正改变时保存（防止频繁写入）
+      // if (widget.conversation.scrollIndex != firstVisibleIndex) {
+      //   widget.conversation.scrollIndex = firstVisibleIndex;
+      //   // 延迟保存，避免滚动时频繁触发
+      //   Future.delayed(const Duration(milliseconds: 500), () {
+      //     widget.onConversationUpdated();
+      //   });
+      // }
     }
   }
 
@@ -178,17 +243,30 @@ class ConversationViewState extends State<ConversationView>
   }
 
   /// 更新用户是否在底部的状态
+  /// 优化：基于滚动位置而非消息数量，设置 150px 阈值
   void _updateUserNearBottomStatus(Iterable<ItemPosition> positions) {
     if (positions.isEmpty) return;
 
     final totalMessages = widget.conversation.messages.length + (_currentAssistantMessage.isEmpty ? 0 : 1);
-    final lastVisibleIndex = positions
-        .where((position) => position.itemLeadingEdge < 1)
-        .reduce((a, b) => a.index > b.index ? a : b)
-        .index;
+    if (totalMessages == 0) return;
 
-    // 如果最后可见的消息距离底部2条消息以内，认为用户在底部附近
-    final isNearBottom = totalMessages - lastVisibleIndex <= 2;
+    // 获取最后一条消息的位置
+    final lastMessageIndex = totalMessages - 1;
+    
+    // 查找最后一条消息是否可见
+    final lastMessagePosition = positions.firstWhere(
+      (pos) => pos.index == lastMessageIndex,
+      orElse: () => ItemPosition(
+        index: -1,
+        itemLeadingEdge: 2.0,  // 设置为屏幕外（>1）
+        itemTrailingEdge: 2.0,
+      ),
+    );
+
+    // 判断：如果最后一条消息的 trailing edge 在屏幕内且接近底部
+    // itemTrailingEdge 范围：0~1 表示在屏幕内，0.95 表示离底部很近（约 50px）
+    final isNearBottom = lastMessagePosition.index == lastMessageIndex && 
+                        lastMessagePosition.itemTrailingEdge >= 0.95;
 
     if (_isUserNearBottom != isNearBottom) {
       setState(() {
@@ -202,18 +280,20 @@ class ConversationViewState extends State<ConversationView>
   }
 
   /// 恢复滚动位置
+  /// 🔴 已禁用：该功能在切换对话时会导致频繁IO和性能问题
+  /// 保留代码以便未来需要时重新启用
   void _restoreScrollPosition() {
-    if (widget.conversation.scrollIndex != null && 
-        _itemScrollController.isAttached) {
-      final targetIndex = widget.conversation.scrollIndex!;
-      final maxIndex = widget.conversation.messages.length - 1;
-      
-      // 确保索引有效
-      if (targetIndex >= 0 && targetIndex <= maxIndex) {
-        _itemScrollController.jumpTo(index: targetIndex);
-        debugPrint('✅ 恢复滚动位置到索引: $targetIndex');
-      }
-    }
+    // if (widget.conversation.scrollIndex != null && 
+    //     _itemScrollController.isAttached) {
+    //   final targetIndex = widget.conversation.scrollIndex!;
+    //   final maxIndex = widget.conversation.messages.length - 1;
+    //   
+    //   // 确保索引有效
+    //   if (targetIndex >= 0 && targetIndex <= maxIndex) {
+    //     _itemScrollController.jumpTo(index: targetIndex);
+    //     debugPrint('✅ 恢复滚动位置到索引: $targetIndex');
+    //   }
+    // }
   }
 
   /// 公开方法：滚动到指定消息（使用 ItemScrollController - 100% 可靠）
@@ -257,6 +337,7 @@ class ConversationViewState extends State<ConversationView>
   }
 
   /// 智能滚动到底部（优化版）
+  /// 用于自动追随 AI 回复，跳转到最后一条消息的顶部
   void _scrollToBottom({bool smooth = false}) {
     // 只有在自动滚动启用且用户不在主动滚动时才执行
     if (!_autoScrollEnabled || _isUserScrolling) {
@@ -288,6 +369,43 @@ class ConversationViewState extends State<ConversationView>
         }
       }
     });
+  }
+
+  /// 滚动到真正的底部（最后一条消息的底部）
+  /// 专门用于"回到底部"按钮，与消息搜索定位功能无关
+  void _scrollToActualBottom() {
+    // 🔥 修复：计算最新的消息数量（包括正在生成的消息和底部占位符）
+    final messagesCount = widget.conversation.messages.length;
+    final hasCurrentMessage = _currentAssistantMessage.isNotEmpty;
+    final totalItems = messagesCount + (hasCurrentMessage ? 1 : 0) + 1; // +1 为底部占位符
+    
+    // ✅ 使用智能滚动控制器，并传入最新的消息数量
+    if (_smartScrollController != null) {
+      _smartScrollController!.scrollToBottom(
+        smooth: true,
+        messageCount: totalItems, // 🔥 关键修复：传入最新的总项数
+      );
+    } else {
+      // 降级处理（如果控制器未初始化）
+      if (!_itemScrollController.isAttached) {
+        debugPrint('⚠️ _scrollToActualBottom: ItemScrollController 未附加');
+        return;
+      }
+
+      if (messagesCount == 0) {
+        debugPrint('⚠️ _scrollToActualBottom: 没有消息');
+        return;
+      }
+
+      final spacerIndex = totalItems - 1;
+      _itemScrollController.scrollTo(
+        index: spacerIndex,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOutCubic,
+      );
+      
+      debugPrint('✅ _scrollToActualBottom: 已滚动到底部占位符索引 $spacerIndex');
+    }
   }
 
   /// 节流滚动：用于流式输出
@@ -409,12 +527,15 @@ class ConversationViewState extends State<ConversationView>
         parameters: _conversationSettings.parameters,
         files: files.isNotEmpty ? files : null,
         onChunk: (chunk) {
-          setState(() {
-            _currentAssistantMessage += chunk;
-          });
-          _throttledScrollToBottom();
+          // ✅ 使用 ChunkBuffer 批量处理
+          _chunkBuffer?.add(chunk);
         },
         onDone: () {
+          debugPrint('✅ 流式输出完成');
+          
+          // 🆕 确保最后的内容被刷新
+          _chunkBuffer?.flush();
+          
           // 保存助手消息
           if (_currentAssistantMessage.isNotEmpty) {
             final inputTokens = TokenCounter.estimateTokens(text);
@@ -911,6 +1032,9 @@ class ConversationViewState extends State<ConversationView>
       });
       widget.onConversationUpdated();
 
+      _scrollToBottom();
+      
+
       // 🔥 关键修改：即使 content 为空，只要有附件也要发送
       _messageController.text = userContent;
       await _sendMessage();
@@ -937,6 +1061,7 @@ class ConversationViewState extends State<ConversationView>
 
     return Stack(
       children: [
+        // 底层：主内容（始终渲染，但初始化时被遮罩覆盖）
         Column(
           children: [
             // 导出模式工具栏
@@ -957,6 +1082,31 @@ class ConversationViewState extends State<ConversationView>
         // 回到底部浮动按钮
         if (!_isExportMode && !_isUserNearBottom && !_isLoading)
           _buildScrollToBottomButton(),
+        
+        // 顶层：初始化加载遮罩（完全覆盖底层内容）
+        if (_isInitializing)
+          Container(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SpinKitFadingCircle(
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 60,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    '加载中...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -1043,14 +1193,24 @@ class ConversationViewState extends State<ConversationView>
 
   /// 消息列表
   Widget _buildMessageList() {
+    // 计算总项数：消息 + 当前生成中的消息 + 底部占位符
+    final messagesCount = widget.conversation.messages.length;
+    final hasCurrentMessage = _currentAssistantMessage.isNotEmpty;
+    final totalItems = messagesCount + (hasCurrentMessage ? 1 : 0) + 1; // +1 为底部占位符
+    
     return ScrollablePositionedList.builder(
       itemScrollController: _itemScrollController,
       itemPositionsListener: _itemPositionsListener,
       padding: const EdgeInsets.all(16),
-      itemCount: widget.conversation.messages.length + (_currentAssistantMessage.isEmpty ? 0 : 1),
+      itemCount: totalItems,
       itemBuilder: (context, index) {
+        // 底部占位符：最后一项，透明的空间
+        if (index == totalItems - 1) {
+          return const SizedBox(height: 1); // 极小的占位符
+        }
+        
         // 显示正在生成的消息
-        if (index == widget.conversation.messages.length) {
+        if (index == messagesCount) {
           return _buildMessageBubble(
             content: _currentAssistantMessage,
             isUser: false,
@@ -1059,6 +1219,7 @@ class ConversationViewState extends State<ConversationView>
           );
         }
 
+        // 正常消息
         final message = widget.conversation.messages[index];
         
         return _buildMessageBubble(
@@ -1289,11 +1450,13 @@ class ConversationViewState extends State<ConversationView>
       child: FloatingActionButton.small(
         heroTag: 'scrollToBottom_${widget.conversation.id}',
         onPressed: () {
+          // 重置状态
           setState(() {
             _autoScrollEnabled = true;
             _isUserNearBottom = true;
           });
-          _scrollToBottom(smooth: true);
+          // 使用专门的方法滚动到真正的底部
+          _scrollToActualBottom();
         },
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Theme.of(context).colorScheme.onPrimary,
@@ -1542,10 +1705,9 @@ class ConversationViewState extends State<ConversationView>
               color: Colors.black,
             ),
             loadingBuilder: (context, event) => Center(
-              child: CircularProgressIndicator(
-                value: event == null
-                    ? 0
-                    : event.cumulativeBytesLoaded / (event.expectedTotalBytes ?? 1),
+              child: SpinKitFadingCircle(
+                color: Colors.white,
+                size: 50.0,
               ),
             ),
             errorBuilder: (context, error, stackTrace) => Center(

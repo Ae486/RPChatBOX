@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 /// 全局浮动提示框工具类
 /// 从左上方由左向右曲线动画飘出，位于所有窗口最上层
@@ -264,13 +265,9 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
                 children: [
                   // 图标或加载动画
                   if (showLoading)
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        valueColor: AlwaysStoppedAnimation<Color>(iconColor),
-                      ),
+                    SpinKitThreeBounce(
+                      color: iconColor,
+                      size: 20.0,
                     )
                   else
                     Icon(iconData, color: iconColor, size: 24),
