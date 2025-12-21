@@ -234,3 +234,7 @@ $RECYCLE.BIN/
 # Linux
 .directory
 .Trash-*
+
+# Agents
+.claude
+.snow
