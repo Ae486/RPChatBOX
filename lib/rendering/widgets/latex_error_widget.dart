@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../design_system/apple_icons.dart';
 import 'package:flutter/services.dart';
 
 /// LaTeX渲染错误提示组件
@@ -68,7 +69,7 @@ class _LaTeXErrorWidgetState extends State<LaTeXErrorWidget> {
           Row(
             children: [
               Icon(
-                Icons.error_outline,
+                AppleIcons.error,
                 color: widget.isDark ? Colors.red.shade300 : Colors.red.shade700,
                 size: 20,
               ),
@@ -92,7 +93,7 @@ class _LaTeXErrorWidgetState extends State<LaTeXErrorWidget> {
                   child: Padding(
                     padding: const EdgeInsets.all(4),
                     child: Icon(
-                      _copied ? Icons.check : Icons.content_copy,
+                      _copied ? AppleIcons.check : AppleIcons.copy,
                       size: 16,
                       color: _copied 
                         ? Colors.green
@@ -110,7 +111,7 @@ class _LaTeXErrorWidgetState extends State<LaTeXErrorWidget> {
                   child: Padding(
                     padding: const EdgeInsets.all(4),
                     child: Icon(
-                      _showDetails ? Icons.expand_less : Icons.expand_more,
+                      _showDetails ? AppleIcons.arrowUp : AppleIcons.arrowDown,
                       size: 16,
                       color: widget.isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                     ),
@@ -242,7 +243,7 @@ class InlineLaTeXErrorWidget extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            Icons.warning_amber_rounded,
+            AppleIcons.warning,
             size: 14,
             color: isDark ? Colors.red.shade300 : Colors.red.shade700,
           ),

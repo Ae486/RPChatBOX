@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
 import '../data/model_capability_presets.dart';
@@ -118,7 +119,7 @@ class _ModelEditPageState extends State<ModelEditPage> {
                     child: Row(
                       children: [
                         Icon(
-                          Icons.warning_amber_rounded,
+                          AppleIcons.warning,
                           color: Theme.of(context).colorScheme.error,
                           size: 20,
                         ),

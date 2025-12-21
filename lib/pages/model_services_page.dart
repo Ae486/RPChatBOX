@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
 import '../widgets/provider_card.dart';
 import 'provider_detail_page.dart';
+import '../design_system/design_tokens.dart';
 
 /// 模型服务管理页面
 /// 参照cherrybox界面设计，管理AI服务提供商和模型
@@ -167,7 +169,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     }
   }
 
-  /// 🆕 自定义拖动装饰器（支持x/y轴自由移动）
+  /// 自定义拖动装饰器（支持x/y轴自由移动）
   Widget _proxyDecorator(Widget child, int index, Animation<double> animation) {
     return AnimatedBuilder(
       animation: animation,
@@ -175,7 +177,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
         return Material(
           elevation: 8,
           color: Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
           child: Opacity(
             opacity: 0.9,
             child: child,
@@ -216,16 +218,16 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
               size: 64,
               color: Colors.grey.shade400,
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: ChatBoxTokens.spacing.lg),
             Text(
               '暂无AI服务',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: Colors.grey.shade600,
                   ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: ChatBoxTokens.spacing.sm),
             Text(
-              '点击下方"添加"按钮创建第一个服务',
+              '点击下方“添加”按钮创建第一个服务',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.grey.shade500,
                   ),
@@ -238,7 +240,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     // 🆕 管理模式下使用拖动排序（支持x/y轴移动）
     if (_isManagementMode) {
       return ReorderableListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
         itemCount: _providers.length,
         onReorder: _onReorder,
         buildDefaultDragHandles: false, // 🔧 禁用默认拖动按钮
@@ -268,7 +270,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
 
     // 普通模式下使用普通ListView
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
       itemCount: _providers.length,
       itemBuilder: (context, index) {
         final provider = _providers[index];
@@ -291,7 +293,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
 
   Widget _buildBottomBar() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
         boxShadow: [
@@ -308,21 +310,21 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: _toggleManagementMode, // 🆕 点击切换管理模式
-                icon: Icon(_isManagementMode ? Icons.close : Icons.settings),
+                icon: Icon(_isManagementMode ? AppleIcons.close : AppleIcons.settings),
                 label: Text(_isManagementMode ? '退出' : '管理'),
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            SizedBox(width: ChatBoxTokens.spacing.md),
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: _isManagementMode ? null : _showAddProviderDialog, // 🆕 管理模式下禁用
-                icon: const Icon(Icons.add),
+                icon: const Icon(AppleIcons.add),
                 label: const Text('添加'),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
             ),

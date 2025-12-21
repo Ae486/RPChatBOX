@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../design_system/apple_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
@@ -50,7 +51,7 @@ class CachedImageWidget extends StatelessWidget {
             : (context, url, error) => Container(
                 color: Colors.grey.shade300,
                 child: const Icon(
-                  Icons.broken_image,
+                  AppleIcons.imageOff,
                   color: Colors.grey,
                   size: 48,
                 ),
@@ -79,7 +80,7 @@ class CachedImageWidget extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        Icons.broken_image,
+                        AppleIcons.imageOff,
                         color: Colors.grey,
                         size: 48,
                       ),

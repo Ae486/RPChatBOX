@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
+import '../rendering/widgets/latex_error_widget.dart';
 
 /// WebView LaTeX 渲染器
 /// 用于渲染复杂 LaTeX 公式（矩阵、多行、特殊符号等）
@@ -168,25 +169,20 @@ class _WebViewMathWidgetState extends State<WebViewMathWidget> {
   }
 
   Widget _buildErrorWidget() {
-    // 渲染失败时显示原始 LaTeX
-    return Container(
-      padding: const EdgeInsets.all(8),
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(
-          color: Colors.orange.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Text(
-        widget.isBlockMath ? '\$\$${widget.latex}\$\$' : '\$${widget.latex}\$',
-        style: widget.textStyle?.copyWith(
-          fontFamily: 'monospace',
-          backgroundColor: Colors.orange.withValues(alpha: 0.2),
-        ),
-      ),
-    );
+    // 🔥 使用统一的LaTeX错误组件，而不是橙色警告框
+    if (widget.isBlockMath) {
+      return LaTeXErrorWidget(
+        latex: widget.latex,
+        errorMessage: _error ?? 'WebView rendering not supported on desktop platform',
+        isBlockMath: true,
+        isDark: widget.isDark,
+      );
+    } else {
+      return InlineLaTeXErrorWidget(
+        latex: widget.latex,
+        isDark: widget.isDark,
+      );
+    }
   }
 }
 

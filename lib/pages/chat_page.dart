@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../models/chat_settings.dart';
 import '../models/conversation.dart';
@@ -10,6 +11,7 @@ import '../services/custom_role_service.dart';
 import '../utils/token_counter.dart';
 import '../widgets/conversation_drawer.dart';
 import '../widgets/conversation_view.dart';
+import '../widgets/apple_toast.dart';
 import '../main.dart';
 import 'settings_page.dart';
 import 'search_page.dart';
@@ -135,9 +137,7 @@ class _ChatPageState extends State<ChatPage> {
   /// 删除会话
   Future<void> _deleteConversation(Conversation conversation) async {
     if (_conversations.length == 1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 至少需要保留一个会话')),
-      );
+      AppleToast.warning(context, message: '至少需要保留一个会话');
       return;
     }
 
@@ -342,9 +342,7 @@ class _ChatPageState extends State<ChatPage> {
       
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ 统计已重置')),
-        );
+        AppleToast.success(context, message: '统计已重置');
       }
     }
   }
@@ -555,12 +553,12 @@ class _ChatPageState extends State<ChatPage> {
         title: Text(_conversations[_currentIndex].title),
               actions: [
                 IconButton(
-                  icon: const Icon(Icons.search),
+                  icon: const Icon(AppleIcons.search),
                   onPressed: _openSearch,
                   tooltip: '搜索',
                 ),
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert),
+                  icon: const Icon(AppleIcons.moreVert),
                   onSelected: (value) {
                     switch (value) {
                       case 'token_stats':
@@ -602,7 +600,7 @@ class _ChatPageState extends State<ChatPage> {
                       value: 'clear',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outline, size: 20),
+                          Icon(AppleIcons.delete, size: 20),
                           SizedBox(width: 8),
                           Text('清空对话'),
                         ],
@@ -612,7 +610,7 @@ class _ChatPageState extends State<ChatPage> {
                       value: 'settings',
                       child: Row(
                         children: [
-                          Icon(Icons.settings, size: 20),
+                          Icon(AppleIcons.settings, size: 20),
                           SizedBox(width: 8),
                           Text('设置'),
                         ],

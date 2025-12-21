@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -70,15 +71,18 @@ class OptimizedLaTeXRenderer extends StatelessWidget {
       // 检测复杂度，选择渲染方式
       final hasComplexLatex = ContentDetector.containsComplexLatex(content);
       final hasStandardLatex = ContentDetector.containsStandardLatex(content);
+      
+      // 🔥 桌面平台不支持WebView，强制使用flutter_math_fork
+      final isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
       if (preferNative && !hasComplexLatex && hasStandardLatex) {
         // 优先使用原生渲染，处理标准LaTeX
         result = _buildOptimizedNativeRenderer(content, isDark);
-      } else if (hasComplexLatex) {
-        // 复杂公式，降级到WebView
+      } else if (hasComplexLatex && !isDesktop) {
+        // 复杂公式，移动平台可以降级到WebView
         result = _buildWebViewRenderer(content, isDark);
       } else {
-        // 基础公式，使用flutter_math_fork
+        // 基础公式或桌面平台，使用flutter_math_fork
         result = _buildFlutterMathRenderer(content, isDark);
       }
     }

@@ -1,7 +1,11 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/conversation.dart';
 import '../models/role_preset.dart';
 import '../models/custom_role.dart';
+import '../design_system/design_tokens.dart';
+import '../design_system/apple_tokens.dart';
+import '../design_system/apple_icons.dart';
 
 /// 会话列表侧边栏（按角色分组）
 class ConversationDrawer extends StatelessWidget {
@@ -32,6 +36,8 @@ class ConversationDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     // 按角色分组会话
     final groupedConversations = _groupByRole(conversations);
     
@@ -40,86 +46,115 @@ class ConversationDrawer extends StatelessWidget {
         .fold<int>(0, (sum, group) => sum + group.conversations.length);
 
     return Drawer(
-      child: Column(
-        children: [
-          // 头部
-          DrawerHeader(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primaryContainer,
-                  Theme.of(context).colorScheme.secondaryContainer,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+      backgroundColor: Colors.transparent, // 关键：Drawer背景透明
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30), // 增强模糊效果
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.75) // 暗模式75%透明
+                : Colors.white.withValues(alpha: 0.8), // 亮模式80%透明
+            border: Border(
+              right: BorderSide(
+                color: AppleColors.separator(context),
+                width: 0.5,
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text(
-                  'AI ChatBox',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+          ),
+          child: Column(
+            children: [
+              // 头部 - Apple风格简洁设计（移除新建按钮）
+              Container(
+                padding: EdgeInsets.fromLTRB(
+                  ChatBoxTokens.spacing.lg,
+                  MediaQuery.of(context).padding.top + ChatBoxTokens.spacing.lg,
+                  ChatBoxTokens.spacing.lg,
+                  ChatBoxTokens.spacing.lg,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  '$displayedConversationsCount 个会话',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onPrimaryContainer
-                            .withValues(alpha: 0.7),
-                      ),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: AppleColors.separator(context),
+                      width: 0.5,
+                    ),
+                  ),
                 ),
-              ],
-            ),
-          ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '对话',
+                      style: AppleTokens.typography.largeTitle.copyWith(
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    SizedBox(height: ChatBoxTokens.spacing.xs),
+                    Text(
+                      '$displayedConversationsCount 个会话',
+                      style: AppleTokens.typography.footnote.copyWith(
+                        color: AppleColors.secondaryLabel(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
-          // 角色分组列表
-          Expanded(
-            child: ListView(
-              children: [
-                // 遍历所有角色分组
-                ...groupedConversations.entries.map((entry) {
-                  final roleName = entry.key;
-                  final roleIcon = entry.value.icon;
-                  final convs = entry.value.conversations;
+              // 角色分组列表
+              Expanded(
+                child: ListView(
+                  children: [
+                    // 遍历所有角色分组
+                    ...groupedConversations.entries.map((entry) {
+                      final roleName = entry.key;
+                      final roleIcon = entry.value.icon;
+                      final convs = entry.value.conversations;
 
-                  return _buildRoleGroup(
-                    context,
-                    roleName: roleName,
-                    roleIcon: roleIcon,
-                    conversations: convs,
-                    onNewWithRole: entry.value.preset,
-                    onNewWithCustomRole: entry.value.customRole,
-                  );
-                }),
-                
-                // 显示还没有会话的自定义角色
-                ..._buildEmptyCustomRoles(context, groupedConversations),
-              ],
-            ),
-          ),
+                      return _buildRoleGroup(
+                        context,
+                        roleName: roleName,
+                        roleIcon: roleIcon,
+                        conversations: convs,
+                        onNewWithRole: entry.value.preset,
+                        onNewWithCustomRole: entry.value.customRole,
+                      );
+                    }),
+                    
+                    // 显示还没有会话的自定义角色
+                    ..._buildEmptyCustomRoles(context, groupedConversations),
+                  ],
+                ),
+              ),
 
-          // 底部：自定义角色管理
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.person_add),
-            title: const Text('自定义助手'),
-            onTap: () {
-              Navigator.pop(context);
-              onManageCustomRoles();
-            },
+              // 底部：自定义角色管理
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(
+                      color: AppleColors.separator(context),
+                      width: 0.5,
+                    ),
+                  ),
+                ),
+                child: ListTile(
+                  leading: Icon(AppleIcons.personAdd, color: AppleColors.blue),
+                  title: Text(
+                    '自定义助手',
+                    style: AppleTokens.typography.body,
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onManageCustomRoles();
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  /// 构建角色分组
+  /// 构建角色分组 - Apple风格卡片
   Widget _buildRoleGroup(
     BuildContext context, {
     required String roleName,
@@ -128,108 +163,170 @@ class ConversationDrawer extends StatelessWidget {
     RolePreset? onNewWithRole,
     CustomRole? onNewWithCustomRole,
   }) {
-    return ExpansionTile(
-      leading: Text(roleIcon, style: const TextStyle(fontSize: 24)),
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              roleName,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
+    return Container(
+      margin: EdgeInsets.symmetric(
+        horizontal: ChatBoxTokens.spacing.md,
+        vertical: ChatBoxTokens.spacing.xs,
       ),
-      subtitle: Text('${conversations.length} 个对话'),
-      initiallyExpanded: conversations.any((c) => c.id == currentConversationId),
-      children: [
-        // 新建对话按钮
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: OutlinedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              if (onNewWithRole != null) {
-                onNewConversationWithRole(onNewWithRole);
-              } else if (onNewWithCustomRole != null) {
-                onNewConversationWithCustomRole(onNewWithCustomRole);
-              } else {
-                onNewConversation();
-              }
-            },
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('新建对话'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 36),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12), // Apple圆角
+        boxShadow: AppleTokens.shadows.card, // 轻微阴影
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: ExpansionTile(
+          leading: Text(roleIcon, style: const TextStyle(fontSize: 24)),
+          title: Text(
+            roleName,
+            style: AppleTokens.typography.body.copyWith(
+              fontWeight: FontWeight.w600,
             ),
           ),
+          subtitle: Text(
+            '${conversations.length} 个对话',
+            style: AppleTokens.typography.footnote.copyWith(
+              color: AppleColors.secondaryLabel(context),
+            ),
+          ),
+          tilePadding: EdgeInsets.symmetric(
+            horizontal: ChatBoxTokens.spacing.md,
+            vertical: ChatBoxTokens.spacing.xs,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          collapsedShape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          initiallyExpanded: conversations.any((c) => c.id == currentConversationId),
+          children: [
+            // 新建对话按钮 - Apple蓝色风格
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                ChatBoxTokens.spacing.md,
+                ChatBoxTokens.spacing.xs,
+                ChatBoxTokens.spacing.md,
+                ChatBoxTokens.spacing.sm,
+              ),
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  if (onNewWithRole != null) {
+                    onNewConversationWithRole(onNewWithRole);
+                  } else if (onNewWithCustomRole != null) {
+                    onNewConversationWithCustomRole(onNewWithCustomRole);
+                  } else {
+                    onNewConversation();
+                  }
+                },
+                icon: const Icon(AppleIcons.addCircle, size: 20),
+                label: Text(
+                  '新建对话',
+                  style: AppleTokens.typography.body.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppleColors.blue,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shadowColor: Colors.transparent,
+                  padding: EdgeInsets.symmetric(
+                    vertical: ChatBoxTokens.spacing.sm,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  minimumSize: const Size(double.infinity, 44),
+                ),
+              ),
+            ),
+            // 该角色下的所有会话
+            ...conversations.map((conv) => _buildConversationTile(context, conv)),
+          ],
         ),
-        // 该角色下的所有会话
-        ...conversations.map((conv) => _buildConversationTile(context, conv)),
-      ],
+      ),
     );
   }
 
-  /// 构建会话磁贴
+  /// 构建会话磁贴 - Apple风格选中高亮
   Widget _buildConversationTile(BuildContext context, Conversation conv) {
     final isSelected = conv.id == currentConversationId;
 
-    return ListTile(
-      selected: isSelected,
-      contentPadding: const EdgeInsets.only(left: 72, right: 16),
-      title: Text(
-        conv.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+    return Container(
+      margin: EdgeInsets.symmetric(
+        horizontal: ChatBoxTokens.spacing.sm,
+        vertical: 2,
       ),
-      subtitle: Text(
-        conv.lastMessagePreview,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 12,
-          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? AppleColors.blue.withValues(alpha: 0.15) // Apple蓝半透明背景
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListTile(
+        selected: isSelected,
+        contentPadding: EdgeInsets.only(
+          left: ChatBoxTokens.spacing.lg,
+          right: ChatBoxTokens.spacing.md,
         ),
-      ),
-      trailing: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert, size: 20),
-        onSelected: (value) {
-          switch (value) {
-            case 'rename':
-              onRenameConversation(conv);
-              break;
-            case 'delete':
-              _confirmDelete(context, conv);
-              break;
+        title: Text(
+          conv.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppleTokens.typography.body.copyWith(
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
+        subtitle: Text(
+          conv.lastMessagePreview,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppleTokens.typography.footnote.copyWith(
+            color: AppleColors.secondaryLabel(context),
+          ),
+        ),
+        trailing: PopupMenuButton<String>(
+          icon: const Icon(AppleIcons.moreVert, size: 20),
+          onSelected: (value) {
+            switch (value) {
+              case 'rename':
+                onRenameConversation(conv);
+                break;
+              case 'delete':
+                _confirmDelete(context, conv);
+                break;
           }
         },
         itemBuilder: (context) => [
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'rename',
             child: Row(
               children: [
-                Icon(Icons.edit, size: 18),
-                SizedBox(width: 8),
+                Icon(AppleIcons.edit, size: 18),
+                SizedBox(width: ChatBoxTokens.spacing.sm),
                 Text('重命名'),
               ],
             ),
           ),
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'delete',
             child: Row(
               children: [
-                Icon(Icons.delete, size: 18),
-                SizedBox(width: 8),
+                Icon(AppleIcons.delete, size: 18),
+                SizedBox(width: ChatBoxTokens.spacing.sm),
                 Text('删除'),
               ],
             ),
           ),
         ],
+        ),
+        onTap: () {
+          onConversationSelected(conv.id);
+          Navigator.pop(context);
+        },
       ),
-      onTap: () {
-        onConversationSelected(conv.id);
-        Navigator.pop(context);
-      },
     );
   }
 

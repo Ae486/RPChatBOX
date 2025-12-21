@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../design_system/apple_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart' as file_picker;
 import '../models/attached_file.dart';
@@ -8,6 +9,7 @@ import '../services/model_service_manager.dart';
 import 'conversation_config_dialog.dart';
 import '../models/conversation_settings.dart';
 import '../utils/global_toast.dart';
+import '../design_system/design_tokens.dart';
 
 /// 增强的输入区域组件
 /// 包含文件上传、网络开关、配置按钮、模型选择
@@ -39,6 +41,15 @@ class EnhancedInputArea extends StatefulWidget {
 
 class _EnhancedInputAreaState extends State<EnhancedInputArea> {
   final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    // 监听焦点变化以触发UI更新（边框动画）
+    _focusNode.addListener(() {
+      setState(() {});
+    });
+  }
 
   @override
   void dispose() {
@@ -181,33 +192,60 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
 
             // 🆕 两层布局结构
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: EdgeInsets.symmetric(
+                horizontal: ChatBoxTokens.spacing.md,
+                vertical: ChatBoxTokens.spacing.sm,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 🆕 上层：多行文本输入框
-                  Container(
+                  // 上层：多行文本输入框（Apple现代风格）
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
                     constraints: const BoxConstraints(
                       minHeight: 48,
                       maxHeight: 48 * 5, // 最大 5 行
                     ),
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(24),
+                      color: isDark 
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.03),
+                      borderRadius: BorderRadius.circular(12), // Apple风格圆角
                       border: Border.all(
-                        color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
+                        color: _focusNode.hasFocus
+                          ? Theme.of(context).colorScheme.primary
+                          : (isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                        width: _focusNode.hasFocus ? 2 : 1, // 聚焦时加粗边框
                       ),
+                      boxShadow: _focusNode.hasFocus ? [
+                        BoxShadow(
+                          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ] : null, // 聚焦时添加阴影
                     ),
                     child: TextField(
                       controller: widget.textController,
                       focusNode: _focusNode,
                       maxLines: 5,
                       minLines: 1,
-                      decoration: const InputDecoration(
+                      style: TextStyle(
+                        fontSize: 15,
+                        height: 1.5,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      decoration: InputDecoration(
                         hintText: '请在这里输入你的问题...',
+                        hintStyle: TextStyle(
+                          color: isDark 
+                            ? Colors.grey.shade500
+                            : Colors.grey.shade600,
+                          fontSize: 15,
+                        ),
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 20,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
                           vertical: 14,
                         ),
                       ),
@@ -219,14 +257,14 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
                     ),
                   ),
 
-                  const SizedBox(height: 8),
+                  SizedBox(height: ChatBoxTokens.spacing.sm),
 
-                  // 🆕 下层：按钮行
+                  // 下层：按钮行
                   Row(
                     children: [
                       // 左侧按钮组
                       IconButton(
-                        icon: const Icon(Icons.add_circle_outline),
+                        icon: const Icon(AppleIcons.addCircle),
                         onPressed: _pickFiles,
                         tooltip: '上传文件',
                         color: hasFiles ? Theme.of(context).colorScheme.primary : null,
@@ -249,12 +287,15 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
                       // 模型选择器
                       InkWell(
                         onTap: _showModelSelector,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(ChatBoxTokens.spacing.lg + 4),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: ChatBoxTokens.spacing.md,
+                            vertical: ChatBoxTokens.spacing.sm,
+                          ),
                           decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.primary,
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(ChatBoxTokens.spacing.lg + 4),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -264,7 +305,7 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
                                 size: 18,
                                 color: Colors.white,
                               ),
-                              const SizedBox(width: 6),
+                              SizedBox(width: ChatBoxTokens.spacing.xs + 2),
                               ConstrainedBox(
                                 constraints: const BoxConstraints(maxWidth: 100),
                                 child: Text(
@@ -277,7 +318,7 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              const SizedBox(width: 4),
+                              SizedBox(width: ChatBoxTokens.spacing.xs),
                               const Icon(
                                 Icons.arrow_drop_down,
                                 size: 20,
@@ -314,7 +355,7 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
   Widget _buildAttachedFilesPreview() {
     return Container(
       width: double.infinity, // 固定为全屏宽度
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: Colors.grey.shade300),
@@ -329,10 +370,10 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
                   color: Colors.grey.shade700,
                 ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: ChatBoxTokens.spacing.sm),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: ChatBoxTokens.spacing.sm,
+            runSpacing: ChatBoxTokens.spacing.sm,
             children: widget.conversationSettings.attachedFiles.map((file) {
               return Chip(
                 avatar: Icon(_getFileIcon(file.type), size: 18),
@@ -346,7 +387,7 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                deleteIcon: const Icon(Icons.close, size: 16),
+                deleteIcon: const Icon(AppleIcons.close, size: 16),
                 onDeleted: () => _removeFile(file),
               );
             }).toList(),
@@ -359,19 +400,19 @@ class _EnhancedInputAreaState extends State<EnhancedInputArea> {
   IconData _getFileIcon(FileType type) {
     switch (type) {
       case FileType.image:
-        return Icons.image;
+        return AppleIcons.image;
       case FileType.video:
-        return Icons.videocam;
+        return AppleIcons.video;
       case FileType.audio:
-        return Icons.audiotrack;
+        return AppleIcons.audio;
       case FileType.document:
-        return Icons.description;
+        return AppleIcons.document;
       case FileType.code:
-        return Icons.code;
+        return AppleIcons.code;
       case FileType.other:
-        return Icons.insert_drive_file;
+        return AppleIcons.file;
       default:
-        return Icons.insert_drive_file;
+        return AppleIcons.file;
     }
   }
 }
@@ -393,7 +434,7 @@ class _ModelSelectorSheet extends StatelessWidget {
     final providers = serviceManager.getEnabledProviders();
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -406,16 +447,16 @@ class _ModelSelectorSheet extends StatelessWidget {
               ),
               const Spacer(),
               IconButton(
-                icon: const Icon(Icons.close),
+                icon: const Icon(AppleIcons.close),
                 onPressed: () => Navigator.pop(context),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: ChatBoxTokens.spacing.lg),
           if (providers.isEmpty)
-            const Center(
+            Center(
               child: Padding(
-                padding: EdgeInsets.all(32),
+                padding: EdgeInsets.all(ChatBoxTokens.spacing.xxl),
                 child: Text('暂无可用模型服务\n请先在设置中添加'),
               ),
             )
@@ -435,7 +476,7 @@ class _ModelSelectorSheet extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.symmetric(vertical: ChatBoxTokens.spacing.sm),
                         child: Text(
                           provider.name,
                           style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -458,10 +499,10 @@ class _ModelSelectorSheet extends StatelessWidget {
                               return Tooltip(
                                 message: cap.displayName,
                                 child: Container(
-                                  padding: const EdgeInsets.all(4),
+                                  padding: EdgeInsets.all(ChatBoxTokens.spacing.xs),
                                   decoration: BoxDecoration(
                                     color: cap.color.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(4),
+                                    borderRadius: BorderRadius.circular(ChatBoxTokens.radius.xs),
                                   ),
                                   child: Icon(
                                     cap.icon,
@@ -472,7 +513,7 @@ class _ModelSelectorSheet extends StatelessWidget {
                               );
                             }).toList(),
                           ),
-                          trailing: isSelected ? const Icon(Icons.check) : null,
+                          trailing: isSelected ? const Icon(AppleIcons.check) : null,
                           onTap: () => onModelSelected(provider.id, model.id),
                         );
                       }),

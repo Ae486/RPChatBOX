@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
+import '../design_system/design_tokens.dart';
 
 /// Provider卡片组件
 /// 展示Provider信息、API配置、模型列表
@@ -38,10 +39,10 @@ class _ProviderCardState extends State<ProviderCard> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.only(bottom: ChatBoxTokens.spacing.md),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -55,9 +56,9 @@ class _ProviderCardState extends State<ProviderCard> {
         child: InkWell(
           onTap: widget.isManagementMode ? null : widget.onEdit,
           onLongPress: widget.onLongPress,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
             child: Row(
             children: [
               // Provider图标
@@ -68,7 +69,7 @@ class _ProviderCardState extends State<ProviderCard> {
                   color: widget.provider.isEnabled
                       ? Theme.of(context).colorScheme.primaryContainer
                       : Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
                 ),
                 child: Icon(
                   _getProviderIcon(widget.provider.type),
@@ -78,7 +79,7 @@ class _ProviderCardState extends State<ProviderCard> {
                       : Colors.grey.shade600,
                 ),
               ),
-              const SizedBox(width: 16),
+              SizedBox(width: ChatBoxTokens.spacing.lg),
 
               // Provider名称和类型
               Expanded(
@@ -93,17 +94,17 @@ class _ProviderCardState extends State<ProviderCard> {
                                 fontWeight: FontWeight.bold,
                               ),
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: ChatBoxTokens.spacing.sm),
                         // 模型数量徽章
                         if (widget.models.isNotEmpty)
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: ChatBoxTokens.spacing.sm,
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
                               color: Theme.of(context).colorScheme.primary,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
                             ),
                             child: Text(
                               '${widget.models.length}',
@@ -116,7 +117,7 @@ class _ProviderCardState extends State<ProviderCard> {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: ChatBoxTokens.spacing.xs),
                     Text(
                       widget.provider.type.displayName,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -148,7 +149,7 @@ class _ProviderCardState extends State<ProviderCard> {
                   value: widget.provider.isEnabled,
                   onChanged: (_) => widget.onToggle(),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: ChatBoxTokens.spacing.sm),
                 // 箭头图标
                 Icon(
                   Icons.arrow_forward_ios,

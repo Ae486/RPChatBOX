@@ -12,6 +12,7 @@ class ConversationSettings {
   final bool enableVision;
   final bool enableTools;
   final bool enableNetwork;
+  final bool enableExperimentalStreamingMarkdown;
   final int contextLength;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -25,6 +26,7 @@ class ConversationSettings {
     this.enableVision = false,
     this.enableTools = false,
     this.enableNetwork = false,
+    this.enableExperimentalStreamingMarkdown = false,
     this.contextLength = 10,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -49,6 +51,7 @@ class ConversationSettings {
       enableVision: json['enableVision'] as bool? ?? false,
       enableTools: json['enableTools'] as bool? ?? false,
       enableNetwork: json['enableNetwork'] as bool? ?? false,
+      enableExperimentalStreamingMarkdown: json['enableExperimentalStreamingMarkdown'] as bool? ?? false,
       contextLength: json['contextLength'] as int? ?? 10,
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
@@ -66,6 +69,7 @@ class ConversationSettings {
       'enableVision': enableVision,
       'enableTools': enableTools,
       'enableNetwork': enableNetwork,
+      'enableExperimentalStreamingMarkdown': enableExperimentalStreamingMarkdown,
       'contextLength': contextLength,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -82,6 +86,7 @@ class ConversationSettings {
     bool? enableVision,
     bool? enableTools,
     bool? enableNetwork,
+    bool? enableExperimentalStreamingMarkdown,
     int? contextLength,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -95,6 +100,7 @@ class ConversationSettings {
       enableVision: enableVision ?? this.enableVision,
       enableTools: enableTools ?? this.enableTools,
       enableNetwork: enableNetwork ?? this.enableNetwork,
+      enableExperimentalStreamingMarkdown: enableExperimentalStreamingMarkdown ?? this.enableExperimentalStreamingMarkdown,
       contextLength: contextLength ?? this.contextLength,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),

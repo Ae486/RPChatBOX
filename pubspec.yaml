@@ -2,7 +2,7 @@ name: chatboxapp
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -34,43 +34,45 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  
+
   # HTTP 请求
-  http: ^1.2.0  # 保留，逐步迁移到 dio
-  dio: ^5.4.0   # 新增：更强大的网络请求库
-  
+  http: ^1.2.0 # 保留，逐步迁移到 dio
+  dio: ^5.4.0 # 新增：更强大的网络请求库
+
   # 本地存储
   shared_preferences: ^2.2.2
-  
+
   # Markdown 渲染
   flutter_markdown: ^0.7.4
   markdown: ^7.0.0
-  
+  markdown_widget: ^2.3.2
+
   # 数学公式渲染（LaTeX）
   flutter_math_fork: ^0.7.2
   # latext包不存在或版本不兼容，使用增强的flutter_math_fork方案
   # 注：使用优化的flutter_math_fork方案，提供更好的LaTeX支持
-  
+
   # 代码语法高亮
   flutter_highlight: ^0.7.0
-  
+
   # JSON 序列化
   json_annotation: ^4.8.1
-  
+
   # 加密哈希（用于缓存键生成）
   crypto: ^3.0.3
-  
+
   # 文件路径
   path_provider: ^2.1.2
   path: ^1.9.0
-  
+
   # 可滚动定位列表（精确跳转到任意索引）
   scrollable_positioned_list: ^0.3.8
-  
+
   # WebView 支持（用于高级渲染：Mermaid、复杂LaTeX等）
   webview_flutter: ^4.4.2
   webview_flutter_android: ^3.12.1
   webview_flutter_wkwebview: ^3.9.4
+  webview_windows: ^0.4.0  # Windows 桌面端 WebView2
 
   # UUID 生成
   uuid: ^4.2.1
@@ -83,22 +85,31 @@ dependencies:
 
   # 图片查看器（支持缩放、手势）
   photo_view: ^0.14.0
-  
+
   # 图片缓存（自动缓存网络和本地图片）
   cached_network_image: ^3.3.0
-  
+
   # 美观的加载动画
   flutter_spinkit: ^5.2.1
-  
+
   # 高性能本地数据库
   hive: ^2.2.3
   hive_flutter: ^1.1.0
-  
+
   # PDF 文本提取
   syncfusion_flutter_pdf: ^27.2.5
-  
+
   # ZIP/压缩文件处理（用于解析 .docx 文件）
-  archive: ^3.4.0
+  archive: ^4.0.7
+
+  # Chat UI 组件库 (flutter_chat_ui 生态系统)
+  flutter_chat_ui: ^2.0.0
+  flutter_chat_core: ^2.0.0
+  flyer_chat_text_message: ^2.0.0
+  flyer_chat_text_stream_message: ^2.0.0
+  flyer_chat_image_message: ^2.0.0
+  flyer_chat_file_message: ^2.0.0
+  flyer_chat_system_message: ^2.0.0
 
 dev_dependencies:
   flutter_test:
@@ -110,17 +121,24 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
-  
+
   # Hive 代码生成器
   hive_generator: ^2.0.1
   build_runner: ^2.4.6
+
+  # 测试框架和工具 (方案B - 最小保护网)
+  mockito: ^5.4.4 # Mock 框架
+  golden_toolkit: ^0.15.0 # Golden 测试
+  integration_test: # 集成测试
+    sdk: flutter
+  fake_async: ^1.3.1 # 异步测试辅助
+  test: ^1.24.9 # Dart 测试框架
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

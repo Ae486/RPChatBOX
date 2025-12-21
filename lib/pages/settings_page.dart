@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../pages/model_services_page.dart';
+import '../pages/flyer_chat_demo_page.dart';
 import '../main.dart' show globalModelServiceManager;
+import '../design_system/design_tokens.dart';
 
 /// 设置页面
 class SettingsPage extends StatefulWidget {
@@ -83,15 +86,33 @@ class _SettingsPageState extends State<SettingsPage> {
         title: const Text('设置'),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
         children: [
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.chat_bubble_outline, size: 32),
+              title: const Text('Flyer Chat Demo'),
+              subtitle: const Text('查看 flutter_chat_ui 默认风格效果'),
+              trailing: const Icon(AppleIcons.arrowRight),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const FlyerChatDemoPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+          SizedBox(height: ChatBoxTokens.spacing.lg),
+
           // 模型服务管理入口
           Card(
             child: ListTile(
               leading: const Icon(Icons.cloud_outlined, size: 32),
               title: const Text('模型服务'),
               subtitle: const Text('管理AI服务提供商和模型配置'),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: const Icon(AppleIcons.arrowRight),
               onTap: () {
                 Navigator.push(
                   context,
@@ -104,7 +125,7 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: ChatBoxTokens.spacing.lg),
 
           // 缓存管理
           Card(
@@ -117,16 +138,16 @@ class _SettingsPageState extends State<SettingsPage> {
                       color: Theme.of(context).colorScheme.primary,
                       size: 16.0,
                     )
-                  : const Icon(Icons.chevron_right),
+                  : const Icon(AppleIcons.arrowRight),
               onTap: _isClearing ? null : () => _clearImageCache(context),
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: ChatBoxTokens.spacing.lg),
 
           // 关于信息
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -134,7 +155,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     '关于',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: ChatBoxTokens.spacing.sm),
                   const Text(
                     'ChatBox App\n版本 2.0.0\n\n支持多个AI服务提供商，包括OpenAI、Gemini、DeepSeek等。',
                     style: TextStyle(fontSize: 14, color: Colors.grey),

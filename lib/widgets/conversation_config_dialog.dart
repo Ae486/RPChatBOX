@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import '../models/conversation_settings.dart';
 import '../models/model_config.dart';
+import '../design_system/design_tokens.dart';
 
 /// 对话配置对话框
 /// 允许用户调整单个对话的参数和功能开关
@@ -21,18 +23,21 @@ class ConversationConfigDialog extends StatefulWidget {
 class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
   late ModelParameters _parameters;
   late int _contextLength;
+  late bool _enableExperimentalStreamingMarkdown;
 
   @override
   void initState() {
     super.initState();
     _parameters = widget.settings.parameters;
     _contextLength = widget.settings.contextLength;
+    _enableExperimentalStreamingMarkdown = widget.settings.enableExperimentalStreamingMarkdown;
   }
 
   void _save() {
     final updated = widget.settings.copyWith(
       parameters: _parameters,
       contextLength: _contextLength,
+      enableExperimentalStreamingMarkdown: _enableExperimentalStreamingMarkdown,
     );
 
     widget.onSave(updated);
@@ -50,7 +55,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
           children: [
             // 标题栏
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: const BorderRadius.only(
@@ -64,7 +69,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                     Icons.tune,
                     color: Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: ChatBoxTokens.spacing.md),
                   Text(
                     '对话配置',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -73,7 +78,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(AppleIcons.close),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -83,7 +88,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
             // 内容区域
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -102,7 +107,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                       description: '控制输出的随机性。较低值(0.1-0.3)更确定和聚焦，较高值(0.7-1.0)更有创造性。',
                     ),
 
-                    const SizedBox(height: 24),
+                    SizedBox(height: ChatBoxTokens.spacing.xl),
 
                     // Top P
                     _buildSliderSetting(
@@ -119,7 +124,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                       description: '核采样参数。控制输出的多样性。建议值0.9-1.0。',
                     ),
 
-                    const SizedBox(height: 24),
+                    SizedBox(height: ChatBoxTokens.spacing.xl),
 
                     // Max Tokens
                     _buildSliderSetting(
@@ -137,19 +142,33 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                       valueFormatter: (value) => value.toInt().toString(),
                     ),
 
-                    const SizedBox(height: 24),
+                    SizedBox(height: ChatBoxTokens.spacing.xl),
 
                     // Context Length - 特殊范围：1-30普通值，500特殊值，-1无限制
                     _buildContextLengthSlider(),
 
-                    const SizedBox(height: 24),
+                    SizedBox(height: ChatBoxTokens.spacing.xl),
+
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('实验性：流式 Markdown（稳定前缀）'),
+                      subtitle: const Text('仅影响正在生成中的 AI 回复；默认关闭，可随时回退。'),
+                      value: _enableExperimentalStreamingMarkdown,
+                      onChanged: (value) {
+                        setState(() {
+                          _enableExperimentalStreamingMarkdown = value;
+                        });
+                      },
+                    ),
+
+                    SizedBox(height: ChatBoxTokens.spacing.xl),
 
                     // 说明卡片
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                         border: Border.all(
                           color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
                         ),
@@ -160,11 +179,11 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                           Row(
                             children: [
                               Icon(
-                                Icons.info_outline,
+                                AppleIcons.info,
                                 size: 18,
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
-                              const SizedBox(width: 8),
+                              SizedBox(width: ChatBoxTokens.spacing.sm),
                               Text(
                                 '提示',
                                 style: TextStyle(
@@ -174,7 +193,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 8),
+                          SizedBox(height: ChatBoxTokens.spacing.sm),
                           Text(
                             '这些参数会影响模型的输出行为。不同模型对参数的支持可能不同，如果遇到错误，请尝试使用默认值。',
                             style: TextStyle(
@@ -192,7 +211,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
 
             // 底部按钮
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
               decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(color: Colors.grey.shade300),
@@ -205,7 +224,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                     onPressed: () => Navigator.pop(context),
                     child: const Text('取消'),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: ChatBoxTokens.spacing.md),
                   ElevatedButton(
                     onPressed: _save,
                     child: const Text('保存'),
@@ -255,10 +274,13 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                   ),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: EdgeInsets.symmetric(
+                horizontal: ChatBoxTokens.spacing.md,
+                vertical: ChatBoxTokens.spacing.xs,
+              ),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
               ),
               child: Text(
                 displayValue,
@@ -271,7 +293,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: ChatBoxTokens.spacing.sm),
         Slider(
           value: sliderIndex.toDouble(),
           min: 0,
@@ -318,10 +340,13 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                   ),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: EdgeInsets.symmetric(
+                horizontal: ChatBoxTokens.spacing.md,
+                vertical: ChatBoxTokens.spacing.xs,
+              ),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
               ),
               child: Text(
                 formatter(value),
@@ -334,7 +359,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: ChatBoxTokens.spacing.sm),
         Slider(
           value: value,
           min: min,

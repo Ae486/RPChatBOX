@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import '../models/provider_config.dart';
 import '../adapters/ai_provider.dart';
+import '../design_system/design_tokens.dart';
 
 /// 添加模型对话框
 /// 支持手动输入模型ID或从检测到的模型列表中选择
@@ -131,14 +133,14 @@ class _AddModelDialogState extends State<AddModelDialog> {
               
               // 🆕 已选择的模型卡片列表
               if (_selectedModels.isNotEmpty) ...[
-                const SizedBox(height: 12),
+                SizedBox(height: ChatBoxTokens.spacing.md),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: _selectedModels.map((modelId) {
                     return Chip(
                       label: Text(modelId),
-                      deleteIcon: const Icon(Icons.close, size: 18),
+                      deleteIcon: const Icon(AppleIcons.close, size: 18),
                       onDeleted: () => _removeSelectedModel(modelId),
                       backgroundColor: Theme.of(context).colorScheme.primaryContainer,
                       labelStyle: TextStyle(
@@ -150,7 +152,7 @@ class _AddModelDialogState extends State<AddModelDialog> {
                 ),
               ],
               
-              const SizedBox(height: 16),
+              SizedBox(height: ChatBoxTokens.spacing.lg),
               
               // 检测按钮
               OutlinedButton.icon(
@@ -161,18 +163,18 @@ class _AddModelDialogState extends State<AddModelDialog> {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.search),
+                    : const Icon(AppleIcons.search),
                 label: Text(_isDetecting ? '检测中...' : '检测可用模型'),
               ),
               
               // 错误信息
               if (_errorMessage != null) ...[
-                const SizedBox(height: 12),
+                SizedBox(height: ChatBoxTokens.spacing.md),
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                     border: Border.all(
                       color: Theme.of(context).colorScheme.error.withOpacity(0.3),
                     ),
@@ -180,11 +182,11 @@ class _AddModelDialogState extends State<AddModelDialog> {
                   child: Row(
                     children: [
                       Icon(
-                        Icons.error_outline,
+                        AppleIcons.error,
                         size: 18,
                         color: Theme.of(context).colorScheme.error,
                       ),
-                      const SizedBox(width: 8),
+                      SizedBox(width: ChatBoxTokens.spacing.sm),
                       Expanded(
                         child: Text(
                           _errorMessage!,
@@ -201,19 +203,19 @@ class _AddModelDialogState extends State<AddModelDialog> {
               
               // 模型列表
               if (_availableModels.isNotEmpty) ...[
-                const SizedBox(height: 16),
+                SizedBox(height: ChatBoxTokens.spacing.lg),
                 Text(
                   '可用模型 (${_availableModels.length})',
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
-                const SizedBox(height: 8),
+                SizedBox(height: ChatBoxTokens.spacing.sm),
                 Container(
                   constraints: const BoxConstraints(maxHeight: 300),
                   decoration: BoxDecoration(
                     border: Border.all(
                       color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
                     ),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                   ),
                   child: ListView.separated(
                     shrinkWrap: true,
@@ -236,7 +238,7 @@ class _AddModelDialogState extends State<AddModelDialog> {
                           style: const TextStyle(fontSize: 13),
                         ),
                         trailing: Icon(
-                          isSelected ? Icons.check_circle : Icons.add_circle_outline,
+                          isSelected ? AppleIcons.checkCircle : AppleIcons.addCircle,
                           size: 20,
                           color: isSelected 
                               ? Theme.of(context).colorScheme.primary 
@@ -248,23 +250,23 @@ class _AddModelDialogState extends State<AddModelDialog> {
                 ),
               ],
               
-              const SizedBox(height: 12),
+              SizedBox(height: ChatBoxTokens.spacing.md),
               
               // 提示信息
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                 ),
                 child: Row(
                   children: [
                     Icon(
-                      Icons.info_outline,
+                      AppleIcons.info,
                       size: 18,
                       color: Theme.of(context).colorScheme.primary,
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: ChatBoxTokens.spacing.sm),
                     Expanded(
                       child: Text(
                         '💡 支持多选：点击模型列表批量选择，模型能力将自动识别',

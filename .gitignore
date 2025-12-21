@@ -119,6 +119,7 @@ coverage/
 **/.local_storage/
 
 # 临时文档（只保留 README.md 和 CHANGELOG.md）
+*.md
 *修复*.md
 *测试*.md
 *方案*.md
@@ -132,10 +133,10 @@ v3.*.md
 批量*.md
 项目*.md
 桌面*.md
-!README.md
-!CHANGELOG.md
-!LICENSE.md
-!CONTRIBUTING.md
+# !README.md
+# !CHANGELOG.md
+# !LICENSE.md
+# !CONTRIBUTING.md
 
 # 导出的对话文件
 exports/

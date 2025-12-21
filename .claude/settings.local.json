@@ -6,7 +6,19 @@
       "Bash(flutter analyze:*)",
       "Bash(/usr/bin/flutter pub get)",
       "Bash(/mnt/h/flutter/bin/flutter pub get)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(flutter test:*)",
+      "mcp__codex__codex",
+      "mcp__fetch__fetch",
+      "mcp__exa-mcp-server__web_search_exa",
+      "mcp__exa-mcp-server__get_code_context_exa",
+      "mcp__tavily-remote__tavily_crawl",
+      "mcp__tavily-remote__tavily_map",
+      "mcp__exa__web_search_exa",
+      "mcp__tavily-remote__tavily_search",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "mcp__exa__get_code_context_exa"
     ],
     "deny": [],
     "ask": []

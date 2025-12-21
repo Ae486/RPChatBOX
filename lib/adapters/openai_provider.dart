@@ -149,29 +149,206 @@ class OpenAIProvider extends AIProvider {
       // 处理流式响应
       // response.data 是 ResponseBody，需要访问其 stream 属性
       final responseStream = (response.data as ResponseBody).stream;
+      // 🧠 Gemini思考块控制（仅在 ProviderType.gemini 时启用）
+      final isGemini = config.type == ProviderType.gemini;
+      bool geminiReasoningOpen = false;      // 是否已输出 <think>
+      bool geminiEmittedBody = false;        // 是否已开始输出正文
       await for (var chunk in responseStream
           .cast<List<int>>()  // Cast to List<int> first
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
-        if (chunk.isEmpty || !chunk.startsWith('data: ')) continue;
+        // 🐛 调试：打印原始 SSE 行
+        if (kDebugMode) {
+          debugPrint('🔶 [SSE raw] $chunk');
+        }
 
-        final data = chunk.substring(6); // Remove 'data: ' prefix
+        final line = chunk.trim();
+        if (line.isEmpty) continue;
+        final data = line.startsWith('data: ') ? line.substring(6) : line;
+        if (kDebugMode) {
+          debugPrint('🟢 [SSE data] $data');
+        }
         if (data == '[DONE]') break;
 
         try {
           final parsed = json.decode(data) as Map<String, dynamic>;
+          if (kDebugMode) {
+            // 打印解析后的完整 JSON（逐行，便于阅读）
+            final pretty = const JsonEncoder.withIndent('  ').convert(parsed);
+            debugPrint('🧾 [SSE parsed]');
+            for (final line in pretty.split('\n')) {
+              debugPrint('    $line');
+            }
+          }
+
           final choices = parsed['choices'] as List?;
           if (choices != null && choices.isNotEmpty) {
             final delta = choices[0]['delta'] as Map<String, dynamic>?;
-            final content = delta?['content'] as String?;
+            if (delta != null) {
+              // 1) 尝试识别不同供应商可能使用的“思考/推理”字段
+              final possibleKeys = [
+                'reasoning',
+                'reasoning_content',
+                'internal_thoughts',
+                'thinking',
+              ];
+
+              for (final key in possibleKeys) {
+                final v = delta[key];
+                if (v == null) continue;
+
+                String? reasoningText;
+                if (v is String) {
+                  reasoningText = v;
+                } else if (v is Map<String, dynamic>) {
+                  // 常见结构：{ content: '...' } / { text: '...' }
+                  reasoningText = (v['content'] ?? v['text']) as String?;
+                } else if (v is List) {
+                  // 如果是数组，拼接其中的文本
+                  reasoningText = v.map((e) {
+                    if (e is String) return e;
+                    if (e is Map<String, dynamic>) {
+                      return (e['content'] ?? e['text'] ?? '').toString();
+                    }
+                    return '';
+                  }).where((s) => s.isNotEmpty).join('');
+                }
+
+                if (reasoningText != null && reasoningText.isNotEmpty) {
+                  final wrapped = '<think>$reasoningText</think>';
+                  if (kDebugMode) {
+                    debugPrint('💡 [reasoning detected][$key] ${reasoningText.length} chars');
+                  }
+                  yield wrapped;
+                }
+              }
+
+              // 2) 解析 content
+              final contentField = delta['content'];
+              if (contentField is String) {
+                if (contentField.isNotEmpty) {
+                  if (kDebugMode) {
+                    debugPrint('✍️  [content:string] ${contentField.length} chars');
+                  }
+                  yield contentField;
+                }
+              } else if (contentField is List) {
+                for (final part in contentField) {
+                  if (part is Map<String, dynamic>) {
+                    final pType = (part['type'] ?? part['role'] ?? '').toString();
+                    final pText = (part['text'] ?? part['content'] ?? '').toString();
+                    if (pText.isEmpty) continue;
+                    if (kDebugMode) {
+                      debugPrint('🔹 [content:part] type=$pType len=${pText.length}');
+                    }
+                    // 常见：type 为 'reasoning' 或自定义标签
+                    final lower = pType.toLowerCase();
+                    if (lower.contains('reason') || lower.contains('think') || lower.contains('thought')) {
+                      yield '<think>$pText</think>';
+                    } else {
+                      yield pText;
+                    }
+                  } else if (part is String && part.isNotEmpty) {
+                    if (kDebugMode) {
+                      debugPrint('🔹 [content:part:string] len=${part.length}');
+                    }
+                    yield part;
+                  }
+                }
+              }
+            }
+          }
+
+          // 3) 兼容 Gemini/OpenRouter 风格：candidates[].content.parts[].text
+          final candidates = parsed['candidates'] as List?;
+          if (candidates != null && candidates.isNotEmpty) {
+            final cand0 = candidates[0] as Map<String, dynamic>;
+            final content = cand0['content'] as Map<String, dynamic>?;
             if (content != null) {
-              yield content;
+              final parts = content['parts'] as List?;
+              if (parts != null) {
+                for (var i = 0; i < parts.length; i++) {
+                  final part = parts[i];
+                  if (part is! Map<String, dynamic>) continue;
+                  final pText = (part['text'] ?? part['content'] ?? '').toString();
+                  final pType = (part['type'] ?? part['role'] ?? '').toString().toLowerCase();
+                  if (pText.isEmpty) continue;
+                  if (kDebugMode) {
+                    debugPrint('🔹 [candidates:part] idx=$i type=$pType len=${pText.length}');
+                  }
+                  if (isGemini) {
+                    // 规则：在遇到正文前，首个parts作为思考；一旦开始正文，关闭思考块
+                    if (!geminiEmittedBody && i == 0) {
+                      if (!geminiReasoningOpen) {
+                        yield '<think>';
+                        geminiReasoningOpen = true;
+                        if (kDebugMode) debugPrint('💡 [gemini] open <think>');
+                      }
+                      yield pText;
+                    } else {
+                      if (geminiReasoningOpen) {
+                        yield '</think>';
+                        geminiReasoningOpen = false;
+                        if (kDebugMode) debugPrint('💡 [gemini] close </think>');
+                      }
+                      geminiEmittedBody = true;
+                      yield pText;
+                    }
+                  } else {
+                    // 非Gemini：类型含 reasoning/think 视为思考块
+                    if (pType.contains('reason') || pType.contains('think') || pType.contains('thought')) {
+                      yield '<think>$pText</think>';
+                    } else {
+                      yield pText;
+                    }
+                  }
+                }
+              } else {
+                // 一些实现直接将 text 放在 content.text
+                final cText = (content['text'] ?? '').toString();
+                if (cText.isNotEmpty) {
+                  if (kDebugMode) {
+                    debugPrint('🔹 [candidates:content.text] len=${cText.length}');
+                  }
+                  if (isGemini && geminiReasoningOpen) {
+                    // content.text 视为正文
+                    yield '</think>';
+                    geminiReasoningOpen = false;
+                    if (kDebugMode) debugPrint('💡 [gemini] close </think> (content.text)');
+                    geminiEmittedBody = true;
+                  }
+                  yield cText;
+                }
+              }
+            } else {
+              // 一些实现直接 candidates[].text
+              final cText = (cand0['text'] ?? '').toString();
+              if (cText.isNotEmpty) {
+                if (kDebugMode) {
+                  debugPrint('🔹 [candidates:text] len=${cText.length}');
+                }
+                if (isGemini && geminiReasoningOpen) {
+                  yield '</think>';
+                  geminiReasoningOpen = false;
+                  if (kDebugMode) debugPrint('💡 [gemini] close </think> (candidates.text)');
+                  geminiEmittedBody = true;
+                }
+                yield cText;
+              }
             }
           }
         } catch (e) {
-          // Skip malformed chunks
+          // 🟠 调试：解析失败
+          if (kDebugMode) {
+            debugPrint('⚠️ [SSE parse error] ${e.toString()}');
+          }
           continue;
         }
+      }
+      // 流结束时，如果Gemini思考块仍未关闭，则补充关闭标签
+      if (isGemini && geminiReasoningOpen) {
+        yield '</think>';
+        if (kDebugMode) debugPrint('💡 [gemini] auto close </think> at stream end');
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {

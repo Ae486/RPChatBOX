@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
+import '../widgets/apple_toast.dart';
 import '../models/custom_role.dart';
 import '../services/custom_role_service.dart';
 import '../services/hive_conversation_service.dart';
@@ -14,14 +16,21 @@ class CustomRolesPage extends StatefulWidget {
 
 class _CustomRolesPageState extends State<CustomRolesPage> {
   final _service = CustomRoleService();
-  final _conversationService = HiveConversationService();
+  late final HiveConversationService _conversationService;
   List<CustomRole> _customRoles = [];
   bool _isInitialized = false;
 
   @override
   void initState() {
     super.initState();
+    _conversationService = HiveConversationService();
     _initialize();
+  }
+  
+  @override
+  void dispose() {
+    // 确保清理资源
+    super.dispose();
   }
   
   /// 初始化 Hive 和加载角色
@@ -33,12 +42,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     } catch (e) {
       debugPrint('⚠️ 初始化失败: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('初始化失败: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppleToast.error(context, message: '初始化失败: $e');
       }
     }
   }
@@ -166,12 +170,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
       // 验证：角色名称不能为空
       if (name.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('⚠️ 角色名称不能为空'),
-              backgroundColor: Colors.orange,
-            ),
-          );
+          AppleToast.warning(context, message: '角色名称不能为空');
         }
         return;
       }
@@ -254,6 +253,9 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
 
   /// 删除角色（级联删除关联的对话）
   Future<void> _deleteRole(CustomRole role) async {
+    // 显示确认对话框前显示loading
+    if (!mounted) return;
+    
     // 查找关联的对话
     List<Conversation> allConversations = [];
     List<Conversation> relatedConversations = [];
@@ -270,6 +272,8 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
         debugPrint('⚠️ 查找关联对话失败: $e');
       }
     }
+    
+    if (!mounted) return;
     
     // 构建确认对话框内容
     final hasRelatedConversations = relatedConversations.isNotEmpty;
@@ -299,7 +303,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.warning, color: Colors.orange.shade700, size: 20),
+                        Icon(AppleIcons.warning, color: Colors.orange.shade700, size: 20),
                         const SizedBox(width: 8),
                         Text(
                           '关联对话警告',
@@ -345,12 +349,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
         } catch (e) {
           debugPrint('⚠️ 删除关联对话失败: $e');
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('删除关联对话失败: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
+            AppleToast.error(context, message: '删除关联对话失败: $e');
           }
           return;
         }
@@ -362,15 +361,11 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
       
       // 显示成功提示
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              hasRelatedConversations 
-                ? '✅ 已删除角色和 $conversationCount 个关联对话' 
-                : '✅ 已删除角色',
-            ),
-            backgroundColor: Colors.green,
-          ),
+        AppleToast.success(
+          context,
+          message: hasRelatedConversations 
+            ? '已删除角色和 $conversationCount 个关联对话' 
+            : '已删除角色',
         );
       }
     }
@@ -396,11 +391,11 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.edit),
+                        icon: const Icon(AppleIcons.edit),
                         onPressed: () => _showRoleDialog(editRole: role),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
+                        icon: const Icon(AppleIcons.delete, color: Colors.red),
                         onPressed: () => _deleteRole(role),
                       ),
                     ],
@@ -410,7 +405,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showRoleDialog(),
-        child: const Icon(Icons.add),
+        child: const Icon(AppleIcons.add),
       ),
     );
   }
@@ -420,7 +415,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.person_add, size: 80, color: Colors.grey.shade300),
+          Icon(AppleIcons.personAdd, size: 80, color: Colors.grey.shade300),
           const SizedBox(height: 16),
           Text(
             '还没有自定义角色',
@@ -429,7 +424,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
           const SizedBox(height: 8),
           TextButton.icon(
             onPressed: () => _showRoleDialog(),
-            icon: const Icon(Icons.add),
+            icon: const Icon(AppleIcons.add),
             label: const Text('创建第一个角色'),
           ),
         ],

@@ -16,13 +16,18 @@ import '../utils/token_counter.dart';
 import 'message_actions.dart';
 import 'enhanced_content_renderer.dart';
 import '../models/conversation_settings.dart';
-import '../utils/global_toast.dart';
 import 'enhanced_input_area.dart';
+import 'apple_toast.dart';
+import '../design_system/apple_icons.dart';
 import '../main.dart' show globalModelServiceManager;
 import '../controllers/stream_output_controller.dart';
 import '../adapters/ai_provider.dart';
 import '../utils/chunk_buffer.dart';
 import '../utils/smart_scroll_controller.dart';
+import '../design_system/design_tokens.dart';
+import '../design_system/apple_tokens.dart';
+import '../themes/chatbox_chat_theme.dart';
+import '../rendering/markdown/experimental_streaming_markdown_renderer.dart';
 
 /// 单个会话视图（保持存活状态）
 class ConversationView extends StatefulWidget {
@@ -44,7 +49,7 @@ class ConversationView extends StatefulWidget {
 }
 
 class ConversationViewState extends State<ConversationView>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
   
   final _messageController = TextEditingController();
   final _editController = TextEditingController();
@@ -83,6 +88,26 @@ class ConversationViewState extends State<ConversationView>
   ChunkBuffer? _chunkBuffer;
   SmartScrollController? _smartScrollController;
   
+  // 🧠 思考气泡状态
+  bool _thinkingVisible = false;
+  bool _thinkingExpanded = false;
+  bool _isThinkingOpen = false;
+  String _thinkingContent = '';
+  String? _currentThinkingEndTag; // 当前使用的结束标签（用于跨chunk匹配）
+  DateTime? _thinkingStartTime;
+  Timer? _thinkingTimer;
+  AnimationController? _bulbController; // 呼吸动画（可为空，热重载下更安全）
+  final AlwaysStoppedAnimation<double> _staticScale = AlwaysStoppedAnimation<double>(1.0);
+  final ScrollController _thinkingScrollController = ScrollController();
+  final Map<String, bool> _savedThinkingExpanded = {}; // 已保存消息折叠状态
+  DateTime? _currentUserSendTime; // 当前轮用户消息时间（用于冻结流式气泡头部时间）
+  final ValueNotifier<int> _thinkingSeconds = ValueNotifier<int>(0);
+  final Map<String, int> _savedThinkingDurations = {}; // 保存消息的思考时长（秒）
+  String _pendingBodyBuffer = '';
+  bool _holdBodyUntilThinkEnd = false;
+  DateTime? _thinkingEndTime;
+  bool _hasBodyStartedAfterThink = false; // 正文是否已在思考之后开始输出
+  
   // 🔥 关键：保持页面存活，不销毁
   @override
   bool get wantKeepAlive => true;
@@ -91,29 +116,34 @@ class ConversationViewState extends State<ConversationView>
   void initState() {
     super.initState();
 
+    // 呼吸灯动画控制器
+    _bulbController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+      lowerBound: 0.92,
+      upperBound: 1.08,
+    )..value = 1.0;
+
     // 初始化自动滚动状态
     _autoScrollEnabled = true;
     _isUserNearBottom = true;
 
-    // 🆕 初始化对话配置
-    _conversationSettings = globalModelServiceManager
-        .getConversationSettings(widget.conversation.id);
+    // 初始化对话配置
+    _conversationSettings = globalModelServiceManager.getConversationSettings(widget.conversation.id);
 
-    // 🆕 初始化流式控制器
+    // 初始化流式控制器
     _streamController = EnhancedStreamController();
 
-    // 🆕 初始化 Chunk 缓冲器
+    // 初始化 Chunk 缓冲器
     _chunkBuffer = ChunkBuffer(
       onFlush: (content) {
         setState(() {
-          _currentAssistantMessage += content;
+          _handleStreamContent(content);
         });
-        
         if (_smartScrollController != null) {
           final messagesCount = widget.conversation.messages.length;
-          final hasCurrentMessage = _currentAssistantMessage.isNotEmpty;
-          final totalItems = messagesCount + (hasCurrentMessage ? 1 : 0) + 1;
-          
+          final hasGenerating = _isLoading || _currentAssistantMessage.isNotEmpty;
+          final totalItems = messagesCount + (hasGenerating ? 1 : 0) + 1;
           _smartScrollController!.autoScrollToBottom(
             messageCount: totalItems,
             smooth: false,
@@ -125,7 +155,7 @@ class ConversationViewState extends State<ConversationView>
       enableDebugLog: true,
     );
 
-    // 🆕 初始化智能滚动控制器
+    // 初始化智能滚动控制器
     _smartScrollController = SmartScrollController(
       scrollController: _itemScrollController,
       positionsListener: _itemPositionsListener,
@@ -134,28 +164,20 @@ class ConversationViewState extends State<ConversationView>
       enableDebugLog: true,
     );
 
-    // 监听滚动位置变化，自动保存
+    // 监听滚动位置变化
     _itemPositionsListener.itemPositions.addListener(_onScrollPositionChanged);
 
-    // 🔴 已禁用：恢复之前保存的滚动位置（默认显示最新消息）
-    // WidgetsBinding.instance.addPostFrameCallback((_) {
-    //   _restoreScrollPosition();
-    // });
-    
-    // ✅ 初始化时滚动到底部，显示最新消息
+    // 初始化时滚动到底部
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_itemScrollController.isAttached && widget.conversation.messages.isNotEmpty) {
-        // 计算总项数：消息 + 当前生成中的消息 + 底部占位符
         final messagesCount = widget.conversation.messages.length;
-        final hasCurrentMessage = _currentAssistantMessage.isNotEmpty;
-        final totalItems = messagesCount + (hasCurrentMessage ? 1 : 0) + 1; // +1 为底部占位符
+        final hasGenerating = _isLoading || _currentAssistantMessage.isNotEmpty;
+        final totalItems = messagesCount + (hasGenerating ? 1 : 0) + 1;
         final spacerIndex = totalItems - 1;
-        
         _itemScrollController.jumpTo(index: spacerIndex);
         debugPrint('✅ 初始化滚动到底部占位符，索引: $spacerIndex (messagesCount: $messagesCount)');
       }
-      
-      // 等待一帧后隐藏加载页面
+
       await Future.delayed(const Duration(milliseconds: 100));
       if (mounted) {
         setState(() {
@@ -165,6 +187,173 @@ class ConversationViewState extends State<ConversationView>
     });
   }
 
+  void _ensureThinkingTimerStarted() {
+    if (_thinkingStartTime == null) {
+      _thinkingStartTime = DateTime.now();
+    }
+    // 立即同步一次
+    if (_thinkingStartTime != null) {
+      _thinkingSeconds.value = DateTime.now().difference(_thinkingStartTime!).inSeconds;
+    }
+    _thinkingTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_thinkingStartTime != null) {
+        _thinkingSeconds.value = DateTime.now().difference(_thinkingStartTime!).inSeconds;
+      }
+      _autoScrollThinking();
+    });
+    if (!(_bulbController?.isAnimating ?? false)) {
+      _bulbController?.repeat(reverse: true);
+    }
+  }
+
+  void _stopThinkingTimer() {
+    _thinkingTimer?.cancel();
+    _thinkingTimer = null;
+    if (_bulbController?.isAnimating ?? false) {
+      _bulbController?.stop();
+      _bulbController?.value = 1.0;
+    }
+  }
+  
+  void _handleStreamContent(String chunk) {
+    // 🐛 调试：打印进入的原始 chunk（截断显示）
+    final preview = chunk.length > 200 ? '${chunk.substring(0, 200)}…' : chunk;
+    debugPrint('🧩 [flush->handle] len=${chunk.length} preview="$preview"');
+    
+    // 🧠 支持多种思考标签变体（按优先级）
+    const thinkingTags = [
+      ('<thinking>', '</thinking>'),
+      ('<think>', '</think>'),
+      ('<thought>', '</thought>'),
+      ('<thoughts>', '</thoughts>'),
+    ];
+    
+    var remaining = chunk;
+    // 如果之前有未结束的思考段，优先补齐
+    if (_isThinkingOpen) {
+      // 使用之前检测到的标签类型
+      final endTag = _currentThinkingEndTag ?? '</think>';
+      final endIdx = remaining.indexOf(endTag);
+      if (endIdx != -1) {
+        _thinkingContent += remaining.substring(0, endIdx);
+        remaining = remaining.substring(endIdx + endTag.length);
+        _isThinkingOpen = false;
+        _currentThinkingEndTag = null; // 标签已闭合，清空
+        _thinkingEndTime = DateTime.now();
+        _stopThinkingTimer();
+        if (_pendingBodyBuffer.isNotEmpty) {
+          final pending = _pendingBodyBuffer;
+          _currentAssistantMessage += pending;
+          _pendingBodyBuffer = '';
+          if (!_hasBodyStartedAfterThink && pending.trim().isNotEmpty) {
+            _hasBodyStartedAfterThink = true; // 首次正文出现
+            _thinkingExpanded = false; // 仅首次强制折叠
+          }
+        }
+        _holdBodyUntilThinkEnd = false;
+        debugPrint('💡 [think] closed pending block, thinkLen=${_thinkingContent.length}');
+      } else {
+        _thinkingContent += remaining;
+        remaining = '';
+        debugPrint('💡 [think] appended to pending, thinkLen=${_thinkingContent.length}');
+      }
+    }
+
+    // 解析本段中的思考标签
+    while (true) {
+      // 查找最早出现的思考标签
+      int earliestIndex = -1;
+      String? detectedStartTag;
+      String? detectedEndTag;
+      
+      for (final (startTag, endTag) in thinkingTags) {
+        final idx = remaining.indexOf(startTag);
+        if (idx != -1 && (earliestIndex == -1 || idx < earliestIndex)) {
+          earliestIndex = idx;
+          detectedStartTag = startTag;
+          detectedEndTag = endTag;
+        }
+      }
+      
+      if (earliestIndex == -1) break; // 没有找到任何思考标签
+      
+      final s = earliestIndex;
+      final startTag = detectedStartTag!;
+      final endTag = detectedEndTag!;
+      final before = remaining.substring(0, s);
+      final afterStart = s + startTag.length;
+      if (before.isNotEmpty) {
+        if (_holdBodyUntilThinkEnd || _thinkingVisible || _isThinkingOpen) {
+          _pendingBodyBuffer += before;
+        } else {
+          _currentAssistantMessage += before;
+        }
+        debugPrint('✍️  [content] appended ${before.length} chars, contentLen=${_currentAssistantMessage.length} pendingLen=${_pendingBodyBuffer.length}');
+      }
+      final endIdx = remaining.indexOf(endTag, afterStart);
+      _thinkingVisible = true;
+      _ensureThinkingTimerStarted();
+      _holdBodyUntilThinkEnd = true;
+      if (endIdx != -1) {
+        _thinkingContent += remaining.substring(afterStart, endIdx);
+        remaining = remaining.substring(endIdx + endTag.length);
+        _isThinkingOpen = false;
+        _currentThinkingEndTag = null; // 标签已闭合，清空
+        _thinkingEndTime = DateTime.now();
+        _stopThinkingTimer();
+        // 正文开始，折叠思考框为 header-only
+        _thinkingExpanded = false;
+        if (_pendingBodyBuffer.isNotEmpty) {
+          _currentAssistantMessage += _pendingBodyBuffer;
+          _pendingBodyBuffer = '';
+          _hasBodyStartedAfterThink = true;
+        }
+        _holdBodyUntilThinkEnd = false;
+        debugPrint('💡 [think] inline block closed, tag=$startTag, thinkLen=${_thinkingContent.length}');
+        _autoScrollThinking();
+      } else {
+        _thinkingContent += remaining.substring(afterStart);
+        _isThinkingOpen = true;
+        _currentThinkingEndTag = endTag; // 保存结束标签以便下次chunk使用
+        remaining = '';
+        debugPrint('💡 [think] open block started, tag=$startTag, thinkLen=${_thinkingContent.length}');
+        _autoScrollThinking();
+        break;
+      }
+    }
+
+    if (remaining.isNotEmpty) {
+      if (_holdBodyUntilThinkEnd || _isThinkingOpen) {
+        _pendingBodyBuffer += remaining;
+        debugPrint('✍️  [content] tail buffered ${remaining.length} chars, pendingLen=${_pendingBodyBuffer.length}');
+      } else {
+        _currentAssistantMessage += remaining;
+        if (_thinkingContent.isNotEmpty && !_isThinkingOpen) {
+          // 仅在首次检测到非空正文 token 时，设置 body started 并折叠
+          if (!_hasBodyStartedAfterThink && remaining.trim().isNotEmpty) {
+            _hasBodyStartedAfterThink = true;
+            _thinkingExpanded = false;
+          }
+        }
+        debugPrint('✍️  [content] tail appended ${remaining.length} chars, contentLen=${_currentAssistantMessage.length}');
+      }
+    }
+  }
+
+  void _autoScrollThinking() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_thinkingScrollController.hasClients) return;
+      final max = _thinkingScrollController.position.maxScrollExtent;
+      // 强制跟随到底部（思考框内的内容取消限制）
+      _thinkingScrollController.animateTo(
+        max,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+  
   @override
   void dispose() {
     _messageController.dispose();
@@ -177,6 +366,9 @@ class ConversationViewState extends State<ConversationView>
     // 🆕 清理优化组件
     _chunkBuffer?.dispose();
     _smartScrollController?.dispose();
+    _thinkingTimer?.cancel();
+    _bulbController?.dispose();
+    _thinkingScrollController.dispose();
     
     super.dispose();
   }
@@ -202,8 +394,10 @@ class ConversationViewState extends State<ConversationView>
         _markUserScrolling();
       }
 
-      // 更新用户是否在底部的状态
-      _updateUserNearBottomStatus(positions);
+      // 更新用户是否在底部的状态（需要context获取屏幕高度）
+      if (mounted && context.mounted) {
+        _updateUserNearBottomStatus(positions, context);
+      }
 
       _lastScrollIndex = firstVisibleIndex;
 
@@ -243,13 +437,19 @@ class ConversationViewState extends State<ConversationView>
   }
 
   /// 更新用户是否在底部的状态
-  /// 优化：基于滚动位置而非消息数量，设置 150px 阈值
-  void _updateUserNearBottomStatus(Iterable<ItemPosition> positions) {
+  /// 优化：使用绝对像素距离（150px）而非相对位置阈值
+  /// 
+  /// [positions] 当前可见的item位置列表
+  /// [context] BuildContext用于获取屏幕高度
+  void _updateUserNearBottomStatus(Iterable<ItemPosition> positions, BuildContext context) {
     if (positions.isEmpty) return;
 
     final totalMessages = widget.conversation.messages.length + (_currentAssistantMessage.isEmpty ? 0 : 1);
     if (totalMessages == 0) return;
 
+    // 获取viewport高度
+    final viewportHeight = MediaQuery.of(context).size.height;
+    
     // 获取最后一条消息的位置
     final lastMessageIndex = totalMessages - 1;
     
@@ -263,10 +463,15 @@ class ConversationViewState extends State<ConversationView>
       ),
     );
 
-    // 判断：如果最后一条消息的 trailing edge 在屏幕内且接近底部
-    // itemTrailingEdge 范围：0~1 表示在屏幕内，0.95 表示离底部很近（约 50px）
+    // 计算距离底部的绝对像素距离
+    // itemTrailingEdge: 0表示item底部在屏幕顶部，1表示item底部在屏幕底部
+    // distanceFromBottom = (1.0 - itemTrailingEdge) * viewportHeight
+    final distanceFromBottomPx = (1.0 - lastMessagePosition.itemTrailingEdge) * viewportHeight;
+    
+    // 判断：距离底部小于150px视为"在底部附近"
+    const bottomThresholdPx = 150.0;
     final isNearBottom = lastMessagePosition.index == lastMessageIndex && 
-                        lastMessagePosition.itemTrailingEdge >= 0.95;
+                        distanceFromBottomPx < bottomThresholdPx;
 
     if (_isUserNearBottom != isNearBottom) {
       setState(() {
@@ -433,20 +638,14 @@ class ConversationViewState extends State<ConversationView>
     final modelId = _conversationSettings.selectedModelId;
     if (modelId == null) {
       // 🆕 使用全局提示框
-      GlobalToast.showInfo(
-        context,
-        '⚠️ 请先选择一个模型',
-      );
+      AppleToast.warning(context, message: '请先选择一个模型');
       return;
     }
 
     final modelWithProvider = globalModelServiceManager.getModelWithProvider(modelId);
     if (modelWithProvider == null) {
       // 🆕 使用全局提示框
-      GlobalToast.showError(
-        context,
-        '❌ 无法找到指定的模型',
-      );
+      AppleToast.error(context, message: '无法找到指定的模型');
       return;
     }
 
@@ -477,7 +676,20 @@ class ConversationViewState extends State<ConversationView>
       _messageController.clear();
       _isLoading = true;
       _currentAssistantMessage = '';
+      _currentUserSendTime = userMessage.timestamp;
+      // 重置思考状态
+      _thinkingVisible = false;
+      _thinkingExpanded = false;
+      _isThinkingOpen = false;
+      _thinkingContent = '';
+      _currentThinkingEndTag = null;
+      _thinkingStartTime = null;
+      _thinkingEndTime = null;
+      _pendingBodyBuffer = '';
+      _holdBodyUntilThinkEnd = false;
+      _hasBodyStartedAfterThink = false;
     });
+    _stopThinkingTimer();
 
     _scrollToBottom();
     widget.onConversationUpdated();
@@ -520,6 +732,7 @@ class ConversationViewState extends State<ConversationView>
           .toList();
 
       // 开始流式输出
+      debugPrint('🚀 [startStreaming] provider=${provider.displayName} type=${provider.type.name} model=${modelWithProvider.model.modelName} apiUrl=${modelWithProvider.provider.apiUrl}');
       await _streamController.startStreaming(
         provider: provider,
         modelName: modelWithProvider.model.modelName,
@@ -527,6 +740,8 @@ class ConversationViewState extends State<ConversationView>
         parameters: _conversationSettings.parameters,
         files: files.isNotEmpty ? files : null,
         onChunk: (chunk) {
+          final cPrev = chunk.length > 200 ? '${chunk.substring(0, 200)}…' : chunk;
+          debugPrint('📨 [onChunk] len=${chunk.length} preview="$cPrev"');
           // ✅ 使用 ChunkBuffer 批量处理
           _chunkBuffer?.add(chunk);
         },
@@ -535,15 +750,28 @@ class ConversationViewState extends State<ConversationView>
           
           // 🆕 确保最后的内容被刷新
           _chunkBuffer?.flush();
+          _stopThinkingTimer();
+          // 如仍有缓冲的正文，合并到显示内容
+          if (_pendingBodyBuffer.isNotEmpty) {
+            _currentAssistantMessage += _pendingBodyBuffer;
+            _pendingBodyBuffer = '';
+          }
+          _holdBodyUntilThinkEnd = false;
+          if (_thinkingStartTime != null && _thinkingEndTime == null) {
+            _thinkingEndTime = DateTime.now();
+          }
           
           // 保存助手消息
-          if (_currentAssistantMessage.isNotEmpty) {
+          if (_currentAssistantMessage.isNotEmpty || _thinkingContent.isNotEmpty) {
+            final finalContent = _thinkingContent.isNotEmpty
+                ? '<think>' + _thinkingContent + '</think>' + _currentAssistantMessage
+                : _currentAssistantMessage;
             final inputTokens = TokenCounter.estimateTokens(text);
-            final outputTokens = TokenCounter.estimateTokens(_currentAssistantMessage);
+            final outputTokens = TokenCounter.estimateTokens(finalContent);
 
             final assistantMessage = Message(
               id: DateTime.now().millisecondsSinceEpoch.toString(),
-              content: _currentAssistantMessage,
+              content: finalContent,
               isUser: false,
               timestamp: DateTime.now(),
               inputTokens: inputTokens,
@@ -556,6 +784,19 @@ class ConversationViewState extends State<ConversationView>
               widget.conversation.addMessage(assistantMessage);
               _currentAssistantMessage = '';
               _isLoading = false;
+              _thinkingVisible = false;
+              _thinkingExpanded = false;
+              _isThinkingOpen = false;
+              _thinkingContent = '';
+              _currentThinkingEndTag = null;
+              _pendingBodyBuffer = '';
+              _holdBodyUntilThinkEnd = false;
+              _thinkingStartTime = null;
+              _thinkingEndTime = null;
+              // 保存思考时长
+              final dur = _thinkingSeconds.value;
+              _savedThinkingDurations[assistantMessage.id] = dur;
+              _thinkingSeconds.value = 0;
             });
 
             // 🔥 成功后：清空附件数据并恢复可见性状态
@@ -576,13 +817,11 @@ class ConversationViewState extends State<ConversationView>
             _isLoading = false;
             _attachmentBarVisible = true;
           });
+          _stopThinkingTimer();
 
           if (mounted) {
             // 🆕 使用全局提示框
-            GlobalToast.showError(
-              context,
-              '❌ 消息发送失败\n${error.toString()}',
-            );
+            AppleToast.error(context, message: '消息发送失败\n${error.toString()}');
           }
         },
       );
@@ -595,10 +834,7 @@ class ConversationViewState extends State<ConversationView>
 
       if (mounted) {
         // 🆕 使用全局提示框
-        GlobalToast.showError(
-          context,
-          '❌ 消息发送失败\n${e.toString()}',
-        );
+        AppleToast.error(context, message: '消息发送失败\n${e.toString()}');
       }
     }
   }
@@ -637,6 +873,15 @@ class ConversationViewState extends State<ConversationView>
 
     // 使用 _currentAssistantMessage，因为它包含所有已显示的内容
     if (_currentAssistantMessage.isNotEmpty) {
+      // 合并未刷新的正文缓冲
+      if (_pendingBodyBuffer.isNotEmpty) {
+        _currentAssistantMessage += _pendingBodyBuffer;
+        _pendingBodyBuffer = '';
+      }
+      _holdBodyUntilThinkEnd = false;
+      if (_thinkingStartTime != null && _thinkingEndTime == null) {
+        _thinkingEndTime = DateTime.now();
+      }
       debugPrint('🛡️ [Stop] 准备保存消息，内容: ${_currentAssistantMessage.substring(0, _currentAssistantMessage.length > 50 ? 50 : _currentAssistantMessage.length)}...');
       // 获取当前模型信息
       final modelId = _conversationSettings.selectedModelId;
@@ -667,6 +912,19 @@ class ConversationViewState extends State<ConversationView>
         widget.conversation.addMessage(assistantMessage);
         _isLoading = false;
         // 不要立即清空，避免渲染竞争
+        _thinkingVisible = false;
+        _thinkingExpanded = false;
+        _isThinkingOpen = false;
+        _thinkingContent = '';
+        _currentThinkingEndTag = null;
+        _pendingBodyBuffer = '';
+        _holdBodyUntilThinkEnd = false;
+        _thinkingStartTime = null;
+        _thinkingEndTime = null;
+        // 保存思考时长
+        final dur = _thinkingSeconds.value;
+        _savedThinkingDurations[assistantMessage.id] = dur;
+        _thinkingSeconds.value = 0;
       });
       debugPrint('🛡️ [Stop] 消息已添加，总消息数: ${widget.conversation.messages.length}');
       debugPrint('🛡️ [Stop] _currentAssistantMessage 还未清空，长度: ${_currentAssistantMessage.length}');
@@ -700,6 +958,15 @@ class ConversationViewState extends State<ConversationView>
         _currentAssistantMessage = '';
         _isLoading = false;
         _attachmentBarVisible = true;
+        _thinkingVisible = false;
+        _thinkingExpanded = false;
+        _isThinkingOpen = false;
+        _thinkingContent = '';
+        _currentThinkingEndTag = null;
+        _pendingBodyBuffer = '';
+        _holdBodyUntilThinkEnd = false;
+        _thinkingStartTime = null;
+        _thinkingEndTime = null;
       });
     }
   }
@@ -708,10 +975,7 @@ class ConversationViewState extends State<ConversationView>
   void _copyMessage(String content) {
     Clipboard.setData(ClipboardData(text: content));
     // 🆕 使用全局提示框
-    GlobalToast.showSuccess(
-      context,
-      '✅ 已复制到剪贴板',
-    );
+    AppleToast.success(context, message: '已复制到剪贴板');
   }
 
   /// 导出消息（进入批量导出模式）
@@ -779,9 +1043,7 @@ class ConversationViewState extends State<ConversationView>
   /// 导出选中的消息
   Future<void> _exportSelectedMessages() async {
     if (_selectedMessageIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 请先选择要导出的消息')),
-      );
+      AppleToast.warning(context, message: '请先选择要导出的消息');
       return;
     }
 
@@ -799,13 +1061,13 @@ class ConversationViewState extends State<ConversationView>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.text_snippet),
+              leading: const Icon(AppleIcons.document),
               title: const Text('Markdown'),
               subtitle: Text('${selectedMessages.length} 条消息'),
               onTap: () => Navigator.pop(context, 'md'),
             ),
             ListTile(
-              leading: const Icon(Icons.description),
+              leading: const Icon(AppleIcons.document),
               title: const Text('纯文本'),
               subtitle: Text('${selectedMessages.length} 条消息'),
               onTap: () => Navigator.pop(context, 'txt'),
@@ -847,17 +1109,10 @@ class ConversationViewState extends State<ConversationView>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(' 已导出 ${selectedMessages.length} 条消息到:\n$filePath'),
-            duration: const Duration(seconds: 3),
-            action: SnackBarAction(
-              label: '复制路径',
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: filePath));
-              },
-            ),
-          ),
+        Clipboard.setData(ClipboardData(text: filePath));
+        AppleToast.success(
+          context,
+          message: '已导出 ${selectedMessages.length} 条消息\n路径已复制到剪贴板',
         );
         
         // 退出导出模式
@@ -865,9 +1120,7 @@ class ConversationViewState extends State<ConversationView>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(' 导出失败: $e')),
-        );
+        AppleToast.error(context, message: '导出失败: $e');
       }
     }
   }
@@ -962,12 +1215,15 @@ class ConversationViewState extends State<ConversationView>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('以下文件无法重新发送：'),
-                const SizedBox(height: 8),
+                SizedBox(height: ChatBoxTokens.spacing.sm),
                 ...missingFiles.map((name) => Padding(
-                  padding: const EdgeInsets.only(left: 16, top: 4),
+                  padding: EdgeInsets.only(
+                    left: ChatBoxTokens.spacing.lg,
+                    top: ChatBoxTokens.spacing.xs,
+                  ),
                   child: Text('• $name', style: const TextStyle(fontSize: 13)),
                 )),
-                const SizedBox(height: 16),
+                SizedBox(height: ChatBoxTokens.spacing.lg),
                 const Text('是否继续发送其他内容？'),
               ],
             ),
@@ -1095,7 +1351,7 @@ class ConversationViewState extends State<ConversationView>
                     color: Theme.of(context).colorScheme.primary,
                     size: 60,
                   ),
-                  const SizedBox(height: 24),
+                  SizedBox(height: ChatBoxTokens.spacing.xl),
                   Text(
                     '加载中...',
                     style: TextStyle(
@@ -1117,7 +1373,10 @@ class ConversationViewState extends State<ConversationView>
     final totalCount = widget.conversation.messages.length;
     
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.symmetric(
+        horizontal: ChatBoxTokens.spacing.lg,
+        vertical: ChatBoxTokens.spacing.md,
+      ),
       decoration: BoxDecoration(
         color: Theme.of(context).primaryColor.withOpacity(0.1),
         border: Border(
@@ -1130,11 +1389,11 @@ class ConversationViewState extends State<ConversationView>
         children: [
           // 关闭按钮
           IconButton(
-            icon: const Icon(Icons.close),
+            icon: const Icon(AppleIcons.close),
             onPressed: _exitExportMode,
             tooltip: '退出导出模式',
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: ChatBoxTokens.spacing.sm),
           
           // 选中计数
           Text(
@@ -1150,16 +1409,16 @@ class ConversationViewState extends State<ConversationView>
           // 全选按钮
           TextButton.icon(
             onPressed: selectedCount == totalCount ? _deselectAllMessages : _selectAllMessages,
-            icon: Icon(selectedCount == totalCount ? Icons.deselect : Icons.select_all),
+            icon: Icon(selectedCount == totalCount ? AppleIcons.close : AppleIcons.selectAll),
             label: Text(selectedCount == totalCount ? '取消全选' : '全选'),
           ),
           
-          const SizedBox(width: 8),
+          SizedBox(width: ChatBoxTokens.spacing.sm),
           
           // 导出按钮
           FilledButton.icon(
             onPressed: selectedCount > 0 ? _exportSelectedMessages : null,
-            icon: const Icon(Icons.file_download),
+            icon: const Icon(AppleIcons.download),
             label: const Text('导出'),
           ),
         ],
@@ -1177,7 +1436,7 @@ class ConversationViewState extends State<ConversationView>
             '💬',
             style: const TextStyle(fontSize: 80),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: ChatBoxTokens.spacing.lg),
           Text(
             '开始对话吧！',
             style: TextStyle(
@@ -1193,42 +1452,266 @@ class ConversationViewState extends State<ConversationView>
 
   /// 消息列表
   Widget _buildMessageList() {
-    // 计算总项数：消息 + 当前生成中的消息 + 底部占位符
+    // 计算总项数：消息 + 生成中的消息 + 底部占位符
     final messagesCount = widget.conversation.messages.length;
-    final hasCurrentMessage = _currentAssistantMessage.isNotEmpty;
-    final totalItems = messagesCount + (hasCurrentMessage ? 1 : 0) + 1; // +1 为底部占位符
+    final hasGenerating = _isLoading || _currentAssistantMessage.isNotEmpty;
+    final totalItems = messagesCount + (hasGenerating ? 1 : 0) + 1; // +1 为底部占位符
     
     return ScrollablePositionedList.builder(
       itemScrollController: _itemScrollController,
       itemPositionsListener: _itemPositionsListener,
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
       itemCount: totalItems,
       itemBuilder: (context, index) {
         // 底部占位符：最后一项，透明的空间
         if (index == totalItems - 1) {
           return const SizedBox(height: 1); // 极小的占位符
         }
-        
-        // 显示正在生成的消息
-        if (index == messagesCount) {
+
+        // 普通历史消息区域
+        if (index < messagesCount) {
+          final msg = widget.conversation.messages[index];
+          return _buildMessageBubble(
+            content: msg.content,
+            isUser: msg.isUser,
+            timestamp: msg.timestamp,
+            message: msg,
+          );
+        }
+
+        // 追加生成中的消息
+        var next = messagesCount;
+        if (hasGenerating && index == next) {
           return _buildMessageBubble(
             content: _currentAssistantMessage,
             isUser: false,
-            timestamp: DateTime.now(),
+            timestamp: _currentUserSendTime ?? DateTime.now(),
             message: null,
           );
         }
 
-        // 正常消息
-        final message = widget.conversation.messages[index];
-        
-        return _buildMessageBubble(
-          content: message.content,
-          isUser: message.isUser,
-          timestamp: message.timestamp,
-          message: message,
-        );
+        // 兜底（不应触达）
+        return const SizedBox.shrink();
       },
+    );
+  }
+
+  /// 思考内联片段
+  Widget _buildInlineThinkingSection() {
+    // 是否显示正文区域（思考中始终展开；正文开始后默认折叠，用户可手动展开）
+    final showContent = _isThinkingOpen || !_hasBodyStartedAfterThink || _thinkingExpanded;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: () {
+            if (!_isThinkingOpen) {
+              setState(() => _thinkingExpanded = !_thinkingExpanded);
+              if (_thinkingExpanded) _autoScrollThinking();
+            }
+          },
+          borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+          child: Row(
+            children: [
+              ScaleTransition(
+                scale: _bulbController ?? _staticScale,
+                child: const Icon(AppleIcons.lightbulb, size: 16),
+              ),
+              SizedBox(width: ChatBoxTokens.spacing.xs + 2),
+              ValueListenableBuilder<int>(
+                valueListenable: _thinkingSeconds,
+                builder: (_, v, __) {
+                  if (_isThinkingOpen) {
+                    final m = (v ~/ 60).toString().padLeft(2, '0');
+                    final s = (v % 60).toString().padLeft(2, '0');
+                    return Text(
+                      '思考中 $m:$s',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    );
+                  } else {
+                    return Text(
+                      '已思考 ${v}s',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    );
+                  }
+                },
+              ),
+              const Spacer(),
+              // 展开指示（仅在思考结束后显示）
+              if (!_isThinkingOpen)
+                AnimatedCrossFade(
+                  duration: const Duration(milliseconds: 150),
+                  firstChild: const Icon(AppleIcons.arrowDown, size: 18),
+                  secondChild: const Icon(AppleIcons.arrowUp, size: 18),
+                  crossFadeState: _thinkingExpanded
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                ),
+            ],
+          ),
+        ),
+        SizedBox(height: ChatBoxTokens.spacing.sm),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          child: showContent
+              ? Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(
+                    maxHeight: 160,
+                    minHeight: 44,
+                  ),
+                  padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
+                  ),
+                  child: SingleChildScrollView(
+                    controller: _thinkingScrollController,
+                    child: Text(
+                      _thinkingContent.isEmpty ? '...' : _thinkingContent,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        SizedBox(height: ChatBoxTokens.spacing.md),
+      ],
+    );
+  }
+
+  String _formatThinkingElapsed() {
+    final start = _thinkingStartTime;
+    if (start == null) return '00:00';
+    final end = _thinkingEndTime;
+    final diff = (end ?? DateTime.now()).difference(start);
+    final m = diff.inMinutes;
+    final s = diff.inSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  /// 解析保存内容中的思考段，返回思考和正文（支持多种标签）
+  ({String think, String body}) _splitThinkSegments(String full) {
+    // 🧠 支持多种思考标签变体（按优先级）
+    const thinkingTags = [
+      ('<thinking>', '</thinking>'),
+      ('<think>', '</think>'),
+      ('<thought>', '</thought>'),
+      ('<thoughts>', '</thoughts>'),
+    ];
+    
+    // 查找最早出现的思考标签
+    int earliestStart = -1;
+    String? detectedStartTag;
+    String? detectedEndTag;
+    
+    for (final (startTag, endTag) in thinkingTags) {
+      final idx = full.indexOf(startTag);
+      if (idx != -1 && (earliestStart == -1 || idx < earliestStart)) {
+        earliestStart = idx;
+        detectedStartTag = startTag;
+        detectedEndTag = endTag;
+      }
+    }
+    
+    if (earliestStart == -1) return (think: '', body: full);
+    
+    final startTag = detectedStartTag!;
+    final endTag = detectedEndTag!;
+    final afterStart = earliestStart + startTag.length;
+    final e = full.indexOf(endTag, afterStart);
+    
+    if (e == -1) {
+      // 没有闭合，视为全部正文
+      return (think: '', body: full);
+    }
+    
+    final think = full.substring(afterStart, e);
+    final body = full.substring(0, earliestStart) + full.substring(e + endTag.length);
+    return (think: think, body: body);
+  }
+
+  /// 已保存消息的思考气泡（沿用流式正文阶段的单行 header 样式，默认折叠，可点击展开内容）
+  Widget _buildSavedThinkingSection({
+    required String messageId,
+    required String thinkText,
+  }) {
+    final expanded = _savedThinkingExpanded[messageId] ?? false;
+    final durSec = _savedThinkingDurations[messageId] ?? 0;
+    return InkWell(
+      onTap: () => setState(() => _savedThinkingExpanded[messageId] = !expanded),
+      borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(AppleIcons.lightbulb, size: 16),
+              SizedBox(width: ChatBoxTokens.spacing.xs + 2),
+              Text(
+                '已思考 ${durSec}s',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const Spacer(),
+              AnimatedCrossFade(
+                duration: const Duration(milliseconds: 150),
+                firstChild: const Icon(AppleIcons.arrowDown, size: 18),
+                secondChild: const Icon(AppleIcons.arrowUp, size: 18),
+                crossFadeState: expanded
+                    ? CrossFadeState.showSecond
+                    : CrossFadeState.showFirst,
+              ),
+            ],
+          ),
+          if (expanded) SizedBox(height: ChatBoxTokens.spacing.sm),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            child: expanded
+                ? Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(
+                      maxHeight: 160,
+                      minHeight: 44,
+                    ),
+                    padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
+                    ),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        thinkText.isEmpty ? '...' : thinkText,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Theme.of(context).colorScheme.onSurface,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+          SizedBox(height: ChatBoxTokens.spacing.md),
+        ],
+      ),
     );
   }
 
@@ -1246,7 +1729,20 @@ class ConversationViewState extends State<ConversationView>
     String senderName;
     if (isUser) {
       senderName = '用户';
-    } else if (message != null && message.modelName != null && message.providerName != null) {
+    } else if (message == null) {
+      // 流式进行中的消息，名称使用当前选择的模型
+      final modelId = _conversationSettings.selectedModelId;
+      if (modelId != null) {
+        final mp = globalModelServiceManager.getModelWithProvider(modelId);
+        if (mp != null) {
+          senderName = '${mp.model.displayName}|${mp.provider.name}';
+        } else {
+          senderName = 'AI助手';
+        }
+      } else {
+        senderName = 'AI助手';
+      }
+    } else if (message.modelName != null && message.providerName != null) {
       senderName = '${message.modelName}|${message.providerName}';
     } else {
       senderName = 'AI助手';
@@ -1261,7 +1757,10 @@ class ConversationViewState extends State<ConversationView>
             // 导出模式：复选框
             if (_isExportMode && message != null)
               Padding(
-                padding: const EdgeInsets.only(top: 4, right: 8),
+                padding: EdgeInsets.only(
+                  top: ChatBoxTokens.spacing.xs,
+                  right: ChatBoxTokens.spacing.sm,
+                ),
                 child: Checkbox(
                   value: _selectedMessageIds.contains(message.id),
                   onChanged: (_) => _toggleMessageSelection(message.id),
@@ -1270,14 +1769,17 @@ class ConversationViewState extends State<ConversationView>
             
             // 头像
             Padding(
-              padding: const EdgeInsets.only(top: 4, right: 8),
+              padding: EdgeInsets.only(
+                top: ChatBoxTokens.spacing.xs,
+                right: ChatBoxTokens.spacing.sm,
+              ),
               child: CircleAvatar(
                 radius: 20,
                 backgroundColor: isUser
                     ? Theme.of(context).colorScheme.primary
                     : Theme.of(context).colorScheme.secondary,
                 child: Icon(
-                  isUser ? Icons.person_rounded : Icons.smart_toy,
+                  isUser ? AppleIcons.person : AppleIcons.chatbot,
                   color: Colors.white,
                   size: 24,
                 ),
@@ -1298,7 +1800,7 @@ class ConversationViewState extends State<ConversationView>
                       color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  SizedBox(height: 2),
                   // 时间
                   Text(
                     _formatFullTimestamp(timestamp),
@@ -1307,74 +1809,203 @@ class ConversationViewState extends State<ConversationView>
                       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: ChatBoxTokens.spacing.sm),
 
-                  // 消息内容容器
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isUser
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(context).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                      border: isHighlighted
-                          ? Border.all(
-                              color: Theme.of(context).colorScheme.primary,
-                              width: 3,
-                            )
-                          : null,
-                      boxShadow: isHighlighted
-                          ? [
-                              BoxShadow(
-                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
-                                blurRadius: 12,
-                                spreadRadius: 2,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 用户消息：显示附件
-                        if (isUser && message != null && message.attachedFiles != null && message.attachedFiles!.isNotEmpty)
-                          _buildAttachmentsPreview(message.attachedFiles!),
+                  // 消息内容容器：分开渲染思考气泡与正文气泡
+                  ...(() {
+                    final bubbles = <Widget>[];
 
-                        // 编辑模式：文本框
-                        if (isEditing)
-                          TextField(
-                            controller: _editController,
-                            maxLines: null,
-                            autofocus: true,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.all(8),
-                            ),
-                          )
-                        // 正常模式：增强渲染（支持 Markdown + LaTeX + Mermaid）
-                        else
-                          EnhancedContentRenderer(
-                            content: content,
-                            textStyle: TextStyle(
-                              fontSize: 15,
-                              color: isUser
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer
-                                  : Theme.of(context).colorScheme.onSurface,
-                            ),
-                            backgroundColor: isUser
-                                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
-                                : Theme.of(context).colorScheme.surface,
-                            isUser: isUser,
+                    // 用户消息：单一气泡（包含附件或编辑框或正文）
+                    if (isUser) {
+                      bubbles.add(
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: double.infinity,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: ChatBoxTokens.spacing.lg, // 16px
+                            vertical: ChatBoxTokens.spacing.md,    // 12px
                           ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(AppleTokens.corners.bubble), // 20px Apple风格
+                            border: isHighlighted
+                                ? Border.all(
+                                    color: Theme.of(context).colorScheme.primary,
+                                    width: 3,
+                                  )
+                                : null,
+                            boxShadow: isHighlighted
+                                ? AppleTokens.shadows.highlight(Theme.of(context).colorScheme.primary)
+                                : AppleTokens.shadows.bubble, // Apple双层阴影
+                          ),
+                          child: isEditing
+                              ? TextField(
+                                  controller: _editController,
+                                  maxLines: null,
+                                  autofocus: true,
+                                  decoration: InputDecoration(
+                                    border: OutlineInputBorder(),
+                                    contentPadding: EdgeInsets.all(ChatBoxTokens.spacing.sm),
+                                  ),
+                                )
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (message != null && message.attachedFiles != null && message.attachedFiles!.isNotEmpty)
+                                      _buildAttachmentsPreview(message.attachedFiles!),
+                                    EnhancedContentRenderer(
+                                      content: content,
+                                      textStyle: TextStyle(
+                                        fontSize: 15,
+                                        color: Theme.of(context).colorScheme.onSurface,
+                                      ),
+                                      backgroundColor: Theme.of(context).colorScheme.surface,
+                                      isUser: true,
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      );
+                      if (!isEditing && message != null) {
+                        bubbles.add(_buildTokenInfo(message, isUser));
+                      }
+                      return bubbles;
+                    }
 
-                        // Token 统计
-                        if (message != null && !isEditing)
-                          _buildTokenInfo(message, isUser),
-                      ],
-                    ),
-                  ),
+                    // 助手消息：分离思考与正文
+                    if (message == null) {
+                      // 流式
+                      if (_thinkingVisible || _isThinkingOpen || _thinkingContent.isNotEmpty) {
+                        bubbles.add(
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: ChatBoxTokens.spacing.lg,
+                              vertical: ChatBoxTokens.spacing.md,
+                            ),
+                            decoration: ChatBoxChatTheme.thinkingBubbleDecoration(context),
+                            child: _buildInlineThinkingSection(),
+                          ),
+                        );
+                        bubbles.add(SizedBox(height: ChatBoxTokens.spacing.md));
+                      }
+
+                      if (content.isNotEmpty) {
+                        bubbles.add(
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: ChatBoxTokens.spacing.lg, // 16px
+                              vertical: ChatBoxTokens.spacing.md,    // 12px
+                            ),
+                            decoration: ChatBoxChatTheme.assistantBubbleDecoration(context),
+                            child: _conversationSettings.enableExperimentalStreamingMarkdown
+                                ? ExperimentalStreamingMarkdownRenderer(
+                                    text: content,
+                                    textStyle: TextStyle(
+                                      fontSize: 15,
+                                      color: ChatBoxChatTheme.onSurfaceColor(context),
+                                    ),
+                                    backgroundColor: ChatBoxChatTheme.assistantBubbleColor(context),
+                                    isUser: false,
+                                  )
+                                : EnhancedContentRenderer(
+                                    content: content,
+                                    textStyle: TextStyle(
+                                      fontSize: 15,
+                                      color: ChatBoxChatTheme.onSurfaceColor(context),
+                                    ),
+                                    backgroundColor: ChatBoxChatTheme.assistantBubbleColor(context),
+                                    isUser: false,
+                                  ),
+                          ),
+                        );
+                      } else if (!(_thinkingVisible || _isThinkingOpen || _thinkingContent.isNotEmpty)) {
+                        bubbles.add(
+                          Padding(
+                            padding: EdgeInsets.symmetric(vertical: ChatBoxTokens.spacing.xs),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SpinKitThreeBounce(
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                                  size: 14,
+                                ),
+                                SizedBox(width: ChatBoxTokens.spacing.sm),
+                                Text(
+                                  '正在输入...',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                                  ),
+                                )
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+                    } else {
+                      // 已保存
+                      final split = _splitThinkSegments(content);
+                      if (split.think.isNotEmpty) {
+                        bubbles.add(
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: ChatBoxTokens.spacing.lg,
+                              vertical: ChatBoxTokens.spacing.md,
+                            ),
+                            decoration: ChatBoxChatTheme.thinkingBubbleDecoration(context),
+                            child: _buildSavedThinkingSection(
+                              messageId: message.id,
+                              thinkText: split.think,
+                            ),
+                          ),
+                        );
+                        bubbles.add(SizedBox(height: ChatBoxTokens.spacing.md));
+                      }
+                      if (split.body.trim().isNotEmpty || isEditing) {
+                        bubbles.add(
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: ChatBoxTokens.spacing.lg, // 16px
+                              vertical: ChatBoxTokens.spacing.md,    // 12px
+                            ),
+                            decoration: ChatBoxChatTheme.assistantBubbleDecoration(context),
+                            child: isEditing
+                                ? TextField(
+                                    controller: _editController,
+                                    maxLines: null,
+                                    autofocus: true,
+                                    decoration: InputDecoration(
+                                      border: OutlineInputBorder(),
+                                      contentPadding: EdgeInsets.all(ChatBoxTokens.spacing.sm),
+                                    ),
+                                  )
+                                : EnhancedContentRenderer(
+                                    content: split.body,
+                                    textStyle: TextStyle(
+                                      fontSize: 15,
+                                      color: ChatBoxChatTheme.onSurfaceColor(context),
+                                    ),
+                                    backgroundColor: ChatBoxChatTheme.assistantBubbleColor(context),
+                                    isUser: false,
+                                  ),
+                          ),
+                        );
+                      }
+                      if (!isEditing) {
+                        bubbles.add(_buildTokenInfo(message, isUser));
+                      }
+                    }
+
+                    return bubbles;
+                  }()),
 
                   // 操作按钮
                   if (message != null)
@@ -1398,7 +2029,7 @@ class ConversationViewState extends State<ConversationView>
           ],
         ),
 
-        const SizedBox(height: 12),
+        SizedBox(height: ChatBoxTokens.spacing.md),
       ],
     );
   }
@@ -1419,7 +2050,7 @@ class ConversationViewState extends State<ConversationView>
     }
 
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: EdgeInsets.only(top: ChatBoxTokens.spacing.sm),
       child: Text(
         tokenText,
         style: TextStyle(
@@ -1460,7 +2091,7 @@ class ConversationViewState extends State<ConversationView>
         },
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        child: const Icon(Icons.keyboard_arrow_down),
+        child: const Icon(AppleIcons.arrowDown),
       ),
     );
   }
@@ -1498,12 +2129,12 @@ class ConversationViewState extends State<ConversationView>
               if (file.isImage) {
                 // 图片文件：显示缩略图，可点击查看原图
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: EdgeInsets.only(bottom: ChatBoxTokens.spacing.sm),
                   child: fileExists
                       ? GestureDetector(
                           onTap: () => _showImageViewer(file.path, file.name),
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                             child: CachedImageWidget(
                               path: file.path,
                               fit: BoxFit.cover,
@@ -1511,7 +2142,7 @@ class ConversationViewState extends State<ConversationView>
                                 return _buildFilePlaceholder(
                                   file.name,
                                   '图片加载失败',
-                                  Icons.broken_image,
+                                  AppleIcons.imageOff,
                                 );
                               },
                             ),
@@ -1520,21 +2151,21 @@ class ConversationViewState extends State<ConversationView>
                       : _buildFilePlaceholder(
                           file.name,
                           '图片已不存在',
-                          Icons.image_not_supported,
+                          AppleIcons.imageOff,
                         ),
                 );
               } else {
                 // 文档/代码文件：显示可点击的卡片
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: EdgeInsets.only(bottom: ChatBoxTokens.spacing.sm),
                   child: fileExists
                       ? InkWell(
                           onTap: () => _openFile(file.path),
                           child: Container(
-                            padding: const EdgeInsets.all(12),
+                            padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
                             decoration: BoxDecoration(
                               color: Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                               border: Border.all(
                                 color: Theme.of(context)
                                     .colorScheme
@@ -1549,7 +2180,7 @@ class ConversationViewState extends State<ConversationView>
                                   _getFileIconData(file.type),
                                   color: Theme.of(context).colorScheme.primary,
                                 ),
-                                const SizedBox(width: 12),
+                                SizedBox(width: ChatBoxTokens.spacing.md),
                                 Flexible(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1563,7 +2194,7 @@ class ConversationViewState extends State<ConversationView>
                                         ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
-                                      const SizedBox(height: 2),
+                                      SizedBox(height: 2),
                                       Text(
                                         file.mimeType,
                                         style: TextStyle(
@@ -1577,9 +2208,9 @@ class ConversationViewState extends State<ConversationView>
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                SizedBox(width: ChatBoxTokens.spacing.sm),
                                 Icon(
-                                  Icons.open_in_new,
+                                  AppleIcons.externalLink,
                                   size: 16,
                                   color: Theme.of(context)
                                       .colorScheme
@@ -1593,16 +2224,16 @@ class ConversationViewState extends State<ConversationView>
                       : _buildFilePlaceholder(
                           file.name,
                           '文件已不存在',
-                          Icons.insert_drive_file_outlined,
+                          AppleIcons.file,
                         ),
                 );
               }
             },
           );
         }),
-        const SizedBox(height: 8),
+        SizedBox(height: ChatBoxTokens.spacing.sm),
         const Divider(height: 1),
-        const SizedBox(height: 8),
+        SizedBox(height: ChatBoxTokens.spacing.sm),
       ],
     );
   }
@@ -1610,17 +2241,17 @@ class ConversationViewState extends State<ConversationView>
   /// 构建文件占位符（文件不存在时显示）
   Widget _buildFilePlaceholder(String fileName, String message, IconData icon) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
       decoration: BoxDecoration(
         color: Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
         border: Border.all(color: Colors.grey.shade400),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: Colors.grey),
-          const SizedBox(width: 8),
+          SizedBox(width: ChatBoxTokens.spacing.sm),
           Flexible(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1633,7 +2264,7 @@ class ConversationViewState extends State<ConversationView>
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text(
                   message,
                   style: TextStyle(
@@ -1657,24 +2288,12 @@ class ConversationViewState extends State<ConversationView>
         await launchUrl(uri);
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('无法打开文件: $path'),
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
-            ),
-          );
+          AppleToast.error(context, message: '无法打开文件: $path');
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('打开文件失败: ${e.toString()}'),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
-          ),
-        );
+        AppleToast.error(context, message: '打开文件失败: ${e.toString()}');
       }
     }
   }
@@ -1691,7 +2310,7 @@ class ConversationViewState extends State<ConversationView>
             title: Text(imageName),
             actions: [
               IconButton(
-                icon: const Icon(Icons.close),
+                icon: const Icon(AppleIcons.close),
                 onPressed: () => Navigator.pop(context),
               ),
             ],
@@ -1714,8 +2333,8 @@ class ConversationViewState extends State<ConversationView>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.broken_image, size: 64, color: Colors.white54),
-                  const SizedBox(height: 16),
+                  const Icon(AppleIcons.imageOff, size: 64, color: Colors.white54),
+                  SizedBox(height: ChatBoxTokens.spacing.lg),
                   Text(
                     '图片加载失败',
                     style: TextStyle(color: Colors.white54),
@@ -1734,17 +2353,17 @@ class ConversationViewState extends State<ConversationView>
   IconData _getFileIconData(FileType type) {
     switch (type) {
       case FileType.image:
-        return Icons.image;
+        return AppleIcons.image;
       case FileType.video:
-        return Icons.videocam;
+        return AppleIcons.video;
       case FileType.audio:
-        return Icons.audiotrack;
+        return AppleIcons.audio;
       case FileType.document:
-        return Icons.description;
+        return AppleIcons.document;
       case FileType.code:
-        return Icons.code;
+        return AppleIcons.code;
       case FileType.other:
-        return Icons.insert_drive_file;
+        return AppleIcons.file;
     }
   }
 }

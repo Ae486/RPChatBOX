@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
+import '../design_system/design_tokens.dart';
 
 /// 消息操作按钮组件
 class MessageActions extends StatelessWidget {
@@ -22,14 +24,14 @@ class MessageActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(top: 4),
+      margin: EdgeInsets.only(top: ChatBoxTokens.spacing.xs),
       child: Wrap(
-        spacing: 8,
+        spacing: ChatBoxTokens.spacing.sm,
         children: [
           // 复制
           _buildActionButton(
             context,
-            icon: Icons.copy,
+            icon: AppleIcons.copy,
             label: '复制',
             onPressed: onCopy,
           ),
@@ -45,7 +47,7 @@ class MessageActions extends StatelessWidget {
           // 编辑
           _buildActionButton(
             context,
-            icon: Icons.edit,
+            icon: AppleIcons.edit,
             label: '编辑',
             onPressed: onEdit,
           ),
@@ -54,7 +56,7 @@ class MessageActions extends StatelessWidget {
           if (onExport != null)
             _buildActionButton(
               context,
-              icon: Icons.file_download,
+              icon: AppleIcons.download,
               label: '导出',
               onPressed: onExport!,
             ),
@@ -62,7 +64,7 @@ class MessageActions extends StatelessWidget {
           // 删除
           _buildActionButton(
             context,
-            icon: Icons.delete_outline,
+            icon: AppleIcons.delete,
             label: '删除',
             onPressed: onDelete,
           ),
@@ -81,12 +83,15 @@ class MessageActions extends StatelessWidget {
 
     return Tooltip(
       message: label,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Icon(icon, size: 18, color: color),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+          child: Padding(
+            padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
+            child: Icon(icon, size: 18, color: color), // 恢复原始大小
+          ),
         ),
       ),
     );
@@ -109,20 +114,20 @@ class EditModeActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(top: 8),
+      margin: EdgeInsets.only(top: ChatBoxTokens.spacing.sm),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           // 取消
           TextButton.icon(
             onPressed: onCancel,
-            icon: const Icon(Icons.close, size: 18),
+            icon: const Icon(AppleIcons.close, size: 18),
             label: const Text('取消'),
             style: TextButton.styleFrom(
               foregroundColor: Colors.grey.shade600,
             ),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: ChatBoxTokens.spacing.sm),
           
           // 保存
           ElevatedButton.icon(
@@ -133,7 +138,7 @@ class EditModeActions extends StatelessWidget {
           
           // 重新发送（仅用户消息）
           if (onResend != null) ...[
-            const SizedBox(width: 8),
+            SizedBox(width: ChatBoxTokens.spacing.sm),
             ElevatedButton.icon(
               onPressed: onResend,
               icon: const Icon(Icons.send, size: 18),

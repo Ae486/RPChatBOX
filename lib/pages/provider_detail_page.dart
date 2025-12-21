@@ -4,7 +4,9 @@ import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
 import '../widgets/add_model_dialog.dart';
 import '../utils/global_toast.dart';
-import '../utils/api_url_helper.dart';
+import '../design_system/design_tokens.dart';
+import '../design_system/apple_tokens.dart';
+import '../design_system/apple_icons.dart';
 import '../data/model_capability_presets.dart';
 import 'model_edit_page.dart';
 
@@ -36,8 +38,6 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   List<ModelConfig> _models = [];
   bool _isTestingMode = false; // 是否处于检测模式
   String? _testingModelId; // 当前正在测试的模型ID
-  String? _testMessage; // 测试消息
-  bool _isTestLoading = false; // 是否正在测试
 
   @override
   void initState() {
@@ -89,12 +89,15 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
   /// 🆕 获取实际使用的API地址预览
   String get _apiUrlPreview {
-    return ApiUrlHelper.getDisplayUrl(_apiUrlController.text, _selectedType);
-  }
-
-  /// 🆕 获取API地址提示文本
-  String get _apiUrlHint {
-    return ApiUrlHelper.getHintText(_apiUrlController.text, _selectedType);
+    final url = _apiUrlController.text.trim();
+    if (url.isEmpty) return '未设置';
+    // 自动补全 /v1 后缀
+    if (_selectedType == ProviderType.openai || _selectedType == ProviderType.claude) {
+      if (!url.endsWith('/v1') && !url.contains('/v1/')) {
+        return '$url/v1';
+      }
+    }
+    return url;
   }
 
   /// 🆕 判断是否显示API预览（仅支持补全的服务商类型）
@@ -126,7 +129,6 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
     setState(() {
       _testingModelId = model.id;
-      _isTestLoading = true;
     });
     
     // 🔧 使用全局提示框
@@ -150,10 +152,6 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       );
 
       if (mounted) {
-        setState(() {
-          _isTestLoading = false;
-        });
-
         // 🔧 使用全局提示框
         if (result.success) {
           GlobalToast.showSuccess(
@@ -177,7 +175,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _isTestLoading = false;
+          _testingModelId = null;
         });
         // 🔧 使用全局提示框
         GlobalToast.showError(context, '❌ 测试失败\n${e.toString()}');
@@ -303,13 +301,13 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
             onPressed: _save,
             child: const Text('保存', style: TextStyle(fontSize: 16)),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: ChatBoxTokens.spacing.sm),
         ],
       ),
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
           children: [
             // 🔧 移除页面内提示框，改用全局浮动提示框
 
@@ -320,7 +318,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 children: [
                   // 🆕 现代化服务商类型选择器
                   _buildModernTypeSelector(),
-                  const SizedBox(height: 16),
+                  SizedBox(height: ChatBoxTokens.spacing.lg),
 
                   // 名称
                   TextFormField(
@@ -337,7 +335,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16),
+                  SizedBox(height: ChatBoxTokens.spacing.lg),
 
                   // 🆕 API地址输入框（带预览）
                   Column(
@@ -366,14 +364,17 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                       ),
                       // 🆕 实际使用地址预览（仅在支持补全时显示）
                       if (_shouldShowApiPreview()) ...[
-                        const SizedBox(height: 8),
+                        SizedBox(height: ChatBoxTokens.spacing.sm),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: ChatBoxTokens.spacing.md,
+                            vertical: ChatBoxTokens.spacing.sm,
+                          ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                            borderRadius: BorderRadius.circular(8),
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                             border: Border.all(
-                              color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
                             ),
                           ),
                           child: Row(
@@ -383,7 +384,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                                 size: 16,
                                 color: Theme.of(context).colorScheme.primary,
                               ),
-                              const SizedBox(width: 8),
+                              SizedBox(width: ChatBoxTokens.spacing.sm),
                               Expanded(
                                 child: Text(
                                   _apiUrlPreview,
@@ -398,7 +399,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                       ],
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  SizedBox(height: ChatBoxTokens.spacing.lg),
 
                   // API密钥
                   TextFormField(
@@ -433,7 +434,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
               ),
             ),
 
-            const SizedBox(height: 24),
+            SizedBox(height: ChatBoxTokens.spacing.xl),
 
             // 模型区
             if (!isNewProvider) ...[
@@ -441,7 +442,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 title: '模型',
                 trailing: TextButton.icon(
                   onPressed: _isTestingMode ? _exitTestMode : _enterTestMode,
-                  icon: Icon(_isTestingMode ? Icons.close : Icons.wifi_tethering),
+                  icon: Icon(_isTestingMode ? AppleIcons.close : Icons.wifi_tethering),
                   label: Text(_isTestingMode ? '取消' : '检测'),
                 ),
                 child: Column(
@@ -449,7 +450,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                     // 模型列表
                     if (_models.isEmpty)
                       Container(
-                        padding: const EdgeInsets.all(32),
+                        padding: EdgeInsets.all(ChatBoxTokens.spacing.xl + 8),
                         alignment: Alignment.center,
                         child: Text(
                           '暂无模型',
@@ -459,12 +460,12 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                     else
                       ..._models.map((model) => _buildModelCard(model)),
 
-                    const SizedBox(height: 12),
+                    SizedBox(height: ChatBoxTokens.spacing.md),
 
                     // 添加模型按钮
                     OutlinedButton.icon(
                       onPressed: _addModel,
-                      icon: const Icon(Icons.add),
+                      icon: const Icon(AppleIcons.add),
                       label: const Text('添加模型'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(double.infinity, 48),
@@ -475,15 +476,15 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
               ),
             ] else
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
                 decoration: BoxDecoration(
                   color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                   border: Border.all(color: Colors.blue.shade200),
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.info_outline, color: Colors.blue),
+                    Icon(AppleIcons.info, color: Colors.blue),
                     SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -520,7 +521,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
             if (trailing != null) trailing,
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: ChatBoxTokens.spacing.lg),
         child,
       ],
     );
@@ -529,7 +530,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   /// 🆕 现代化下拉框选择器
   Widget _buildModernTypeSelector() {
     return DropdownButtonFormField<ProviderType>(
-      value: _selectedType,
+      initialValue: _selectedType,
       decoration: const InputDecoration(
         labelText: '服务商类型',
         border: OutlineInputBorder(),
@@ -546,7 +547,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 _getProviderIcon(type),
                 size: 20,
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: ChatBoxTokens.spacing.md),
               Text(
                 type.displayName,
                 style: const TextStyle(
@@ -582,19 +583,20 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     }
   }
 
+  /// Model卡片 - Apple风格
   Widget _buildModelCard(ModelConfig model) {
     final isTestingThis = _testingModelId == model.id;
     final isInTestMode = _isTestingMode && !isTestingThis;
 
     return _BreathingBorderCard(
       isBreathing: isInTestMode,
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.only(bottom: ChatBoxTokens.spacing.md),
       isSelected: isTestingThis,
       child: InkWell(
         onTap: _isTestingMode && !isTestingThis ? () => _testModel(model) : null,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12), // Apple圆角
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
           child: Row(
             children: [
               // 模型名称和能力图标
@@ -602,31 +604,54 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 模型名称 - Apple字体
                     Text(
                       model.displayName,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w500,
-                          ),
+                      style: AppleTokens.typography.body.copyWith(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    // 🔧 能力图标（移除文本能力）
+                    SizedBox(height: ChatBoxTokens.spacing.sm),
+                    // 能力图标 - 优化样式
                     Wrap(
-                      spacing: 6,
+                      spacing: 8,
+                      runSpacing: 6,
                       children: model.capabilities
-                          .where((cap) => cap != ModelCapability.text) // 🔧 移除文本图标
+                          .where((cap) => cap != ModelCapability.text)
                           .map((cap) {
                         return Tooltip(
                           message: cap.displayName,
                           child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: cap.color.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(4),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
                             ),
-                            child: Icon(
-                              cap.icon,
-                              size: 14,
-                              color: cap.color,
+                            decoration: BoxDecoration(
+                              color: cap.color.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6), // 更圆润
+                              border: Border.all(
+                                color: cap.color.withValues(alpha: 0.3),
+                                width: 0.5,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  cap.icon,
+                                  size: 14,
+                                  color: cap.color,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  cap.displayName,
+                                  style: AppleTokens.typography.caption2.copyWith(
+                                    color: cap.color,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         );
@@ -636,31 +661,58 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 ),
               ),
 
-              // 🆕 设置和删除按钮（非测试模式）
+              // 设置和删除按钮 - Apple风格
               if (!_isTestingMode) ...[
                 IconButton(
-                  icon: const Icon(Icons.settings, size: 20),
+                  icon: Icon(
+                    AppleIcons.settings,
+                    size: 22,
+                    color: AppleColors.secondaryLabel(context),
+                  ),
                   onPressed: () => _openModelSettings(model),
                   tooltip: '模型设置',
-                  padding: EdgeInsets.zero,
+                  padding: EdgeInsets.all(8),
                   constraints: const BoxConstraints(),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).cardColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: ChatBoxTokens.spacing.sm),
                 IconButton(
-                  icon: const Icon(Icons.remove_circle_outline, size: 20, color: Colors.red),
+                  icon: Icon(
+                    AppleIcons.removeCircle,
+                    size: 22,
+                    color: AppleColors.red,
+                  ),
                   onPressed: () => _deleteModel(model),
                   tooltip: '删除模型',
-                  padding: EdgeInsets.zero,
+                  padding: EdgeInsets.all(8),
                   constraints: const BoxConstraints(),
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppleColors.red.withValues(alpha: 0.1),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                 ),
               ],
 
               // 测试模式下的箭头
               if (_isTestingMode && !isTestingThis)
-                Icon(
-                  Icons.touch_app,
-                  color: Theme.of(context).colorScheme.primary,
-                  size: 20,
+                Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppleColors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    AppleIcons.send,
+                    color: AppleColors.blue,
+                    size: 22,
+                  ),
                 ),
             ],
           ),
@@ -730,9 +782,7 @@ class _BreathingBorderCardState extends State<_BreathingBorderCard>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final primaryColor = theme.colorScheme.primary;
-    final surfaceColor = theme.colorScheme.surface;
-    final outlineColor = theme.colorScheme.outline;
+    final primaryColor = AppleColors.blue;
 
     return AnimatedBuilder(
       animation: _animation,
@@ -740,25 +790,40 @@ class _BreathingBorderCardState extends State<_BreathingBorderCard>
         return Container(
           margin: widget.margin,
           decoration: BoxDecoration(
-            color: surfaceColor,
-            borderRadius: BorderRadius.circular(8),
+            color: theme.cardColor,
+            borderRadius: BorderRadius.circular(12), // Apple圆角
             border: Border.all(
               color: widget.isSelected
                   ? primaryColor
                   : (widget.isBreathing
-                      ? primaryColor.withValues(alpha: _animation.value)
-                      : outlineColor.withOpacity(0.3)),
-              width: widget.isSelected ? 2 : 1,
+                      ? primaryColor.withValues(alpha: _animation.value * 0.6)
+                      : AppleColors.separator(context)),
+              width: widget.isSelected ? 2 : 0.5,
             ),
-            boxShadow: widget.isBreathing
+            boxShadow: widget.isSelected
                 ? [
+                    // 选中状态：Apple蓝色阴影
                     BoxShadow(
-                      color: primaryColor.withValues(alpha: _animation.value * 0.3),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    )
+                      color: primaryColor.withValues(alpha: 0.2),
+                      blurRadius: 12,
+                      offset: Offset(0, 4),
+                    ),
+                    BoxShadow(
+                      color: primaryColor.withValues(alpha: 0.1),
+                      blurRadius: 24,
+                      offset: Offset(0, 8),
+                    ),
                   ]
-                : null,
+                : widget.isBreathing
+                    ? [
+                        // 呼吸状态：动态阴影
+                        BoxShadow(
+                          color: primaryColor.withValues(alpha: _animation.value * 0.15),
+                          blurRadius: 12 * _animation.value,
+                          offset: Offset(0, 4 * _animation.value),
+                        ),
+                      ]
+                    : AppleTokens.shadows.card, // 默认：Apple卡片阴影
           ),
           child: child,
         );

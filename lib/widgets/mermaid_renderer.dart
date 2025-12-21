@@ -1,7 +1,12 @@
 import 'dart:io';
+import '../design_system/apple_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_windows/webview_windows.dart' as windows_webview;
+import '../design_system/design_tokens.dart';
 
 /// Mermaid 图表渲染器
 /// 使用 WebView + Mermaid.js 渲染流程图、时序图等
@@ -9,12 +14,16 @@ class MermaidRenderer extends StatefulWidget {
   final String mermaidCode;
   final bool isDark;
   final double? height;
+  final bool includeOuterContainer;
+  final EdgeInsets? margin;
 
   const MermaidRenderer({
     super.key,
     required this.mermaidCode,
     this.isDark = false,
     this.height,
+    this.includeOuterContainer = true,
+    this.margin,
   });
 
   @override
@@ -22,10 +31,13 @@ class MermaidRenderer extends StatefulWidget {
 }
 
 class _MermaidRendererState extends State<MermaidRenderer> {
-  late WebViewController _controller;
+  WebViewController? _controller;
+  windows_webview.WebviewController? _windowsController;
   double _webViewHeight = 300; // 默认高度
   bool _isLoading = true;
   String? _error;
+  Uri? _previewUri;
+  bool _isWindowsWebViewReady = false;
 
   @override
   void initState() {
@@ -35,12 +47,19 @@ class _MermaidRendererState extends State<MermaidRenderer> {
 
   Future<void> _initializeWebView() async {
     try {
-      // Windows 平台暂不支持 WebView
-      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      // Windows 平台使用 webview_windows
+      if (Platform.isWindows) {
+        await _initializeWindowsWebView();
+        return;
+      }
+      
+      // Linux 平台仍使用外部预览
+      if (Platform.isLinux) {
         setState(() {
-          _error = '桌面平台暂不支持 Mermaid 渲染，请使用 Android/iOS 版本';
+          _error = '当前平台不支持内嵌 Mermaid 渲染，可使用“外部预览”。';
           _isLoading = false;
         });
+        await _prepareExternalPreview();
         return;
       }
       
@@ -83,11 +102,88 @@ class _MermaidRendererState extends State<MermaidRenderer> {
     }
   }
 
+  Future<void> _initializeWindowsWebView() async {
+    try {
+      _windowsController = windows_webview.WebviewController();
+      await _windowsController!.initialize();
+      
+      // 加载 HTML 模板
+      final template = await rootBundle.loadString('assets/web/mermaid_template.html');
+      final html = template
+          .replaceAll('{{MERMAID_CODE}}', _escapeMermaidCode(widget.mermaidCode))
+          .replaceAll('{{THEME}}', widget.isDark ? 'dark' : 'default');
+      
+      // 写入临时文件并加载
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}${Platform.pathSeparator}mermaid_${DateTime.now().millisecondsSinceEpoch}.html');
+      await file.writeAsString(html);
+      
+      await _windowsController!.setBackgroundColor(Colors.transparent);
+      await _windowsController!.loadUrl(Uri.file(file.path).toString());
+      
+      if (mounted) {
+        setState(() {
+          _isWindowsWebViewReady = true;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Windows WebView initialization error: $e');
+      // 降级到外部预览
+      setState(() {
+        _error = 'Windows WebView 初始化失败，使用外部预览';
+        _isLoading = false;
+      });
+      await _prepareExternalPreview();
+    }
+  }
+
+  Future<void> _prepareExternalPreview() async {
+    try {
+      final template = await rootBundle.loadString('assets/web/mermaid_template.html');
+      final html = template
+          .replaceAll('{{MERMAID_CODE}}', _escapeMermaidCode(widget.mermaidCode))
+          .replaceAll('{{THEME}}', widget.isDark ? 'dark' : 'default');
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}${Platform.pathSeparator}mermaid_preview_${DateTime.now().millisecondsSinceEpoch}.html');
+      await file.writeAsString(html);
+      setState(() {
+        _previewUri = Uri.file(file.path);
+      });
+    } catch (e) {
+      debugPrint('Mermaid external preview prepare error: $e');
+    }
+  }
+
+  Future<void> _openExternalPreview() async {
+    final uri = _previewUri;
+    if (uri == null) {
+      await _prepareExternalPreview();
+    }
+    final finalUri = _previewUri;
+    if (finalUri == null) return;
+
+    await launchUrl(
+      finalUri,
+      mode: LaunchMode.externalApplication,
+    );
+  }
+
+  Future<void> _copyMermaidCode() async {
+    await Clipboard.setData(ClipboardData(text: widget.mermaidCode));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Mermaid 代码已复制到剪贴板')),
+    );
+  }
+
   /// 获取 WebView 实际高度
   Future<void> _getWebViewHeight() async {
+    if (_controller == null) return;
     try {
       // 执行 JavaScript 获取内容高度
-      final heightStr = await _controller.runJavaScriptReturningResult(
+      final heightStr = await _controller!.runJavaScriptReturningResult(
         'document.getElementById("diagram").scrollHeight'
       );
       
@@ -111,45 +207,117 @@ class _MermaidRendererState extends State<MermaidRenderer> {
   }
 
   @override
+  void dispose() {
+    _windowsController?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (_error != null) {
       return _buildErrorWidget();
     }
 
+    // Windows 平台使用 webview_windows
+    if (Platform.isWindows && _isWindowsWebViewReady && _windowsController != null) {
+      return _buildWindowsWebView();
+    }
+
+    // 其他平台使用 webview_flutter
+    if (_controller == null) {
+      return _buildLoadingWidget();
+    }
+
+    final inner = ClipRRect(
+      borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+      child: Stack(
+        children: [
+          SizedBox(
+            height: widget.height ?? _webViewHeight,
+            child: WebViewWidget(controller: _controller!),
+          ),
+          if (_isLoading) _buildLoadingOverlay(),
+        ],
+      ),
+    );
+
+    if (!widget.includeOuterContainer) {
+      return inner;
+    }
+
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
+      margin: widget.margin ?? EdgeInsets.symmetric(vertical: ChatBoxTokens.spacing.sm),
       decoration: BoxDecoration(
         color: widget.isDark ? Colors.grey.shade900 : Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
         border: Border.all(
           color: widget.isDark ? Colors.grey.shade700 : Colors.grey.shade300,
         ),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Stack(
+      child: inner,
+    );
+  }
+
+  Widget _buildWindowsWebView() {
+    final inner = ClipRRect(
+      borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+      child: SizedBox(
+        height: widget.height ?? _webViewHeight,
+        child: windows_webview.Webview(_windowsController!),
+      ),
+    );
+
+    if (!widget.includeOuterContainer) {
+      return inner;
+    }
+
+    return Container(
+      margin: widget.margin ?? EdgeInsets.symmetric(vertical: ChatBoxTokens.spacing.sm),
+      decoration: BoxDecoration(
+        color: widget.isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+        border: Border.all(
+          color: widget.isDark ? Colors.grey.shade700 : Colors.grey.shade300,
+        ),
+      ),
+      child: inner,
+    );
+  }
+
+  Widget _buildLoadingWidget() {
+    return Container(
+      height: widget.height ?? _webViewHeight,
+      margin: widget.margin ?? EdgeInsets.symmetric(vertical: ChatBoxTokens.spacing.sm),
+      decoration: BoxDecoration(
+        color: widget.isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+      ),
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              height: widget.height ?? _webViewHeight,
-              child: WebViewWidget(controller: _controller),
-            ),
-            if (_isLoading)
-              Positioned.fill(
-                child: Container(
-                  color: widget.isDark ? Colors.grey.shade900 : Colors.grey.shade50,
-                  child: const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 8),
-                        Text('正在渲染图表...'),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+            CircularProgressIndicator(),
+            SizedBox(height: 8),
+            Text('正在加载 WebView...'),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: widget.isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 8),
+              Text('正在渲染图表...'),
+            ],
+          ),
         ),
       ),
     );
@@ -157,13 +325,13 @@ class _MermaidRendererState extends State<MermaidRenderer> {
 
   Widget _buildErrorWidget() {
     // 桌面平台：显示为代码块
-    if (_error != null && _error!.contains('桌面平台')) {
+    if (Platform.isWindows || Platform.isLinux) {
       return Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.all(16),
+        margin: EdgeInsets.symmetric(vertical: ChatBoxTokens.spacing.sm),
+        padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
         decoration: BoxDecoration(
           color: widget.isDark ? Colors.grey.shade900 : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
           border: Border.all(
             color: widget.isDark ? Colors.grey.shade700 : Colors.grey.shade300,
           ),
@@ -175,26 +343,40 @@ class _MermaidRendererState extends State<MermaidRenderer> {
             Row(
               children: [
                 Icon(
-                  Icons.info_outline,
+                  AppleIcons.info,
                   color: Colors.blue.shade700,
                   size: 16,
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: ChatBoxTokens.spacing.sm),
                 Text(
-                  'Mermaid 代码（桌面平台仅显示源码）',
+                  'Mermaid（桌面平台：源码 + 外部预览）',
                   style: TextStyle(
                     color: widget.isDark ? Colors.grey.shade400 : Colors.grey.shade700,
                     fontSize: 12,
                   ),
                 ),
+                const Spacer(),
+                IconButton(
+                  tooltip: '复制源码',
+                  onPressed: _copyMermaidCode,
+                  icon: Icon(
+                    AppleIcons.copy,
+                    size: 16,
+                    color: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                  ),
+                ),
+                TextButton(
+                  onPressed: _previewUri == null ? null : _openExternalPreview,
+                  child: const Text('外部预览'),
+                ),
               ],
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: ChatBoxTokens.spacing.md),
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
               decoration: BoxDecoration(
                 color: widget.isDark ? Colors.black : Colors.white,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(ChatBoxTokens.radius.xs),
               ),
               child: SelectableText(
                 widget.mermaidCode,
@@ -212,11 +394,11 @@ class _MermaidRendererState extends State<MermaidRenderer> {
     
     // 其他错误：显示错误信息
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(16),
+      margin: EdgeInsets.symmetric(vertical: ChatBoxTokens.spacing.sm),
+      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
       decoration: BoxDecoration(
         color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
         border: Border.all(color: Colors.red.shade300),
       ),
       child: Column(
@@ -225,8 +407,8 @@ class _MermaidRendererState extends State<MermaidRenderer> {
         children: [
           Row(
             children: [
-              Icon(Icons.error_outline, color: Colors.red.shade700),
-              const SizedBox(width: 8),
+              Icon(AppleIcons.error, color: Colors.red.shade700),
+              SizedBox(width: ChatBoxTokens.spacing.sm),
               Text(
                 'Mermaid 渲染失败',
                 style: TextStyle(
@@ -236,7 +418,7 @@ class _MermaidRendererState extends State<MermaidRenderer> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: ChatBoxTokens.spacing.sm),
           Text(
             _error ?? '未知错误',
             style: TextStyle(
@@ -245,12 +427,12 @@ class _MermaidRendererState extends State<MermaidRenderer> {
               fontFamily: 'monospace',
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: ChatBoxTokens.spacing.sm),
           ExpansionTile(
             title: const Text('查看原始代码'),
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(ChatBoxTokens.spacing.sm),
                 color: Colors.grey.shade200,
                 child: SelectableText(
                   widget.mermaidCode,

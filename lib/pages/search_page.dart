@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../models/conversation.dart';
 import '../models/message.dart';
+import '../design_system/design_tokens.dart';
 
 /// 搜索页面
 class SearchPage extends StatefulWidget {
@@ -110,7 +112,7 @@ class _SearchPageState extends State<SearchPage> {
         actions: [
           if (_searchController.text.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.clear),
+              icon: const Icon(AppleIcons.close),
               onPressed: () {
                 _searchController.clear();
                 _performSearch('');
@@ -154,8 +156,8 @@ class _SearchPageState extends State<SearchPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search, size: 80, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
+          Icon(AppleIcons.search, size: 80, color: Colors.grey.shade300),
+          SizedBox(height: ChatBoxTokens.spacing.lg),
           Text(
             '搜索会话和消息',
             style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
@@ -170,8 +172,8 @@ class _SearchPageState extends State<SearchPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search_off, size: 80, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
+          Icon(AppleIcons.searchOff, size: 80, color: Colors.grey.shade300),
+          SizedBox(height: ChatBoxTokens.spacing.lg),
           Text(
             '未找到匹配结果',
             style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
@@ -196,8 +198,8 @@ class _SearchPageState extends State<SearchPage> {
           result.type == SearchResultType.conversationTitle
               ? Icons.chat_bubble_outline
               : (result.message?.isUser ?? false
-                  ? Icons.person_rounded
-                  : Icons.smart_toy),
+                  ? AppleIcons.person
+                  : AppleIcons.chatbot),
         ),
       ),
       title: Row(
@@ -248,10 +250,10 @@ class _SearchPageState extends State<SearchPage> {
         title: Row(
           children: [
             Icon(
-              result.message!.isUser ? Icons.person_rounded : Icons.smart_toy,
+              result.message!.isUser ? AppleIcons.person : AppleIcons.chatbot,
               size: 20,
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: ChatBoxTokens.spacing.sm),
             Expanded(
               child: Text(
                 result.message!.isUser ? '用户' : '助手',
@@ -267,15 +269,15 @@ class _SearchPageState extends State<SearchPage> {
             children: [
               // 会话信息
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(ChatBoxTokens.spacing.sm),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
                 ),
                 child: Row(
                   children: [
                     const Icon(Icons.chat_bubble_outline, size: 16),
-                    const SizedBox(width: 8),
+                    SizedBox(width: ChatBoxTokens.spacing.sm),
                     Expanded(
                       child: Text(
                         result.conversation.title,
@@ -285,7 +287,7 @@ class _SearchPageState extends State<SearchPage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: ChatBoxTokens.spacing.lg),
               // 消息内容（高亮关键词）
               _buildHighlightedText(
                 result.message!.content,

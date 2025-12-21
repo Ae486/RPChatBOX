@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
+import 'apple_text_field.dart';
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
+import '../design_system/design_tokens.dart';
 
 /// 添加/编辑Provider对话框
 class AddProviderDialog extends StatefulWidget {
@@ -187,7 +190,7 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
           children: [
             // 标题栏
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: const BorderRadius.only(
@@ -198,10 +201,10 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
               child: Row(
                 children: [
                   Icon(
-                    isEdit ? Icons.edit : Icons.add_circle_outline,
+                    isEdit ? AppleIcons.edit : AppleIcons.addCircle,
                     color: Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: ChatBoxTokens.spacing.md),
                   Text(
                     isEdit ? '编辑服务' : '添加服务',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -210,7 +213,7 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(AppleIcons.close),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -220,7 +223,7 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
             // 表单内容
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
                 child: Form(
                   key: _formKey,
                   child: Column(
@@ -231,7 +234,7 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                         'Provider 类型',
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: ChatBoxTokens.spacing.sm),
                       SegmentedButton<ProviderType>(
                         segments: ProviderType.values.map((type) {
                           return ButtonSegment<ProviderType>(
@@ -251,16 +254,15 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                         },
                       ),
 
-                      const SizedBox(height: 20),
+                      SizedBox(height: ChatBoxTokens.spacing.lg + 4),
 
                       // Provider名称
-                      TextFormField(
+                      AppleTextField(
                         controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: '名称',
-                          hintText: '例如：My OpenAI',
-                          border: OutlineInputBorder(),
-                        ),
+                        labelText: '名称',
+                        hintText: '例如：My OpenAI',
+                        prefixIcon: AppleIcons.settings,
+                        showClearButton: true,
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return '请输入名称';
@@ -269,17 +271,16 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                         },
                       ),
 
-                      const SizedBox(height: 16),
+                      SizedBox(height: ChatBoxTokens.spacing.lg),
 
                       // API地址
-                      TextFormField(
+                      AppleTextField(
                         controller: _apiUrlController,
-                        decoration: InputDecoration(
-                          labelText: 'API 地址',
-                          hintText: _selectedType.defaultApiUrl,
-                          border: const OutlineInputBorder(),
-                          helperText: '结尾需包含 /v1 版本路径',
-                        ),
+                        labelText: 'API 地址',
+                        hintText: _selectedType.defaultApiUrl,
+                        prefixIcon: AppleIcons.link,
+                        helperText: '结尾需包含 /v1 版本路径',
+                        showClearButton: true,
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return '请输入API地址';
@@ -295,37 +296,45 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                       const SizedBox(height: 16),
 
                       // API密钥
-                      TextFormField(
-                        controller: _apiKeyController,
-                        decoration: InputDecoration(
-                          labelText: 'API 密钥',
-                          hintText: 'sk-...',
-                          border: const OutlineInputBorder(),
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.wifi_tethering),
-                            onPressed: _isTesting ? null : _testConnection,
-                            tooltip: '测试连接',
+                      Stack(
+                        alignment: Alignment.centerRight,
+                        children: [
+                          AppleTextField(
+                            controller: _apiKeyController,
+                            labelText: 'API 密钥',
+                            hintText: 'sk-...',
+                            prefixIcon: AppleIcons.key,
+                            obscureText: true, // 自动显示密码切换按钮
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return '请输入API密钥';
+                              }
+                              return null;
+                            },
                           ),
-                        ),
-                        obscureText: true,
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return '请输入API密钥';
-                          }
-                          return null;
-                        },
+                          // 测试连接按钮
+                          Positioned(
+                            right: 48, // 在密码切换按钮左边
+                            child: IconButton(
+                              icon: const Icon(Icons.wifi_tethering, size: 20),
+                              onPressed: _isTesting ? null : _testConnection,
+                              tooltip: '测试连接',
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
                       ),
 
                       // 测试结果
                       if (_testMessage != null) ...[
-                        const SizedBox(height: 8),
+                        SizedBox(height: ChatBoxTokens.spacing.sm),
                         Container(
-                          padding: const EdgeInsets.all(12),
+                          padding: EdgeInsets.all(ChatBoxTokens.spacing.md),
                           decoration: BoxDecoration(
                             color: _testMessage!.startsWith('✓')
                                 ? Colors.green.withValues(alpha: 0.1)
                                 : Colors.red.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(ChatBoxTokens.radius.xs),
                             border: Border.all(
                               color: _testMessage!.startsWith('✓')
                                   ? Colors.green
@@ -335,11 +344,11 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                           child: Row(
                             children: [
                               Icon(
-                                _testMessage!.startsWith('✓') ? Icons.check_circle : Icons.error,
+                                _testMessage!.startsWith('✓') ? AppleIcons.checkCircle : AppleIcons.error,
                                 color: _testMessage!.startsWith('✓') ? Colors.green : Colors.red,
                                 size: 20,
                               ),
-                              const SizedBox(width: 8),
+                              SizedBox(width: ChatBoxTokens.spacing.sm),
                               Expanded(
                                 child: Text(
                                   _testMessage!,
@@ -355,19 +364,17 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                         ),
                       ],
 
-                      const SizedBox(height: 16),
+                      SizedBox(height: ChatBoxTokens.spacing.lg),
 
                       // 模型列表（仅新建时）
                       if (!isEdit) ...[
-                        TextFormField(
+                        AppleTextArea(
                           controller: _modelsController,
-                          decoration: const InputDecoration(
-                            labelText: '模型列表（可选）',
-                            hintText: 'gpt-4, gpt-3.5-turbo',
-                            border: OutlineInputBorder(),
-                            helperText: '多个模型用逗号分隔，留空则稍后手动添加',
-                          ),
-                          maxLines: 3,
+                          labelText: '模型列表（可选）',
+                          hintText: 'gpt-4, gpt-3.5-turbo',
+                          helperText: '多个模型用逗号分隔，留空则稍后手动添加',
+                          minLines: 3,
+                          maxLines: 5,
                         ),
                       ],
                     ],
@@ -378,7 +385,7 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
 
             // 底部按钮
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
               decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(color: Colors.grey.shade300),
@@ -391,7 +398,7 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
                     onPressed: _isLoading ? null : () => Navigator.pop(context),
                     child: const Text('取消'),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: ChatBoxTokens.spacing.md),
                   ElevatedButton(
                     onPressed: _isLoading ? null : _save,
                     child: _isLoading

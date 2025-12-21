@@ -39,29 +39,35 @@ class EnhancedContentRenderer extends StatelessWidget {
 
   /// 构建混合内容（Markdown + Mermaid）
   Widget _buildMixedContent(BuildContext context, bool isDark) {
-    final mermaidBlocks = ContentDetector.extractMermaidBlocks(content);
-    final remainingContent = ContentDetector.removeMermaidBlocks(content);
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 渲染普通 Markdown 内容（如果有）
-        if (remainingContent.isNotEmpty)
+    final segments = ContentDetector.splitByMermaidBlocks(content);
+
+    final children = <Widget>[];
+    for (final segment in segments) {
+      final segContent = segment.content;
+      if (segment.isMermaid) {
+        if (segContent.trim().isEmpty) continue;
+        children.add(
+          MermaidRenderer(
+            mermaidCode: segContent,
+            isDark: isDark,
+          ),
+        );
+      } else {
+        if (segContent.trim().isEmpty) continue;
+        children.add(
           SmartContentRenderer(
-            content: remainingContent,
+            content: segContent,
             textStyle: textStyle,
             backgroundColor: backgroundColor,
             isUser: isUser,
           ),
-        
-        // 渲染所有 Mermaid 图表
-        ...mermaidBlocks.map((mermaidCode) {
-          return MermaidRenderer(
-            mermaidCode: mermaidCode,
-            isDark: isDark,
-          );
-        }),
-      ],
+        );
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
     );
   }
 }

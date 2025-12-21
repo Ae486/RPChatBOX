@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../design_system/apple_icons.dart';
 import 'package:flutter/material.dart';
 
 /// API 错误信息类
@@ -301,7 +302,7 @@ class ApiErrorWidget extends StatelessWidget {
           // 标题
           Row(
             children: [
-              const Icon(Icons.error_outline, color: Colors.red),
+              const Icon(AppleIcons.error, color: Colors.red),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -379,7 +380,7 @@ class ApiErrorWidget extends StatelessWidget {
                   // 复制详细信息
                   _showDetails(context);
                 },
-                icon: const Icon(Icons.info_outline, size: 16),
+                icon: const Icon(AppleIcons.info, size: 16),
                 label: const Text('详情'),
               ),
             ],

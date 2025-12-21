@@ -5,8 +5,47 @@ import 'dart:core';
 class ContentDetector {
   /// 检测是否包含 Mermaid 图表
   static bool containsMermaid(String content) {
-    return content.contains('```mermaid') || 
-           content.contains('~~~mermaid');
+    return RegExp(r'(```|~~~)mermaid\b').hasMatch(content);
+  }
+
+  static final RegExp _mermaidBlockRegex = RegExp(
+    r'(```|~~~)mermaid\s*([\s\S]*?)(\1)',
+    multiLine: true,
+  );
+
+  /// 将内容按 Mermaid 代码块分割（保持顺序）
+  ///
+  /// 返回的 segments 中：
+  /// - isMermaid=true  => content 为 mermaid 代码（不包含围栏）
+  /// - isMermaid=false => content 为普通文本片段
+  static List<({bool isMermaid, String content})> splitByMermaidBlocks(String content) {
+    final segments = <({bool isMermaid, String content})>[];
+
+    var lastIndex = 0;
+    for (final match in _mermaidBlockRegex.allMatches(content)) {
+      if (match.start > lastIndex) {
+        segments.add((
+          isMermaid: false,
+          content: content.substring(lastIndex, match.start),
+        ));
+      }
+
+      final code = match.group(2)?.trim();
+      if (code != null && code.isNotEmpty) {
+        segments.add((isMermaid: true, content: code));
+      }
+
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < content.length) {
+      segments.add((
+        isMermaid: false,
+        content: content.substring(lastIndex),
+      ));
+    }
+
+    return segments;
   }
 
   /// 检测是否包含复杂 LaTeX（需要 WebView 渲染）
@@ -170,19 +209,11 @@ class ContentDetector {
   /// 提取所有 Mermaid 代码块
   static List<String> extractMermaidBlocks(String content) {
     final blocks = <String>[];
-    final regex = RegExp(
-      r'```mermaid\s*([\s\S]*?)```',
-      multiLine: true,
-    );
-    
-    final matches = regex.allMatches(content);
-    for (var match in matches) {
-      final code = match.group(1)?.trim();
-      if (code != null && code.isNotEmpty) {
-        blocks.add(code);
+    for (final segment in splitByMermaidBlocks(content)) {
+      if (segment.isMermaid && segment.content.trim().isNotEmpty) {
+        blocks.add(segment.content.trim());
       }
     }
-    
     return blocks;
   }
 
@@ -204,10 +235,13 @@ class ContentDetector {
 
   /// 移除内容中的 Mermaid 代码块（用于混合渲染）
   static String removeMermaidBlocks(String content) {
-    return content.replaceAll(
-      RegExp(r'```mermaid\s*[\s\S]*?```', multiLine: true),
-      '',
-    ).trim();
+    final buf = StringBuffer();
+    for (final segment in splitByMermaidBlocks(content)) {
+      if (!segment.isMermaid) {
+        buf.write(segment.content);
+      }
+    }
+    return buf.toString().trim();
   }
 }
 

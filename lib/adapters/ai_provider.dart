@@ -204,7 +204,9 @@ class ProviderFactory {
       case ProviderType.openai:
         return OpenAIProvider(config);
       case ProviderType.gemini:
-        return GeminiProvider(config);
+        // 临时：使用 OpenAI 兼容实现以支持大多数聚合/代理（如 OpenRouter）的 Gemini 路由
+        // 待实现原生 GeminiProvider 后再切换
+        return OpenAIProvider(config);
       case ProviderType.deepseek:
         return DeepSeekProvider(config);
       case ProviderType.claude:

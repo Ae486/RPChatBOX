@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 
 /// AI模型配置
 /// 包含模型能力、参数和显示属性
@@ -132,7 +133,7 @@ enum ModelCapability {
   network('联网', Icons.public, Color(0xFFFF9800)),
   tool('工具', Icons.build, Color(0xFF9C27B0)),
   audio('音频', Icons.mic, Color(0xFFE91E63)),
-  video('视频', Icons.videocam, Color(0xFFF44336));
+  video('视频', AppleIcons.video, Color(0xFFF44336));
 
   final String displayName;
   final IconData icon;

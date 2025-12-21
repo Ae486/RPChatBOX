@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../design_system/apple_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 /// 全局浮动提示框工具类
@@ -207,23 +208,23 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
     switch (widget.type) {
       case _ToastType.loading:
         backgroundColor = Colors.blue.shade50;
-        iconData = Icons.info;
+        iconData = AppleIcons.info;
         iconColor = Colors.blue;
         showLoading = true;
         break;
       case _ToastType.success:
         backgroundColor = Colors.green.shade50;
-        iconData = Icons.check_circle;
+        iconData = AppleIcons.checkCircle;
         iconColor = Colors.green;
         break;
       case _ToastType.error:
         backgroundColor = Colors.red.shade50;
-        iconData = Icons.error;
+        iconData = AppleIcons.error;
         iconColor = Colors.red;
         break;
       case _ToastType.info: // 🆕 信息提示
         backgroundColor = Colors.orange.shade50;
-        iconData = Icons.info_outline;
+        iconData = AppleIcons.info;
         iconColor = Colors.orange;
         break;
     }
@@ -289,7 +290,7 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
                   // 关闭按钮（非加载状态）
                   if (!showLoading)
                     IconButton(
-                      icon: const Icon(Icons.close, size: 20),
+                      icon: const Icon(AppleIcons.close, size: 20),
                       onPressed: _dismiss,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
