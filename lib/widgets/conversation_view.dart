@@ -15,11 +15,12 @@ import '../services/export_service.dart';
 import '../utils/token_counter.dart';
 import 'message_actions.dart';
 import 'enhanced_content_renderer.dart';
-import '../models/conversation_settings.dart';
 import 'enhanced_input_area.dart';
-import 'apple_toast.dart';
-import '../design_system/apple_icons.dart';
+import '../models/conversation_settings.dart';
+import '../utils/global_toast.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import '../main.dart' show globalModelServiceManager;
+
 import '../controllers/stream_output_controller.dart';
 import '../adapters/ai_provider.dart';
 import '../utils/chunk_buffer.dart';
@@ -638,14 +639,14 @@ class ConversationViewState extends State<ConversationView>
     final modelId = _conversationSettings.selectedModelId;
     if (modelId == null) {
       // 🆕 使用全局提示框
-      AppleToast.warning(context, message: '请先选择一个模型');
+      GlobalToast.warning(context, message: '请先选择一个模型');
       return;
     }
 
     final modelWithProvider = globalModelServiceManager.getModelWithProvider(modelId);
     if (modelWithProvider == null) {
       // 🆕 使用全局提示框
-      AppleToast.error(context, message: '无法找到指定的模型');
+      GlobalToast.error(context, message: '无法找到指定的模型');
       return;
     }
 
@@ -821,7 +822,7 @@ class ConversationViewState extends State<ConversationView>
 
           if (mounted) {
             // 🆕 使用全局提示框
-            AppleToast.error(context, message: '消息发送失败\n${error.toString()}');
+            GlobalToast.error(context, message: '消息发送失败\n${error.toString()}');
           }
         },
       );
@@ -834,7 +835,7 @@ class ConversationViewState extends State<ConversationView>
 
       if (mounted) {
         // 🆕 使用全局提示框
-        AppleToast.error(context, message: '消息发送失败\n${e.toString()}');
+        GlobalToast.error(context, message: '消息发送失败\n${e.toString()}');
       }
     }
   }
@@ -975,7 +976,7 @@ class ConversationViewState extends State<ConversationView>
   void _copyMessage(String content) {
     Clipboard.setData(ClipboardData(text: content));
     // 🆕 使用全局提示框
-    AppleToast.success(context, message: '已复制到剪贴板');
+    GlobalToast.success(context, message: '已复制到剪贴板');
   }
 
   /// 导出消息（进入批量导出模式）
@@ -1043,7 +1044,7 @@ class ConversationViewState extends State<ConversationView>
   /// 导出选中的消息
   Future<void> _exportSelectedMessages() async {
     if (_selectedMessageIds.isEmpty) {
-      AppleToast.warning(context, message: '请先选择要导出的消息');
+      GlobalToast.warning(context, message: '请先选择要导出的消息');
       return;
     }
 
@@ -1061,13 +1062,13 @@ class ConversationViewState extends State<ConversationView>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(AppleIcons.document),
+              leading: const Icon(OwuiIcons.document),
               title: const Text('Markdown'),
               subtitle: Text('${selectedMessages.length} 条消息'),
               onTap: () => Navigator.pop(context, 'md'),
             ),
             ListTile(
-              leading: const Icon(AppleIcons.document),
+              leading: const Icon(OwuiIcons.document),
               title: const Text('纯文本'),
               subtitle: Text('${selectedMessages.length} 条消息'),
               onTap: () => Navigator.pop(context, 'txt'),
@@ -1110,7 +1111,7 @@ class ConversationViewState extends State<ConversationView>
 
       if (mounted) {
         Clipboard.setData(ClipboardData(text: filePath));
-        AppleToast.success(
+        GlobalToast.success(
           context,
           message: '已导出 ${selectedMessages.length} 条消息\n路径已复制到剪贴板',
         );
@@ -1120,7 +1121,7 @@ class ConversationViewState extends State<ConversationView>
       }
     } catch (e) {
       if (mounted) {
-        AppleToast.error(context, message: '导出失败: $e');
+        GlobalToast.error(context, message: '导出失败: $e');
       }
     }
   }
@@ -1389,7 +1390,7 @@ class ConversationViewState extends State<ConversationView>
         children: [
           // 关闭按钮
           IconButton(
-            icon: const Icon(AppleIcons.close),
+            icon: const Icon(OwuiIcons.close),
             onPressed: _exitExportMode,
             tooltip: '退出导出模式',
           ),
@@ -1409,7 +1410,7 @@ class ConversationViewState extends State<ConversationView>
           // 全选按钮
           TextButton.icon(
             onPressed: selectedCount == totalCount ? _deselectAllMessages : _selectAllMessages,
-            icon: Icon(selectedCount == totalCount ? AppleIcons.close : AppleIcons.selectAll),
+            icon: Icon(selectedCount == totalCount ? OwuiIcons.close : OwuiIcons.selectAll),
             label: Text(selectedCount == totalCount ? '取消全选' : '全选'),
           ),
           
@@ -1418,7 +1419,7 @@ class ConversationViewState extends State<ConversationView>
           // 导出按钮
           FilledButton.icon(
             onPressed: selectedCount > 0 ? _exportSelectedMessages : null,
-            icon: const Icon(AppleIcons.download),
+            icon: const Icon(OwuiIcons.download),
             label: const Text('导出'),
           ),
         ],
@@ -1515,7 +1516,7 @@ class ConversationViewState extends State<ConversationView>
             children: [
               ScaleTransition(
                 scale: _bulbController ?? _staticScale,
-                child: const Icon(AppleIcons.lightbulb, size: 16),
+                child: const Icon(OwuiIcons.lightbulb, size: 16),
               ),
               SizedBox(width: ChatBoxTokens.spacing.xs + 2),
               ValueListenableBuilder<int>(
@@ -1549,8 +1550,8 @@ class ConversationViewState extends State<ConversationView>
               if (!_isThinkingOpen)
                 AnimatedCrossFade(
                   duration: const Duration(milliseconds: 150),
-                  firstChild: const Icon(AppleIcons.arrowDown, size: 18),
-                  secondChild: const Icon(AppleIcons.arrowUp, size: 18),
+                  firstChild: const Icon(OwuiIcons.arrowDown, size: 18),
+                  secondChild: const Icon(OwuiIcons.arrowUp, size: 18),
                   crossFadeState: _thinkingExpanded
                       ? CrossFadeState.showSecond
                       : CrossFadeState.showFirst,
@@ -1659,7 +1660,7 @@ class ConversationViewState extends State<ConversationView>
         children: [
           Row(
             children: [
-              const Icon(AppleIcons.lightbulb, size: 16),
+              const Icon(OwuiIcons.lightbulb, size: 16),
               SizedBox(width: ChatBoxTokens.spacing.xs + 2),
               Text(
                 '已思考 ${durSec}s',
@@ -1672,8 +1673,8 @@ class ConversationViewState extends State<ConversationView>
               const Spacer(),
               AnimatedCrossFade(
                 duration: const Duration(milliseconds: 150),
-                firstChild: const Icon(AppleIcons.arrowDown, size: 18),
-                secondChild: const Icon(AppleIcons.arrowUp, size: 18),
+                firstChild: const Icon(OwuiIcons.arrowDown, size: 18),
+                secondChild: const Icon(OwuiIcons.arrowUp, size: 18),
                 crossFadeState: expanded
                     ? CrossFadeState.showSecond
                     : CrossFadeState.showFirst,
@@ -1779,7 +1780,7 @@ class ConversationViewState extends State<ConversationView>
                     ? Theme.of(context).colorScheme.primary
                     : Theme.of(context).colorScheme.secondary,
                 child: Icon(
-                  isUser ? AppleIcons.person : AppleIcons.chatbot,
+                  isUser ? OwuiIcons.person : OwuiIcons.chatbot,
                   color: Colors.white,
                   size: 24,
                 ),
@@ -2091,7 +2092,7 @@ class ConversationViewState extends State<ConversationView>
         },
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        child: const Icon(AppleIcons.arrowDown),
+        child: const Icon(OwuiIcons.arrowDown),
       ),
     );
   }
@@ -2142,7 +2143,7 @@ class ConversationViewState extends State<ConversationView>
                                 return _buildFilePlaceholder(
                                   file.name,
                                   '图片加载失败',
-                                  AppleIcons.imageOff,
+                                  OwuiIcons.imageOff,
                                 );
                               },
                             ),
@@ -2151,7 +2152,7 @@ class ConversationViewState extends State<ConversationView>
                       : _buildFilePlaceholder(
                           file.name,
                           '图片已不存在',
-                          AppleIcons.imageOff,
+                          OwuiIcons.imageOff,
                         ),
                 );
               } else {
@@ -2210,7 +2211,7 @@ class ConversationViewState extends State<ConversationView>
                                 ),
                                 SizedBox(width: ChatBoxTokens.spacing.sm),
                                 Icon(
-                                  AppleIcons.externalLink,
+                                  OwuiIcons.link,
                                   size: 16,
                                   color: Theme.of(context)
                                       .colorScheme
@@ -2224,7 +2225,7 @@ class ConversationViewState extends State<ConversationView>
                       : _buildFilePlaceholder(
                           file.name,
                           '文件已不存在',
-                          AppleIcons.file,
+                          OwuiIcons.file,
                         ),
                 );
               }
@@ -2288,12 +2289,12 @@ class ConversationViewState extends State<ConversationView>
         await launchUrl(uri);
       } else {
         if (mounted) {
-          AppleToast.error(context, message: '无法打开文件: $path');
+          GlobalToast.error(context, message: '无法打开文件: $path');
         }
       }
     } catch (e) {
       if (mounted) {
-        AppleToast.error(context, message: '打开文件失败: ${e.toString()}');
+        GlobalToast.error(context, message: '打开文件失败: ${e.toString()}');
       }
     }
   }
@@ -2310,7 +2311,7 @@ class ConversationViewState extends State<ConversationView>
             title: Text(imageName),
             actions: [
               IconButton(
-                icon: const Icon(AppleIcons.close),
+                icon: const Icon(OwuiIcons.close),
                 onPressed: () => Navigator.pop(context),
               ),
             ],
@@ -2333,7 +2334,7 @@ class ConversationViewState extends State<ConversationView>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(AppleIcons.imageOff, size: 64, color: Colors.white54),
+                  const Icon(OwuiIcons.imageOff, size: 64, color: Colors.white54),
                   SizedBox(height: ChatBoxTokens.spacing.lg),
                   Text(
                     '图片加载失败',
@@ -2353,17 +2354,17 @@ class ConversationViewState extends State<ConversationView>
   IconData _getFileIconData(FileType type) {
     switch (type) {
       case FileType.image:
-        return AppleIcons.image;
+        return OwuiIcons.image;
       case FileType.video:
-        return AppleIcons.video;
+        return OwuiIcons.video;
       case FileType.audio:
-        return AppleIcons.audio;
+        return OwuiIcons.audio;
       case FileType.document:
-        return AppleIcons.document;
+        return OwuiIcons.document;
       case FileType.code:
-        return AppleIcons.code;
+        return OwuiIcons.code;
       case FileType.other:
-        return AppleIcons.file;
+        return OwuiIcons.file;
     }
   }
 }

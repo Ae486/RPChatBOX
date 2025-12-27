@@ -26,13 +26,14 @@ class ConversationAdapter extends TypeAdapter<Conversation> {
       scrollIndex: fields[6] as int?,
       roleId: fields[7] as String?,
       roleType: fields[8] as String?,
+      threadJson: fields[9] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Conversation obj) {
     writer
-      ..writeByte(9)
+      ..writeByte(10)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -50,7 +51,9 @@ class ConversationAdapter extends TypeAdapter<Conversation> {
       ..writeByte(7)
       ..write(obj.roleId)
       ..writeByte(8)
-      ..write(obj.roleType);
+      ..write(obj.roleType)
+      ..writeByte(9)
+      ..write(obj.threadJson);
   }
 
   @override

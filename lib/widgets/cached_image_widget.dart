@@ -1,12 +1,12 @@
-import 'dart:io';
-import '../design_system/apple_icons.dart';
+﻿import 'dart:io';
+import '../chat_ui/owui/owui_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 /// 缓存图片组件
-/// 
-/// 支持本地文件和网络图片的显示，自动缓存以提升性能
+///
+/// 支持本地文件和网络图片显示，自动缓存以提升性能
 class CachedImageWidget extends StatelessWidget {
   final String path;
   final BoxFit? fit;
@@ -51,16 +51,15 @@ class CachedImageWidget extends StatelessWidget {
             : (context, url, error) => Container(
                 color: Colors.grey.shade300,
                 child: const Icon(
-                  AppleIcons.imageOff,
+                  OwuiIcons.imageOff,
                   color: Colors.grey,
                   size: 48,
                 ),
               ),
       );
     } else {
-      // 本地文件：使用 Image.file with MemoryCache
-      // Flutter 已经对 Image.file 进行了内存缓存
-      // 我们只需要添加错误处理
+      // 本地文件：使用 Image.file（Flutter 已有内存缓存）
+      // 这里只需要补充错误处理
       final file = File(path);
       
       return Image.file(
@@ -80,7 +79,7 @@ class CachedImageWidget extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        AppleIcons.imageOff,
+                        OwuiIcons.imageOff,
                         color: Colors.grey,
                         size: 48,
                       ),
@@ -99,3 +98,5 @@ class CachedImageWidget extends StatelessWidget {
     }
   }
 }
+
+

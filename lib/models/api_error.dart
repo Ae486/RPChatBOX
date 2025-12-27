@@ -1,6 +1,8 @@
 import 'dart:convert';
-import '../design_system/apple_icons.dart';
+
 import 'package:flutter/material.dart';
+
+import '../chat_ui/owui/owui_icons.dart';
 
 /// API 错误信息类
 class ApiError implements Exception {
@@ -21,7 +23,7 @@ class ApiError implements Exception {
   }) : timestamp = timestamp ?? DateTime.now();
 
   /// 获取错误标题
-  String get title => '❌ API 请求失败 (HTTP $statusCode)';
+  String get title => 'API 请求失败 (HTTP $statusCode)';
 
   /// 获取人类可读的错误描述
   String get friendlyMessage {
@@ -33,7 +35,7 @@ class ApiError implements Exception {
       case 403:
         return '禁止访问：没有权限访问此资源';
       case 404:
-        return '资源不存在：请检查 API 地址和端点';
+        return '资源不存在：请检查 API 地址和端口';
       case 429:
         return '请求过于频繁：已触发速率限制，请稍后重试';
       case 500:
@@ -71,15 +73,15 @@ class ApiError implements Exception {
 
   /// 建议重试延迟（毫秒）
   int get retryDelayMs {
-    if (statusCode == 429) return 5000; // 速率限制：5秒后重试
-    if (statusCode >= 500) return 3000; // 服务器错误：3秒后重试
-    return 1000; // 其他：1秒后重试
+    if (statusCode == 429) return 5000; // 速率限制：5 秒后重试
+    if (statusCode >= 500) return 3000; // 服务器错误：3 秒后重试
+    return 1000; // 其他：1 秒后重试
   }
 
   /// 获取完整错误信息（用于调试）
   String get fullMessage {
     final buffer = StringBuffer();
-    buffer.writeln('═══ API 错误详情 ═══');
+    buffer.writeln('══ API 错误详情 ══');
     buffer.writeln('状态码: $statusCode');
     buffer.writeln('消息: $message');
     if (errorCode != null) buffer.writeln('错误代码: $errorCode');
@@ -155,8 +157,7 @@ enum HttpStatus {
   factory HttpStatus.fromCode(int code) {
     try {
       return HttpStatus.values.firstWhere((status) => status.code == code);
-    } catch (e) {
-      // 未知状态码
+    } catch (_) {
       if (code >= 400 && code < 500) return HttpStatus.badRequest;
       if (code >= 500 && code < 600) return HttpStatus.internalServerError;
       return HttpStatus.ok;
@@ -175,15 +176,13 @@ class ApiErrorParser {
     try {
       // 尝试解析 JSON 响应
       final json = _tryParseJson(responseBody);
-
       if (json != null) {
         return _parseJsonError(statusCode, json, responseBody);
       }
-    } catch (e) {
+    } catch (_) {
       // JSON 解析失败，返回原始响应
     }
 
-    // 返回通用错误
     return ApiError(
       statusCode: statusCode,
       message: responseBody.isNotEmpty
@@ -211,7 +210,6 @@ class ApiErrorParser {
           rawResponse: rawResponse,
         );
       }
-      // 处理其他错误格式
       return ApiError(
         statusCode: statusCode,
         message: error.toString(),
@@ -267,7 +265,7 @@ class ApiErrorParser {
       if (decoded is Map<String, dynamic>) {
         return decoded;
       }
-    } catch (e) {
+    } catch (_) {
       return null;
     }
     return null;
@@ -299,10 +297,9 @@ class ApiErrorWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 标题
           Row(
             children: [
-              const Icon(AppleIcons.error, color: Colors.red),
+              const Icon(OwuiIcons.error, color: Colors.red),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -317,8 +314,6 @@ class ApiErrorWidget extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-
-          // 错误消息
           Text(
             error.friendlyMessage,
             style: TextStyle(
@@ -327,8 +322,6 @@ class ApiErrorWidget extends StatelessWidget {
               height: 1.5,
             ),
           ),
-
-          // 错误代码（如果有）
           if (error.errorCode != null) ...[
             const SizedBox(height: 8),
             Container(
@@ -347,8 +340,6 @@ class ApiErrorWidget extends StatelessWidget {
               ),
             ),
           ],
-
-          // 详情（如果有）
           if (error.details != null) ...[
             const SizedBox(height: 8),
             Text(
@@ -359,8 +350,6 @@ class ApiErrorWidget extends StatelessWidget {
               ),
             ),
           ],
-
-          // 操作按钮
           const SizedBox(height: 12),
           Row(
             children: [
@@ -376,11 +365,8 @@ class ApiErrorWidget extends StatelessWidget {
                 ),
               const SizedBox(width: 8),
               TextButton.icon(
-                onPressed: () {
-                  // 复制详细信息
-                  _showDetails(context);
-                },
-                icon: const Icon(AppleIcons.info, size: 16),
+                onPressed: () => _showDetails(context),
+                icon: const Icon(OwuiIcons.info, size: 16),
                 label: const Text('详情'),
               ),
             ],

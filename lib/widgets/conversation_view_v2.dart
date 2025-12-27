@@ -1,0 +1,418 @@
+/// INPUT: Conversation/ChatSettings + globalModelServiceManager + flutter_chat_ui
+/// OUTPUT: ConversationViewV2() - 被 ConversationViewHost 使用；State API: scrollToMessage()/enterExportMode()
+/// POS: UI 层 / Chat / V2（flutter_chat_ui 集成）核心模块（改动需全量回归）
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_chat_core/flutter_chat_core.dart' as chat;
+import 'package:flutter_chat_ui/flutter_chat_ui.dart' hide ChatMessage;
+import 'package:flyer_chat_file_message/flyer_chat_file_message.dart';
+import 'package:flyer_chat_image_message/flyer_chat_image_message.dart';
+import 'package:provider/provider.dart';
+
+import '../adapters/ai_provider.dart' as ai;
+import '../adapters/chat_message_adapter.dart';
+import '../chat_ui/owui/assistant_message.dart';
+import '../chat_ui/owui/chat_theme.dart';
+import '../chat_ui/owui/composer/owui_composer.dart';
+import '../chat_ui/owui/message_highlight_sweep.dart';
+import '../chat_ui/owui/owui_tokens_ext.dart';
+import '../chat_ui/owui/palette.dart';
+
+import '../controllers/stream_output_controller.dart';
+import '../main.dart' show globalModelServiceManager;
+import '../models/attached_file.dart';
+import '../models/chat_settings.dart';
+import '../models/conversation.dart';
+import '../models/conversation_settings.dart';
+import '../models/conversation_thread.dart';
+import '../models/model_config.dart';
+import '../models/message.dart' as app;
+import '../models/provider_config.dart';
+import '../services/export_service.dart';
+import '../utils/chunk_buffer.dart';
+import '../utils/token_counter.dart';
+import '../utils/global_toast.dart';
+import 'stream_manager.dart';
+
+part 'conversation_view_v2/build.dart';
+part 'conversation_view_v2/export_mode.dart';
+part 'conversation_view_v2/message_actions_sheet.dart';
+part 'conversation_view_v2/scroll_and_highlight.dart';
+part 'conversation_view_v2/streaming.dart';
+part 'conversation_view_v2/tokens_and_ids.dart';
+part 'conversation_view_v2/user_bubble.dart';
+part 'conversation_view_v2/thread_projection.dart';
+
+const String _v2CurrentUserId = 'user';
+const String _v2AssistantUserId = 'assistant';
+int _v2MessageIdSeq = 0;
+
+class ConversationViewV2 extends StatefulWidget {
+  final Conversation conversation;
+  final ChatSettings settings;
+  final VoidCallback onConversationUpdated;
+  final Function(Conversation) onTokenUsageUpdated;
+
+  const ConversationViewV2({
+    super.key,
+    required this.conversation,
+    required this.settings,
+    required this.onConversationUpdated,
+    required this.onTokenUsageUpdated,
+  });
+
+  @override
+  State<ConversationViewV2> createState() => ConversationViewV2State();
+}
+
+abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  late final chat.InMemoryChatController _chatController;
+  final _messageController = TextEditingController();
+
+  late ConversationSettings _conversationSettings;
+  late EnhancedStreamController _streamController;
+  ChunkBuffer? _chunkBuffer;
+  final StreamManager _streamManager = StreamManager();
+
+  bool _isLoading = false;
+  bool _attachmentBarVisible = true;
+  ai.AIProvider? _currentProvider;
+  bool _isDisposed = false;
+
+  bool _isExportMode = false;
+  final Set<String> _selectedMessageIds = <String>{};
+
+  String? _pendingScrollToMessageId;
+  int _pendingScrollToMessageAttempts = 0;
+  String? _highlightedMessageId;
+  int _highlightNonce = 0;
+  Timer? _clearHighlightTimer;
+
+  String? _activeStreamId;
+  chat.Message? _activeAssistantPlaceholder;
+  int? _activePromptTokensEstimate;
+ConversationThread? _thread;
+  Timer? _persistThreadTimer;
+  String? _lastPersistedThreadJson;
+
+  final Map<String, chat.Message> _chatMessageCache = <String, chat.Message>{};
+  final Map<String, int> _chatMessageCacheFingerprints = <String, int>{};
+
+  bool _autoFollowEnabled = true;
+
+
+  bool _showScrollToBottom = false;
+  double _lastScrollPixels = 0;
+  DateTime _lastAutoFollowRequest = DateTime.fromMillisecondsSinceEpoch(0);
+
+  @override
+  void initState() {
+    super.initState();
+
+    _chatController = chat.InMemoryChatController();
+
+    _conversationSettings = globalModelServiceManager.getConversationSettings(
+      widget.conversation.id,
+    );
+    _streamController = EnhancedStreamController();
+
+    _chunkBuffer = ChunkBuffer(
+      onFlush: (content) {
+        if (!mounted || _isDisposed) return;
+        _handleStreamFlush(content);
+      },
+      flushInterval: const Duration(milliseconds: 50),
+      flushThreshold: 30,
+      enableDebugLog: false,
+    );
+
+    // 初始化同步对话消息到 chatController
+    scheduleMicrotask(() {
+      if (!mounted) return;
+      _syncConversationToChatController();
+    });
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    // Best-effort: stop streaming to prevent late callbacks touching a deactivated tree.
+    _streamController.stop();
+    _chunkBuffer?.dispose();
+    _clearHighlightTimer?.cancel();
+    _persistThreadTimer?.cancel();
+    _persistThreadTimer = null;
+    _streamController.dispose();
+    _messageController.dispose();
+    _chatController.dispose();
+    _streamManager.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant ConversationViewV2 oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversation.id != widget.conversation.id) {
+      _flushPersistThreadNow();
+      _conversationSettings = globalModelServiceManager.getConversationSettings(
+        widget.conversation.id,
+      );
+      _thread = null;
+      _chatMessageCache.clear();
+      _chatMessageCacheFingerprints.clear();
+      scheduleMicrotask(() {
+        if (!mounted) return;
+        _syncConversationToChatController();
+      });
+    }
+  }
+
+  ConversationThread _getThread({bool rebuildFromMessagesIfMismatch = true}) {
+    final conversation = widget.conversation;
+
+    if (_thread == null || _thread!.conversationId != conversation.id) {
+      _thread = _loadThreadFromConversation(conversation);
+    }
+
+    if (rebuildFromMessagesIfMismatch) {
+      final raw = (conversation.threadJson ?? '').trim();
+      final hasUsableThreadJson = raw.isNotEmpty && _thread!.nodes.isNotEmpty;
+
+      final hasBranches = _thread!.nodes.values.any((n) => n.children.length > 1);
+      final messages = conversation.messages;
+      final messagesLastId = messages.isEmpty ? '' : messages.last.id;
+
+      // Phase 1 (tree as source-of-truth):
+      // - If there is NO usable threadJson yet, build a linear thread from messages.
+      // - If the current thread is still linear (no branches), keep it synced with
+      //   the legacy linear list to avoid breaking existing delete/truncate paths.
+      // - Once branches exist, never rebuild from `conversation.messages`.
+      final shouldRebuildFromMessages = !hasUsableThreadJson ||
+          (!hasBranches &&
+              (_thread!.nodes.length != messages.length ||
+                  _thread!.activeLeafId != messagesLastId));
+
+      if (shouldRebuildFromMessages) {
+        _thread = ConversationThread.fromLinearMessages(conversation.id, messages);
+        _persistThreadNoSave(_thread!);
+      }
+    }
+
+    return _thread!;
+  }
+
+  ConversationThread _loadThreadFromConversation(Conversation conversation) {
+    final raw = (conversation.threadJson ?? '').trim();
+    if (raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) {
+          _lastPersistedThreadJson = raw;
+          return ConversationThread.fromJson(decoded);
+        }
+        if (decoded is Map) {
+          _lastPersistedThreadJson = raw;
+          return ConversationThread.fromJson(decoded.cast<String, dynamic>());
+        }
+      } catch (_) {
+        // Fall back to linear messages.
+      }
+    }
+
+    return ConversationThread.fromLinearMessages(
+      conversation.id,
+      conversation.messages,
+    );
+  }
+
+  void _persistThreadNoSave(ConversationThread thread) {
+    final encoded = jsonEncode(thread.toJson());
+    _lastPersistedThreadJson = encoded;
+    widget.conversation.threadJson = encoded;
+  }
+
+  void _schedulePersistThread({
+    Duration delay = const Duration(milliseconds: 350),
+  }) {
+    if (_isDisposed) return;
+    _persistThreadTimer?.cancel();
+    _persistThreadTimer = Timer(delay, () {
+      if (_isDisposed) return;
+      final thread = _thread;
+      if (thread == null) return;
+
+      final encoded = jsonEncode(thread.toJson());
+      if (encoded == _lastPersistedThreadJson) return;
+
+      _lastPersistedThreadJson = encoded;
+      widget.conversation.threadJson = encoded;
+      widget.onConversationUpdated();
+    });
+  }
+
+  void _flushPersistThreadNow() {
+    if (_isDisposed) return;
+
+    _persistThreadTimer?.cancel();
+    _persistThreadTimer = null;
+
+    final thread = _thread;
+    if (thread == null) return;
+
+    final encoded = jsonEncode(thread.toJson());
+    if (encoded == _lastPersistedThreadJson) return;
+
+    _lastPersistedThreadJson = encoded;
+    widget.conversation.threadJson = encoded;
+    if (mounted && !_isDisposed) {
+      widget.onConversationUpdated();
+    }
+  }
+
+  void _syncConversationMessagesSnapshotFromThread(ConversationThread thread) {
+    final chain = buildActiveMessageChain(thread);
+    final messages = widget.conversation.messages;
+    messages
+      ..clear()
+      ..addAll(chain);
+  }
+
+  int _fingerprintAppMessage(app.Message message) {
+    final attachments = message.attachedFiles;
+    final attachmentsKey = attachments == null || attachments.isEmpty
+        ? 0
+        : Object.hashAll(
+            attachments.map(
+              (f) => Object.hash(f.id, f.path, f.mimeType, f.name),
+            ),
+          );
+
+    return Object.hash(
+      message.isUser,
+      message.content,
+      message.timestamp.millisecondsSinceEpoch,
+      message.inputTokens ?? -1,
+      message.outputTokens ?? -1,
+      message.modelName ?? '',
+      message.providerName ?? '',
+      attachmentsKey,
+    );
+  }
+
+  chat.Message _toFlutterChatMessageCached(app.Message message) {
+    final fp = _fingerprintAppMessage(message);
+    final cachedFp = _chatMessageCacheFingerprints[message.id];
+    final cached = _chatMessageCache[message.id];
+
+    if (cached != null && cachedFp == fp) return cached;
+
+    final converted = ChatMessageAdapter.toFlutterChatMessage(message);
+    _chatMessageCache[message.id] = converted;
+    _chatMessageCacheFingerprints[message.id] = fp;
+    return converted;
+  }
+
+  List<String> _assistantVariantIdsForUser(
+    String userMessageId,
+    ConversationThread thread,
+  ) {
+    final node = thread.nodes[userMessageId];
+    if (node == null) return const <String>[];
+    if (!node.message.isUser) return const <String>[];
+
+    final result = <String>[];
+    for (final childId in node.children) {
+      final child = thread.nodes[childId];
+      if (child == null) continue;
+      if (child.message.isUser) continue;
+      result.add(childId);
+    }
+    return result;
+  }
+
+  Future<void> _switchAssistantVariant(String userMessageId, int delta) async {
+    if (_isDisposed) return;
+    if (_isLoading || _streamController.isStreaming) {
+      GlobalToast.warning(context, message: '请先停止输出再切换版本');
+      return;
+    }
+
+    final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+    final variants = _assistantVariantIdsForUser(userMessageId, thread);
+    if (variants.length <= 1) return;
+
+    final selected = thread.selectedChild[userMessageId];
+    var index = selected == null ? -1 : variants.indexOf(selected);
+    if (index < 0) index = variants.length - 1;
+
+    final rawNext = index + delta;
+    final nextIndex = ((rawNext % variants.length) + variants.length) % variants.length;
+
+    thread.selectedChild[userMessageId] = variants[nextIndex];
+    thread.normalize();
+
+    _syncConversationMessagesSnapshotFromThread(thread);
+    _persistThreadNoSave(thread);
+    _schedulePersistThread(delay: const Duration(milliseconds: 220));
+
+    _syncConversationToChatController();
+    scrollToMessage(userMessageId);
+  }
+
+  void scrollToMessage(String messageId);
+
+  void _syncConversationToChatController();
+
+  void _handleStreamFlush(String content);
+
+  bool _handleChatScrollNotification(ScrollNotification notification);
+
+
+  void _requestAutoFollow({required bool smooth});
+  Widget _wrapHighlighted({required String messageId, required Widget child});
+  Widget _wrapExportSelectable({
+    required chat.Message message,
+    required Widget child,
+  });
+
+  Widget _buildExportModeToolbar();
+  Widget _buildTokenFooter(chat.Message message, {required bool isSentByMe});
+  Widget _buildUserBubble({required chat.TextMessage message});
+
+  Future<void> _sendMessage();
+  Future<void> _startAssistantResponse({
+    required ({ProviderConfig provider, ModelConfig model}) modelWithProvider,
+    String? parentUserMessageId,
+    bool animateInsert = true,
+    bool useAtomicSetMessages = false,
+  });
+  Future<void> _stopStreaming();
+  Future<void> _showMessageActionsSheet(chat.Message message);
+
+  bool _isProbablyNetworkUrl(String source);
+  String _toFilePathIfNeeded(String source);
+
+  int _estimatePromptTokens(List<ai.ChatMessage> messages);
+  String _newMessageId();
+}
+
+class ConversationViewV2State extends _ConversationViewV2StateBase
+    with
+        _ConversationViewV2ScrollMixin,
+        _ConversationViewV2ExportMixin,
+        _ConversationViewV2TokensMixin,
+        _ConversationViewV2StreamingMixin,
+        _ConversationViewV2MessageActionsMixin,
+        _ConversationViewV2UserBubbleMixin,
+        _ConversationViewV2BuildMixin {}
+

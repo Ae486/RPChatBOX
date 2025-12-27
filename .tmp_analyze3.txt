@@ -1,0 +1,842 @@
+﻿ERROR|COMPILE_TIME_ERROR|NON_TYPE_AS_TYPE_ARGUMENT|H:\\chatboxapp\\lib\\pages\\chat_page.dart|132|39|21|The name 'ConversationViewState' isn't a type, so it can't be used as a type argument.
+ERROR|COMPILE_TIME_ERROR|AMBIGUOUS_IMPORT|H:\\chatboxapp\\lib\\pages\\chat_page.dart|167|28|10|The name 'showDialog' is defined in the libraries 'package:chatboxapp/pages/custom_roles_page.dart', 'package:chatboxapp/pages/search_page.dart', and 'package:flutter/src/material/dialog.dart (via package:flutter/material.dart)'.
+ERROR|COMPILE_TIME_ERROR|AMBIGUOUS_IMPORT|H:\\chatboxapp\\lib\\pages\\chat_page.dart|204|29|10|The name 'showDialog' is defined in the libraries 'package:chatboxapp/pages/custom_roles_page.dart', 'package:chatboxapp/pages/search_page.dart', and 'package:flutter/src/material/dialog.dart (via package:flutter/material.dart)'.
+ERROR|COMPILE_TIME_ERROR|AMBIGUOUS_IMPORT|H:\\chatboxapp\\lib\\pages\\chat_page.dart|262|5|10|The name 'showDialog' is defined in the libraries 'package:chatboxapp/pages/custom_roles_page.dart', 'package:chatboxapp/pages/search_page.dart', and 'package:flutter/src/material/dialog.dart (via package:flutter/material.dart)'.
+ERROR|COMPILE_TIME_ERROR|AMBIGUOUS_IMPORT|H:\\chatboxapp\\lib\\pages\\chat_page.dart|322|29|10|The name 'showDialog' is defined in the libraries 'package:chatboxapp/pages/custom_roles_page.dart', 'package:chatboxapp/pages/search_page.dart', and 'package:flutter/src/material/dialog.dart (via package:flutter/material.dart)'.
+ERROR|COMPILE_TIME_ERROR|CREATION_WITH_NON_TYPE|H:\\chatboxapp\\lib\\pages\\chat_page.dart|421|37|15|The name 'CustomRolesPage' isn't a class.
+ERROR|COMPILE_TIME_ERROR|AMBIGUOUS_IMPORT|H:\\chatboxapp\\lib\\pages\\chat_page.dart|481|5|10|The name 'showDialog' is defined in the libraries 'package:chatboxapp/pages/custom_roles_page.dart', 'package:chatboxapp/pages/search_page.dart', and 'package:flutter/src/material/dialog.dart (via package:flutter/material.dart)'.
+ERROR|SYNTACTIC_ERROR|EXTRANEOUS_MODIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|10|3|5|Can't have modifier 'const' here.
+ERROR|COMPILE_TIME_ERROR|INVALID_SUPER_FORMAL_PARAMETER_LOCATION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|10|26|5|Super parameters can only be used in non-redirecting generative constructors.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|10|37|1|A function body must be provided.
+ERROR|COMPILE_TIME_ERROR|NON_TYPE_AS_TYPE_ARGUMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|13|9|15|The name 'CustomRolesPage' isn't a type, so it can't be used as a type argument.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|14|1|1|Expected a method, getter, setter or operator declaration.
+ERROR|COMPILE_TIME_ERROR|NON_ABSTRACT_CLASS_INHERITS_ABSTRACT_MEMBER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|16|7|21|Missing concrete implementation of 'abstract class State<T extends StatefulWidget> with Diagnosticable.build'.
+ERROR|COMPILE_TIME_ERROR|NON_TYPE_AS_TYPE_ARGUMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|16|43|15|The name 'CustomRolesPage' isn't a type, so it can't be used as a type argument.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_METHOD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|26|5|11|The method '_initialize' isn't defined for the type '_CustomRolesPageState'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_CLASS_MEMBER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|36|5|3|Expected a class member.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|36|9|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|MISSING_METHOD_PARAMETERS|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|36|9|1|Methods must have an explicit list of parameters.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|37|7|5|The await expression can only be used in an async function.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|39|7|5|The await expression can only be used in an async function.
+ERROR|SYNTACTIC_ERROR|EXPECTED_CLASS_MEMBER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|40|7|5|Expected a class member.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|40|13|1|Expected an identifier.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_METHOD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|49|34|15|The method 'loadCustomRoles' isn't defined for the type 'Function'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_FUNCTION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|50|5|8|The function 'setState' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|51|7|12|Undefined name '_customRoles'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|56|56|8|Undefined name 'editRole'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|57|56|8|Undefined name 'editRole'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|58|58|8|Undefined name 'editRole'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|59|27|8|Undefined name 'editRole'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|59|45|4|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|59|48|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|61|20|5|The await expression can only be used in an async function.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|62|16|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|23|8|Undefined name 'editRole'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|58|6|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|58|1|Illegal character '32514'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|58|6|Undefined name '缂栬緫瑙掕壊'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|59|1|Illegal character '26668'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|60|1|Illegal character '32235'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|61|1|Illegal character '29785'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|62|1|Illegal character '25493'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|63|1|Illegal character '22730'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|64|3|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|65|66|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|66|11|7|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|66|11|7|The named parameter 'content' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|72|19|8|Undefined name 'children'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|72|27|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|72|27|1|Expected to find ']'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|96|21|1|Expected to find ']'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|109|19|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|109|19|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|119|47|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|120|23|6|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|143|15|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|143|15|1|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|146|11|7|The named parameter 'actions' isn't defined.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|158|5|1|Expected an identifier.
+ERROR|COMPILE_TIME_ERROR|FINAL_NOT_INITIALIZED|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|158|6|0|The final variable '' must be initialized.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|160|5|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|160|16|2|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|166|13|7|Undefined name 'mounted'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|167|31|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|MISSING_REQUIRED_ARGUMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|172|20|10|The named parameter 'systemPrompt' is required, but there's no corresponding argument.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|173|13|8|Undefined name 'editRole'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|174|15|4|Undefined name 'name'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|175|22|11|Undefined name 'description'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|180|7|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|180|7|2|The name 'if' is already defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|180|20|2|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|181|9|5|The await expression can only be used in an async function.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_METHOD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|181|24|13|The method 'addCustomRole' isn't defined for the type 'Function'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|182|9|4|'else' can't be used as an identifier because it's a keyword.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_PARAMETERS|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|182|9|4|Functions must have an explicit list of parameters.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|183|9|5|The await expression can only be used in an async function.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_METHOD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|183|24|16|The method 'updateCustomRole' isn't defined for the type 'Function'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER_AWAIT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|186|7|5|Undefined name 'await' in function body not marked with 'async'.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|186|13|10|The name '_loadRoles' is already defined.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|186|25|1|A function body must be provided.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|187|5|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|188|3|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|19|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|19|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|19|2|Undefined name '馃挕'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|20|1|Illegal character '25365'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|21|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|25|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|25|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|25|2|Undefined name '馃幆'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|26|1|Illegal character '24134'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|27|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|31|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|31|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|31|2|Undefined name '馃殌'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|32|1|Illegal character '27532'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|33|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|37|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|37|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|37|2|Undefined name '馃摎'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|38|1|Illegal character '25678'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|39|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|43|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|43|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|43|2|Undefined name '馃帹'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|44|1|Illegal character '24121'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|45|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|49|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|49|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|49|2|Undefined name '馃捇'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|50|1|Illegal character '25415'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|51|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|193|52|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|19|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|19|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|19|2|Undefined name '馃専'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|20|1|Illegal character '23554'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|21|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|25|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|25|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|25|2|Undefined name '馃帗'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|26|1|Illegal character '24087'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|27|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|31|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|31|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|31|2|Undefined name '馃摑'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|32|1|Illegal character '25681'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|33|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|37|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|37|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|37|2|Undefined name '馃攳'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|38|1|Illegal character '25907'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|39|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|43|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|43|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|43|2|Undefined name '馃捈'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|44|1|Illegal character '25416'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|45|4|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|49|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|49|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|49|2|Undefined name '馃幁'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|50|1|Illegal character '24129'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|51|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|194|52|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|17|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|17|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|17|5|Undefined name '馃鈥嶐煍'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|18|1|Illegal character '59222'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|19|1|Illegal character '37413'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|20|1|Illegal character '23952'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|21|1|Illegal character '29005'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|23|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|23|1|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|35|6|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|35|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|35|6|Undefined name '馃鈥嶁殨锔'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|36|1|Illegal character '59222'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|37|1|Illegal character '37413'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|38|1|Illegal character '23937'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|39|1|Illegal character '27560'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|40|1|Illegal character '38164'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|42|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|42|1|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|54|6|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|54|1|Illegal character '39299'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|54|6|Undefined name '馃鈥嶁湀锔'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|55|1|Illegal character '59222'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|56|1|Illegal character '37413'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|57|1|Illegal character '23937'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|58|1|Illegal character '28224'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|59|1|Illegal character '38164'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|61|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|61|1|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|196|80|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|199|5|6|'return' can't be used as an identifier because it's a keyword.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|199|5|6|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|MISSING_CONST_FINAL_VAR_OR_TYPE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|199|5|6|Variables must be declared using the keywords 'const', 'final', 'var' or a type name.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER_AWAIT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|199|12|5|Undefined name 'await' in function body not marked with 'async'.
+ERROR|SYNTACTIC_ERROR|NAMED_PARAMETER_OUTSIDE_GROUP|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|200|14|1|Named parameters must be enclosed in curly braces ('{' and '}').
+ERROR|COMPILE_TIME_ERROR|OBSOLETE_COLON_FOR_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|200|14|1|Using a colon as the separator before a default value is no longer supported.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|200|16|7|Undefined name 'context'.
+ERROR|SYNTACTIC_ERROR|NAMED_PARAMETER_OUTSIDE_GROUP|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|201|14|1|Named parameters must be enclosed in curly braces ('{' and '}').
+ERROR|COMPILE_TIME_ERROR|OBSOLETE_COLON_FOR_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|201|14|1|Using a colon as the separator before a default value is no longer supported.
+ERROR|COMPILE_TIME_ERROR|NON_CONSTANT_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|201|16|1435|The default value of an optional parameter must be constant.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|215|43|11|Undefined name 'currentIcon'.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|243|6|1|A function body must be provided.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|244|3|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|248|5|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|248|5|2|The name 'if' is already defined.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|248|9|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|248|10|7|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|248|19|6|A function body must be provided.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|248|25|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|253|5|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|253|5|2|The name 'if' is already defined.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|253|9|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|253|10|14|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|254|18|32|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|254|49|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|255|5|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|255|7|4|'else' can't be used as an identifier because it's a keyword.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_PARAMETERS|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|255|7|4|Functions must have an explicit list of parameters.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|255|7|4|The name 'else' is already defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|257|9|16|Undefined name 'allConversations'.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|257|28|5|The await expression can only be used in an async function.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|257|34|20|Undefined name '_conversationService'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|258|32|16|Undefined name 'allConversations'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|266|5|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|266|5|2|The name 'if' is already defined.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|266|9|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|266|10|7|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|266|19|6|A function body must be provided.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|266|25|1|Expected an identifier.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|271|23|5|The await expression can only be used in an async function.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|272|16|7|Undefined name 'context'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|279|46|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|280|13|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|280|13|2|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|280|17|23|Undefined name 'hasRelatedConversations'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|282|17|23|Undefined name 'hasRelatedConversations'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|308|79|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|309|23|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|324|25|23|Undefined name 'hasRelatedConversations'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|330|5|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|330|5|2|The name 'if' is already defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|330|19|2|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|AWAIT_IN_WRONG_CONTEXT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|334|13|5|The await expression can only be used in an async function.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|334|19|20|Undefined name '_conversationService'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|334|59|16|Undefined name 'allConversations'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|336|48|11|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|336|58|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|337|9|1|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|339|15|7|Undefined name 'mounted'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|340|31|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER_AWAIT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|347|7|5|Undefined name 'await' in function body not marked with 'async'.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_PARAMETERS|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|347|13|8|Functions must have an explicit list of parameters.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|347|21|1|A function body must be provided.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|347|21|1|Expected a method, getter, setter or operator declaration.
+ERROR|COMPILE_TIME_ERROR|PREFIX_SHADOWED_BY_LOCAL_DECLARATION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|347|39|4|The prefix 'role' can't be used here because it's shadowed by a local declaration.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|347|46|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|347|47|1|A function body must be provided.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER_AWAIT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|348|7|5|Undefined name 'await' in function body not marked with 'async'.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|348|13|10|The name '_loadRoles' is already defined.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|348|25|1|A function body must be provided.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|351|7|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|COMPILE_TIME_ERROR|DUPLICATE_DEFINITION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|351|7|2|The name 'if' is already defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|353|11|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|354|20|23|Undefined name 'hasRelatedConversations'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|355|53|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|356|24|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|359|5|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|360|3|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|366|37|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|368|7|4|The named parameter 'body' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|368|13|12|Undefined name '_customRoles'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|371|26|12|Undefined name '_customRoles'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|373|30|12|Undefined name '_customRoles'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_FUNCTION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|383|42|15|The function '_showRoleDialog' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_FUNCTION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|387|42|11|The function '_deleteRole' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|394|7|20|The named parameter 'floatingActionButton' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_FUNCTION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|395|26|15|The function '_showRoleDialog' isn't defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|398|6|1|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_FUNCTION|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|414|30|15|The function '_showRoleDialog' isn't defined.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|416|44|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|418|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|422|1|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|59|53|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|60|7|9|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|60|7|36|Too many positional arguments: 2 expected, but 3 found.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|60|43|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|163|68|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|164|23|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|105|87|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|106|9|7|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|106|9|7|The named parameter 'actions' isn't defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|118|6|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|164|64|1|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|164|65|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|164|65|1|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNEXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|164|65|1|Unexpected text ','.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|165|7|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|UNEXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|165|7|1|Unexpected text ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|166|50|7|Undefined name 'updated'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|223|43|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|224|15|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|58|3|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|58|1|Illegal character '32480'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|58|3|Undefined name '绠＄悊'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|59|1|Illegal character '65284'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|60|1|Illegal character '24714'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|61|3|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|61|3|Too many positional arguments: 1 expected, but 2 found.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|304|63|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|305|17|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|305|24|106|The argument type 'ButtonStyle' can't be assigned to the parameter type 'TextStyle?'. 
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|310|13|39|Too many positional arguments: 0 expected, but 2 found.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|322|11|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|93|29|7|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|93|35|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|115|38|20|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|115|57|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|116|3|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|232|71|8|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|232|78|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|233|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|333|32|10|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|333|41|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|360|36|16|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|360|51|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|MISSING_REQUIRED_ARGUMENT|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|441|15|13|The named parameter 'child' is required, but there's no corresponding argument.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|446|62|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|448|17|5|The named parameter 'child' isn't defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|477|13|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|535|29|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|536|9|6|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|NON_ABSTRACT_CLASS_INHERITS_ABSTRACT_MEMBER|H:\\chatboxapp\\lib\\pages\\search_page.dart|28|7|16|Missing concrete implementation of 'abstract class State<T extends StatefulWidget> with Diagnosticable.build'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|59|11|12|Undefined name 'conversation'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|62|27|12|Undefined name 'conversation'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|64|28|12|Undefined name 'conversation'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|70|27|12|Undefined name 'conversation'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|74|29|12|Undefined name 'conversation'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|84|14|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|84|17|1|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|110|23|17|Undefined name '_searchController'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|113|22|14|Undefined name '_performSearch'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|116|15|17|Undefined name '_searchController'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|120|17|17|Undefined name '_searchController'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_FUNCTION|H:\\chatboxapp\\lib\\pages\\search_page.dart|121|17|14|The function '_performSearch' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|131|9|17|Undefined name '_searchController'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|135|9|12|Undefined name '_isSearching'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|138|27|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|144|9|8|Undefined name '_results'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|149|18|8|Undefined name '_results'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|151|24|8|Undefined name '_results'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|165|20|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|167|28|7|Undefined name 'context'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\search_page.dart|169|25|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|170|13|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|172|22|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|188|20|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|190|28|7|Undefined name 'context'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\search_page.dart|192|25|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|193|13|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|195|22|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|207|7|8|Undefined name 'timeText'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|231|15|8|Undefined name 'timeText'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|233|15|8|Undefined name 'timeText'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|236|24|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_FUNCTION|H:\\chatboxapp\\lib\\pages\\search_page.dart|248|20|19|The function '_showMessagePreview' isn't defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_IDENTIFIER_BUT_GOT_KEYWORD|H:\\chatboxapp\\lib\\pages\\search_page.dart|256|5|2|'if' can't be used as an identifier because it's a keyword.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_CLASS|H:\\chatboxapp\\lib\\pages\\search_page.dart|256|9|14|Undefined class 'message'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|256|24|2|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|256|27|4|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|258|21|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|259|7|6|Undefined name 'widget'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|259|26|6|Undefined name 'result'.
+ERROR|SYNTACTIC_ERROR|NAMED_PARAMETER_OUTSIDE_GROUP|H:\\chatboxapp\\lib\\pages\\search_page.dart|264|14|1|Named parameters must be enclosed in curly braces ('{' and '}').
+ERROR|COMPILE_TIME_ERROR|OBSOLETE_COLON_FOR_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\search_page.dart|264|14|1|Using a colon as the separator before a default value is no longer supported.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|264|16|7|Undefined name 'context'.
+ERROR|SYNTACTIC_ERROR|NAMED_PARAMETER_OUTSIDE_GROUP|H:\\chatboxapp\\lib\\pages\\search_page.dart|265|14|1|Named parameters must be enclosed in curly braces ('{' and '}').
+ERROR|COMPILE_TIME_ERROR|OBSOLETE_COLON_FOR_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\search_page.dart|265|14|1|Using a colon as the separator before a default value is no longer supported.
+ERROR|COMPILE_TIME_ERROR|NON_CONSTANT_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\search_page.dart|265|16|1780|The default value of an optional parameter must be constant.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|269|15|6|Undefined name 'result'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|275|17|6|Undefined name 'result'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|300|25|6|Undefined name 'result'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|309|17|6|Undefined name 'result'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|310|17|17|Undefined name '_searchController'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|311|15|1|Expected to find ']'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|312|13|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|312|13|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|NAMED_PARAMETER_OUTSIDE_GROUP|H:\\chatboxapp\\lib\\pages\\search_page.dart|315|16|1|Named parameters must be enclosed in curly braces ('{' and '}').
+ERROR|COMPILE_TIME_ERROR|OBSOLETE_COLON_FOR_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\search_page.dart|315|16|1|Using a colon as the separator before a default value is no longer supported.
+ERROR|COMPILE_TIME_ERROR|NON_CONSTANT_DEFAULT_VALUE|H:\\chatboxapp\\lib\\pages\\search_page.dart|315|18|490|The default value of an optional parameter must be constant.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|317|44|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|322|29|7|Undefined name 'context'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|323|29|7|Undefined name 'context'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\pages\\search_page.dart|326|41|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|328|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|MISSING_FUNCTION_BODY|H:\\chatboxapp\\lib\\pages\\search_page.dart|329|8|1|A function body must be provided.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\search_page.dart|329|8|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\search_page.dart|330|5|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|UNEXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|330|6|1|Unexpected text ';'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\search_page.dart|331|3|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|365|9|1|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|365|10|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|365|10|1|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNEXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|365|10|1|Unexpected text ','.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|366|7|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|UNEXPECTED_TOKEN|H:\\chatboxapp\\lib\\pages\\search_page.dart|366|7|1|Unexpected text ')'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\pages\\search_page.dart|375|27|7|Undefined name 'context'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_EXECUTABLE|H:\\chatboxapp\\lib\\pages\\search_page.dart|381|1|1|Expected a method, getter, setter or operator declaration.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|112|22|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|393|28|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|528|38|17|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|528|54|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|529|3|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|48|6|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|48|1|Illegal character '38007'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|48|6|Undefined name '鑷姩鎹㈣'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|49|1|Illegal character '57412'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|50|1|Illegal character '23017'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|51|1|Illegal character '37817'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|52|1|Illegal character '12835'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|53|1|Illegal character '58641'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|54|2|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|54|2|Too many positional arguments: 0 expected, but 1 found.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|589|55|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\enhanced_code_block.dart|590|21|9|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|37|44|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|38|9|8|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|38|9|8|The named parameter 'duration' isn't defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|40|6|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|171|30|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|172|21|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|189|30|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\rendering\\widgets\\latex_error_widget.dart|190|21|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|167|69|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|171|15|2|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|171|15|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|171|15|2|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|268|36|10|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|268|45|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|334|36|1602|The argument type 'bool' can't be assigned to the parameter type 'Color?'. 
+ERROR|COMPILE_TIME_ERROR|NON_BOOL_CONDITION|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|334|61|4|Conditions must have a static type of 'bool'.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|334|61|144|The argument type 'Color' can't be assigned to the parameter type 'Pattern'. 
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|334|64|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|337|29|12|The named parameter 'borderRadius' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|338|29|6|The named parameter 'border' isn't defined.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|339|38|159|The argument type 'bool' can't be assigned to the parameter type 'Color'. 
+ERROR|COMPILE_TIME_ERROR|NON_BOOL_CONDITION|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|339|63|4|Conditions must have a static type of 'bool'.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|339|63|102|The argument type 'MaterialColor' can't be assigned to the parameter type 'Pattern'. 
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|339|66|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|344|27|5|The named parameter 'child' isn't defined.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|347|33|853|The argument type 'bool' can't be assigned to the parameter type 'IconData?'. 
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|347|104|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|348|33|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|348|33|5|The named parameter 'color' isn't defined.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|348|97|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|349|33|4|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|349|33|4|The named parameter 'size' isn't defined.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|351|31|41|The argument type 'SizedBox' can't be assigned to the parameter type 'int'. 
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|352|31|499|Too many positional arguments: 2 expected, but 3 found.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|356|44|195|The argument type 'bool' can't be assigned to the parameter type 'Color?'. 
+ERROR|COMPILE_TIME_ERROR|NON_BOOL_CONDITION|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|356|69|4|Conditions must have a static type of 'bool'.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|356|69|132|The argument type 'Color' can't be assigned to the parameter type 'Pattern'. 
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|356|72|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|362|29|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\add_provider_dialog.dart|365|23|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|107|100|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|124|74|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|141|75|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|142|23|14|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|MISSING_REQUIRED_ARGUMENT|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|152|21|14|The named parameter 'onChanged' is required, but there's no corresponding argument.
+ERROR|COMPILE_TIME_ERROR|MISSING_REQUIRED_ARGUMENT|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|152|21|14|The named parameter 'value' is required, but there's no corresponding argument.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|154|71|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|155|23|8|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|155|23|8|The named parameter 'subtitle' isn't defined.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|155|85|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|156|23|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|156|23|5|The named parameter 'value' isn't defined.
+ERROR|COMPILE_TIME_ERROR|INVALID_CONSTANT|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|156|30|36|Invalid constant value.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|157|23|9|The named parameter 'onChanged' isn't defined.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|164|21|42|Too many positional arguments: 1 expected, but 3 found.
+ERROR|COMPILE_TIME_ERROR|CONST_WITH_NON_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|167|21|2006|The constructor being called isn't a const constructor.
+ERROR|COMPILE_TIME_ERROR|CONST_WITH_NON_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|171|39|49|The constructor being called isn't a const constructor.
+ERROR|COMPILE_TIME_ERROR|CONST_WITH_NON_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|172|33|128|The constructor being called isn't a const constructor.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|198|100|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|199|29|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|207|19|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|259|22|7|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|259|28|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|261|38|4|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|261|41|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|309|76|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|310|11|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2.dart|346|45|20|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2.dart|346|64|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2.dart|347|7|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|11|45|23|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|11|67|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|12|7|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|38|45|23|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|38|67|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|39|7|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|91|38|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|93|11|129|Too many positional arguments: 0 expected, but 1 found.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|97|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|127|71|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|223|37|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|224|17|9|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|239|71|3|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|239|71|1|Illegal character '37711'.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_IDENTIFIER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|239|71|3|Undefined name '鍏ㄩ€'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|239|72|1|Illegal character '12585'.
+ERROR|SYNTACTIC_ERROR|ILLEGAL_CHARACTER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|239|73|1|Illegal character '8364'.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|239|75|1|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|239|75|1|Expected to find ':'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|57|45|14|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|57|58|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|58|5|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|63|47|23|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|63|69|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|64|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|67|47|17|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|67|63|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|68|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|82|37|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|83|15|6|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|97|43|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|99|11|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|130|47|8|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|130|54|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|131|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|138|39|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|139|11|7|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|139|11|7|The named parameter 'content' isn't defined.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|140|11|7|The named parameter 'actions' isn't defined.
+ERROR|COMPILE_TIME_ERROR|INVALID_CONSTANT|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|142|26|34|Invalid constant value.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|151|8|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|179|46|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|180|15|7|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|180|15|7|The named parameter 'content' isn't defined.
+ERROR|COMPILE_TIME_ERROR|CONST_EVAL_METHOD_INVOCATION|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|181|43|20|Methods can't be invoked in constant expressions.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|181|76|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|183|15|7|The named parameter 'actions' isn't defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|194|12|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|233|47|16|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|233|62|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|234|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|240|45|17|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|240|61|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|241|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|255|47|23|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|255|69|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|256|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|259|47|17|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|259|63|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|260|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|274|37|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|275|15|6|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|314|45|8|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|314|52|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|315|5|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|326|40|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|328|13|135|Too many positional arguments: 0 expected, but 1 found.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|332|11|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|349|47|20|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|349|66|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|350|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|365|47|23|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|365|69|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|366|7|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|381|40|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|383|13|135|Too many positional arguments: 0 expected, but 1 found.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|387|11|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|404|47|26|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|404|72|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|405|7|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|416|47|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|417|11|7|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|417|11|7|The named parameter 'actions' isn't defined.
+ERROR|COMPILE_TIME_ERROR|INVALID_CONSTANT|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|419|26|34|Invalid constant value.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|428|8|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|439|45|8|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|439|52|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|440|5|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|448|47|20|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|448|66|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|449|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|465|47|26|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|465|72|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|466|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|472|47|20|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|472|66|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|473|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|519|46|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|520|15|7|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|520|15|7|The named parameter 'content' isn't defined.
+ERROR|COMPILE_TIME_ERROR|CONST_EVAL_METHOD_INVOCATION|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|521|43|20|Methods can't be invoked in constant expressions.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|521|79|1|Unterminated string literal.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|523|15|7|The named parameter 'actions' isn't defined.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|534|12|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|565|47|16|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|565|62|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|566|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|572|45|17|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|572|61|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|573|9|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|608|44|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|609|19|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|609|19|5|The named parameter 'onTap' isn't defined.
+ERROR|COMPILE_TIME_ERROR|INVALID_CONSTANT|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|609|26|116|Invalid constant value.
+ERROR|SYNTACTIC_ERROR|EXPECTED_ELSE_OR_COMMA|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|614|15|2|Expected 'else' or comma.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|614|15|2|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|614|15|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|626|47|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|627|19|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|627|19|5|The named parameter 'onTap' isn't defined.
+ERROR|COMPILE_TIME_ERROR|INVALID_CONSTANT|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|627|26|122|Invalid constant value.
+ERROR|SYNTACTIC_ERROR|EXPECTED_ELSE_OR_COMMA|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|640|15|2|Expected 'else' or comma.
+ERROR|SYNTACTIC_ERROR|MISSING_IDENTIFIER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|640|15|2|Expected an identifier.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|640|15|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|643|53|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|644|19|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|UNDEFINED_NAMED_PARAMETER|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|644|19|5|The named parameter 'onTap' isn't defined.
+ERROR|COMPILE_TIME_ERROR|INVALID_CONSTANT|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|644|26|120|Invalid constant value.
+ERROR|COMPILE_TIME_ERROR|EXTRA_POSITIONAL_ARGUMENTS_COULD_BE_NAMED|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|649|15|353|Too many positional arguments: 0 expected, but 2 found.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|660|13|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|17|45|16|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|17|60|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|18|7|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|25|43|17|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|25|59|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|26|7|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\enhanced_input_area.dart|108|52|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\enhanced_input_area.dart|275|49|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\enhanced_input_area.dart|276|25|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\enhanced_input_area.dart|342|68|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\mermaid_renderer.dart|59|20|45|Expected to find ';'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\mermaid_renderer.dart|59|64|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\mermaid_renderer.dart|177|61|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\mermaid_renderer.dart|178|6|1|Expected to find ')'.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\mermaid_renderer.dart|352|50|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\mermaid_renderer.dart|353|19|5|Expected to find ','.
+ERROR|SYNTACTIC_ERROR|UNTERMINATED_STRING_LITERAL|H:\\chatboxapp\\lib\\widgets\\message_actions.dart|145|42|1|Unterminated string literal.
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\message_actions.dart|146|15|5|Expected to find ','.
+ERROR|COMPILE_TIME_ERROR|CONST_EVAL_METHOD_INVOCATION|H:\\chatboxapp\\lib\\widgets\\message_actions.dart|146|22|190|Methods can't be invoked in constant expressions.
+ERROR|COMPILE_TIME_ERROR|ARGUMENT_TYPE_NOT_ASSIGNABLE|H:\\chatboxapp\\lib\\widgets\\message_actions.dart|146|22|190|The argument type 'ButtonStyle' can't be assigned to the parameter type 'TextStyle?'. 
+ERROR|SYNTACTIC_ERROR|EXPECTED_TOKEN|H:\\chatboxapp\\lib\\widgets\\message_actions.dart|151|11|1|Expected to find ')'.
+ERROR|COMPILE_TIME_ERROR|MISSING_REQUIRED_ARGUMENT|H:\\chatboxapp\\test\\widget_test.dart|16|35|5|The named parameter 'initialUiCodeFontFamily' is required, but there's no corresponding argument.
+ERROR|COMPILE_TIME_ERROR|MISSING_REQUIRED_ARGUMENT|H:\\chatboxapp\\test\\widget_test.dart|16|35|5|The named parameter 'initialUiFontFamily' is required, but there's no corresponding argument.
+ERROR|COMPILE_TIME_ERROR|MISSING_REQUIRED_ARGUMENT|H:\\chatboxapp\\test\\widget_test.dart|16|35|5|The named parameter 'initialUiScale' is required, but there's no corresponding argument.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|118|16|4|The value of the field 'blue' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|121|16|6|The value of the field 'purple' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|124|16|4|The value of the field 'pink' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|127|16|3|The value of the field 'red' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|130|16|6|The value of the field 'orange' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|133|16|6|The value of the field 'yellow' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|136|16|5|The value of the field 'green' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|139|16|4|The value of the field 'teal' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|142|16|6|The value of the field 'indigo' isn't used.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|145|16|16|The declaration 'systemBackground' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|152|16|25|The declaration 'secondarySystemBackground' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|159|16|24|The declaration 'tertiarySystemBackground' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|166|16|5|The declaration 'label' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|173|16|14|The declaration 'secondaryLabel' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|180|16|13|The declaration 'tertiaryLabel' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|187|16|15|The declaration 'quaternaryLabel' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\design_system\\apple_tokens.dart|194|16|9|The declaration 'separator' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\chat_page.dart|409|8|16|The declaration '_enterExportMode' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|1|1|0|The declaration '<unnamed>' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|16|7|0|The declaration '<unnamed>' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|17|9|8|The value of the field '_service' isn't used.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|20|8|14|The value of the field '_isInitialized' isn't used.
+WARNING|STATIC_WARNING|UNUSED_LOCAL_VARIABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|161|13|4|The value of the local variable 'name' isn't used.
+WARNING|STATIC_WARNING|UNUSED_LOCAL_VARIABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|162|13|11|The value of the local variable 'description' isn't used.
+WARNING|STATIC_WARNING|UNUSED_LOCAL_VARIABLE|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|163|13|6|The value of the local variable 'prompt' isn't used.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|186|13|10|The declaration '_loadRoles' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|348|13|10|The declaration '_loadRoles' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT_PARAMETER|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\admonition_node.dart|117|10|5|A value for optional parameter 'title' isn't ever given.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT_PARAMETER|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\admonition_node.dart|120|10|11|A value for optional parameter 'collapsible' isn't ever given.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT_PARAMETER|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\admonition_node.dart|121|10|13|A value for optional parameter 'initiallyOpen' isn't ever given.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\admonition_node.dart|216|58|17|The declaration '_detectAdmonition' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT_PARAMETER|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\enhanced_code_block.dart|26|10|10|A value for optional parameter 'showHeader' isn't ever given.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\mermaid_block.dart|39|12|10|The declaration '_isDesktop' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\mermaid_block.dart|102|16|20|The declaration '_openExternalPreview' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT_PARAMETER|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\streaming_code_block_preview.dart|17|10|9|A value for optional parameter 'isLoading' isn't ever given.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|64|8|19|The declaration '_isPresetCapability' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|159|16|18|The declaration '_saveProviderOrder' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_LOCAL_VARIABLE|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|162|13|8|The value of the local variable 'provider' isn't used.
+WARNING|STATIC_WARNING|UNUSED_LABEL|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|164|9|10|The label 'updatedAt' isn't used.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\search_page.dart|40|8|14|The declaration '_performSearch' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\pages\\search_page.dart|334|10|21|The declaration '_buildHighlightedText' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|73|16|15|The declaration '_cleanupOldData' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|72|8|21|The value of the field '_showNewMessageButton' isn't used.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|490|8|22|The declaration '_restoreScrollPosition' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|617|8|24|The declaration '_throttledScrollToBottom' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|1596|10|22|The declaration '_formatThinkingElapsed' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2.dart|312|16|27|The declaration '_toFlutterChatMessageCached' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_LOCAL_VARIABLE|H:\\chatboxapp\\lib\\widgets\\enhanced_input_area.dart|137|11|17|The value of the local variable 'modelWithProvider' isn't used.
+WARNING|STATIC_WARNING|UNREACHABLE_SWITCH_DEFAULT|H:\\chatboxapp\\lib\\widgets\\enhanced_input_area.dart|414|7|7|This default clause is covered by the previous cases.
+WARNING|STATIC_WARNING|UNUSED_FIELD|H:\\chatboxapp\\lib\\widgets\\optimized_latex_renderer.dart|556|8|7|The value of the field '_copied' isn't used.
+WARNING|STATIC_WARNING|UNUSED_ELEMENT|H:\\chatboxapp\\lib\\widgets\\optimized_latex_renderer.dart|558|8|16|The declaration '_copyToClipboard' isn't referenced.
+WARNING|STATIC_WARNING|UNUSED_IMPORT|H:\\chatboxapp\\lib\\widgets\\smart_content_renderer.dart|2|8|32|Unused import: '../utils/content_detector.dart'.
+WARNING|STATIC_WARNING|UNUSED_LOCAL_VARIABLE|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|32|9|18|The value of the local variable 'simpleReplacements' isn't used.
+WARNING|STATIC_WARNING|UNUSED_LOCAL_VARIABLE|H:\\chatboxapp\\tools\\batch_replace_icons.dart|102|12|15|The value of the local variable 'originalContent' isn't used.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\lib\\chat_ui\\owui\\composer\\owui_composer.dart|1|1|92|Dangling library doc comment.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\lib\\chat_ui\\owui\\composer\\owui_model_selector_sheet.dart|1|1|47|Dangling library doc comment.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\main.dart|38|7|5|Don't invoke 'print' in production code.
+INFO|LINT|LIBRARY_PRIVATE_TYPES_IN_PUBLIC_API|H:\\chatboxapp\\lib\\main.dart|79|10|11|Invalid use of a private type in a public API.
+INFO|LINT|USE_BUILD_CONTEXT_SYNCHRONOUSLY|H:\\chatboxapp\\lib\\pages\\chat_page.dart|347|23|7|Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check.
+INFO|LINT|USE_BUILD_CONTEXT_SYNCHRONOUSLY|H:\\chatboxapp\\lib\\pages\\chat_page.dart|348|29|7|Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\chat_page.dart|491|15|10|'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\chat_page.dart|494|15|9|'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\chat_page.dart|504|15|10|'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\chat_page.dart|507|15|9|'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\chat_page.dart|517|15|10|'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\chat_page.dart|518|15|9|'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre.
+INFO|LINT|NON_CONSTANT_IDENTIFIER_NAMES|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|10|9|15|The variable name 'CustomRolesPage' isn't a lowerCamelCase identifier.
+INFO|LINT|PREFER_FINAL_FIELDS|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|19|20|17|The private field _customRoles could be 'final'.
+INFO|LINT|UNINTENDED_HTML_IN_DOC_COMMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|55|26|6|Angle brackets will be interpreted as HTML.
+INFO|LINT|PREFER_TYPING_UNINITIALIZED_VARIABLES|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|158|6|0|An uninitialized variable should have an explicit type annotation.
+INFO|LINT|UNINTENDED_HTML_IN_DOC_COMMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|190|30|9|Angle brackets will be interpreted as HTML.
+INFO|LINT|PREFER_TYPING_UNINITIALIZED_VARIABLES|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|199|5|6|An uninitialized variable should have an explicit type annotation.
+INFO|LINT|AVOID_TYPES_AS_PARAMETER_NAMES|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|199|29|6|The type parameter name 'String' matches a visible type name.
+INFO|LINT|UNINTENDED_HTML_IN_DOC_COMMENT|H:\\chatboxapp\\lib\\pages\\custom_roles_page.dart|246|38|6|Angle brackets will be interpreted as HTML.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\performance_monitor.dart|187|21|11|'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre.
+INFO|LINT|UNNECESSARY_STRING_INTERPOLATIONS|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\performance_monitor.dart|267|33|26|Unnecessary use of string interpolation.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\sub_sup_syntax.dart|36|20|11|The member 'parentStyle' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\pages\\flyer_chat_demo\\sub_sup_syntax.dart|56|20|11|The member 'parentStyle' overrides an inherited member but isn't annotated with '@override'.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|113|75|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|116|68|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|165|76|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|207|62|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|233|39|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|236|28|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|237|53|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\pages\\model_edit_page.dart|250|32|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|LINT|PREFER_FINAL_FIELDS|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|27|34|20|The private field _providerModels could be 'final'.
+INFO|LINT|EMPTY_STATEMENTS|H:\\chatboxapp\\lib\\pages\\model_services_page.dart|165|8|1|Unnecessary empty statement.
+INFO|LINT|CURLY_BRACES_IN_FLOW_CONTROL_STRUCTURES|H:\\chatboxapp\\lib\\pages\\provider_detail_page.dart|93|22|43|Statements in an if should be enclosed in a block.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\pages\\search_page.dart|84|5|8|The member 'setState' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|USE_FUNCTION_TYPE_SYNTAX_FOR_PARAMETERS|H:\\chatboxapp\\lib\\pages\\search_page.dart|84|14|2|Use the generic function type syntax to declare the parameter ''.
+INFO|LINT|EMPTY_STATEMENTS|H:\\chatboxapp\\lib\\pages\\search_page.dart|366|8|1|Unnecessary empty statement.
+INFO|LINT|DEPEND_ON_REFERENCED_PACKAGES|H:\\chatboxapp\\lib\\pages\\settings_page.dart|2|8|58|The imported package 'flutter_cache_manager' isn't a dependency of the importing package.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|30|5|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|38|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|47|9|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|53|9|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|60|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|66|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|67|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|77|5|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\lib\\services\\data_migration_service.dart|84|5|5|Don't invoke 'print' in production code.
+INFO|LINT|PREFER_FINAL_FIELDS|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|27|16|20|The private field _selectedModels could be 'final'.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|176|73|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|179|66|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|216|68|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|225|68|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|234|91|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|259|80|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\add_model_dialog.dart|275|74|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|LINT|PREFER_INITIALIZING_FORMALS|H:\\chatboxapp\\lib\\widgets\\apple_loading_indicator.dart|25|9|13|Use an initializing formal to assign a parameter to a field.
+INFO|LINT|PREFER_INITIALIZING_FORMALS|H:\\chatboxapp\\lib\\widgets\\apple_loading_indicator.dart|33|9|13|Use an initializing formal to assign a parameter to a field.
+INFO|LINT|PREFER_INITIALIZING_FORMALS|H:\\chatboxapp\\lib\\widgets\\apple_loading_indicator.dart|41|9|13|Use an initializing formal to assign a parameter to a field.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|155|33|5|Unnecessary 'const' keyword.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|170|62|14|'surfaceVariant' is deprecated and shouldn't be used. Use surfaceContainerHighest instead. This feature was deprecated after v3.18.0-0.1.pre.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|170|77|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|173|72|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|201|85|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_config_dialog.dart|311|64|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|LINT|PREFER_FINAL_FIELDS|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|72|8|29|The private field _showNewMessageButton could be 'final'.
+INFO|LINT|PREFER_CONDITIONAL_ASSIGNMENT|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|191|5|84|The 'if' statement could be replaced by a null-aware assignment.
+INFO|LINT|PREFER_INTERPOLATION_TO_COMPOSE_STRINGS|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|767|19|28|Use interpolation to compose strings and values.
+INFO|LINT|PREFER_INTERPOLATION_TO_COMPOSE_STRINGS|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|767|50|37|Use interpolation to compose strings and values.
+INFO|LINT|USE_BUILD_CONTEXT_SYNCHRONOUSLY|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|1210|11|16|Don't use 'BuildContext's across async gaps.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|1381|47|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|2173|38|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|2205|48|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\conversation_view.dart|2218|40|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2.dart|1|1|82|Dangling library doc comment.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|136|10|21|The member '_wrapExportSelectable' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\export_mode.dart|201|10|23|The member '_buildExportModeToolbar' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|8|16|24|The member '_showMessageActionsSheet' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|139|20|5|Unnecessary 'const' keyword.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|143|22|5|Unnecessary 'const' keyword.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|147|22|5|Unnecessary 'const' keyword.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|186|26|5|Unnecessary 'const' keyword.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|190|26|5|Unnecessary 'const' keyword.
+INFO|LINT|USE_BUILD_CONTEXT_SYNCHRONOUSLY|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|233|29|7|Don't use 'BuildContext's across async gaps.
+INFO|LINT|USE_BUILD_CONTEXT_SYNCHRONOUSLY|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|240|27|7|Don't use 'BuildContext's across async gaps.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|420|22|5|Unnecessary 'const' keyword.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|424|22|5|Unnecessary 'const' keyword.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|526|26|5|Unnecessary 'const' keyword.
+INFO|LINT|UNNECESSARY_CONST|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|530|26|5|Unnecessary 'const' keyword.
+INFO|LINT|USE_BUILD_CONTEXT_SYNCHRONOUSLY|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|565|29|7|Don't use 'BuildContext's across async gaps.
+INFO|LINT|USE_BUILD_CONTEXT_SYNCHRONOUSLY|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\message_actions_sheet.dart|572|27|7|Don't use 'BuildContext's across async gaps.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\scroll_and_highlight.dart|8|8|15|The member 'scrollToMessage' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\scroll_and_highlight.dart|13|7|33|The member '_syncConversationToChatController' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\scroll_and_highlight.dart|108|10|16|The member '_wrapHighlighted' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\scroll_and_highlight.dart|133|8|18|The member '_requestAutoFollow' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|CURLY_BRACES_IN_FLOW_CONTROL_STRUCTURES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\scroll_and_highlight.dart|142|7|7|Statements in an if should be enclosed in a block.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\scroll_and_highlight.dart|158|8|29|The member '_handleChatScrollNotification' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|8|16|12|The member '_sendMessage' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|268|8|18|The member '_handleStreamFlush' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|392|16|14|The member '_stopStreaming' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|431|8|21|The member '_isProbablyNetworkUrl' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\streaming.dart|437|10|19|The member '_toFilePathIfNeeded' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\tokens_and_ids.dart|8|7|21|The member '_estimatePromptTokens' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\tokens_and_ids.dart|30|10|13|The member '_newMessageId' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\tokens_and_ids.dart|36|10|17|The member '_buildTokenFooter' overrides an inherited member but isn't annotated with '@override'.
+INFO|LINT|ANNOTATE_OVERRIDES|H:\\chatboxapp\\lib\\widgets\\conversation_view_v2\\user_bubble.dart|8|10|16|The member '_buildUserBubble' overrides an inherited member but isn't annotated with '@override'.
+INFO|HINT|UNNECESSARY_IMPORT|H:\\chatboxapp\\lib\\widgets\\provider_card.dart|2|8|31|The import of 'package:flutter/services.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart'.
+INFO|HINT|DEPRECATED_MEMBER_USE|H:\\chatboxapp\\lib\\widgets\\provider_card.dart|48|33|11|'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss.
+INFO|LINT|PREFER_CONDITIONAL_ASSIGNMENT|H:\\chatboxapp\\lib\\widgets\\stream_manager.dart|157|7|96|The 'if' statement could be replaced by a null-aware assignment.
+INFO|LINT|LIBRARY_ANNOTATIONS|H:\\chatboxapp\\test\\golden\\conversation_view_golden_test.dart|1|1|17|This annotation should be attached to a library directive.
+INFO|LINT|DEPEND_ON_REFERENCED_PACKAGES|H:\\chatboxapp\\test\\unit\\services\\hive_conversation_service_test.dart|8|8|80|The imported package 'path_provider_platform_interface' isn't a dependency of the importing package.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|1|1|29|Dangling library doc comment.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|5|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|43|7|5|Don't invoke 'print' in production code.
+INFO|LINT|PREFER_INTERPOLATION_TO_COMPOSE_STRINGS|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|62|19|64|Use interpolation to compose strings and values.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|72|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|76|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|77|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|78|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|79|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|80|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|81|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_fix_snackbar.dart|82|3|5|Don't invoke 'print' in production code.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\tools\\batch_replace_icons.dart|1|1|29|Dangling library doc comment.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_icons.dart|9|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_icons.dart|95|3|5|Don't invoke 'print' in production code.
+INFO|LINT|PREFER_INTERPOLATION_TO_COMPOSE_STRINGS|H:\\chatboxapp\\tools\\batch_replace_icons.dart|127|23|100|Use interpolation to compose strings and values.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_icons.dart|139|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_icons.dart|143|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_icons.dart|144|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_icons.dart|145|3|5|Don't invoke 'print' in production code.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|1|1|32|Dangling library doc comment.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|9|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|33|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|44|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|50|9|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|55|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|56|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|57|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|58|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|59|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|60|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|61|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|62|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\batch_replace_snackbar.dart|63|3|5|Don't invoke 'print' in production code.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\tools\\fix_duplicate_apple.dart|1|1|26|Dangling library doc comment.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_duplicate_apple.dart|5|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_duplicate_apple.dart|32|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_duplicate_apple.dart|36|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_duplicate_apple.dart|37|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_duplicate_apple.dart|38|3|5|Don't invoke 'print' in production code.
+INFO|LINT|DANGLING_LIBRARY_DOC_COMMENTS|H:\\chatboxapp\\tools\\fix_icon_names.dart|1|1|13|Dangling library doc comment.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_icon_names.dart|5|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_icon_names.dart|48|7|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_icon_names.dart|52|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_icon_names.dart|53|3|5|Don't invoke 'print' in production code.
+INFO|LINT|AVOID_PRINT|H:\\chatboxapp\\tools\\fix_icon_names.dart|54|3|5|Don't invoke 'print' in production code.

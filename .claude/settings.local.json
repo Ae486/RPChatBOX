@@ -18,7 +18,8 @@
       "mcp__tavily-remote__tavily_search",
       "mcp__context7__resolve-library-id",
       "mcp__context7__get-library-docs",
-      "mcp__exa__get_code_context_exa"
+      "mcp__exa__get_code_context_exa",
+      "mcp__auggie__prompt-enhancer"
     ],
     "deny": [],
     "ask": []

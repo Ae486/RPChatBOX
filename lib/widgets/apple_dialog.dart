@@ -3,6 +3,9 @@ import 'dart:ui';
 import '../design_system/apple_tokens.dart';
 
 /// Apple风格对话框
+///
+/// Legacy: 请勿在新代码中使用；请优先使用 OWUI 组件（例如 `OwuiDialog`）或更现代的弹层实现。
+@Deprecated('Legacy Apple 风格对话框已废弃，请使用 OWUI Dialog/BottomSheet 实现')
 class AppleDialog {
   /// 显示确认对话框
   static Future<bool?> showConfirm(

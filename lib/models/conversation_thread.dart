@@ -1,0 +1,354 @@
+import 'message.dart';
+
+class ConversationThread {
+  final String conversationId;
+  final Map<String, ThreadNode> nodes;
+  String rootId;
+  final Map<String, String> selectedChild;
+  String activeLeafId;
+
+  ConversationThread({
+    required this.conversationId,
+    required this.nodes,
+    required this.rootId,
+    Map<String, String>? selectedChild,
+    String? activeLeafId,
+  })  : selectedChild = selectedChild ?? {},
+        activeLeafId = activeLeafId ?? rootId;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'conversationId': conversationId,
+      'nodes': nodes.map((id, node) => MapEntry(id, node.toJson())),
+      'rootId': rootId,
+      'selectedChild': selectedChild,
+      'activeLeafId': activeLeafId,
+    };
+  }
+
+  factory ConversationThread.fromJson(Map<String, dynamic> json) {
+    final nodesJson = (json['nodes'] as Map?)?.cast<String, dynamic>() ?? {};
+    final nodes = <String, ThreadNode>{
+      for (final entry in nodesJson.entries)
+        entry.key: ThreadNode.fromJson(entry.value as Map<String, dynamic>),
+    };
+
+    return ConversationThread(
+      conversationId: json['conversationId'] as String,
+      nodes: nodes,
+      rootId: (json['rootId'] as String?) ?? '',
+      selectedChild:
+          (json['selectedChild'] as Map?)?.cast<String, String>() ?? {},
+      activeLeafId: json['activeLeafId'] as String?,
+    )..normalize();
+  }
+
+  static ConversationThread fromLinearMessages(
+    String conversationId,
+    List<Message> messages,
+  ) {
+    if (messages.isEmpty) {
+      return ConversationThread(
+        conversationId: conversationId,
+        nodes: <String, ThreadNode>{},
+        rootId: '',
+        selectedChild: <String, String>{},
+        activeLeafId: '',
+      );
+    }
+
+    final nodes = <String, ThreadNode>{};
+    String? previousId;
+    for (final message in messages) {
+      final node = ThreadNode(
+        id: message.id,
+        parentId: previousId,
+        message: message,
+        children: const [],
+      );
+      nodes[node.id] = node;
+      if (previousId != null) {
+        nodes[previousId] = nodes[previousId]!.copyWith(
+          children: [...nodes[previousId]!.children, node.id],
+        );
+      }
+      previousId = node.id;
+    }
+
+    final rootId = messages.first.id;
+    final activeLeafId = messages.last.id;
+    return ConversationThread(
+      conversationId: conversationId,
+      nodes: nodes,
+      rootId: rootId,
+      selectedChild: <String, String>{},
+      activeLeafId: activeLeafId,
+    )..normalize();
+  }
+
+  void normalize() {
+    if (nodes.isEmpty) {
+      rootId = '';
+      activeLeafId = '';
+      selectedChild.clear();
+      return;
+    }
+
+    if (rootId.isEmpty || !nodes.containsKey(rootId)) {
+      rootId = nodes.keys.first;
+    }
+
+    if (activeLeafId.isEmpty || !nodes.containsKey(activeLeafId)) {
+      activeLeafId = rootId;
+    }
+
+    selectedChild.removeWhere(
+      (parentId, childId) =>
+          !nodes.containsKey(parentId) ||
+          !nodes.containsKey(childId) ||
+          !nodes[parentId]!.children.contains(childId),
+    );
+
+    final nodeIds = nodes.keys.toList(growable: false);
+    for (final nodeId in nodeIds) {
+      final node = nodes[nodeId];
+      if (node == null || node.children.isEmpty) continue;
+
+      final validChildren = node.children
+          .where(nodes.containsKey)
+          .toList(growable: false);
+      if (validChildren.length != node.children.length) {
+        nodes[nodeId] = node.copyWith(children: validChildren);
+      }
+    }
+
+    var currentId = rootId;
+    while (currentId.isNotEmpty) {
+      final node = nodes[currentId];
+      if (node == null || node.children.isEmpty) break;
+
+      final selected = selectedChild[currentId];
+      final nextId =
+          (selected != null && node.children.contains(selected))
+              ? selected
+              : node.children.last;
+
+      selectedChild[currentId] = nextId;
+      currentId = nextId;
+    }
+
+    activeLeafId = currentId;
+  }
+
+  void upsertMessage(Message message) {
+    final existing = nodes[message.id];
+    if (existing == null) return;
+    nodes[message.id] = existing.copyWith(message: message);
+  }
+
+  void appendToActiveLeaf(Message message) {
+    // If the node already exists, treat this as an update and move the active leaf.
+    if (nodes.containsKey(message.id)) {
+      upsertMessage(message);
+      activeLeafId = message.id;
+      return;
+    }
+
+    // Empty thread: initialize root.
+    if (nodes.isEmpty || rootId.isEmpty) {
+      nodes[message.id] = ThreadNode(
+        id: message.id,
+        parentId: null,
+        message: message,
+        children: const [],
+      );
+      rootId = message.id;
+      activeLeafId = message.id;
+      selectedChild.clear();
+      return;
+    }
+
+    final parentId = activeLeafId;
+    final parent = nodes[parentId];
+    if (parent == null) {
+      // Corrupted state; fall back to re-initialize as a single-chain.
+      nodes
+        ..clear()
+        ..[message.id] = ThreadNode(
+          id: message.id,
+          parentId: null,
+          message: message,
+          children: const [],
+        );
+      rootId = message.id;
+      activeLeafId = message.id;
+      selectedChild.clear();
+      return;
+    }
+
+    nodes[message.id] = ThreadNode(
+      id: message.id,
+      parentId: parentId,
+      message: message,
+      children: const [],
+    );
+    nodes[parentId] = parent.copyWith(children: [...parent.children, message.id]);
+    selectedChild[parentId] = message.id;
+    activeLeafId = message.id;
+  }
+
+  void appendAssistantChildUnderUserAndSelect({
+    required String userId,
+    required String childId,
+    Message? assistantMessage,
+  }) {
+    final userNode = nodes[userId];
+    if (userNode == null) {
+      throw ArgumentError.value(userId, 'userId', 'Parent node not found');
+    }
+    if (!userNode.message.isUser) {
+      throw ArgumentError.value(userId, 'userId', 'Parent must be a user node');
+    }
+
+    if (assistantMessage != null) {
+      if (assistantMessage.id != childId) {
+        throw ArgumentError.value(
+          assistantMessage.id,
+          'assistantMessage',
+          'assistantMessage.id must equal childId',
+        );
+      }
+      if (assistantMessage.isUser) {
+        throw ArgumentError.value(
+          assistantMessage.id,
+          'assistantMessage',
+          'Child must be an assistant message',
+        );
+      }
+    }
+
+    final existingChild = nodes[childId];
+    if (existingChild != null) {
+      if (existingChild.message.isUser) {
+        throw ArgumentError.value(childId, 'childId', 'Child must be assistant');
+      }
+      if (existingChild.parentId != userId) {
+        throw ArgumentError.value(
+          childId,
+          'childId',
+          'Child already exists under a different parent',
+        );
+      }
+      if (assistantMessage != null) {
+        upsertMessage(assistantMessage);
+      }
+    } else {
+      if (assistantMessage == null) {
+        throw ArgumentError.value(
+          childId,
+          'childId',
+          'assistantMessage is required when creating a new child node',
+        );
+      }
+      nodes[childId] = ThreadNode(
+        id: childId,
+        parentId: userId,
+        message: assistantMessage,
+        children: const [],
+      );
+    }
+
+    if (!userNode.children.contains(childId)) {
+      nodes[userId] = userNode.copyWith(children: [...userNode.children, childId]);
+    }
+
+    _selectPathToNode(userId);
+    selectedChild[userId] = childId;
+    activeLeafId = childId;
+
+    normalize();
+    selectedChild[userId] = childId;
+    activeLeafId = childId;
+  }
+
+  void appendAssistantVariantUnderUser({
+    required String userId,
+    required Message assistantMessage,
+  }) {
+    appendAssistantChildUnderUserAndSelect(
+      userId: userId,
+      childId: assistantMessage.id,
+      assistantMessage: assistantMessage,
+    );
+  }
+
+  void _selectPathToNode(String nodeId) {
+    if (nodes.isEmpty) return;
+
+    final path = <String>[];
+    var currentId = nodeId;
+    while (currentId.isNotEmpty) {
+      path.add(currentId);
+      final parentId = nodes[currentId]?.parentId;
+      if (parentId == null || parentId.isEmpty) break;
+      currentId = parentId;
+    }
+
+    // path: nodeId -> ... -> root
+    for (var i = path.length - 1; i >= 1; i--) {
+      final parentId = path[i];
+      final childId = path[i - 1];
+      final parent = nodes[parentId];
+      if (parent == null) continue;
+      if (!parent.children.contains(childId)) continue;
+      selectedChild[parentId] = childId;
+    }
+  }
+}
+
+
+class ThreadNode {
+  final String id;
+  final String? parentId;
+  final Message message;
+  final List<String> children;
+
+  const ThreadNode({
+    required this.id,
+    required this.parentId,
+    required this.message,
+    required this.children,
+  });
+
+  ThreadNode copyWith({
+    String? id,
+    String? parentId,
+    Message? message,
+    List<String>? children,
+  }) {
+    return ThreadNode(
+      id: id ?? this.id,
+      parentId: parentId ?? this.parentId,
+      message: message ?? this.message,
+      children: children ?? this.children,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'parentId': parentId,
+      'message': message.toJson(),
+      'children': children,
+    };
+  }
+
+  factory ThreadNode.fromJson(Map<String, dynamic> json) {
+    return ThreadNode(
+      id: json['id'] as String,
+      parentId: json['parentId'] as String?,
+      message: Message.fromJson(json['message'] as Map<String, dynamic>),
+      children: (json['children'] as List?)?.cast<String>() ?? const [],
+    );
+  }
+}

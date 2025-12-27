@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
+
+import '../chat_ui/owui/components/owui_app_bar.dart';
+import '../chat_ui/owui/components/owui_card.dart';
+import '../chat_ui/owui/components/owui_scaffold.dart';
+import '../chat_ui/owui/owui_icons.dart';
+import '../chat_ui/owui/owui_tokens_ext.dart';
+import '../data/model_capability_presets.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
-import '../data/model_capability_presets.dart';
 import '../utils/global_toast.dart';
 
 /// 模型设置页面
@@ -30,7 +35,9 @@ class _ModelEditPageState extends State<ModelEditPage> {
   void initState() {
     super.initState();
     _selectedCapabilities = Set.from(widget.model.capabilities);
-    _presetCapabilities = ModelCapabilityPresets.getCapabilities(widget.model.modelName);
+    _presetCapabilities = ModelCapabilityPresets.getCapabilities(
+      widget.model.modelName,
+    );
   }
 
   void _toggleCapability(ModelCapability capability) {
@@ -42,7 +49,7 @@ class _ModelEditPageState extends State<ModelEditPage> {
         _selectedCapabilities.add(capability);
         _hasModifications = true;
       }
-      
+
       // 🔧 确保始终包含文本能力（不显示但必须有）
       _selectedCapabilities.add(ModelCapability.text);
     });
@@ -61,111 +68,71 @@ class _ModelEditPageState extends State<ModelEditPage> {
     }
   }
 
-  bool _isPresetCapability(ModelCapability capability) {
-    return _presetCapabilities.contains(capability);
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+    final colors = context.owuiColors;
+    final spacing = context.owuiSpacing;
+
+    return OwuiScaffold(
+      appBar: OwuiAppBar(
         title: const Text('模型设置'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           if (_hasModifications)
-            TextButton(
-              onPressed: _save,
-              child: const Text('保存', style: TextStyle(fontSize: 16)),
-            ),
-          const SizedBox(width: 8),
+            TextButton(onPressed: _save, child: const Text('保存')),
+          SizedBox(width: spacing.sm),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(spacing.lg),
         children: [
-          // 模型ID（只读）
           _buildSection(
             title: '模型信息',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildInfoRow('模型 ID', widget.model.modelName),
-                const SizedBox(height: 12),
+                SizedBox(height: spacing.md),
                 _buildInfoRow('显示名称', widget.model.displayName),
               ],
             ),
           ),
-
-          const SizedBox(height: 24),
-
-          // 模型能力设置
+          SizedBox(height: spacing.xl),
           _buildSection(
             title: '模型能力',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 警告提示
-                if (!ModelCapabilityPresets.isKnownModel(widget.model.modelName))
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.error.withOpacity(0.3),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          AppleIcons.warning,
-                          color: Theme.of(context).colorScheme.error,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            '未识别的模型，请根据实际情况手动配置能力',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // 能力选择网格（移除文本能力）
+                if (!ModelCapabilityPresets.isKnownModel(
+                  widget.model.modelName,
+                ))
+                  _UnknownModelCallout(),
                 Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
+                  spacing: spacing.md,
+                  runSpacing: spacing.md,
                   children: ModelCapability.values
-                      .where((cap) => cap != ModelCapability.text) // 🔧 移除文本能力
+                      .where((cap) => cap != ModelCapability.text)
                       .map((capability) {
-                    final isSelected = _selectedCapabilities.contains(capability);
+                        final isSelected = _selectedCapabilities.contains(
+                          capability,
+                        );
+                        final isPreset = _presetCapabilities.contains(
+                          capability,
+                        );
 
-                    return _buildCapabilityChip(
-                      capability: capability,
-                      isSelected: isSelected,
-                    );
-                  }).toList(),
+                        return _buildCapabilityChip(
+                          capability: capability,
+                          isSelected: isSelected,
+                          isPreset: isPreset,
+                        );
+                      })
+                      .toList(),
                 ),
-
-                const SizedBox(height: 16),
-
-                // 说明文本
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '请慎重更改模型类型，选择错误的类型会导致模型无法正常使用！',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                          ),
-                    ),
-                  ],
+                SizedBox(height: spacing.lg),
+                Text(
+                  '请慎重更改模型类型，选择错误的类型会导致模型无法正常使用！',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
                 ),
               ],
             ),
@@ -175,46 +142,45 @@ class _ModelEditPageState extends State<ModelEditPage> {
     );
   }
 
-  Widget _buildSection({
-    required String title,
-    required Widget child,
-  }) {
+  Widget _buildSection({required String title, required Widget child}) {
+    final spacing = context.owuiSpacing;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
         ),
-        const SizedBox(height: 16),
-        child,
+        SizedBox(height: spacing.sm),
+        OwuiCard(padding: EdgeInsets.all(spacing.lg), child: child),
       ],
     );
   }
 
   Widget _buildInfoRow(String label, String value) {
+    final colors = context.owuiColors;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 80,
+          width: 80 * context.owui.uiScale,
           child: Text(
             label,
-            style: TextStyle(
-              fontSize: 14,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
           ),
         ),
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -224,53 +190,86 @@ class _ModelEditPageState extends State<ModelEditPage> {
   Widget _buildCapabilityChip({
     required ModelCapability capability,
     required bool isSelected,
+    required bool isPreset,
   }) {
-    final theme = Theme.of(context);
-    
-    // 🔧 开启时显示彩色，关闭时显示灰色
-    final chipColor = isSelected
-        ? capability.color
-        : theme.colorScheme.onSurface.withOpacity(0.4);
-    
-    final backgroundColor = isSelected
-        ? capability.color.withOpacity(0.15)
-        : theme.colorScheme.surfaceContainerHighest.withOpacity(0.5);
+    final colors = context.owuiColors;
+    final spacing = context.owuiSpacing;
+    final radius = context.owuiRadius;
+
+    final accentColor = isSelected ? capability.color : colors.textSecondary;
+    final borderColor = isSelected
+        ? capability.color.withValues(alpha: 0.55)
+        : colors.borderSubtle;
+
+    final chipBg = isPreset ? colors.surface2 : colors.surfaceCard;
+
+    final iconSize = 20 * context.owui.uiScale;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () => _toggleCapability(capability),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(radius.rXl),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: EdgeInsets.symmetric(
+            horizontal: spacing.lg,
+            vertical: spacing.md,
+          ),
           decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: chipColor.withOpacity(0.5),
-              width: 2, // 🔧 固定边框宽度
-            ),
+            color: chipBg,
+            borderRadius: BorderRadius.circular(radius.rXl),
+            border: Border.all(color: borderColor),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                capability.icon,
-                size: 20,
-                color: chipColor,
-              ),
-              const SizedBox(width: 8),
+              Icon(capability.icon, size: iconSize, color: accentColor),
+              SizedBox(width: spacing.sm),
               Text(
                 capability.displayName,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500, // 🔧 固定字体粗细
-                  color: chipColor,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                  color: accentColor,
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _UnknownModelCallout extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.owuiColors;
+    final spacing = context.owuiSpacing;
+    final radius = context.owuiRadius;
+    final scheme = Theme.of(context).colorScheme;
+
+    final iconSize = 20 * context.owui.uiScale;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: spacing.lg),
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(radius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(OwuiIcons.warning, color: scheme.error, size: iconSize),
+          SizedBox(width: spacing.md),
+          Expanded(
+            child: Text(
+              '未识别的模型，请根据实际情况手动配置能力',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
       ),
     );
   }

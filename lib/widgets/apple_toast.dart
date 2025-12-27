@@ -12,6 +12,9 @@ enum AppleToastType {
 }
 
 /// Apple风格Toast显示器
+///
+/// Legacy: 请勿在新代码中使用；请优先使用 `GlobalToast`（OWUI 风格）。
+@Deprecated('Legacy Apple Toast 已废弃，请使用 GlobalToast（lib/utils/global_toast.dart）')
 class AppleToast {
   static OverlayEntry? _currentEntry;
   static bool _isShowing = false;
@@ -294,6 +297,9 @@ class _AppleToastWidgetState extends State<_AppleToastWidget>
 }
 
 /// Apple风格加载Toast
+///
+/// Legacy: 请勿在新代码中使用；请优先使用 `GlobalToast.showLoading`。
+@Deprecated('Legacy Apple LoadingToast 已废弃，请使用 GlobalToast.showLoading')
 class AppleLoadingToast {
   static OverlayEntry? _currentEntry;
 

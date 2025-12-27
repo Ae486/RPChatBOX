@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
+﻿import 'package:flutter/material.dart';
+import '../chat_ui/owui/owui_icons.dart';
 
-/// AI模型配置
+/// AI 模型配置
 /// 包含模型能力、参数和显示属性
 class ModelConfig {
   final String id;
@@ -31,7 +31,7 @@ class ModelConfig {
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
-  /// 从JSON创建实例
+  /// 从 JSON 创建实例
   factory ModelConfig.fromJson(Map<String, dynamic> json) {
     return ModelConfig(
       id: json['id'] as String,
@@ -55,7 +55,7 @@ class ModelConfig {
     );
   }
 
-  /// 转换为JSON
+  /// 转换为 JSON
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -133,7 +133,7 @@ enum ModelCapability {
   network('联网', Icons.public, Color(0xFFFF9800)),
   tool('工具', Icons.build, Color(0xFF9C27B0)),
   audio('音频', Icons.mic, Color(0xFFE91E63)),
-  video('视频', AppleIcons.video, Color(0xFFF44336));
+  video('视频', OwuiIcons.video, Color(0xFFF44336));
 
   final String displayName;
   final IconData icon;
@@ -160,7 +160,7 @@ class ModelParameters {
     this.streamOutput = true,
   });
 
-  /// 从JSON创建实例
+  /// 从 JSON 创建实例
   factory ModelParameters.fromJson(Map<String, dynamic> json) {
     return ModelParameters(
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0.7,
@@ -172,7 +172,7 @@ class ModelParameters {
     );
   }
 
-  /// 转换为JSON
+  /// 转换为 JSON
   Map<String, dynamic> toJson() {
     return {
       'temperature': temperature,
@@ -206,20 +206,22 @@ class ModelParameters {
   /// 验证参数有效性
   String? validate() {
     if (temperature < 0.0 || temperature > 2.0) {
-      return 'Temperature必须在0.0-2.0之间';
+      return 'Temperature 必须在 0.0-2.0 之间';
     }
     if (maxTokens <= 0) {
-      return 'MaxTokens必须大于0';
+      return 'MaxTokens 必须大于 0';
     }
     if (topP < 0.0 || topP > 1.0) {
-      return 'TopP必须在0.0-1.0之间';
+      return 'TopP 必须在 0.0-1.0 之间';
     }
     if (frequencyPenalty < -2.0 || frequencyPenalty > 2.0) {
-      return 'FrequencyPenalty必须在-2.0-2.0之间';
+      return 'FrequencyPenalty 必须在 -2.0-2.0 之间';
     }
     if (presencePenalty < -2.0 || presencePenalty > 2.0) {
-      return 'PresencePenalty必须在-2.0-2.0之间';
+      return 'PresencePenalty 必须在 -2.0-2.0 之间';
     }
     return null;
   }
 }
+
+

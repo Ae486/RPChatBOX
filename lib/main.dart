@@ -1,13 +1,20 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/services.dart';
-import 'services/model_service_manager.dart';
-import 'services/data_migration_service.dart';
+
+import 'chat_ui/owui/owui_tokens.dart';
 import 'pages/chat_page.dart';
+import 'services/data_migration_service.dart';
+import 'services/model_service_manager.dart';
 
 // 全局ModelServiceManager实例
 late ModelServiceManager globalModelServiceManager;
+
+const _prefsThemeModeKey = 'theme_mode';
+const _prefsUiScaleKey = 'ui_scale';
+const _prefsUiFontFamilyKey = 'ui_font_family';
+const _prefsUiCodeFontFamilyKey = 'ui_code_font_family';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,29 +43,56 @@ void main() async {
   globalModelServiceManager = ModelServiceManager(prefs);
   await globalModelServiceManager.initialize();
 
-  final themeMode = prefs.getString('theme_mode') ?? 'system';
-  runApp(MyApp(initialThemeMode: themeMode));
+  final themeMode = prefs.getString(_prefsThemeModeKey) ?? 'system';
+  final uiScale = prefs.getDouble(_prefsUiScaleKey) ?? 1.0;
+  final uiFontFamily = prefs.getString(_prefsUiFontFamilyKey) ?? 'system';
+  final uiCodeFontFamily =
+      prefs.getString(_prefsUiCodeFontFamilyKey) ?? 'system_mono';
+
+  runApp(
+    MyApp(
+      initialThemeMode: themeMode,
+      initialUiScale: uiScale,
+      initialUiFontFamily: uiFontFamily,
+      initialUiCodeFontFamily: uiCodeFontFamily,
+    ),
+  );
 }
 
 class MyApp extends StatefulWidget {
   final String initialThemeMode;
+  final double initialUiScale;
+  final String initialUiFontFamily;
+  final String initialUiCodeFontFamily;
 
-  const MyApp({super.key, required this.initialThemeMode});
+  const MyApp({
+    super.key,
+    required this.initialThemeMode,
+    required this.initialUiScale,
+    required this.initialUiFontFamily,
+    required this.initialUiCodeFontFamily,
+  });
 
   @override
-  State<MyApp> createState() => _MyAppState();
-  
-  static _MyAppState? of(BuildContext context) =>
-      context.findAncestorStateOfType<_MyAppState>();
+  State<MyApp> createState() => MyAppState();
+
+  static MyAppState? of(BuildContext context) =>
+      context.findAncestorStateOfType<MyAppState>();
 }
 
-class _MyAppState extends State<MyApp> {
+class MyAppState extends State<MyApp> {
   late ThemeMode _themeMode;
+  late double _uiScale;
+  late String _uiFontFamily;
+  late String _uiCodeFontFamily;
 
   @override
   void initState() {
     super.initState();
     _themeMode = _themeModeFromString(widget.initialThemeMode);
+    _uiScale = _clampUiScale(widget.initialUiScale);
+    _uiFontFamily = widget.initialUiFontFamily;
+    _uiCodeFontFamily = widget.initialUiCodeFontFamily;
   }
 
   ThemeMode _themeModeFromString(String mode) {
@@ -72,35 +106,208 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  double _clampUiScale(double value) => value.clamp(0.85, 1.25).toDouble();
+
+  String? _resolveUiFontFamily(String id) {
+    switch (id) {
+      case 'noto_sans':
+        return 'NotoSans';
+      case 'noto_serif':
+        return 'NotoSerif';
+      case 'system':
+      default:
+        return null;
+    }
+  }
+
+  String _resolveUiCodeFontFamily(String id) {
+    switch (id) {
+      case 'jetbrains_mono':
+        return 'JetBrainsMono';
+      case 'noto_sans_mono':
+        return 'NotoSansMono';
+      case 'system_mono':
+      default:
+        return 'monospace';
+    }
+  }
+
+  List<String> _codeFontFallback() => const ['Consolas', 'Menlo', 'Monaco'];
+
   /// 切换主题
   Future<void> setThemeMode(ThemeMode mode) async {
     setState(() {
       _themeMode = mode;
     });
-    
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('theme_mode', mode.toString().split('.').last);
+    await prefs.setString(_prefsThemeModeKey, mode.toString().split('.').last);
+  }
+
+  double get uiScale => _uiScale;
+  String get uiFontFamily => _uiFontFamily;
+  String get uiCodeFontFamily => _uiCodeFontFamily;
+
+  Future<void> setDisplaySettings({
+    double? uiScale,
+    String? uiFontFamily,
+    String? uiCodeFontFamily,
+    bool persist = true,
+  }) async {
+    setState(() {
+      if (uiScale != null) _uiScale = _clampUiScale(uiScale);
+      if (uiFontFamily != null) _uiFontFamily = uiFontFamily;
+      if (uiCodeFontFamily != null) _uiCodeFontFamily = uiCodeFontFamily;
+    });
+
+    if (!persist) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (uiScale != null) await prefs.setDouble(_prefsUiScaleKey, _uiScale);
+    if (uiFontFamily != null) {
+      await prefs.setString(_prefsUiFontFamilyKey, _uiFontFamily);
+    }
+    if (uiCodeFontFamily != null) {
+      await prefs.setString(_prefsUiCodeFontFamilyKey, _uiCodeFontFamily);
+    }
+  }
+
+  ThemeData _buildOwuiTheme({
+    required Brightness brightness,
+    required OwuiTokens tokens,
+  }) {
+    final colors = tokens.colors;
+    final scale = tokens.uiScale;
+    final fontFamily = tokens.typography.fontFamily;
+
+    final ColorScheme colorScheme = ColorScheme.fromSeed(
+      seedColor: Colors.blue,
+      brightness: brightness,
+    ).copyWith(surface: colors.surface, onSurface: colors.textPrimary);
+
+    final base = ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      extensions: [tokens],
+      scaffoldBackgroundColor: colors.pageBg,
+      dividerColor: colors.borderSubtle,
+      appBarTheme: AppBarTheme(
+        backgroundColor: colors.pageBg,
+        foregroundColor: colors.textPrimary,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+      ),
+    );
+
+    final textTheme = base.textTheme.apply(
+      fontFamily: fontFamily,
+      fontSizeFactor: scale,
+      displayColor: colors.textPrimary,
+      bodyColor: colors.textPrimary,
+    );
+
+    final minInteractiveHeight = (44 * scale).clamp(40, 64).toDouble();
+    final buttonPadding = EdgeInsets.symmetric(
+      horizontal: 16 * scale,
+      vertical: 12 * scale,
+    );
+
+    final buttonShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(tokens.radius.rXl),
+    );
+
+    return base.copyWith(
+      textTheme: textTheme,
+      primaryTextTheme: textTheme,
+      iconTheme: base.iconTheme.copyWith(size: 20 * scale),
+      scrollbarTheme: ScrollbarThemeData(
+        thickness: WidgetStatePropertyAll((8 * scale).clamp(6, 12).toDouble()),
+        radius: Radius.circular(tokens.radius.rFull),
+        thumbColor: WidgetStatePropertyAll(
+          colors.borderStrong.withValues(alpha: 0.6),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          padding: buttonPadding,
+          minimumSize: Size(0, minInteractiveHeight),
+          shape: buttonShape,
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          padding: buttonPadding,
+          minimumSize: Size(0, minInteractiveHeight),
+          shape: buttonShape,
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          padding: buttonPadding,
+          minimumSize: Size(0, minInteractiveHeight),
+          shape: buttonShape,
+          side: BorderSide(color: colors.borderSubtle),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          padding: buttonPadding,
+          minimumSize: Size(0, minInteractiveHeight),
+          shape: buttonShape,
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: colors.surfaceCard,
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: 12 * scale,
+          vertical: 12 * scale,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(tokens.radius.r3xl),
+          borderSide: BorderSide(color: colors.borderSubtle),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(tokens.radius.r3xl),
+          borderSide: BorderSide(color: colors.borderSubtle),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(tokens.radius.r3xl),
+          borderSide: BorderSide(color: colors.borderStrong),
+        ),
+      ),
+      listTileTheme: ListTileThemeData(
+        iconColor: colors.textSecondary,
+        textColor: colors.textPrimary,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: 12 * scale,
+          vertical: 2 * scale,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final fontFamily = _resolveUiFontFamily(_uiFontFamily);
+    final codeFontFamily = _resolveUiCodeFontFamily(_uiCodeFontFamily);
+
+    final typography = OwuiTypographyTokens(
+      fontFamily: fontFamily,
+      codeFontFamily: codeFontFamily,
+      codeFontFallback: _codeFontFallback(),
+    );
+
+    final owuiLight = OwuiTokens.light(uiScale: _uiScale, typography: typography);
+    final owuiDark = OwuiTokens.dark(uiScale: _uiScale, typography: typography);
+
     return MaterialApp(
       title: 'AI ChatBox',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: _buildOwuiTheme(brightness: Brightness.light, tokens: owuiLight),
+      darkTheme: _buildOwuiTheme(brightness: Brightness.dark, tokens: owuiDark),
       themeMode: _themeMode,
       home: const ChatPage(),
     );

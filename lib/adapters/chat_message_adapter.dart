@@ -7,6 +7,9 @@ import '../models/attached_file.dart';
 /// 将应用内部的 Message 模型转换为 flutter_chat_ui 的 Message 模型
 /// 同时支持反向转换，保持数据兼容性
 class ChatMessageAdapter {
+  static const String _userAuthorId = 'user';
+  static const String _assistantAuthorId = 'assistant';
+
   /// 思考标签列表（按优先级排序）
   static const _thinkingTags = [
     ('<thinking>', '</thinking>'),
@@ -36,7 +39,7 @@ class ChatMessageAdapter {
         // 纯图片消息
         return chat.ImageMessage(
           id: msg.id,
-          authorId: 'user',
+          authorId: _userAuthorId,
           createdAt: msg.timestamp.toUtc(),
           source: imageFiles.first.path,
           metadata: {
@@ -50,7 +53,7 @@ class ChatMessageAdapter {
     // 普通文本消息（可能带附件）
     return chat.TextMessage(
       id: msg.id,
-      authorId: 'user',
+      authorId: _userAuthorId,
       createdAt: msg.timestamp.toUtc(),
       text: msg.content,
       metadata: {
@@ -69,7 +72,7 @@ class ChatMessageAdapter {
       // 包含思考内容，使用 CustomMessage
       return chat.CustomMessage(
         id: msg.id,
-        authorId: msg.modelName ?? 'assistant',
+        authorId: _assistantAuthorId,
         createdAt: msg.timestamp.toUtc(),
         metadata: {
           'type': 'thinking_message',
@@ -86,7 +89,7 @@ class ChatMessageAdapter {
     // 普通文本消息
     return chat.TextMessage(
       id: msg.id,
-      authorId: msg.modelName ?? 'assistant',
+      authorId: _assistantAuthorId,
       createdAt: msg.timestamp.toUtc(),
       text: msg.content,
       metadata: {
@@ -101,7 +104,7 @@ class ChatMessageAdapter {
   /// 从 flutter_chat_ui Message 转换回应用 Message
   static app.Message fromFlutterChatMessage(chat.Message msg) {
     final metadata = msg.metadata ?? {};
-    final isUser = msg.authorId == 'user';
+    final isUser = msg.authorId == _userAuthorId;
 
     String content;
     if (msg is chat.TextMessage) {
@@ -182,7 +185,7 @@ class ChatMessageAdapter {
       return '$modelName|$providerName';
     } else if (modelName != null) {
       return modelName;
-    } else if (msg.authorId == 'user') {
+    } else if (msg.authorId == _userAuthorId) {
       return '用户';
     }
 

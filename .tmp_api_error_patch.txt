@@ -1,0 +1,818 @@
+*** Begin Patch
+*** Update File: lib/models/api_error.dart
+@@
+-import 'dart:convert';
+-import '../chat_ui/owui/owui_icons.dart';
+-import 'package:flutter/material.dart';
+-
+-/// API 閿欒淇℃伅绫?
+-class ApiError implements Exception {
+-  final int statusCode;
+-  final String message;
+-  final String? errorCode;
+-  final String? details;
+-  final dynamic rawResponse;
+-  final DateTime timestamp;
+-
+-  ApiError({
+-    required this.statusCode,
+-    required this.message,
+-    this.errorCode,
+-    this.details,
+-    this.rawResponse,
+-    DateTime? timestamp,
+-  }) : timestamp = timestamp ?? DateTime.now();
+-
+-  /// 鑾峰彇閿欒鏍囬
+-  String get title => '鉂?API 璇锋眰澶辫触 (HTTP $statusCode)';
+-
+-  /// 鑾峰彇浜虹被鍙鐨勯敊璇弿杩?
+-  String get friendlyMessage {
+-    switch (statusCode) {
+-      case 400:
+-        return '璇锋眰鍙傛暟閿欒锛?message';
+-      case 401:
+-        return '璁よ瘉澶辫触锛欰PI Key 鏃犳晥鎴栧凡杩囨湡';
+-      case 403:
+-        return '绂佹璁块棶锛氭病鏈夋潈闄愯闂璧勬簮';
+-      case 404:
+-        return '璧勬簮涓嶅瓨鍦細璇锋鏌?API 鍦板潃鍜岀鐐?;
+-      case 429:
+-        return '璇锋眰杩囦簬棰戠箒锛氬凡瑙﹀彂閫熺巼闄愬埗锛岃绋嶅悗閲嶈瘯';
+-      case 500:
+-        return 'AI 鏈嶅姟鍣ㄩ敊璇細鏈嶅姟鏂归亣鍒伴棶棰橈紝璇风◢鍚庨噸璇?;
+-      case 502:
+-        return '缃戝叧閿欒锛氭湇鍔′复鏃朵笉鍙敤';
+-      case 503:
+-        return '鏈嶅姟涓嶅彲鐢細鏈嶅姟鍣ㄧ淮鎶や腑';
+-      case 504:
+-        return '缃戝叧瓒呮椂锛氳姹傚鐞嗚秴鏃?;
+-      default:
+-        return message;
+-    }
+-  }
+-
+-  /// 鏄惁鏄鎴风閿欒锛?xx锛?
+-  bool get isClientError => statusCode >= 400 && statusCode < 500;
+-
+-  /// 鏄惁鏄湇鍔″櫒閿欒锛?xx锛?
+-  bool get isServerError => statusCode >= 500 && statusCode < 600;
+-
+-  /// 鏄惁鏄璇侀敊璇?
+-  bool get isAuthError => statusCode == 401 || statusCode == 403;
+-
+-  /// 鏄惁鏄€熺巼闄愬埗
+-  bool get isRateLimited => statusCode == 429;
+-
+-  /// 鏄惁鍙噸璇?
+-  bool get isRetryable =>
+-      statusCode == 429 ||
+-      statusCode == 500 ||
+-      statusCode == 502 ||
+-      statusCode == 503 ||
+-      statusCode == 504;
+-
+-  /// 寤鸿閲嶈瘯寤惰繜锛堟绉掞級
+-  int get retryDelayMs {
+-    if (statusCode == 429) return 5000; // 閫熺巼闄愬埗锛?绉掑悗閲嶈瘯
+-    if (statusCode >= 500) return 3000; // 鏈嶅姟鍣ㄩ敊璇細3绉掑悗閲嶈瘯
+-    return 1000; // 鍏朵粬锛?绉掑悗閲嶈瘯
+-  }
+-
+-  /// 鑾峰彇瀹屾暣閿欒淇℃伅锛堢敤浜庤皟璇曪級
+-  String get fullMessage {
+-    final buffer = StringBuffer();
+-    buffer.writeln('鈺愨晲鈺?API 閿欒璇︽儏 鈺愨晲鈺?);
+-    buffer.writeln('鐘舵€佺爜: $statusCode');
+-    buffer.writeln('娑堟伅: $message');
+-    if (errorCode != null) buffer.writeln('閿欒浠ｇ爜: $errorCode');
+-    if (details != null) buffer.writeln('璇︽儏: $details');
+-    buffer.writeln('鏃堕棿: $timestamp');
+-    if (rawResponse != null) buffer.writeln('鍘熷鍝嶅簲: $rawResponse');
+-    return buffer.toString();
+-  }
+-
+-  @override
+-  String toString() => 'ApiError($statusCode): $message';
+-}
+-
+-/// HTTP 鐘舵€佺爜
+-enum HttpStatusCode {
+-  ok(200),
+-  badRequest(400),
+-  unauthorized(401),
+-  forbidden(403),
+-  notFound(404),
+-  conflict(409),
+-  tooManyRequests(429),
+-  internalServerError(500),
+-  badGateway(502),
+-  serviceUnavailable(503),
+-  gatewayTimeout(504);
+-
+-  final int code;
+-  const HttpStatusCode(this.code);
+-}
+-
+-/// 鐘舵€佺爜鍒嗙被
+-enum HttpStatus {
+-  // 1xx - 淇℃伅
+-  continue_(100, '缁х画'),
+-  switchingProtocols(101, '姝ｅ湪鍒囨崲鍗忚'),
+-
+-  // 2xx - 鎴愬姛
+-  ok(200, '璇锋眰鎴愬姛'),
+-  created(201, '璧勬簮宸插垱寤?),
+-  accepted(202, '璇锋眰宸叉帴鍙?),
+-  noContent(204, '鏃犲唴瀹?),
+-
+-  // 3xx - 閲嶅畾鍚?
+-  multipleChoices(300, '澶氫釜閫夋嫨'),
+-  movePermanently(301, '姘镐箙绉诲姩'),
+-  found(302, '鎵惧埌'),
+-  notModified(304, '鏈慨鏀?),
+-
+-  // 4xx - 瀹㈡埛绔敊璇?
+-  badRequest(400, '璇锋眰閿欒'),
+-  unauthorized(401, '鏈巿鏉?),
+-  forbidden(403, '绂佹璁块棶'),
+-  notFound(404, '鏈壘鍒?),
+-  methodNotAllowed(405, '鏂规硶涓嶅厑璁?),
+-  conflict(409, '鍐茬獊'),
+-  gone(410, '璧勬簮宸插垹闄?),
+-  unprocessableEntity(422, '鏃犳硶澶勭悊鐨勫疄浣?),
+-  tooManyRequests(429, '璇锋眰杩囦簬棰戠箒'),
+-
+-  // 5xx - 鏈嶅姟鍣ㄩ敊璇?
+-  internalServerError(500, '鏈嶅姟鍣ㄥ唴閮ㄩ敊璇?),
+-  notImplemented(501, '鏈疄鐜?),
+-  badGateway(502, '缃戝叧閿欒'),
+-  serviceUnavailable(503, '鏈嶅姟涓嶅彲鐢?),
+-  gatewayTimeout(504, '缃戝叧瓒呮椂');
+-
+-  final int code;
+-  final String description;
+-
+-  const HttpStatus(this.code, this.description);
+-
+-  factory HttpStatus.fromCode(int code) {
+-    try {
+-      return HttpStatus.values.firstWhere((status) => status.code == code);
+-    } catch (e) {
+-      // 鏈煡鐘舵€佺爜
+-      if (code >= 400 && code < 500) return HttpStatus.badRequest;
+-      if (code >= 500 && code < 600) return HttpStatus.internalServerError;
+-      return HttpStatus.ok;
+-    }
+-  }
+-}
+-
+-/// 閿欒鍝嶅簲瑙ｆ瀽鍣?
+-class ApiErrorParser {
+-  /// 浠?HTTP 鍝嶅簲瑙ｆ瀽閿欒
+-  static ApiError parseFromResponse({
+-    required int statusCode,
+-    required String responseBody,
+-    String? apiProvider,
+-  }) {
+-    try {
+-      // 灏濊瘯瑙ｆ瀽 JSON 鍝嶅簲
+-      final json = _tryParseJson(responseBody);
+-
+-      if (json != null) {
+-        return _parseJsonError(statusCode, json, responseBody);
+-      }
+-    } catch (e) {
+-      // JSON 瑙ｆ瀽澶辫触锛岃繑鍥炲師濮嬪搷搴?
+-    }
+-
+-    // 杩斿洖閫氱敤閿欒
+-    return ApiError(
+-      statusCode: statusCode,
+-      message: responseBody.isNotEmpty
+-          ? responseBody
+-          : HttpStatus.fromCode(statusCode).description,
+-      rawResponse: responseBody,
+-    );
+-  }
+-
+-  /// 瑙ｆ瀽 JSON 閿欒鍝嶅簲
+-  static ApiError _parseJsonError(
+-    int statusCode,
+-    Map<String, dynamic> json,
+-    String rawResponse,
+-  ) {
+-    // OpenAI 鏍煎紡
+-    if (json.containsKey('error')) {
+-      final error = json['error'];
+-      if (error is Map<String, dynamic>) {
+-        return ApiError(
+-          statusCode: statusCode,
+-          message: error['message'] as String? ?? '鏈煡閿欒',
+-          errorCode: error['code'] as String?,
+-          details: error['param'] as String?,
+-          rawResponse: rawResponse,
+-        );
+-      }
+-      // 澶勭悊鍏朵粬閿欒鏍煎紡
+-      return ApiError(
+-        statusCode: statusCode,
+-        message: error.toString(),
+-        rawResponse: rawResponse,
+-      );
+-    }
+-
+-    // Claude 鏍煎紡
+-    if (json.containsKey('message')) {
+-      return ApiError(
+-        statusCode: statusCode,
+-        message: json['message'] as String? ?? '鏈煡閿欒',
+-        errorCode: json['type'] as String?,
+-        details: json['status'] as String?,
+-        rawResponse: rawResponse,
+-      );
+-    }
+-
+-    // Gemini 鏍煎紡
+-    if (json.containsKey('errors')) {
+-      final errors = json['errors'] as List?;
+-      if (errors != null && errors.isNotEmpty) {
+-        final firstError = errors[0];
+-        if (firstError is Map<String, dynamic>) {
+-          return ApiError(
+-            statusCode: statusCode,
+-            message: firstError['message'] as String? ?? '鏈煡閿欒',
+-            errorCode: firstError['code'] as String?,
+-            rawResponse: rawResponse,
+-          );
+-        }
+-      }
+-    }
+-
+-    // 閫氱敤鏍煎紡
+-    final message = json['message'] as String? ??
+-        json['error_message'] as String? ??
+-        json['msg'] as String? ??
+-        '鏈煡閿欒';
+-
+-    return ApiError(
+-      statusCode: statusCode,
+-      message: message,
+-      errorCode: json['error_code'] as String? ?? json['code'] as String?,
+-      rawResponse: rawResponse,
+-    );
+-  }
+-
+-  /// 灏濊瘯瑙ｆ瀽 JSON
+-  static Map<String, dynamic>? _tryParseJson(String text) {
+-    try {
+-      final decoded = jsonDecode(text);
+-      if (decoded is Map<String, dynamic>) {
+-        return decoded;
+-      }
+-    } catch (e) {
+-      return null;
+-    }
+-    return null;
+-  }
+-}
+-
+-/// 閿欒灞曠ず缁勪欢
+-class ApiErrorWidget extends StatelessWidget {
+-  final ApiError error;
+-  final VoidCallback? onRetry;
+-
+-  const ApiErrorWidget({
+-    super.key,
+-    required this.error,
+-    this.onRetry,
+-  });
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    return Container(
+-      margin: const EdgeInsets.all(16),
+-      padding: const EdgeInsets.all(16),
+-      decoration: BoxDecoration(
+-        color: Colors.red.shade50,
+-        border: Border.all(color: Colors.red.shade200),
+-        borderRadius: BorderRadius.circular(8),
+-      ),
+-      child: Column(
+-        crossAxisAlignment: CrossAxisAlignment.start,
+-        mainAxisSize: MainAxisSize.min,
+-        children: [
+-          // 鏍囬
+-          Row(
+-            children: [
+-              const Icon(OwuiIcons.error, color: Colors.red),
+-              const SizedBox(width: 8),
+-              Expanded(
+-                child: Text(
+-                  error.title,
+-                  style: const TextStyle(
+-                    fontSize: 16,
+-                    fontWeight: FontWeight.bold,
+-                    color: Colors.red,
+-                  ),
+-                ),
+-              ),
+-            ],
+-          ),
+-          const SizedBox(height: 12),
+-
+-          // 閿欒娑堟伅
+-          Text(
+-            error.friendlyMessage,
+-            style: TextStyle(
+-              fontSize: 14,
+-              color: Colors.red.shade700,
+-              height: 1.5,
+-            ),
+-          ),
+-
+-          // 閿欒浠ｇ爜锛堝鏋滄湁锛?
+-          if (error.errorCode != null) ...[
+-            const SizedBox(height: 8),
+-            Container(
+-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+-              decoration: BoxDecoration(
+-                color: Colors.red.shade100,
+-                borderRadius: BorderRadius.circular(4),
+-              ),
+-              child: Text(
+-                '閿欒浠ｇ爜: ${error.errorCode}',
+-                style: TextStyle(
+-                  fontSize: 12,
+-                  color: Colors.red.shade600,
+-                  fontFamily: 'monospace',
+-                ),
+-              ),
+-            ),
+-          ],
+-
+-          // 璇︽儏锛堝鏋滄湁锛?
+-          if (error.details != null) ...[
+-            const SizedBox(height: 8),
+-            Text(
+-              '璇︽儏: ${error.details}',
+-              style: TextStyle(
+-                fontSize: 12,
+-                color: Colors.red.shade600,
+-              ),
+-            ),
+-          ],
+-
+-          // 鎿嶄綔鎸夐挳
+-          const SizedBox(height: 12),
+-          Row(
+-            children: [
+-              if (onRetry != null && error.isRetryable)
+-                ElevatedButton.icon(
+-                  onPressed: onRetry,
+-                  icon: const Icon(Icons.refresh, size: 16),
+-                  label: const Text('閲嶈瘯'),
+-                  style: ElevatedButton.styleFrom(
+-                    backgroundColor: Colors.orange,
+-                    foregroundColor: Colors.white,
+-                  ),
+-                ),
+-              const SizedBox(width: 8),
+-              TextButton.icon(
+-                onPressed: () {
+-                  // 澶嶅埗璇︾粏淇℃伅
+-                  _showDetails(context);
+-                },
+-                icon: const Icon(OwuiIcons.info, size: 16),
+-                label: const Text('璇︽儏'),
+-              ),
+-            ],
+-          ),
+-        ],
+-      ),
+-    );
+-  }
+-
+-  void _showDetails(BuildContext context) {
+-    showDialog(
+-      context: context,
+-      builder: (context) => AlertDialog(
+-        title: const Text('閿欒璇︽儏'),
+-        content: SingleChildScrollView(
+-          child: SelectableText(
+-            error.fullMessage,
+-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+-          ),
+-        ),
+-        actions: [
+-          TextButton(
+-            onPressed: () => Navigator.pop(context),
+-            child: const Text('鍏抽棴'),
+-          ),
+-        ],
+-      ),
+-    );
+-  }
+-}
+-
+-
++import 'dart:convert';
++
++import 'package:flutter/material.dart';
++
++import '../chat_ui/owui/owui_icons.dart';
++
++/// API ?????
++class ApiError implements Exception {
++  final int statusCode;
++  final String message;
++  final String? errorCode;
++  final String? details;
++  final dynamic rawResponse;
++  final DateTime timestamp;
++
++  ApiError({
++    required this.statusCode,
++    required this.message,
++    this.errorCode,
++    this.details,
++    this.rawResponse,
++    DateTime? timestamp,
++  }) : timestamp = timestamp ?? DateTime.now();
++
++  /// ??????
++  String get title => 'API ???? (HTTP $statusCode)';
++
++  /// ???????????
++  String get friendlyMessage {
++    switch (statusCode) {
++      case 400:
++        return '???????$message';
++      case 401:
++        return '?????API Key ??????';
++      case 403:
++        return '??????????????';
++      case 404:
++        return '????????? API ?????';
++      case 429:
++        return '????????????????????';
++      case 500:
++        return 'AI ???????????????????';
++      case 502:
++        return '????????????';
++      case 503:
++        return '????????????';
++      case 504:
++        return '???????????';
++      default:
++        return message;
++    }
++  }
++
++  /// ?????????4xx?
++  bool get isClientError => statusCode >= 400 && statusCode < 500;
++
++  /// ?????????5xx?
++  bool get isServerError => statusCode >= 500 && statusCode < 600;
++
++  /// ???????
++  bool get isAuthError => statusCode == 401 || statusCode == 403;
++
++  /// ???????
++  bool get isRateLimited => statusCode == 429;
++
++  /// ?????
++  bool get isRetryable =>
++      statusCode == 429 ||
++      statusCode == 500 ||
++      statusCode == 502 ||
++      statusCode == 503 ||
++      statusCode == 504;
++
++  /// ??????????
++  int get retryDelayMs {
++    if (statusCode == 429) return 5000; // ?????5 ????
++    if (statusCode >= 500) return 3000; // ??????3 ????
++    return 1000; // ???1 ????
++  }
++
++  /// ??????????????
++  String get fullMessage {
++    final buffer = StringBuffer();
++    buffer.writeln('?? API ???? ??');
++    buffer.writeln('???: $statusCode');
++    buffer.writeln('??: $message');
++    if (errorCode != null) buffer.writeln('????: $errorCode');
++    if (details != null) buffer.writeln('??: $details');
++    buffer.writeln('??: $timestamp');
++    if (rawResponse != null) buffer.writeln('????: $rawResponse');
++    return buffer.toString();
++  }
++
++  @override
++  String toString() => 'ApiError($statusCode): $message';
++}
++
++/// HTTP ???
++enum HttpStatusCode {
++  ok(200),
++  badRequest(400),
++  unauthorized(401),
++  forbidden(403),
++  notFound(404),
++  conflict(409),
++  tooManyRequests(429),
++  internalServerError(500),
++  badGateway(502),
++  serviceUnavailable(503),
++  gatewayTimeout(504);
++
++  final int code;
++  const HttpStatusCode(this.code);
++}
++
++/// ?????
++enum HttpStatus {
++  // 1xx - ??
++  continue_(100, '??'),
++  switchingProtocols(101, '??????'),
++
++  // 2xx - ??
++  ok(200, '????'),
++  created(201, '?????'),
++  accepted(202, '?????'),
++  noContent(204, '???'),
++
++  // 3xx - ???
++  multipleChoices(300, '????'),
++  movePermanently(301, '????'),
++  found(302, '??'),
++  notModified(304, '???'),
++
++  // 4xx - ?????
++  badRequest(400, '????'),
++  unauthorized(401, '???'),
++  forbidden(403, '????'),
++  notFound(404, '???'),
++  methodNotAllowed(405, '?????'),
++  conflict(409, '??'),
++  gone(410, '?????'),
++  unprocessableEntity(422, '???????'),
++  tooManyRequests(429, '??????'),
++
++  // 5xx - ?????
++  internalServerError(500, '???????'),
++  notImplemented(501, '???'),
++  badGateway(502, '????'),
++  serviceUnavailable(503, '?????'),
++  gatewayTimeout(504, '????');
++
++  final int code;
++  final String description;
++
++  const HttpStatus(this.code, this.description);
++
++  factory HttpStatus.fromCode(int code) {
++    try {
++      return HttpStatus.values.firstWhere((status) => status.code == code);
++    } catch (_) {
++      if (code >= 400 && code < 500) return HttpStatus.badRequest;
++      if (code >= 500 && code < 600) return HttpStatus.internalServerError;
++      return HttpStatus.ok;
++    }
++  }
++}
++
++/// ???????
++class ApiErrorParser {
++  /// ? HTTP ??????
++  static ApiError parseFromResponse({
++    required int statusCode,
++    required String responseBody,
++    String? apiProvider,
++  }) {
++    try {
++      // ???? JSON ??
++      final json = _tryParseJson(responseBody);
++      if (json != null) {
++        return _parseJsonError(statusCode, json, responseBody);
++      }
++    } catch (_) {
++      // JSON ???????????
++    }
++
++    return ApiError(
++      statusCode: statusCode,
++      message: responseBody.isNotEmpty
++          ? responseBody
++          : HttpStatus.fromCode(statusCode).description,
++      rawResponse: responseBody,
++    );
++  }
++
++  /// ?? JSON ????
++  static ApiError _parseJsonError(
++    int statusCode,
++    Map<String, dynamic> json,
++    String rawResponse,
++  ) {
++    // OpenAI ??
++    if (json.containsKey('error')) {
++      final error = json['error'];
++      if (error is Map<String, dynamic>) {
++        return ApiError(
++          statusCode: statusCode,
++          message: error['message'] as String? ?? '????',
++          errorCode: error['code'] as String?,
++          details: error['param'] as String?,
++          rawResponse: rawResponse,
++        );
++      }
++      return ApiError(
++        statusCode: statusCode,
++        message: error.toString(),
++        rawResponse: rawResponse,
++      );
++    }
++
++    // Claude ??
++    if (json.containsKey('message')) {
++      return ApiError(
++        statusCode: statusCode,
++        message: json['message'] as String? ?? '????',
++        errorCode: json['type'] as String?,
++        details: json['status'] as String?,
++        rawResponse: rawResponse,
++      );
++    }
++
++    // Gemini ??
++    if (json.containsKey('errors')) {
++      final errors = json['errors'] as List?;
++      if (errors != null && errors.isNotEmpty) {
++        final firstError = errors[0];
++        if (firstError is Map<String, dynamic>) {
++          return ApiError(
++            statusCode: statusCode,
++            message: firstError['message'] as String? ?? '????',
++            errorCode: firstError['code'] as String?,
++            rawResponse: rawResponse,
++          );
++        }
++      }
++    }
++
++    // ????
++    final message = json['message'] as String? ??
++        json['error_message'] as String? ??
++        json['msg'] as String? ??
++        '????';
++
++    return ApiError(
++      statusCode: statusCode,
++      message: message,
++      errorCode: json['error_code'] as String? ?? json['code'] as String?,
++      rawResponse: rawResponse,
++    );
++  }
++
++  /// ???? JSON
++  static Map<String, dynamic>? _tryParseJson(String text) {
++    try {
++      final decoded = jsonDecode(text);
++      if (decoded is Map<String, dynamic>) {
++        return decoded;
++      }
++    } catch (_) {
++      return null;
++    }
++    return null;
++  }
++}
++
++/// ??????
++class ApiErrorWidget extends StatelessWidget {
++  final ApiError error;
++  final VoidCallback? onRetry;
++
++  const ApiErrorWidget({
++    super.key,
++    required this.error,
++    this.onRetry,
++  });
++
++  @override
++  Widget build(BuildContext context) {
++    return Container(
++      margin: const EdgeInsets.all(16),
++      padding: const EdgeInsets.all(16),
++      decoration: BoxDecoration(
++        color: Colors.red.shade50,
++        border: Border.all(color: Colors.red.shade200),
++        borderRadius: BorderRadius.circular(8),
++      ),
++      child: Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        mainAxisSize: MainAxisSize.min,
++        children: [
++          Row(
++            children: [
++              const Icon(OwuiIcons.error, color: Colors.red),
++              const SizedBox(width: 8),
++              Expanded(
++                child: Text(
++                  error.title,
++                  style: const TextStyle(
++                    fontSize: 16,
++                    fontWeight: FontWeight.bold,
++                    color: Colors.red,
++                  ),
++                ),
++              ),
++            ],
++          ),
++          const SizedBox(height: 12),
++          Text(
++            error.friendlyMessage,
++            style: TextStyle(
++              fontSize: 14,
++              color: Colors.red.shade700,
++              height: 1.5,
++            ),
++          ),
++          if (error.errorCode != null) ...[
++            const SizedBox(height: 8),
++            Container(
++              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
++              decoration: BoxDecoration(
++                color: Colors.red.shade100,
++                borderRadius: BorderRadius.circular(4),
++              ),
++              child: Text(
++                '????: ${error.errorCode}',
++                style: TextStyle(
++                  fontSize: 12,
++                  color: Colors.red.shade600,
++                  fontFamily: 'monospace',
++                ),
++              ),
++            ),
++          ],
++          if (error.details != null) ...[
++            const SizedBox(height: 8),
++            Text(
++              '??: ${error.details}',
++              style: TextStyle(
++                fontSize: 12,
++                color: Colors.red.shade600,
++              ),
++            ),
++          ],
++          const SizedBox(height: 12),
++          Row(
++            children: [
++              if (onRetry != null && error.isRetryable)
++                ElevatedButton.icon(
++                  onPressed: onRetry,
++                  icon: const Icon(Icons.refresh, size: 16),
++                  label: const Text('??'),
++                  style: ElevatedButton.styleFrom(
++                    backgroundColor: Colors.orange,
++                    foregroundColor: Colors.white,
++                  ),
++                ),
++              const SizedBox(width: 8),
++              TextButton.icon(
++                onPressed: () => _showDetails(context),
++                icon: const Icon(OwuiIcons.info, size: 16),
++                label: const Text('??'),
++              ),
++            ],
++          ),
++        ],
++      ),
++    );
++  }
++
++  void _showDetails(BuildContext context) {
++    showDialog(
++      context: context,
++      builder: (context) => AlertDialog(
++        title: const Text('????'),
++        content: SingleChildScrollView(
++          child: SelectableText(
++            error.fullMessage,
++            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
++          ),
++        ),
++        actions: [
++          TextButton(
++            onPressed: () => Navigator.pop(context),
++            child: const Text('??'),
++          ),
++        ],
++      ),
++    );
++  }
++}
+*** End Patch

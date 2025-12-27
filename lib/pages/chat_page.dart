@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
+
+import '../chat_ui/owui/components/owui_dialog.dart';
+import '../chat_ui/owui/components/owui_menu.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import '../models/chat_settings.dart';
 import '../models/conversation.dart';
@@ -10,8 +13,8 @@ import '../services/hive_conversation_service.dart';
 import '../services/custom_role_service.dart';
 import '../utils/token_counter.dart';
 import '../widgets/conversation_drawer.dart';
-import '../widgets/conversation_view.dart';
-import '../widgets/apple_toast.dart';
+import '../widgets/conversation_view_host.dart';
+import '../utils/global_toast.dart';
 import '../main.dart';
 import 'settings_page.dart';
 import 'search_page.dart';
@@ -32,7 +35,7 @@ class _ChatPageState extends State<ChatPage> {
 
   List<Conversation> _conversations = [];
   List<CustomRole> _customRoles = [];
-  late List<GlobalKey<ConversationViewState>> _conversationKeys; // GlobalKey 列表
+  late List<GlobalKey<ConversationViewHostState>> _conversationKeys; // GlobalKey 列表
   int _currentIndex = 0;
   ChatSettings _settings = ChatSettings();
   TokenUsage _tokenUsage = TokenUsage();
@@ -73,7 +76,7 @@ class _ChatPageState extends State<ChatPage> {
       // 为每个会话创建独立的 GlobalKey
       _conversationKeys = List.generate(
         conversations.length,
-        (_) => GlobalKey<ConversationViewState>(),
+        (_) => GlobalKey<ConversationViewHostState>(),
       );
       
       // 恢复当前会话索引
@@ -126,7 +129,7 @@ class _ChatPageState extends State<ChatPage> {
 
     setState(() {
       _conversations.add(newConv);
-      _conversationKeys.add(GlobalKey<ConversationViewState>());
+      _conversationKeys.add(GlobalKey<ConversationViewHostState>());
       _currentIndex = _conversations.length - 1;
     });
 
@@ -137,7 +140,7 @@ class _ChatPageState extends State<ChatPage> {
   /// 删除会话
   Future<void> _deleteConversation(Conversation conversation) async {
     if (_conversations.length == 1) {
-      AppleToast.warning(context, message: '至少需要保留一个会话');
+      GlobalToast.warning(context, message: '至少需要保留一个会话');
       return;
     }
 
@@ -342,7 +345,7 @@ class _ChatPageState extends State<ChatPage> {
       
       if (mounted) {
         Navigator.pop(context);
-        AppleToast.success(context, message: '统计已重置');
+        GlobalToast.success(context, message: '统计已重置');
       }
     }
   }
@@ -434,21 +437,21 @@ class _ChatPageState extends State<ChatPage> {
     final deletedIds = oldConversationIds.difference(newConversationIds);
     
     // 构建新的 keys 列表，保留未被删除的对话的 key
-    final oldKeysMap = <String, GlobalKey<ConversationViewState>>{};
+    final oldKeysMap = <String, GlobalKey<ConversationViewHostState>>{};
     for (var i = 0; i < _conversations.length; i++) {
       if (!deletedIds.contains(_conversations[i].id)) {
         oldKeysMap[_conversations[i].id] = _conversationKeys[i];
       }
     }
     
-    final newKeys = <GlobalKey<ConversationViewState>>[];
+    final newKeys = <GlobalKey<ConversationViewHostState>>[];
     for (var conv in conversations) {
       if (oldKeysMap.containsKey(conv.id)) {
         // 保留现有的 key，避免重建 widget
         newKeys.add(oldKeysMap[conv.id]!);
       } else {
         // 新对话，生成新 key
-        newKeys.add(GlobalKey<ConversationViewState>());
+        newKeys.add(GlobalKey<ConversationViewHostState>());
       }
     }
     
@@ -477,7 +480,7 @@ class _ChatPageState extends State<ChatPage> {
   void _showThemeDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => OwuiDialog(
         title: const Text('选择主题'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -553,12 +556,12 @@ class _ChatPageState extends State<ChatPage> {
         title: Text(_conversations[_currentIndex].title),
               actions: [
                 IconButton(
-                  icon: const Icon(AppleIcons.search),
+                  icon: const Icon(OwuiIcons.search),
                   onPressed: _openSearch,
                   tooltip: '搜索',
                 ),
-                PopupMenuButton<String>(
-                  icon: const Icon(AppleIcons.moreVert),
+                OwuiMenuButton<String>(
+                  icon: const Icon(OwuiIcons.moreVert),
                   onSelected: (value) {
                     switch (value) {
                       case 'token_stats':
@@ -600,7 +603,7 @@ class _ChatPageState extends State<ChatPage> {
                       value: 'clear',
                       child: Row(
                         children: [
-                          Icon(AppleIcons.delete, size: 20),
+                          Icon(OwuiIcons.delete, size: 20),
                           SizedBox(width: 8),
                           Text('清空对话'),
                         ],
@@ -610,7 +613,7 @@ class _ChatPageState extends State<ChatPage> {
                       value: 'settings',
                       child: Row(
                         children: [
-                          Icon(AppleIcons.settings, size: 20),
+                          Icon(OwuiIcons.settings, size: 20),
                           SizedBox(width: 8),
                           Text('设置'),
                         ],
@@ -635,7 +638,7 @@ class _ChatPageState extends State<ChatPage> {
       body: IndexedStack(
         index: _currentIndex,
         children: _conversations.asMap().entries.map((entry) {
-          return ConversationView(
+          return ConversationViewHost(
             key: _conversationKeys[entry.key], // 使用 GlobalKey
             conversation: entry.value,
             settings: _settings,

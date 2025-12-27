@@ -24,6 +24,8 @@ class Conversation {
   String? roleId; // 角色ID（用于精确匹配角色）
   @HiveField(8)
   String? roleType; // 角色类型：'preset'（内置）或 'custom'（自定义）
+  @HiveField(9)
+  String? threadJson; // 树状消息链 JSON（V2 message branching）
 
   Conversation({
     required this.id,
@@ -35,6 +37,7 @@ class Conversation {
     this.scrollIndex,
     this.roleId,
     this.roleType,
+    this.threadJson,
   })  : messages = messages ?? [],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
@@ -78,6 +81,7 @@ class Conversation {
       'scrollIndex': scrollIndex,
       'roleId': roleId,
       'roleType': roleType,
+      'threadJson': threadJson,
     };
   }
 
@@ -95,6 +99,7 @@ class Conversation {
       scrollIndex: json['scrollIndex'] as int?,
       roleId: json['roleId'] as String?,
       roleType: json['roleType'] as String?,
+      threadJson: json['threadJson'] as String?,
     );
   }
 
@@ -108,6 +113,7 @@ class Conversation {
     int? scrollIndex,
     String? roleId,
     String? roleType,
+    String? threadJson,
   }) {
     return Conversation(
       id: id ?? this.id,
@@ -119,6 +125,7 @@ class Conversation {
       scrollIndex: scrollIndex ?? this.scrollIndex,
       roleId: roleId ?? this.roleId,
       roleType: roleType ?? this.roleType,
+      threadJson: threadJson ?? this.threadJson,
     );
   }
 }

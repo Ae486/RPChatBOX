@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
-import '../models/provider_config.dart';
+
+import '../chat_ui/owui/components/owui_app_bar.dart';
+import '../chat_ui/owui/components/owui_scaffold.dart';
+import '../chat_ui/owui/components/owui_snack_bar.dart';
+import '../chat_ui/owui/owui_icons.dart';
+import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../models/model_config.dart';
+import '../models/provider_config.dart';
 import '../services/model_service_manager.dart';
 import '../widgets/provider_card.dart';
 import 'provider_detail_page.dart';
-import '../design_system/design_tokens.dart';
 
 /// 模型服务管理页面
 /// 参照cherrybox界面设计，管理AI服务提供商和模型
@@ -41,8 +45,9 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
       final providers = widget.serviceManager.getProviders();
       final models = <String, List<ModelConfig>>{};
 
-      for (var provider in providers) {
-        models[provider.id] = widget.serviceManager.getModelsByProvider(provider.id);
+      for (final provider in providers) {
+        models[provider.id] =
+            widget.serviceManager.getModelsByProvider(provider.id);
       }
 
       setState(() {
@@ -53,9 +58,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('加载失败: ${e.toString()}')),
-        );
+        OwuiSnackBars.error(context, message: '加载失败: ${e.toString()}');
       }
     }
   }
@@ -121,9 +124,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
       await widget.serviceManager.deleteProvider(provider.id);
       await _loadData();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已删除 "${provider.name}"')),
-        );
+        OwuiSnackBars.success(context, message: '已删除 "${provider.name}"');
       }
     }
   }
@@ -173,28 +174,24 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
   Widget _proxyDecorator(Widget child, int index, Animation<double> animation) {
     return AnimatedBuilder(
       animation: animation,
-      builder: (context, child) {
+      builder: (context, _) {
         return Material(
           elevation: 8,
           color: Colors.transparent,
-          borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
+          borderRadius: BorderRadius.circular(context.owuiRadius.rXl),
           child: Opacity(
             opacity: 0.9,
             child: child,
           ),
         );
       },
-      child: child,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('模型服务'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      ),
+    return OwuiScaffold(
+      appBar: const OwuiAppBar(title: Text('模型服务')),
       body: _isLoading
           ? Center(
               child: SpinKitFadingCircle(
@@ -216,20 +213,21 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
             Icon(
               Icons.cloud_off,
               size: 64,
-              color: Colors.grey.shade400,
+              color: context.owuiColors.textSecondary,
             ),
-            SizedBox(height: ChatBoxTokens.spacing.lg),
+            SizedBox(height: context.owuiSpacing.lg),
             Text(
               '暂无AI服务',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Colors.grey.shade600,
+                    color: context.owuiColors.textSecondary,
                   ),
             ),
-            SizedBox(height: ChatBoxTokens.spacing.sm),
+            SizedBox(height: context.owuiSpacing.sm),
             Text(
               '点击下方“添加”按钮创建第一个服务',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade500,
+                    color:
+                        context.owuiColors.textSecondary.withValues(alpha: 0.85),
                   ),
             ),
           ],
@@ -240,14 +238,14 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     // 🆕 管理模式下使用拖动排序（支持x/y轴移动）
     if (_isManagementMode) {
       return ReorderableListView.builder(
-        padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
+        padding: EdgeInsets.all(context.owuiSpacing.lg),
         itemCount: _providers.length,
         onReorder: _onReorder,
         buildDefaultDragHandles: false, // 🔧 禁用默认拖动按钮
         proxyDecorator: _proxyDecorator, // 🆕 自定义拖动装饰器（支持x轴移动）
         itemBuilder: (context, index) {
           final provider = _providers[index];
-          final models = _providerModels[provider.id] ?? [];
+          final models = _providerModels[provider.id] ?? const [];
 
           return ReorderableDragStartListener(
             key: ValueKey(provider.id),
@@ -270,11 +268,11 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
 
     // 普通模式下使用普通ListView
     return ListView.builder(
-      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
+      padding: EdgeInsets.all(context.owuiSpacing.lg),
       itemCount: _providers.length,
       itemBuilder: (context, index) {
         final provider = _providers[index];
-        final models = _providerModels[provider.id] ?? [];
+        final models = _providerModels[provider.id] ?? const [];
 
         return ProviderCard(
           provider: provider,
@@ -293,9 +291,9 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
 
   Widget _buildBottomBar() {
     return Container(
-      padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
+      padding: EdgeInsets.all(context.owuiSpacing.lg),
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
+        color: context.owuiColors.pageBg,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -310,21 +308,21 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: _toggleManagementMode, // 🆕 点击切换管理模式
-                icon: Icon(_isManagementMode ? AppleIcons.close : AppleIcons.settings),
+                icon: Icon(_isManagementMode ? OwuiIcons.close : OwuiIcons.settings),
                 label: Text(_isManagementMode ? '退出' : '管理'),
                 style: OutlinedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: 14),
+                  padding: EdgeInsets.symmetric(vertical: context.owuiSpacing.md),
                 ),
               ),
             ),
-            SizedBox(width: ChatBoxTokens.spacing.md),
+            SizedBox(width: context.owuiSpacing.md),
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: _isManagementMode ? null : _showAddProviderDialog, // 🆕 管理模式下禁用
-                icon: const Icon(AppleIcons.add),
+                icon: const Icon(OwuiIcons.add),
                 label: const Text('添加'),
                 style: ElevatedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: 14),
+                  padding: EdgeInsets.symmetric(vertical: context.owuiSpacing.md),
                 ),
               ),
             ),

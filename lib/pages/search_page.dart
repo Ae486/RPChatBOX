@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
+
+import '../chat_ui/owui/components/owui_app_bar.dart';
+import '../chat_ui/owui/components/owui_dialog.dart';
+import '../chat_ui/owui/components/owui_scaffold.dart';
+import '../chat_ui/owui/components/owui_text_field.dart';
+import '../chat_ui/owui/owui_icons.dart';
+import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../models/conversation.dart';
 import '../models/message.dart';
-import '../design_system/design_tokens.dart';
 
 /// 搜索页面
 class SearchPage extends StatefulWidget {
@@ -86,33 +91,34 @@ class _SearchPageState extends State<SearchPage> {
 
     final start = (index - 50).clamp(0, content.length);
     final end = (index + query.length + 50).clamp(0, content.length);
-    
+
     String snippet = content.substring(start, end);
     if (start > 0) snippet = '...$snippet';
     if (end < content.length) snippet = '$snippet...';
-    
+
     return snippet;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: TextField(
+    final colors = context.owuiColors;
+
+    return OwuiScaffold(
+      appBar: OwuiAppBar(
+        title: OwuiSearchField(
           controller: _searchController,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '搜索会话和消息...',
-            border: InputBorder.none,
-            hintStyle: TextStyle(color: Colors.grey),
-          ),
-          style: const TextStyle(fontSize: 18),
+          hintText: '搜索会话和消息...',
           onChanged: _performSearch,
         ),
         actions: [
           if (_searchController.text.isNotEmpty)
             IconButton(
-              icon: const Icon(AppleIcons.close),
+              tooltip: '清除',
+              icon: Icon(
+                OwuiIcons.close,
+                color: colors.textSecondary,
+              ),
               onPressed: () {
                 _searchController.clear();
                 _performSearch('');
@@ -152,15 +158,24 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildEmptyState() {
+    final colors = context.owuiColors;
+    final spacing = context.owuiSpacing;
+    final theme = Theme.of(context);
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(AppleIcons.search, size: 80, color: Colors.grey.shade300),
-          SizedBox(height: ChatBoxTokens.spacing.lg),
+          Icon(
+            OwuiIcons.search,
+            size: 80,
+            color: colors.textSecondary.withValues(alpha: 0.35),
+          ),
+          SizedBox(height: spacing.lg),
           Text(
             '搜索会话和消息',
-            style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+            style: (theme.textTheme.titleMedium ?? const TextStyle())
+                .copyWith(color: colors.textSecondary),
           ),
         ],
       ),
@@ -168,15 +183,24 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildNoResults() {
+    final colors = context.owuiColors;
+    final spacing = context.owuiSpacing;
+    final theme = Theme.of(context);
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(AppleIcons.searchOff, size: 80, color: Colors.grey.shade300),
-          SizedBox(height: ChatBoxTokens.spacing.lg),
+          Icon(
+            OwuiIcons.searchOff,
+            size: 80,
+            color: colors.textSecondary.withValues(alpha: 0.35),
+          ),
+          SizedBox(height: spacing.lg),
           Text(
             '未找到匹配结果',
-            style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+            style: (theme.textTheme.titleMedium ?? const TextStyle())
+                .copyWith(color: colors.textSecondary),
           ),
         ],
       ),
@@ -184,6 +208,9 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildResultTile(SearchResult result) {
+    final colors = context.owuiColors;
+    final theme = Theme.of(context);
+
     // 格式化时间
     String timeText = '';
     if (result.message != null) {
@@ -191,15 +218,15 @@ class _SearchPageState extends State<SearchPage> {
       timeText = '${time.year}-${_pad(time.month)}-${_pad(time.day)} '
           '${_pad(time.hour)}:${_pad(time.minute)}:${_pad(time.second)}';
     }
-    
+
     return ListTile(
       leading: CircleAvatar(
         child: Icon(
           result.type == SearchResultType.conversationTitle
               ? Icons.chat_bubble_outline
               : (result.message?.isUser ?? false
-                  ? AppleIcons.person
-                  : AppleIcons.chatbot),
+                  ? OwuiIcons.person
+                  : OwuiIcons.chatbot),
         ),
       ),
       title: Row(
@@ -214,11 +241,8 @@ class _SearchPageState extends State<SearchPage> {
           if (timeText.isNotEmpty)
             Text(
               timeText,
-              style: TextStyle(
-                fontSize: 11,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.normal,
-              ),
+              style: (theme.textTheme.labelSmall ?? const TextStyle())
+                  .copyWith(color: colors.textSecondary),
             ),
         ],
       ),
@@ -227,11 +251,15 @@ class _SearchPageState extends State<SearchPage> {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+      trailing: Icon(
+        OwuiIcons.chevronRight,
+        size: 18,
+        color: colors.textSecondary,
+      ),
       onTap: () => _showMessagePreview(result),
     );
   }
-  
+
   /// 补零辅助函数
   String _pad(int n) => n.toString().padLeft(2, '0');
 
@@ -246,80 +274,95 @@ class _SearchPageState extends State<SearchPage> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(
-              result.message!.isUser ? AppleIcons.person : AppleIcons.chatbot,
-              size: 20,
-            ),
-            SizedBox(width: ChatBoxTokens.spacing.sm),
-            Expanded(
-              child: Text(
-                result.message!.isUser ? '用户' : '助手',
-                style: const TextStyle(fontSize: 18),
-              ),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (context) {
+        final colors = context.owuiColors;
+        final spacing = context.owuiSpacing;
+        final radius = context.owuiRadius;
+        final theme = Theme.of(context);
+
+        return OwuiDialog(
+          title: Row(
             children: [
-              // 会话信息
-              Container(
-                padding: EdgeInsets.all(ChatBoxTokens.spacing.sm),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.chat_bubble_outline, size: 16),
-                    SizedBox(width: ChatBoxTokens.spacing.sm),
-                    Expanded(
-                      child: Text(
-                        result.conversation.title,
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                  ],
-                ),
+              Icon(
+                result.message!.isUser ? OwuiIcons.person : OwuiIcons.chatbot,
+                size: 20,
               ),
-              SizedBox(height: ChatBoxTokens.spacing.lg),
-              // 消息内容（高亮关键词）
-              _buildHighlightedText(
-                result.message!.content,
-                _searchController.text,
+              SizedBox(width: spacing.sm),
+              Expanded(
+                child: Text(
+                  result.message!.isUser ? '用户' : '助手',
+                  style: theme.textTheme.titleMedium,
+                ),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('返回'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 会话信息
+                Container(
+                  padding: EdgeInsets.all(spacing.sm),
+                  decoration: BoxDecoration(
+                    color: colors.surface2,
+                    borderRadius: BorderRadius.circular(radius.rLg),
+                    border: Border.all(color: colors.borderSubtle),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        size: 16,
+                        color: colors.textSecondary,
+                      ),
+                      SizedBox(width: spacing.sm),
+                      Expanded(
+                        child: Text(
+                          result.conversation.title,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: spacing.lg),
+                // 消息内容（高亮关键词）
+                _buildHighlightedText(
+                  result.message!.content,
+                  _searchController.text,
+                ),
+              ],
+            ),
           ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context); // 关闭预览
-              Navigator.pop(context); // 关闭搜索页
-              widget.onResultTap(
-                result.conversation.id,
-                result.message!.id,
-              );
-            },
-            icon: const Icon(Icons.my_location),
-            label: const Text('跳转到消息'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('返回'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context); // 关闭预览
+                Navigator.pop(context); // 关闭搜索页
+                widget.onResultTap(
+                  result.conversation.id,
+                  result.message!.id,
+                );
+              },
+              icon: const Icon(Icons.my_location),
+              label: const Text('跳转到消息'),
+            ),
+          ],
+        );
+      },
     );
   }
 
   /// 构建高亮文本
   Widget _buildHighlightedText(String text, String keyword) {
+    final colors = context.owuiColors;
+    final theme = Theme.of(context);
+
     if (keyword.isEmpty) {
       return Text(text);
     }
@@ -329,9 +372,12 @@ class _SearchPageState extends State<SearchPage> {
     final spans = <TextSpan>[];
     int currentIndex = 0;
 
+    final highlightBg = theme.colorScheme.primary.withValues(alpha: 0.18);
+    final highlightFg = theme.colorScheme.primary;
+
     while (currentIndex < text.length) {
       final index = lowerText.indexOf(lowerKeyword, currentIndex);
-      
+
       if (index == -1) {
         // 没有更多匹配，添加剩余文本
         spans.add(TextSpan(text: text.substring(currentIndex)));
@@ -347,21 +393,20 @@ class _SearchPageState extends State<SearchPage> {
       spans.add(TextSpan(
         text: text.substring(index, index + keyword.length),
         style: TextStyle(
-          backgroundColor: Colors.yellow.shade300,
+          backgroundColor: highlightBg,
           fontWeight: FontWeight.bold,
-          color: Colors.black,
+          color: highlightFg,
         ),
       ));
 
       currentIndex = index + keyword.length;
     }
 
+    final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
+
     return RichText(
       text: TextSpan(
-        style: TextStyle(
-          fontSize: 15,
-          color: Theme.of(context).colorScheme.onSurface,
-        ),
+        style: baseStyle.copyWith(color: colors.textPrimary),
         children: spans,
       ),
     );
@@ -388,4 +433,3 @@ class SearchResult {
     required this.highlightText,
   });
 }
-

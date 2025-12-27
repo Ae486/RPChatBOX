@@ -1,141 +1,117 @@
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
-/// 全局浮动提示框工具类
-/// 从左上方由左向右曲线动画飘出，位于所有窗口最上层
+import '../chat_ui/owui/owui_icons.dart';
+import '../chat_ui/owui/owui_tokens_ext.dart';
+
+/// 全局浮动提示框工具类（OWUI 风格）
+///
+/// 从左上方由左向右动画飘出，位于 Overlay 最上层。
 class GlobalToast {
   static OverlayEntry? _currentEntry;
   static bool _isShowing = false;
 
-  /// 显示加载中提示
-  static void showLoading(
-    BuildContext context,
-    String message,
-  ) {
-    if (_isShowing) {
-      hide(); // 先隐藏之前的
-    }
+  static void loading(BuildContext context, {required String message}) =>
+      showLoading(context, message);
 
-    _isShowing = true;
-    _currentEntry = _createToastEntry(
-      context: context,
-      message: message,
-      type: _ToastType.loading,
-    );
+  static void success(
+    BuildContext context, {
+    required String message,
+    Duration duration = const Duration(seconds: 3),
+  }) =>
+      showSuccess(context, message, duration: duration);
 
-    Overlay.of(context).insert(_currentEntry!);
+  static void error(
+    BuildContext context, {
+    required String message,
+    Duration duration = const Duration(seconds: 3),
+  }) =>
+      showError(context, message, duration: duration);
+
+  static void info(
+    BuildContext context, {
+    required String message,
+    Duration duration = const Duration(seconds: 3),
+  }) =>
+      showInfo(context, message, duration: duration);
+
+  static void warning(
+    BuildContext context, {
+    required String message,
+    Duration duration = const Duration(seconds: 3),
+  }) =>
+      showWarning(context, message, duration: duration);
+
+  static void showLoading(BuildContext context, String message) {
+    _show(context, message: message, type: _ToastType.loading, duration: null);
   }
 
-  /// 显示成功提示
   static void showSuccess(
     BuildContext context,
     String message, {
     Duration duration = const Duration(seconds: 3),
   }) {
-    if (_isShowing) {
-      hide(); // 先隐藏之前的
-    }
-
-    _isShowing = true;
-    _currentEntry = _createToastEntry(
-      context: context,
-      message: message,
-      type: _ToastType.success,
-    );
-
-    Overlay.of(context).insert(_currentEntry!);
-
-    // 自动隐藏
-    Future.delayed(duration, () {
-      hide();
-    });
+    _show(context, message: message, type: _ToastType.success, duration: duration);
   }
 
-  /// 显示失败提示
   static void showError(
     BuildContext context,
     String message, {
     Duration duration = const Duration(seconds: 3),
   }) {
-    if (_isShowing) {
-      hide(); // 先隐藏之前的
-    }
-
-    _isShowing = true;
-    _currentEntry = _createToastEntry(
-      context: context,
-      message: message,
-      type: _ToastType.error,
-    );
-
-    Overlay.of(context).insert(_currentEntry!);
-
-    // 自动隐藏
-    Future.delayed(duration, () {
-      hide();
-    });
+    _show(context, message: message, type: _ToastType.error, duration: duration);
   }
 
-  /// 🆕 显示信息提示
   static void showInfo(
     BuildContext context,
     String message, {
     Duration duration = const Duration(seconds: 3),
   }) {
-    if (_isShowing) {
-      hide(); // 先隐藏之前的
-    }
-
-    _isShowing = true;
-    _currentEntry = _createToastEntry(
-      context: context,
-      message: message,
-      type: _ToastType.info,
-    );
-
-    Overlay.of(context).insert(_currentEntry!);
-
-    // 自动隐藏
-    Future.delayed(duration, () {
-      hide();
-    });
+    _show(context, message: message, type: _ToastType.info, duration: duration);
   }
 
-  /// 隐藏提示框
+  static void showWarning(
+    BuildContext context,
+    String message, {
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    _show(context, message: message, type: _ToastType.warning, duration: duration);
+  }
+
   static void hide() {
-    if (_currentEntry != null && _isShowing) {
-      _currentEntry!.remove();
-      _currentEntry = null;
-      _isShowing = false;
-    }
+    if (_currentEntry == null || !_isShowing) return;
+    _currentEntry!.remove();
+    _currentEntry = null;
+    _isShowing = false;
   }
 
-  /// 创建提示框 OverlayEntry
-  static OverlayEntry _createToastEntry({
-    required BuildContext context,
+  static void _show(
+    BuildContext context, {
     required String message,
     required _ToastType type,
+    Duration? duration,
   }) {
-    return OverlayEntry(
+    if (_isShowing) hide();
+
+    _isShowing = true;
+    _currentEntry = OverlayEntry(
       builder: (context) => _GlobalToastWidget(
         message: message,
         type: type,
         onDismiss: hide,
       ),
     );
+
+    Overlay.of(context).insert(_currentEntry!);
+
+    if (duration != null) {
+      Future.delayed(duration, hide);
+    }
   }
 }
 
-/// 提示框类型
-enum _ToastType {
-  loading,
-  success,
-  error,
-  info, // 🆕 信息提示
-}
+enum _ToastType { loading, success, error, info, warning }
 
-/// 全局提示框 Widget
 class _GlobalToastWidget extends StatefulWidget {
   final String message;
   final _ToastType type;
@@ -162,27 +138,20 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
     super.initState();
 
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 240),
       vsync: this,
     );
 
-    // 🔧 从左向右滑入（曲线动画）
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(-1.0, 0.0), // 从屏幕左侧外
-      end: Offset.zero, // 到正常位置
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic, // 平滑曲线
-    ));
+      begin: const Offset(-1.0, 0.0),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
 
-    // 淡入动画
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeIn,
-    ));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
 
     _controller.forward();
   }
@@ -200,39 +169,43 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
 
   @override
   Widget build(BuildContext context) {
-    Color backgroundColor;
-    IconData iconData;
-    Color iconColor;
-    bool showLoading = false;
+    final tokens = context.owuiTokens;
+    final colors = tokens.colors;
+    final scale = tokens.uiScale;
 
-    switch (widget.type) {
-      case _ToastType.loading:
-        backgroundColor = Colors.blue.shade50;
-        iconData = AppleIcons.info;
-        iconColor = Colors.blue;
-        showLoading = true;
-        break;
-      case _ToastType.success:
-        backgroundColor = Colors.green.shade50;
-        iconData = AppleIcons.checkCircle;
-        iconColor = Colors.green;
-        break;
-      case _ToastType.error:
-        backgroundColor = Colors.red.shade50;
-        iconData = AppleIcons.error;
-        iconColor = Colors.red;
-        break;
-      case _ToastType.info: // 🆕 信息提示
-        backgroundColor = Colors.orange.shade50;
-        iconData = AppleIcons.info;
-        iconColor = Colors.orange;
-        break;
-    }
+    final scheme = Theme.of(context).colorScheme;
+
+    final Color accent = switch (widget.type) {
+      _ToastType.loading || _ToastType.info => scheme.primary,
+      _ToastType.success => scheme.secondary,
+      _ToastType.warning => scheme.tertiary,
+      _ToastType.error => scheme.error,
+    };
+
+    final IconData icon = switch (widget.type) {
+      _ToastType.loading => OwuiIcons.info,
+      _ToastType.success => OwuiIcons.checkCircle,
+      _ToastType.warning => OwuiIcons.warning,
+      _ToastType.error => OwuiIcons.error,
+      _ToastType.info => OwuiIcons.info,
+    };
+
+    final spacing = context.owuiSpacing;
+
+    final topInset = MediaQuery.paddingOf(context).top;
+    final toastTop = topInset + spacing.lg;
+
+    final padding = EdgeInsets.symmetric(
+      horizontal: spacing.md,
+      vertical: spacing.sm,
+    );
+
+    final iconSize = 20 * scale;
 
     return Positioned(
-      top: 16,
-      left: 16,
-      right: 16,
+      top: toastTop,
+      left: spacing.lg,
+      right: spacing.lg,
       child: SlideTransition(
         position: _slideAnimation,
         child: FadeTransition(
@@ -240,61 +213,43 @@ class _GlobalToastWidgetState extends State<_GlobalToastWidget>
           child: Material(
             color: Colors.transparent,
             child: Container(
-              padding: const EdgeInsets.all(16),
+              padding: padding,
               decoration: BoxDecoration(
-                color: backgroundColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: widget.type == _ToastType.loading
-                      ? Colors.blue.shade200
-                      : (widget.type == _ToastType.success
-                          ? Colors.green.shade200
-                          : (widget.type == _ToastType.error
-                              ? Colors.red.shade200
-                              : Colors.orange.shade200)), // 🆕 info 边框颜色
-                  width: 1.5,
-                ),
+                color: colors.surfaceCard,
+                borderRadius: BorderRadius.circular(context.owuiRadius.rXl),
+                border: Border.all(color: colors.borderSubtle),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 16 * scale,
+                    offset: Offset(0, 6 * scale),
                   ),
                 ],
               ),
               child: Row(
                 children: [
-                  // 图标或加载动画
-                  if (showLoading)
-                    SpinKitThreeBounce(
-                      color: iconColor,
-                      size: 20.0,
-                    )
+                  if (widget.type == _ToastType.loading)
+                    SpinKitThreeBounce(color: accent, size: iconSize)
                   else
-                    Icon(iconData, color: iconColor, size: 24),
-
-                  const SizedBox(width: 12),
-
-                  // 消息文本
+                    Icon(icon, color: accent, size: iconSize),
+                  SizedBox(width: spacing.sm),
                   Expanded(
                     child: Text(
                       widget.message,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade800,
-                      ),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: colors.textPrimary,
+                          ),
                     ),
                   ),
-
-                  // 关闭按钮（非加载状态）
-                  if (!showLoading)
+                  if (widget.type != _ToastType.loading)
                     IconButton(
-                      icon: const Icon(AppleIcons.close, size: 20),
+                      icon: Icon(OwuiIcons.close, size: iconSize),
                       onPressed: _dismiss,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       visualDensity: VisualDensity.compact,
+                      color: colors.textSecondary,
+                      tooltip: '关闭',
                     ),
                 ],
               ),

@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
-import '../models/provider_config.dart';
-import '../models/model_config.dart';
-import '../services/model_service_manager.dart';
-import '../widgets/add_model_dialog.dart';
-import '../utils/global_toast.dart';
-import '../design_system/design_tokens.dart';
-import '../design_system/apple_tokens.dart';
-import '../design_system/apple_icons.dart';
+
+import '../chat_ui/owui/components/owui_app_bar.dart';
+import '../chat_ui/owui/components/owui_card.dart';
+import '../chat_ui/owui/components/owui_dialog.dart';
+import '../chat_ui/owui/components/owui_scaffold.dart';
+import '../chat_ui/owui/components/owui_snack_bar.dart';
+import '../chat_ui/owui/owui_icons.dart';
+import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../data/model_capability_presets.dart';
+import '../models/model_config.dart';
+import '../models/provider_config.dart';
+import '../services/model_service_manager.dart';
+import '../utils/global_toast.dart';
+import '../widgets/add_model_dialog.dart';
 import 'model_edit_page.dart';
 
 /// Provider详情编辑页面
@@ -188,9 +193,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     if (provider == null) {
       // 新建Provider时暂存模型，保存Provider后再添加
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请先保存Provider配置')),
-        );
+        OwuiSnackBars.warning(context, message: '请先保存Provider配置');
       }
       return;
     }
@@ -258,9 +261,11 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   /// 🆕 删除模型
   Future<void> _deleteModel(ModelConfig model) async {
     // 🚧 TODO: 第四批 - 实现确认对话框
+    final scheme = Theme.of(context).colorScheme;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => OwuiDialog(
         title: const Text('确认删除'),
         content: Text('确定要删除模型 "${model.displayName}" 吗？'),
         actions: [
@@ -270,7 +275,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: scheme.error),
             child: const Text('删除'),
           ),
         ],
@@ -291,26 +296,26 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   @override
   Widget build(BuildContext context) {
     final isNewProvider = widget.provider == null;
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final scheme = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
+    return OwuiScaffold(
+      appBar: OwuiAppBar(
         title: Text(isNewProvider ? '添加服务' : '编辑服务'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           TextButton(
             onPressed: _save,
-            child: const Text('保存', style: TextStyle(fontSize: 16)),
+            child: const Text('保存'),
           ),
-          SizedBox(width: ChatBoxTokens.spacing.sm),
+          SizedBox(width: spacing.sm),
         ],
       ),
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
+          padding: EdgeInsets.all(spacing.lg),
           children: [
-            // 🔧 移除页面内提示框，改用全局浮动提示框
-
             // 管理区
             _buildSection(
               title: '管理',
@@ -318,14 +323,13 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 children: [
                   // 🆕 现代化服务商类型选择器
                   _buildModernTypeSelector(),
-                  SizedBox(height: ChatBoxTokens.spacing.lg),
+                  SizedBox(height: spacing.lg),
 
                   // 名称
                   TextFormField(
                     controller: _nameController,
                     decoration: const InputDecoration(
                       labelText: '名称',
-                      border: OutlineInputBorder(),
                       hintText: '例如：OpenAI 官方',
                     ),
                     validator: (value) {
@@ -335,7 +339,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                       return null;
                     },
                   ),
-                  SizedBox(height: ChatBoxTokens.spacing.lg),
+                  SizedBox(height: spacing.lg),
 
                   // 🆕 API地址输入框（带预览）
                   Column(
@@ -345,7 +349,6 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                         controller: _apiUrlController,
                         decoration: const InputDecoration(
                           labelText: 'API 地址',
-                          border: OutlineInputBorder(),
                           hintText: 'https://api.openai.com/v1',
                           helperText: '结尾添加 "/" 忽略v1版本，"#" 强制使用输入地址',
                         ),
@@ -364,33 +367,34 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                       ),
                       // 🆕 实际使用地址预览（仅在支持补全时显示）
                       if (_shouldShowApiPreview()) ...[
-                        SizedBox(height: ChatBoxTokens.spacing.sm),
+                        SizedBox(height: spacing.sm),
                         Container(
                           padding: EdgeInsets.symmetric(
-                            horizontal: ChatBoxTokens.spacing.md,
-                            vertical: ChatBoxTokens.spacing.sm,
+                            horizontal: spacing.md,
+                            vertical: spacing.sm,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                            borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
-                            border: Border.all(
-                              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
+                            color: colors.surface2,
+                            borderRadius: BorderRadius.circular(
+                              context.owuiRadius.rLg,
                             ),
+                            border: Border.all(color: colors.borderSubtle),
                           ),
                           child: Row(
                             children: [
                               Icon(
-                                Icons.link,
+                                OwuiIcons.link,
                                 size: 16,
-                                color: Theme.of(context).colorScheme.primary,
+                                color: scheme.primary,
                               ),
-                              SizedBox(width: ChatBoxTokens.spacing.sm),
+                              SizedBox(width: spacing.sm),
                               Expanded(
                                 child: Text(
                                   _apiUrlPreview,
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                        fontWeight: FontWeight.w500,
+                                        color: colors.textPrimary,
+                                      ),
                                 ),
                               ),
                             ],
@@ -399,20 +403,21 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                       ],
                     ],
                   ),
-                  SizedBox(height: ChatBoxTokens.spacing.lg),
+                  SizedBox(height: spacing.lg),
 
                   // API密钥
                   TextFormField(
                     controller: _apiKeyController,
                     decoration: InputDecoration(
                       labelText: 'API 密钥',
-                      border: const OutlineInputBorder(),
                       hintText: 'sk-...',
                       // 🆕 添加显示/隐藏按钮
                       suffixIcon: IconButton(
                         icon: Icon(
-                          _isApiKeyVisible ? Icons.visibility_off : Icons.visibility,
-                          size: 20,
+                          _isApiKeyVisible
+                              ? OwuiIcons.visibilityOff
+                              : OwuiIcons.visibility,
+                          size: 18,
                         ),
                         onPressed: () {
                           setState(() {
@@ -434,7 +439,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
               ),
             ),
 
-            SizedBox(height: ChatBoxTokens.spacing.xl),
+            SizedBox(height: spacing.xl),
 
             // 模型区
             if (!isNewProvider) ...[
@@ -442,59 +447,44 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 title: '模型',
                 trailing: TextButton.icon(
                   onPressed: _isTestingMode ? _exitTestMode : _enterTestMode,
-                  icon: Icon(_isTestingMode ? AppleIcons.close : Icons.wifi_tethering),
+                  icon: Icon(
+                    _isTestingMode ? OwuiIcons.close : Icons.wifi_tethering,
+                  ),
                   label: Text(_isTestingMode ? '取消' : '检测'),
                 ),
                 child: Column(
                   children: [
                     // 模型列表
                     if (_models.isEmpty)
-                      Container(
-                        padding: EdgeInsets.all(ChatBoxTokens.spacing.xl + 8),
-                        alignment: Alignment.center,
+                      Padding(
+                        padding: EdgeInsets.symmetric(vertical: spacing.xxl),
                         child: Text(
                           '暂无模型',
-                          style: TextStyle(color: Colors.grey.shade600),
+                          style: TextStyle(color: colors.textSecondary),
                         ),
                       )
                     else
                       ..._models.map((model) => _buildModelCard(model)),
 
-                    SizedBox(height: ChatBoxTokens.spacing.md),
+                    SizedBox(height: spacing.md),
 
                     // 添加模型按钮
                     OutlinedButton.icon(
                       onPressed: _addModel,
-                      icon: const Icon(AppleIcons.add),
+                      icon: const Icon(OwuiIcons.add),
                       label: const Text('添加模型'),
                       style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
+                        minimumSize: const Size(
+                          double.infinity,
+                          kMinInteractiveDimension,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
             ] else
-              Container(
-                padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
-                  border: Border.all(color: Colors.blue.shade200),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(AppleIcons.info, color: Colors.blue),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '保存Provider后可添加模型',
-                        style: TextStyle(color: Colors.blue),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _buildInfoCallout('保存Provider后可添加模型'),
           ],
         ),
       ),
@@ -506,6 +496,10 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     required Widget child,
     Widget? trailing,
   }) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final theme = Theme.of(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -513,48 +507,71 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: (theme.textTheme.titleMedium ?? const TextStyle()).copyWith(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const Spacer(),
             if (trailing != null) trailing,
           ],
         ),
-        SizedBox(height: ChatBoxTokens.spacing.lg),
-        child,
+        SizedBox(height: spacing.md),
+        OwuiCard(
+          padding: EdgeInsets.all(spacing.lg),
+          child: child,
+        ),
       ],
+    );
+  }
+
+  Widget _buildInfoCallout(String message) {
+    final colors = context.owuiColors;
+    final spacing = context.owuiSpacing;
+    final scheme = Theme.of(context).colorScheme;
+
+    return OwuiCard(
+      padding: EdgeInsets.all(spacing.lg),
+      child: Row(
+        children: [
+          Icon(OwuiIcons.info, size: 18, color: scheme.primary),
+          SizedBox(width: spacing.md),
+          Expanded(
+            child: Text(
+              message,
+              style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
+                  .copyWith(color: colors.textSecondary),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   /// 🆕 现代化下拉框选择器
   Widget _buildModernTypeSelector() {
+    final spacing = context.owuiSpacing;
+    final theme = Theme.of(context);
+
     return DropdownButtonFormField<ProviderType>(
       initialValue: _selectedType,
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         labelText: '服务商类型',
-        border: OutlineInputBorder(),
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: spacing.md,
+          vertical: spacing.sm,
+        ),
       ),
       isExpanded: true,
-      icon: const Icon(Icons.arrow_drop_down, size: 24),
+      icon: const Icon(OwuiIcons.chevronDown, size: 18),
       items: ProviderType.values.map((type) {
         return DropdownMenuItem(
           value: type,
           child: Row(
             children: [
-              Icon(
-                _getProviderIcon(type),
-                size: 20,
-              ),
-              SizedBox(width: ChatBoxTokens.spacing.md),
-              Text(
-                type.displayName,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
+              Icon(_getProviderIcon(type), size: 18),
+              SizedBox(width: spacing.md),
+              Text(type.displayName, style: theme.textTheme.bodyMedium),
             ],
           ),
         );
@@ -577,26 +594,36 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       case ProviderType.gemini:
         return Icons.stars;
       case ProviderType.deepseek:
-        return Icons.psychology;
+        return Icons.travel_explore;
       case ProviderType.claude:
-        return Icons.chat_bubble_outline;
+        return Icons.psychology;
     }
   }
 
-  /// Model卡片 - Apple风格
+  /// Model卡片
   Widget _buildModelCard(ModelConfig model) {
     final isTestingThis = _testingModelId == model.id;
     final isInTestMode = _isTestingMode && !isTestingThis;
 
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final scheme = Theme.of(context).colorScheme;
+    final radius = context.owuiRadius.rXl;
+
+    final actionButtonShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+      side: BorderSide(color: colors.borderSubtle),
+    );
+
     return _BreathingBorderCard(
       isBreathing: isInTestMode,
-      margin: EdgeInsets.only(bottom: ChatBoxTokens.spacing.md),
+      margin: EdgeInsets.only(bottom: spacing.md),
       isSelected: isTestingThis,
       child: InkWell(
         onTap: _isTestingMode && !isTestingThis ? () => _testModel(model) : null,
-        borderRadius: BorderRadius.circular(12), // Apple圆角
+        borderRadius: BorderRadius.circular(radius),
         child: Padding(
-          padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
+          padding: EdgeInsets.all(spacing.lg),
           child: Row(
             children: [
               // 模型名称和能力图标
@@ -604,19 +631,19 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 模型名称 - Apple字体
                     Text(
                       model.displayName,
-                      style: AppleTokens.typography.body.copyWith(
+                      style: (Theme.of(context).textTheme.titleSmall ??
+                              const TextStyle())
+                          .copyWith(
                         fontWeight: FontWeight.w600,
-                        fontSize: 16,
+                        color: colors.textPrimary,
                       ),
                     ),
-                    SizedBox(height: ChatBoxTokens.spacing.sm),
-                    // 能力图标 - 优化样式
+                    SizedBox(height: spacing.sm),
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
+                      spacing: spacing.sm,
+                      runSpacing: spacing.xs,
                       children: model.capabilities
                           .where((cap) => cap != ModelCapability.text)
                           .map((cap) {
@@ -624,12 +651,14 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                           message: cap.displayName,
                           child: Container(
                             padding: EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
+                              horizontal: spacing.sm,
+                              vertical: spacing.xs,
                             ),
                             decoration: BoxDecoration(
                               color: cap.color.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(6), // 更圆润
+                              borderRadius: BorderRadius.circular(
+                                context.owuiRadius.rLg / 2,
+                              ),
                               border: Border.all(
                                 color: cap.color.withValues(alpha: 0.3),
                                 width: 0.5,
@@ -638,15 +667,13 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  cap.icon,
-                                  size: 14,
-                                  color: cap.color,
-                                ),
-                                SizedBox(width: 4),
+                                Icon(cap.icon, size: 14, color: cap.color),
+                                SizedBox(width: spacing.xs),
                                 Text(
                                   cap.displayName,
-                                  style: AppleTokens.typography.caption2.copyWith(
+                                  style: (Theme.of(context).textTheme.bodySmall ??
+                                          const TextStyle())
+                                      .copyWith(
                                     color: cap.color,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -661,57 +688,52 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 ),
               ),
 
-              // 设置和删除按钮 - Apple风格
               if (!_isTestingMode) ...[
                 IconButton(
                   icon: Icon(
-                    AppleIcons.settings,
-                    size: 22,
-                    color: AppleColors.secondaryLabel(context),
+                    OwuiIcons.settings,
+                    size: 20,
+                    color: colors.textSecondary,
                   ),
                   onPressed: () => _openModelSettings(model),
                   tooltip: '模型设置',
-                  padding: EdgeInsets.all(8),
+                  padding: EdgeInsets.all(spacing.sm),
                   constraints: const BoxConstraints(),
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).cardColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    backgroundColor: colors.surface2,
+                    shape: actionButtonShape,
                   ),
                 ),
-                SizedBox(width: ChatBoxTokens.spacing.sm),
+                SizedBox(width: spacing.sm),
                 IconButton(
                   icon: Icon(
-                    AppleIcons.removeCircle,
-                    size: 22,
-                    color: AppleColors.red,
+                    OwuiIcons.removeCircle,
+                    size: 20,
+                    color: scheme.error,
                   ),
                   onPressed: () => _deleteModel(model),
                   tooltip: '删除模型',
-                  padding: EdgeInsets.all(8),
+                  padding: EdgeInsets.all(spacing.sm),
                   constraints: const BoxConstraints(),
                   style: IconButton.styleFrom(
-                    backgroundColor: AppleColors.red.withValues(alpha: 0.1),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    backgroundColor: colors.surface2,
+                    shape: actionButtonShape,
                   ),
                 ),
               ],
 
-              // 测试模式下的箭头
               if (_isTestingMode && !isTestingThis)
                 Container(
-                  padding: EdgeInsets.all(8),
+                  padding: EdgeInsets.all(spacing.sm),
                   decoration: BoxDecoration(
-                    color: AppleColors.blue.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
+                    color: colors.surface2,
+                    borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+                    border: Border.all(color: colors.borderSubtle),
                   ),
                   child: Icon(
-                    AppleIcons.send,
-                    color: AppleColors.blue,
-                    size: 22,
+                    OwuiIcons.send,
+                    color: scheme.primary,
+                    size: 20,
                   ),
                 ),
             ],
@@ -721,6 +743,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     );
   }
 }
+
 
 /// 🔧 呼吸边框卡片组件
 class _BreathingBorderCard extends StatefulWidget {
@@ -781,49 +804,33 @@ class _BreathingBorderCardState extends State<_BreathingBorderCard>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final primaryColor = AppleColors.blue;
+    final colors = context.owuiColors;
+    final scheme = Theme.of(context).colorScheme;
+    final radius = context.owuiRadius.rXl;
 
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
+        final Color borderColor;
+        final double borderWidth;
+
+        if (widget.isSelected) {
+          borderColor = scheme.primary;
+          borderWidth = 1.5;
+        } else if (widget.isBreathing) {
+          borderColor = scheme.primary.withValues(alpha: _animation.value * 0.35);
+          borderWidth = 1;
+        } else {
+          borderColor = colors.borderSubtle;
+          borderWidth = 1;
+        }
+
         return Container(
           margin: widget.margin,
           decoration: BoxDecoration(
-            color: theme.cardColor,
-            borderRadius: BorderRadius.circular(12), // Apple圆角
-            border: Border.all(
-              color: widget.isSelected
-                  ? primaryColor
-                  : (widget.isBreathing
-                      ? primaryColor.withValues(alpha: _animation.value * 0.6)
-                      : AppleColors.separator(context)),
-              width: widget.isSelected ? 2 : 0.5,
-            ),
-            boxShadow: widget.isSelected
-                ? [
-                    // 选中状态：Apple蓝色阴影
-                    BoxShadow(
-                      color: primaryColor.withValues(alpha: 0.2),
-                      blurRadius: 12,
-                      offset: Offset(0, 4),
-                    ),
-                    BoxShadow(
-                      color: primaryColor.withValues(alpha: 0.1),
-                      blurRadius: 24,
-                      offset: Offset(0, 8),
-                    ),
-                  ]
-                : widget.isBreathing
-                    ? [
-                        // 呼吸状态：动态阴影
-                        BoxShadow(
-                          color: primaryColor.withValues(alpha: _animation.value * 0.15),
-                          blurRadius: 12 * _animation.value,
-                          offset: Offset(0, 4 * _animation.value),
-                        ),
-                      ]
-                    : AppleTokens.shadows.card, // 默认：Apple卡片阴影
+            color: colors.surfaceCard,
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: borderColor, width: borderWidth),
           ),
           child: child,
         );
@@ -832,3 +839,4 @@ class _BreathingBorderCardState extends State<_BreathingBorderCard>
     );
   }
 }
+

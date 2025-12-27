@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
-import '../widgets/apple_toast.dart';
+
+import '../chat_ui/owui/components/owui_app_bar.dart';
+import '../chat_ui/owui/components/owui_dialog.dart';
+import '../chat_ui/owui/components/owui_scaffold.dart';
+import '../chat_ui/owui/components/owui_snack_bar.dart';
+import '../chat_ui/owui/owui_icons.dart';
+import '../chat_ui/owui/owui_tokens_ext.dart';
+import '../models/conversation.dart';
 import '../models/custom_role.dart';
 import '../services/custom_role_service.dart';
 import '../services/hive_conversation_service.dart';
-import '../models/conversation.dart';
 
 /// 自定义角色管理页面
 class CustomRolesPage extends StatefulWidget {
@@ -42,10 +47,11 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     } catch (e) {
       debugPrint('⚠️ 初始化失败: $e');
       if (mounted) {
-        AppleToast.error(context, message: '初始化失败: $e');
+        OwuiSnackBars.error(context, message: '初始化失败: $e');
       }
     }
   }
+
 
   Future<void> _loadRoles() async {
     final roles = await _service.loadCustomRoles();
@@ -58,107 +64,115 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
   Future<void> _showRoleDialog({CustomRole? editRole}) async {
     final nameController = TextEditingController(text: editRole?.name ?? '');
     final descController = TextEditingController(text: editRole?.description ?? '');
-    final promptController = TextEditingController(text: editRole?.systemPrompt ?? '');
+    final promptController = TextEditingController(
+      text: editRole?.systemPrompt ?? '',
+    );
     String selectedIcon = editRole?.icon ?? '✨';
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(editRole == null ? '创建自定义角色' : '编辑角色'),
-          content: SizedBox(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 图标和名称一行
-                Row(
-                  children: [
-                    // 图标选择框
-                    InkWell(
-                      onTap: () async {
-                        final icon = await _showEmojiPicker(context, selectedIcon);
-                        if (icon != null) {
-                          setState(() {
-                            selectedIcon = icon;
-                          });
-                        }
-                      },
-                      child: Container(
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Center(
-                          child: Text(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setState) {
+          final spacing = dialogContext.owuiSpacing;
+          final colors = dialogContext.owuiColors;
+          final radius = dialogContext.owuiRadius;
+          final uiScale = dialogContext.owui.uiScale;
+
+          return OwuiDialog(
+            title: Text(editRole == null ? '创建自定义角色' : '编辑角色'),
+            content: SizedBox(
+              width: 400 * uiScale,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      InkWell(
+                        onTap: () async {
+                          final icon = await _showEmojiPicker(
+                            dialogContext,
                             selectedIcon,
-                            style: const TextStyle(fontSize: 32),
+                          );
+                          if (icon != null) {
+                            setState(() {
+                              selectedIcon = icon;
+                            });
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(radius.rLg),
+                        child: Container(
+                          width: 60 * uiScale,
+                          height: 60 * uiScale,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: colors.borderSubtle),
+                            borderRadius: BorderRadius.circular(radius.rLg),
+                          ),
+                          child: Center(
+                            child: Text(
+                              selectedIcon,
+                              style: TextStyle(fontSize: 32 * uiScale),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    // 角色名称
-                    Expanded(
-                      child: TextField(
-                        controller: nameController,
-                        decoration: const InputDecoration(
-                          labelText: '角色名称',
-                          hintText: '例如：Python 专家',
-                          border: OutlineInputBorder(),
+                      SizedBox(width: spacing.md),
+                      Expanded(
+                        child: TextField(
+                          controller: nameController,
+                          decoration: const InputDecoration(
+                            labelText: '角色名称',
+                            hintText: '例如：Python 专家',
+                            border: OutlineInputBorder(),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // 角色描述
-                SizedBox(
-                  height: 80,
-                  child: TextField(
-                    controller: descController,
-                    decoration: const InputDecoration(
-                      labelText: '角色描述',
-                      hintText: '简短描述角色特点',
-                      border: OutlineInputBorder(),
-                      alignLabelWithHint: true,
-                    ),
-                    maxLines: 3,
+                    ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                // System Prompt
-                SizedBox(
-                  height: 150,
-                  child: TextField(
-                    controller: promptController,
-                    decoration: const InputDecoration(
-                      labelText: 'System Prompt',
-                      hintText: 'You are a...',
-                      border: OutlineInputBorder(),
-                      alignLabelWithHint: true,
+                  SizedBox(height: spacing.lg),
+                  SizedBox(
+                    height: 80 * uiScale,
+                    child: TextField(
+                      controller: descController,
+                      decoration: const InputDecoration(
+                        labelText: '角色描述',
+                        hintText: '简短描述角色特点',
+                        border: OutlineInputBorder(),
+                        alignLabelWithHint: true,
+                      ),
+                      maxLines: 3,
                     ),
-                    maxLines: null,
-                    expands: true,
-                    textAlignVertical: TextAlignVertical.top,
                   ),
-                ),
-              ],
+                  SizedBox(height: spacing.lg),
+                  SizedBox(
+                    height: 150 * uiScale,
+                    child: TextField(
+                      controller: promptController,
+                      decoration: const InputDecoration(
+                        labelText: 'System Prompt',
+                        hintText: 'You are a...',
+                        border: OutlineInputBorder(),
+                        alignLabelWithHint: true,
+                      ),
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('保存'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('保存'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -166,15 +180,15 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
       final name = nameController.text.trim();
       final description = descController.text.trim();
       final prompt = promptController.text.trim();
-      
+
       // 验证：角色名称不能为空
       if (name.isEmpty) {
         if (mounted) {
-          AppleToast.warning(context, message: '角色名称不能为空');
+          OwuiSnackBars.warning(context, message: '角色名称不能为空');
         }
         return;
       }
-      
+
       final role = CustomRole(
         id: editRole?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
         name: name,
@@ -206,48 +220,69 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
 
     return await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('选择图标'),
-        content: SizedBox(
-          width: 300,
-          height: 300,
-          child: GridView.builder(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 4,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
-            itemCount: emojis.length,
-            itemBuilder: (context, index) {
-              final emoji = emojis[index];
-              final isSelected = emoji == currentIcon;
-              
-              return InkWell(
-                onTap: () => Navigator.pop(context, emoji),
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: isSelected ? Colors.blue : Colors.grey.shade300,
-                      width: isSelected ? 2 : 1,
+      builder: (dialogContext) {
+        final spacing = dialogContext.owuiSpacing;
+        final colors = dialogContext.owuiColors;
+        final radius = dialogContext.owuiRadius;
+        final scheme = Theme.of(dialogContext).colorScheme;
+        final uiScale = dialogContext.owui.uiScale;
+
+        return OwuiDialog(
+          title: const Text('选择图标'),
+          content: SizedBox(
+            width: 300 * uiScale,
+            height: 300 * uiScale,
+            child: GridView.builder(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                mainAxisSpacing: spacing.md,
+                crossAxisSpacing: spacing.md,
+              ),
+              itemCount: emojis.length,
+              itemBuilder: (context, index) {
+                final emoji = emojis[index];
+                final isSelected = emoji == currentIcon;
+
+                final borderColor =
+                    isSelected ? scheme.primary : colors.borderSubtle;
+                final bgColor = isSelected
+                    ? scheme.primary.withValues(alpha: 0.08)
+                    : colors.surface2;
+
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => Navigator.pop(dialogContext, emoji),
+                    borderRadius: BorderRadius.circular(radius.rLg),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: bgColor,
+                        border: Border.all(
+                          color: borderColor,
+                          width: (isSelected ? 2 : 1) * uiScale,
+                        ),
+                        borderRadius: BorderRadius.circular(radius.rLg),
+                      ),
+                      child: Center(
+                        child: Text(
+                          emoji,
+                          style: TextStyle(fontSize: 32 * uiScale),
+                        ),
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(8),
-                    color: isSelected ? Colors.blue.shade50 : null,
                   ),
-                  child: Center(
-                    child: Text(emoji, style: const TextStyle(fontSize: 32)),
-                  ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -278,68 +313,80 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     // 构建确认对话框内容
     final hasRelatedConversations = relatedConversations.isNotEmpty;
     final conversationCount = relatedConversations.length;
-    
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除角色'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('确定要删除「${role.name}」吗？'),
-            if (hasRelatedConversations)
-              const SizedBox(height: 16),
-            if (hasRelatedConversations)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(AppleIcons.warning, color: Colors.orange.shade700, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          '关联对话警告',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade900,
+      builder: (dialogContext) {
+        final spacing = dialogContext.owuiSpacing;
+        final colors = dialogContext.owuiColors;
+        final radius = dialogContext.owuiRadius;
+        final scheme = Theme.of(dialogContext).colorScheme;
+
+        return OwuiDialog(
+          title: const Text('删除角色'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('确定要删除「${role.name}」吗？'),
+              if (hasRelatedConversations) SizedBox(height: spacing.lg),
+              if (hasRelatedConversations)
+                Container(
+                  padding: EdgeInsets.all(spacing.md),
+                  decoration: BoxDecoration(
+                    color: colors.surface2,
+                    borderRadius: BorderRadius.circular(radius.rLg),
+                    border: Border.all(color: colors.borderSubtle),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            OwuiIcons.warning,
+                            color: scheme.tertiary,
+                            size: 20 * dialogContext.owui.uiScale,
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '此角色有 $conversationCount 个关联对话，删除后这些对话也会被删除！',
-                      style: TextStyle(color: Colors.orange.shade900),
-                    ),
-                  ],
+                          SizedBox(width: spacing.sm),
+                          Text(
+                            '关联对话警告',
+                            style: Theme.of(dialogContext)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: spacing.sm),
+                      Text(
+                        '此角色有 $conversationCount 个关联对话，删除后这些对话也会被删除！',
+                        style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                              color: colors.textSecondary,
+                            ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: TextButton.styleFrom(foregroundColor: scheme.error),
+              child: Text(hasRelatedConversations ? '确认删除' : '删除'),
+            ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: Text(hasRelatedConversations ? '确认删除' : '删除'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (confirmed == true) {
-      // 删除关联的对话
+
       if (hasRelatedConversations) {
         try {
           for (final conv in relatedConversations) {
@@ -349,23 +396,23 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
         } catch (e) {
           debugPrint('⚠️ 删除关联对话失败: $e');
           if (mounted) {
-            AppleToast.error(context, message: '删除关联对话失败: $e');
+            OwuiSnackBars.error(context, message: '删除关联对话失败: $e');
           }
           return;
         }
       }
-      
+
       // 删除角色
       await _service.deleteCustomRole(role.id);
       await _loadRoles();
-      
+
       // 显示成功提示
       if (mounted) {
-        AppleToast.success(
+        OwuiSnackBars.success(
           context,
-          message: hasRelatedConversations 
-            ? '已删除角色和 $conversationCount 个关联对话' 
-            : '已删除角色',
+          message: hasRelatedConversations
+              ? '已删除角色和 $conversationCount 个关联对话'
+              : '已删除角色',
         );
       }
     }
@@ -373,10 +420,10 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('自定义角色'),
-      ),
+    final scheme = Theme.of(context).colorScheme;
+
+    return OwuiScaffold(
+      appBar: const OwuiAppBar(title: Text('自定义角色')),
       body: _customRoles.isEmpty
           ? _buildEmptyState()
           : ListView.builder(
@@ -391,11 +438,11 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        icon: const Icon(AppleIcons.edit),
+                        icon: const Icon(OwuiIcons.edit),
                         onPressed: () => _showRoleDialog(editRole: role),
                       ),
                       IconButton(
-                        icon: const Icon(AppleIcons.delete, color: Colors.red),
+                        icon: Icon(OwuiIcons.delete, color: scheme.error),
                         onPressed: () => _deleteRole(role),
                       ),
                     ],
@@ -405,26 +452,36 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showRoleDialog(),
-        child: const Icon(AppleIcons.add),
+        child: const Icon(OwuiIcons.add),
       ),
     );
   }
 
   Widget _buildEmptyState() {
+    final colors = context.owuiColors;
+    final spacing = context.owuiSpacing;
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(AppleIcons.personAdd, size: 80, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
+          Icon(
+            OwuiIcons.personAdd,
+            size: 80 * context.owui.uiScale,
+            color: colors.textSecondary.withValues(alpha: 0.55),
+          ),
+          SizedBox(height: spacing.lg),
           Text(
             '还没有自定义角色',
-            style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(color: colors.textSecondary),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: spacing.sm),
           TextButton.icon(
             onPressed: () => _showRoleDialog(),
-            icon: const Icon(AppleIcons.add),
+            icon: const Icon(OwuiIcons.add),
             label: const Text('创建第一个角色'),
           ),
         ],
@@ -432,4 +489,3 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     );
   }
 }
-

@@ -7,6 +7,7 @@ class ChatSettings {
   final double temperature;
   final double topP;
   final int maxTokens;
+  final bool enableChatUiV2;
 
   ChatSettings({
     this.apiUrl = 'https://api.openai.com/v1/chat/completions',
@@ -16,6 +17,7 @@ class ChatSettings {
     this.temperature = 0.7,
     this.topP = 1.0,
     this.maxTokens = 2000,
+    this.enableChatUiV2 = false,
   });
 
   Map<String, dynamic> toJson() {
@@ -27,6 +29,7 @@ class ChatSettings {
       'temperature': temperature,
       'topP': topP,
       'maxTokens': maxTokens,
+      'enableChatUiV2': enableChatUiV2,
     };
   }
 
@@ -39,6 +42,7 @@ class ChatSettings {
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0.7,
       topP: (json['topP'] as num?)?.toDouble() ?? 1.0,
       maxTokens: json['maxTokens'] as int? ?? 2000,
+      enableChatUiV2: json['enableChatUiV2'] as bool? ?? false,
     );
   }
 
@@ -50,6 +54,7 @@ class ChatSettings {
     double? temperature,
     double? topP,
     int? maxTokens,
+    bool? enableChatUiV2,
   }) {
     return ChatSettings(
       apiUrl: apiUrl ?? this.apiUrl,
@@ -59,6 +64,7 @@ class ChatSettings {
       temperature: temperature ?? this.temperature,
       topP: topP ?? this.topP,
       maxTokens: maxTokens ?? this.maxTokens,
+      enableChatUiV2: enableChatUiV2 ?? this.enableChatUiV2,
     );
   }
 }

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../themes/chatbox_chat_theme.dart';
-import '../design_system/apple_icons.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import 'enhanced_content_renderer.dart';
 
 /// 思考消息气泡组件
@@ -217,7 +217,7 @@ class _ThinkingMessageBubbleState extends State<ThinkingMessageBubble>
           radius: 20,
           backgroundColor: Theme.of(context).colorScheme.secondary,
           child: const Icon(
-            AppleIcons.chatbot,
+            OwuiIcons.chatbot,
             color: Colors.white,
             size: 24,
           ),
@@ -272,7 +272,7 @@ class _ThinkingMessageBubbleState extends State<ThinkingMessageBubble>
                     ScaleTransition(
                       scale: _breatheController,
                       child: Icon(
-                        AppleIcons.lightbulb,
+                        OwuiIcons.lightbulb,
                         size: 16,
                         color: ChatBoxChatTheme.onSurfaceColor(context),
                       ),
@@ -294,7 +294,7 @@ class _ThinkingMessageBubbleState extends State<ThinkingMessageBubble>
                         turns: _isExpanded ? 0.5 : 0,
                         duration: const Duration(milliseconds: 200),
                         child: Icon(
-                          AppleIcons.arrowDown,
+                          OwuiIcons.arrowDown,
                           size: 18,
                           color: ChatBoxChatTheme.secondaryTextColor(context),
                         ),

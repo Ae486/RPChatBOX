@@ -13,7 +13,14 @@ import 'package:chatboxapp/main.dart';
 void main() {
   testWidgets('App loads', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp(initialThemeMode: 'system'));
+    await tester.pumpWidget(
+      const MyApp(
+        initialThemeMode: 'system',
+        initialUiScale: 1.0,
+        initialUiFontFamily: 'system',
+        initialUiCodeFontFamily: 'system_mono',
+      ),
+    );
     
     // Verify app loads
     expect(find.byType(MaterialApp), findsOneWidget);
