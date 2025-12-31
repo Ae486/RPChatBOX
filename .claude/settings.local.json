@@ -19,7 +19,14 @@
       "mcp__context7__resolve-library-id",
       "mcp__context7__get-library-docs",
       "mcp__exa__get_code_context_exa",
-      "mcp__auggie__prompt-enhancer"
+      "mcp__auggie__prompt-enhancer",
+      "mcp__auggie-mcp__codebase-retrieval",
+      "mcp__augment-context-engine__codebase-retrieval",
+      "Skill(enhance)",
+      "mcp__augment-context-engine__prompt-enhancer",
+      "Bash(flutter build:*)",
+      "Bash(/mnt/h/flutter/bin/flutter analyze:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart' as chat;
@@ -14,6 +15,7 @@ import 'package:flutter_chat_ui/flutter_chat_ui.dart' hide ChatMessage;
 import 'package:flyer_chat_file_message/flyer_chat_file_message.dart';
 import 'package:flyer_chat_image_message/flyer_chat_image_message.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../adapters/ai_provider.dart' as ai;
 import '../adapters/chat_message_adapter.dart';
@@ -38,6 +40,7 @@ import '../services/export_service.dart';
 import '../utils/chunk_buffer.dart';
 import '../utils/token_counter.dart';
 import '../utils/global_toast.dart';
+import '../rendering/markdown_stream/stable_prefix_parser.dart';
 import 'stream_manager.dart';
 
 part 'conversation_view_v2/build.dart';
@@ -45,6 +48,7 @@ part 'conversation_view_v2/export_mode.dart';
 part 'conversation_view_v2/message_actions_sheet.dart';
 part 'conversation_view_v2/scroll_and_highlight.dart';
 part 'conversation_view_v2/streaming.dart';
+part 'conversation_view_v2/streaming_feature_flags.dart';
 part 'conversation_view_v2/tokens_and_ids.dart';
 part 'conversation_view_v2/user_bubble.dart';
 part 'conversation_view_v2/thread_projection.dart';
@@ -101,7 +105,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   String? _activeStreamId;
   chat.Message? _activeAssistantPlaceholder;
   int? _activePromptTokensEstimate;
-ConversationThread? _thread;
+  ConversationThread? _thread;
   Timer? _persistThreadTimer;
   String? _lastPersistedThreadJson;
 
@@ -109,17 +113,36 @@ ConversationThread? _thread;
   final Map<String, int> _chatMessageCacheFingerprints = <String, int>{};
 
   bool _autoFollowEnabled = true;
+  bool _isNearBottom = true;
 
+  bool _pendingAutoFollow = false;
+  bool _pendingAutoFollowSmooth = false;
+  bool _autoFollowScheduled = false;
 
   bool _showScrollToBottom = false;
   double _lastScrollPixels = 0;
   DateTime _lastAutoFollowRequest = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // 调试面板状态
+  bool _showTuningPanel = false;
+
+  // Composer height excluding bottom safe area (used for overlay positioning).
+  double _composerHeight = 0.0;
+
+  // Phase 1 (P0): stable flow reveal (display/full separation).
+  Timer? _stableRevealTimer;
+  bool _stableRevealTicking = false;
+  int _stableRevealDisplayedLen = 0;
+
 
   @override
   void initState() {
     super.initState();
 
     _chatController = chat.InMemoryChatController();
+
+    // Start loading persisted tuning params as early as possible.
+    unawaited(StreamingTuningParams.instance.ensureLoaded());
 
     _conversationSettings = globalModelServiceManager.getConversationSettings(
       widget.conversation.id,
@@ -143,12 +166,22 @@ ConversationThread? _thread;
     });
   }
 
+  void _handleComposerHeightChanged(double heightWithoutSafeArea) {
+    if (!mounted || _isDisposed) return;
+    if ((_composerHeight - heightWithoutSafeArea).abs() < 0.5) return;
+    setState(() {
+      _composerHeight = heightWithoutSafeArea;
+    });
+  }
+
   @override
   void dispose() {
     _isDisposed = true;
     // Best-effort: stop streaming to prevent late callbacks touching a deactivated tree.
     _streamController.stop();
     _chunkBuffer?.dispose();
+    _stableRevealTimer?.cancel();
+    _stableRevealTimer = null;
     _clearHighlightTimer?.cancel();
     _persistThreadTimer?.cancel();
     _persistThreadTimer = null;
@@ -163,11 +196,17 @@ ConversationThread? _thread;
   void didUpdateWidget(covariant ConversationViewV2 oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.conversation.id != widget.conversation.id) {
+      _stableRevealTimer?.cancel();
+      _stableRevealTimer = null;
+      _stableRevealTicking = false;
+      _stableRevealDisplayedLen = 0;
+
       _flushPersistThreadNow();
       _conversationSettings = globalModelServiceManager.getConversationSettings(
         widget.conversation.id,
       );
       _thread = null;
+
       _chatMessageCache.clear();
       _chatMessageCacheFingerprints.clear();
       scheduleMicrotask(() {
@@ -322,6 +361,10 @@ ConversationThread? _thread;
     return converted;
   }
 
+  chat.Message _toFlutterChatMessage(app.Message message) {
+    return _toFlutterChatMessageCached(message);
+  }
+
   List<String> _assistantVariantIdsForUser(
     String userMessageId,
     ConversationThread thread,
@@ -371,6 +414,12 @@ ConversationThread? _thread;
 
   void scrollToMessage(String messageId);
 
+  /// 显示流式渲染调试面板（仅 debug 模式有效）
+  void showTuningPanel() {
+    if (!kDebugMode) return;
+    setState(() => _showTuningPanel = true);
+  }
+
   void _syncConversationToChatController();
 
   void _handleStreamFlush(String content);
@@ -378,7 +427,7 @@ ConversationThread? _thread;
   bool _handleChatScrollNotification(ScrollNotification notification);
 
 
-  void _requestAutoFollow({required bool smooth});
+  void _requestAutoFollow({required bool smooth, bool force = false});
   Widget _wrapHighlighted({required String messageId, required Widget child});
   Widget _wrapExportSelectable({
     required chat.Message message,

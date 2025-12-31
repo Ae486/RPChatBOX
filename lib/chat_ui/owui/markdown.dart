@@ -237,12 +237,32 @@ class OwuiMarkdown extends StatelessWidget {
   final bool isStreaming;
   final Object? stableCacheKey;
 
+  /// P0-3: 启用平滑流式代码块（高亮节流 + 行号对齐等）。
+  final bool enableSmoothCodeBlock;
+
+  /// P0-4: 启用 Mermaid 稳定占位（固定高度，避免 WebView 跳变）。
+  final bool enableSmoothMermaid;
+
+  /// 启用增量淡入（仅对“尾巴纯文本”生效）。
+  final bool enableFadeIn;
+
+  /// 增量淡入动画时长。
+  final Duration fadeInDuration;
+
+  /// 增量淡入动画起始透明度。
+  final double fadeInStartOpacity;
+
   const OwuiMarkdown({
     super.key,
     required this.text,
     required this.isDark,
     required this.isStreaming,
     this.stableCacheKey,
+    this.enableSmoothCodeBlock = false,
+    this.enableSmoothMermaid = false,
+    this.enableFadeIn = false,
+    this.fadeInDuration = const Duration(milliseconds: 150),
+    this.fadeInStartOpacity = 0.3,
   });
 
   static const StablePrefixParser _stablePrefixParser = StablePrefixParser();
@@ -416,6 +436,8 @@ class OwuiMarkdown extends StatelessWidget {
         language: inferred,
         isDark: isDark,
         isStreaming: false,
+        // 非流式代码块也启用视觉行号（窗口变窄时行号随换行动态增加）
+        enableSmoothStreaming: enableSmoothCodeBlock,
       );
     }
 
@@ -494,26 +516,204 @@ class OwuiMarkdown extends StatelessWidget {
       stableCacheKey: stableCacheKey,
       markdown: (markdownText) => _buildMarkdownWidget(context, markdownText),
       plainTextStyle: config.p.textStyle,
+      enableFadeIn: enableFadeIn && isStreaming,
+      fadeInDuration: fadeInDuration,
+      fadeInStartOpacity: fadeInStartOpacity,
       streamingCodeBlock:
           ({required language, required code, required isClosed}) {
             final inferred = inferCodeLanguage(
               declaredLanguage: language,
               code: code,
             );
+            final isStreamingCode = isStreaming && !isClosed;
             if (inferred == 'mermaid') {
               return OwuiMermaidBlock(
                 mermaidCode: code,
                 isDark: isDark,
-                isStreaming: isStreaming && !isClosed,
+                isStreaming: isStreamingCode,
+                enableStablePlaceholder: isStreamingCode && enableSmoothMermaid,
               );
             }
             return OwuiCodeBlock(
               code: code,
               language: inferred.isEmpty ? 'plaintext' : inferred,
               isDark: isDark,
-              isStreaming: isStreaming && !isClosed,
+              isStreaming: isStreamingCode,
+              // 视觉行号不依赖流式状态，只要 enableSmoothCodeBlock 启用就生效
+              enableSmoothStreaming: enableSmoothCodeBlock,
             );
           },
+      // LaTeX 块流式容器
+      streamingLatexBlock: ({required content, required isClosed}) {
+        return _StreamingLatexContainer(
+          content: content,
+          isClosed: isClosed,
+          isDark: isDark,
+        );
+      },
+      // Think 块流式容器
+      streamingThinkBlock: ({required content, required isClosed}) {
+        return _StreamingThinkContainer(
+          content: content,
+          isClosed: isClosed,
+          isDark: isDark,
+        );
+      },
+    );
+  }
+}
+
+/// 流式 LaTeX 块容器
+class _StreamingLatexContainer extends StatelessWidget {
+  final String content;
+  final bool isClosed;
+  final bool isDark;
+
+  const _StreamingLatexContainer({
+    required this.content,
+    required this.isClosed,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = isDark ? const Color(0xFF1A1C20) : const Color(0xFFF5F5F5);
+    final borderColor = isDark ? Colors.white24 : Colors.black12;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!isClosed)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        isDark ? Colors.white54 : Colors.black45,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'LaTeX...',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (content.trim().isNotEmpty)
+            Math.tex(
+              content.trim(),
+              mathStyle: MathStyle.display,
+              textStyle: TextStyle(
+                fontSize: 16,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              onErrorFallback: (err) => Text(
+                content,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.red[300] : Colors.red[700],
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 流式 Think 块容器
+class _StreamingThinkContainer extends StatelessWidget {
+  final String content;
+  final bool isClosed;
+  final bool isDark;
+
+  const _StreamingThinkContainer({
+    required this.content,
+    required this.isClosed,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = isDark ? const Color(0xFF1A1C20) : const Color(0xFFFFF8E1);
+    final textColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF5D4037);
+    final headerColor = isDark ? Colors.amber[300] : Colors.amber[700];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? Colors.amber.withValues(alpha: 0.3) : Colors.amber.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.lightbulb_outline, size: 16, color: headerColor),
+              const SizedBox(width: 6),
+              Text(
+                '思考中',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: headerColor,
+                ),
+              ),
+              if (!isClosed) ...[
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(headerColor!),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (content.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              content,
+              style: TextStyle(
+                fontSize: 14,
+                color: textColor,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

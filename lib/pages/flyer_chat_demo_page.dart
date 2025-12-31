@@ -111,7 +111,7 @@ class _FlyerChatDemoPageState extends State<FlyerChatDemoPage> {
 
   void _handleStreamTick() {
     if (_streamingRenderMode != _StreamingRenderMode.strategyA) return;
-    _requestAutoFollow(smooth: false);
+    _requestAutoFollow(smooth: true);
   }
 
   void _requestAutoFollow({required bool smooth}) {
@@ -386,6 +386,7 @@ class _FlyerChatDemoPageState extends State<FlyerChatDemoPage> {
             stableCacheKey: Object.hash(isDark, bubbleColor, config.hashCode, 'thinking'),
             markdown: buildMarkdown,
             plainTextStyle: config.p.textStyle,
+            enableFadeIn: true,
             streamingCodeBlock: ({required language, required code, required isClosed}) {
               final inferred = inferCodeLanguage(declaredLanguage: language, code: code);
               if (inferred == 'mermaid') {
@@ -664,6 +665,7 @@ class _FlyerChatDemoPageState extends State<FlyerChatDemoPage> {
                           stableCacheKey: Object.hash(isDark, bubbleColor, config.hashCode, i),
                           markdown: buildMarkdown,
                           plainTextStyle: config.p.textStyle,
+                          enableFadeIn: true,
                           streamingCodeBlock: ({required language, required code, required isClosed}) {
                             final inferred = inferCodeLanguage(declaredLanguage: language, code: code);
                             if (inferred == 'mermaid') {

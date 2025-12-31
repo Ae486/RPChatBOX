@@ -83,6 +83,7 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
       _setHighlightedMessage(messageId);
 
       try {
+        MarkstreamV2StreamingMetrics.onScrollToIndex();
         _chatController.scrollToIndex(
           idx,
           duration: const Duration(milliseconds: 260),
@@ -130,39 +131,95 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
     );
   }
 
-  void _requestAutoFollow({required bool smooth}) {
+  /// 请求自动跟随滚动到底部。
+  /// [smooth] 是否使用平滑动画滚动。
+  /// [force] 是否强制执行（绕过节流和 autoFollowEnabled 检查），用于"回到底部"按钮点击。
+  void _requestAutoFollow({required bool smooth, bool force = false}) {
     if (_isDisposed) return;
-    if (!_autoFollowEnabled) return;
-    final messageCount = _chatController.messages.length;
-    if (messageCount <= 0) return;
+    if (!force && !_autoFollowEnabled) return;
+    if (_chatController.messages.isEmpty) return;
 
-    final now = DateTime.now();
-    if (now.difference(_lastAutoFollowRequest) <
-        const Duration(milliseconds: 800))
+    final useAnchor =
+        !force && MarkstreamV2StreamingFlags.anchorAutoFollow(_conversationSettings);
+    if (!useAnchor) {
+      // force 模式绕过节流检查
+      if (!force) {
+        final now = DateTime.now();
+        final throttleMs = MarkstreamV2StreamingFlags.scrollThrottleMs(_conversationSettings);
+        if (now.difference(_lastAutoFollowRequest) <
+            Duration(milliseconds: throttleMs)) {
+          return;
+        }
+        _lastAutoFollowRequest = now;
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _isDisposed) return;
+        final lastIndex = _chatController.messages.length - 1;
+        if (lastIndex < 0) return;
+        final durationMs = MarkstreamV2StreamingFlags.scrollDurationMs(_conversationSettings);
+        MarkstreamV2StreamingMetrics.onScrollToIndex();
+        _chatController.scrollToIndex(
+          lastIndex,
+          duration: smooth ? Duration(milliseconds: durationMs) : Duration.zero,
+          curve: Curves.easeOutCubic,
+          alignment: 1.0,
+          offset: 0,
+        );
+      });
       return;
-    _lastAutoFollowRequest = now;
+    }
+
+    if (!_isNearBottom) return;
+
+    _pendingAutoFollow = true;
+    _pendingAutoFollowSmooth = _pendingAutoFollowSmooth || smooth;
+
+    if (_autoFollowScheduled) return;
+    _autoFollowScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoFollowScheduled = false;
+
       if (!mounted || _isDisposed) return;
+      if (!_pendingAutoFollow) return;
+
+      final smoothNow = _pendingAutoFollowSmooth;
+      _pendingAutoFollow = false;
+      _pendingAutoFollowSmooth = false;
+
+      if (!_autoFollowEnabled) return;
+      if (!_isNearBottom) return;
+
       final lastIndex = _chatController.messages.length - 1;
-      _chatController.scrollToIndex(
-        lastIndex,
-        duration: smooth ? const Duration(milliseconds: 160) : Duration.zero,
-        curve: Curves.easeOutCubic,
-        alignment: 1.0,
-        offset: 0,
-      );
+      if (lastIndex < 0) return;
+
+      try {
+        final durationMs = MarkstreamV2StreamingFlags.scrollDurationMs(_conversationSettings);
+        MarkstreamV2StreamingMetrics.onScrollToIndex();
+        _chatController.scrollToIndex(
+          lastIndex,
+          duration: smoothNow ? Duration(milliseconds: durationMs) : Duration.zero,
+          curve: Curves.easeOutCubic,
+          alignment: 1.0,
+          offset: 0,
+        );
+      } catch (_) {
+        // Ignore: chat list may not be attached yet.
+      }
     });
   }
 
   bool _handleChatScrollNotification(ScrollNotification notification) {
     if (_isDisposed) return false;
     if (notification.depth != 0) return false;
+
     final metrics = notification.metrics;
     final extentAfter = metrics.extentAfter;
-    const threshold = 80.0;
+    final threshold = MarkstreamV2StreamingFlags.nearBottomPx(_conversationSettings);
 
     final isNearBottom = extentAfter <= threshold;
+    _isNearBottom = isNearBottom;
 
     if (notification is ScrollUpdateNotification) {
       final currentPixels = metrics.pixels;
@@ -170,6 +227,8 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
       _lastScrollPixels = currentPixels;
 
       if (scrolledUp && _autoFollowEnabled) {
+        _pendingAutoFollow = false;
+        _pendingAutoFollowSmooth = false;
         setState(() {
           _autoFollowEnabled = false;
           _showScrollToBottom = true;
@@ -193,6 +252,8 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
     if (notification is UserScrollNotification) {
       if (notification.direction == ScrollDirection.forward &&
           _autoFollowEnabled) {
+        _pendingAutoFollow = false;
+        _pendingAutoFollowSmooth = false;
         setState(() {
           _autoFollowEnabled = false;
           _showScrollToBottom = true;

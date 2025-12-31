@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/chat_settings.dart';
@@ -44,6 +45,14 @@ class ConversationViewHostState extends State<ConversationViewHost>
       _v2Key.currentState?.enterExportMode();
     } else {
       _v1Key.currentState?.enterExportMode();
+    }
+  }
+
+  /// 显示流式渲染调试面板（仅 V2 + debug 模式）
+  void showTuningPanel() {
+    if (!kDebugMode) return;
+    if (widget.settings.enableChatUiV2) {
+      _v2Key.currentState?.showTuningPanel();
     }
   }
 

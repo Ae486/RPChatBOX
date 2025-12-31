@@ -32,6 +32,11 @@ class OwuiComposer extends StatefulWidget {
   final ValueChanged<ConversationSettings> onSettingsChanged;
   final bool attachmentBarVisible;
 
+  /// Optional callback for the measured composer height (excluding bottom safe area).
+  ///
+  /// Useful for positioning external overlays relative to the top of the composer.
+  final ValueChanged<double>? onHeightChanged;
+
   /// Optional background blur (glassmorphism). Default off.
   final double? sigmaX;
   final double? sigmaY;
@@ -49,6 +54,7 @@ class OwuiComposer extends StatefulWidget {
     required this.conversationSettings,
     required this.onSettingsChanged,
     this.attachmentBarVisible = true,
+    this.onHeightChanged,
     this.sigmaX,
     this.sigmaY,
     this.handleSafeArea = true,
@@ -134,6 +140,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
     }
     _lastMeasuredHeight = heightWithoutSafeArea;
     context.read<ComposerHeightNotifier>().setHeight(heightWithoutSafeArea);
+    widget.onHeightChanged?.call(heightWithoutSafeArea);
   }
 
   Future<void> _pickFiles() async {

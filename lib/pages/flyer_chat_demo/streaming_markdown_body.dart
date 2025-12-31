@@ -43,6 +43,9 @@ class _StreamingMarkdownBody extends StatefulWidget {
   final Widget Function({required String language, required String code, required bool isClosed})? streamingCodeBlock;
   final Object? stableCacheKey;
 
+  /// 是否启用增量淡入动画（实验性功能）
+  final bool enableFadeIn;
+
   const _StreamingMarkdownBody({
     required this.text,
     required this.splitStableMarkdown,
@@ -50,6 +53,7 @@ class _StreamingMarkdownBody extends StatefulWidget {
     required this.plainTextStyle,
     this.streamingCodeBlock,
     this.stableCacheKey,
+    this.enableFadeIn = false,
   });
 
   @override
@@ -75,12 +79,18 @@ class _StreamingMarkdownBody extends StatefulWidget {
 
 }
 
-class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
+class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody>
+    with SingleTickerProviderStateMixin {
   late ({String stable, String tail}) _parts;
 
   String _cachedStable = '';
   Widget? _cachedStableWidget;
   Object? _cachedStableKey;
+
+  // 增量淡入动画状态
+  int _lastTailLength = 0;
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnimation;
 
   void _recomputeParts() {
     _parts = widget.splitStableMarkdown(widget.text);
@@ -103,8 +113,23 @@ class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
   @override
   void initState() {
     super.initState();
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(parent: _fadeController, curve: Curves.easeOut),
+    );
+    _fadeController.value = 1.0; // 初始完全可见
     _recomputeParts();
     _ensureStableCache();
+    _lastTailLength = _parts.tail.length;
+  }
+
+  @override
+  void dispose() {
+    _fadeController.dispose();
+    super.dispose();
   }
 
   @override
@@ -112,8 +137,32 @@ class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
     super.didUpdateWidget(oldWidget);
     if (widget.text != oldWidget.text || widget.splitStableMarkdown != oldWidget.splitStableMarkdown) {
       _recomputeParts();
+
+      // 增量淡入：检测 tail 是否有新增内容
+      if (widget.enableFadeIn) {
+        final newTailLen = _parts.tail.length;
+        if (newTailLen > _lastTailLength && _parts.tail.isNotEmpty) {
+          // 触发淡入动画：从 0.3 淡入到 1.0
+          _fadeController.forward(from: 0.0);
+        }
+        _lastTailLength = newTailLen;
+      }
     }
     _ensureStableCache();
+  }
+
+  /// 包装 tail 文本，支持淡入动画
+  Widget _buildTailText(String text) {
+    final textWidget = Text(text, style: widget.plainTextStyle);
+
+    if (!widget.enableFadeIn) {
+      return textWidget;
+    }
+
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: textWidget,
+    );
   }
 
   @override
@@ -133,19 +182,12 @@ class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
               code: fence.code,
               isClosed: fence.isClosed,
             ),
-            if (fence.rest.isNotEmpty)
-              Text(
-                fence.rest,
-                style: widget.plainTextStyle,
-              ),
+            if (fence.rest.isNotEmpty) _buildTailText(fence.rest),
           ],
         );
       }
 
-      return Text(
-        parts.tail,
-        style: widget.plainTextStyle,
-      );
+      return _buildTailText(parts.tail);
     }
 
     if (parts.tail.isEmpty) {
@@ -163,11 +205,7 @@ class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
             code: fence.code,
             isClosed: fence.isClosed,
           ),
-          if (fence.rest.isNotEmpty)
-            Text(
-              fence.rest,
-              style: widget.plainTextStyle,
-            ),
+          if (fence.rest.isNotEmpty) _buildTailText(fence.rest),
         ],
       );
     }
@@ -177,10 +215,7 @@ class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
       mainAxisSize: MainAxisSize.min,
       children: [
         _cachedStableWidget ?? widget.markdown(parts.stable),
-        Text(
-          parts.tail,
-          style: widget.plainTextStyle,
-        ),
+        _buildTailText(parts.tail),
       ],
     );
   }

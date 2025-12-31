@@ -17,11 +17,20 @@ class OwuiMermaidBlock extends StatefulWidget {
   final bool isDark;
   final bool isStreaming;
 
+  /// P0-4: 流式阶段启用固定高度占位，避免 WebView 抖动/跳变。
+  ///
+  /// MUST default to false so existing behavior is unaffected.
+  final bool enableStablePlaceholder;
+
+  /// P0-4: 固定占位高度（单位 dp），默认 360。
+  static const double stablePlaceholderHeight = 360.0;
+
   const OwuiMermaidBlock({
     super.key,
     required this.mermaidCode,
     required this.isDark,
     required this.isStreaming,
+    this.enableStablePlaceholder = false,
   });
 
   @override
@@ -247,31 +256,45 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
     }
 
     if (widget.isStreaming) {
+      // P0-4: 启用固定高度占位时，使用 AnimatedContainer 平滑过渡
+      final placeholderContent = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation(
+                widget.isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'Rendering…',
+            style: TextStyle(
+              fontSize: 13,
+              color: widget.isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+            ),
+          ),
+        ],
+      );
+
+      if (widget.enableStablePlaceholder) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          height: OwuiMermaidBlock.stablePlaceholderHeight,
+          padding: const EdgeInsets.all(16),
+          alignment: Alignment.center,
+          child: placeholderContent,
+        );
+      }
+
       return Container(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation(
-                  widget.isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Rendering…',
-              style: TextStyle(
-                fontSize: 13,
-                color: widget.isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
-              ),
-            ),
-          ],
-        ),
+        child: placeholderContent,
       );
     }
 

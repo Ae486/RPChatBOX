@@ -11,12 +11,15 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
     final chatTheme = OwuiChatTheme.chatTheme(context);
     final colors = context.owuiColors;
 
-    final chatWidget = Chat(
-      chatController: _chatController,
-      currentUserId: _v2CurrentUserId,
-      theme: chatTheme,
-      backgroundColor: colors.pageBg,
-      builders: chat.Builders(
+    final chatWidget = Provider<ConversationSettings?>.value(
+      value: _conversationSettings,
+      updateShouldNotify: (previous, next) => !identical(previous, next),
+      child: Chat(
+        chatController: _chatController,
+        currentUserId: _v2CurrentUserId,
+        theme: chatTheme,
+        backgroundColor: colors.pageBg,
+        builders: chat.Builders(
         textMessageBuilder:
             (context, message, index, {required isSentByMe, groupStatus}) {
               if (isSentByMe) {
@@ -266,6 +269,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
             serviceManager: globalModelServiceManager,
             conversationSettings: _conversationSettings,
             attachmentBarVisible: _attachmentBarVisible,
+            onHeightChanged: _handleComposerHeightChanged,
             onSettingsChanged: (settings) {
               setState(() {
                 _conversationSettings = settings;
@@ -284,6 +288,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
           name: userId == _v2CurrentUserId ? '用户' : 'AI助手',
         );
       },
+      ),
     );
 
     Widget scrollToBottomButton() {
@@ -292,12 +297,11 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
       final bg = colors.surfaceCard;
       final border = colors.borderSubtle;
 
-      return Positioned(
-        right: 14,
-        bottom: 86,
+      return ConstrainedBox(
+        constraints: const BoxConstraints.tightFor(width: 40, height: 40),
         child: Material(
           color: bg,
-          shape: StadiumBorder(side: BorderSide(color: border)),
+          shape: CircleBorder(side: BorderSide(color: border)),
           elevation: 1,
           child: InkWell(
             onTap: () {
@@ -305,26 +309,36 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                 _autoFollowEnabled = true;
                 _showScrollToBottom = false;
               });
-              _requestAutoFollow(smooth: true);
+              _requestAutoFollow(smooth: true, force: true);
             },
-            customBorder: const StadiumBorder(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.arrow_downward_rounded, size: 18, color: fg),
-                  const SizedBox(width: 6),
-                  Text(
-                    '回到底部',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: fg,
-                    ),
-                  ),
-                ],
-              ),
+            customBorder: const CircleBorder(),
+            child: Center(
+              child: Icon(Icons.arrow_downward_rounded, size: 20, color: fg),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 带进入/退出动画的"回到底部"按钮
+    Widget animatedScrollToBottomButton() {
+      final show = !_isExportMode && _showScrollToBottom;
+      final bottomSafeArea = MediaQuery.of(context).padding.bottom;
+      final bottomOffset = _composerHeight + bottomSafeArea + 12;
+      return Positioned(
+        right: 14,
+        bottom: bottomOffset,
+        child: AnimatedSlide(
+          offset: show ? Offset.zero : const Offset(0, 0.5),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: AnimatedOpacity(
+            opacity: show ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            child: IgnorePointer(
+              ignoring: !show,
+              child: scrollToBottomButton(),
             ),
           ),
         ),
@@ -337,7 +351,17 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
           onNotification: _handleChatScrollNotification,
           child: chatWidget,
         ),
-        if (!_isExportMode && _showScrollToBottom) scrollToBottomButton(),
+        animatedScrollToBottomButton(),
+        // 调试面板（仅 debug 模式，通过菜单打开）
+        if (!_isExportMode && _showTuningPanel && kDebugMode)
+          Positioned(
+            left: 12,
+            right: 12,
+            top: 12,
+            child: StreamingTuningPanel(
+              onClose: () => setState(() => _showTuningPanel = false),
+            ),
+          ),
       ],
     );
 

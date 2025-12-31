@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../models/conversation_settings.dart';
+import '../../widgets/conversation_view_v2.dart';
 import '../../widgets/stream_manager.dart';
 import 'chat_theme.dart';
 import 'markdown.dart';
@@ -30,6 +33,22 @@ class OwuiAssistantMessage extends StatelessWidget {
     final isDark = OwuiPalette.isDark(context);
     final thinking = streamData?.thinkingContent ?? '';
     final thinkingOpen = streamData?.isThinkingOpen ?? false;
+
+    // P0-3/P0-4: 获取 ConversationSettings 以判断是否启用平滑流式
+    final settings = context.watch<ConversationSettings?>();
+    final enableSmoothCode = settings != null &&
+        MarkstreamV2StreamingFlags.codeBlockPreviewDuringStreaming(settings);
+    final enableSmoothMermaid = settings != null &&
+        MarkstreamV2StreamingFlags.mermaidStablePlaceholderDuringStreaming(settings);
+    final enableFadeIn = settings != null &&
+        isStreaming &&
+        settings.enableExperimentalStreamingMarkdown;
+    final fadeInDurationMs = settings != null
+        ? MarkstreamV2StreamingFlags.fadeInDurationMs(settings)
+        : 150;
+    final fadeInStartOpacity = settings != null
+        ? MarkstreamV2StreamingFlags.fadeInStartOpacity(settings)
+        : 0.3;
 
     final name = modelName?.trim();
     final headerText = (name == null || name.isEmpty) ? 'Assistant' : name;
@@ -103,6 +122,11 @@ class OwuiAssistantMessage extends StatelessWidget {
                             isDark: isDark,
                             isStreaming: isStreaming,
                             stableCacheKey: Object.hash(isDark, messageId, 'thinking'),
+                            enableSmoothCodeBlock: enableSmoothCode,
+                            enableSmoothMermaid: enableSmoothMermaid,
+                            enableFadeIn: enableFadeIn,
+                            fadeInDuration: Duration(milliseconds: fadeInDurationMs),
+                            fadeInStartOpacity: fadeInStartOpacity,
                           ),
                   ),
                 ),
@@ -120,6 +144,11 @@ class OwuiAssistantMessage extends StatelessWidget {
           isDark: isDark,
           isStreaming: isStreaming,
           stableCacheKey: Object.hash(isDark, messageId, 'body'),
+          enableSmoothCodeBlock: enableSmoothCode,
+          enableSmoothMermaid: enableSmoothMermaid,
+          enableFadeIn: enableFadeIn,
+          fadeInDuration: Duration(milliseconds: fadeInDurationMs),
+          fadeInStartOpacity: fadeInStartOpacity,
         ),
       );
     }

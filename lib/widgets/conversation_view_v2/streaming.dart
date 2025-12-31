@@ -5,6 +5,7 @@
 part of '../conversation_view_v2.dart';
 
 mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
+  @override
   Future<void> _sendMessage() async {
     if (_isDisposed) return;
     final text = _messageController.text.trim();
@@ -57,7 +58,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     try {
       await _chatController.insertMessage(
-        ChatMessageAdapter.toFlutterChatMessage(userMsg),
+        _toFlutterChatMessage(userMsg),
         animated: true,
       );
     } catch (_) {
@@ -81,7 +82,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
   }) async {
     if (_isDisposed) return;
     if (_isLoading || _streamController.isStreaming) {
-      GlobalToast.warning(context, message: '璇峰厛鍋滄杈撳嚭');
+      GlobalToast.warning(context, message: '请先停止输出');
       return;
     }
 
@@ -113,6 +114,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     _activeAssistantPlaceholder = placeholder;
     _activeStreamId = assistantId;
     _streamManager.createStream(_activeStreamId!);
+
+    _resetStableFlowRevealForNewStream();
 
     try {
       if (parentUserMessageId != null) {
@@ -147,8 +150,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
                 chain.last.content.trim().isEmpty
             ? chain.sublist(0, chain.length - 1)
             : chain;
-        final msgs =
-            safeChainForUi.map(ChatMessageAdapter.toFlutterChatMessage).toList();
+        final msgs = safeChainForUi.map(_toFlutterChatMessage).toList();
         msgs.add(placeholder);
         await _chatController.setMessages(msgs, animated: false);
       } else {
@@ -173,11 +175,11 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           _isLoading = false;
           _attachmentBarVisible = true;
         });
-        GlobalToast.error(context, message: '娑堟伅鎻掑叆澶辫触\n$e');
+        GlobalToast.error(context, message: '消息插入失败\n$e');
       }
       return;
     }
-    _requestAutoFollow(smooth: false);
+    _requestAutoFollow(smooth: true);
 
     // Build prompt messages after placeholder update so regeneration clears the UI
     // immediately even for long histories.
@@ -264,30 +266,281 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       );
     }
   }
-
+@override
   void _handleStreamFlush(String content) {
     if (_isDisposed) return;
+
     final streamId = _activeStreamId;
     final oldPlaceholder = _activeAssistantPlaceholder;
     if (streamId == null || oldPlaceholder == null) return;
 
     _streamManager.append(streamId, content);
-    final state = _streamManager.getState(streamId);
 
-    final newMsg = chat.TextMessage(
-      id: oldPlaceholder.id,
-      authorId: oldPlaceholder.authorId,
-      createdAt: oldPlaceholder.createdAt,
-      text: state.text,
-      metadata: {
-        ...(oldPlaceholder.metadata ?? const <String, dynamic>{}),
-        'streaming': !state.isComplete,
-      },
+    if (!MarkstreamV2StreamingFlags.stableFlowReveal(_conversationSettings)) {
+      final state = _streamManager.getState(streamId);
+
+      final newMsg = chat.TextMessage(
+        id: oldPlaceholder.id,
+        authorId: oldPlaceholder.authorId,
+        createdAt: oldPlaceholder.createdAt,
+        text: state.text,
+        metadata: {
+          ...(oldPlaceholder.metadata ?? const <String, dynamic>{}),
+          'streaming': !state.isComplete,
+        },
+      );
+
+      MarkstreamV2StreamingMetrics.onUpdateMessage();
+      _chatController.updateMessage(oldPlaceholder, newMsg);
+      _activeAssistantPlaceholder = newMsg;
+      _requestAutoFollow(smooth: true);
+      return;
+    }
+
+    _ensureStableFlowRevealTimer();
+    _stableFlowRevealTick();
+  }
+
+  void _resetStableFlowRevealForNewStream() {
+    _stableRevealTimer?.cancel();
+    _stableRevealTimer = null;
+
+    _stableRevealTicking = false;
+    _stableRevealDisplayedLen = 0;
+  }
+
+  void _ensureStableFlowRevealTimer() {
+    if (_stableRevealTimer != null) return;
+    final tickMs = MarkstreamV2StreamingFlags.revealTickMs(_conversationSettings);
+    _stableRevealTimer = Timer.periodic(
+      Duration(milliseconds: tickMs),
+      (_) => _stableFlowRevealTick(),
+    );
+  }
+
+  void _stopStableFlowRevealTimer() {
+    _stableRevealTimer?.cancel();
+    _stableRevealTimer = null;
+    _stableRevealTicking = false;
+  }
+
+  void _stableFlowRevealTick() {
+    if (_isDisposed) {
+      _stopStableFlowRevealTimer();
+      return;
+    }
+
+    if (_stableRevealTicking) return;
+
+    if (!MarkstreamV2StreamingFlags.stableFlowReveal(_conversationSettings)) {
+      _stopStableFlowRevealTimer();
+      return;
+    }
+
+    final streamId = _activeStreamId;
+    final oldPlaceholder = _activeAssistantPlaceholder;
+    if (streamId == null || oldPlaceholder == null) {
+      _stopStableFlowRevealTimer();
+      return;
+    }
+
+    final fullText = _streamManager.getState(streamId).text;
+    final fullLen = fullText.length;
+    if (fullLen <= 0) return;
+
+    var displayedLen = _stableRevealDisplayedLen;
+    if (displayedLen < 0) displayedLen = 0;
+    if (displayedLen > fullLen) displayedLen = fullLen;
+
+    final backlog = fullLen - displayedLen;
+    if (backlog <= 0) return;
+
+    final maxCharsPerTick =
+        MarkstreamV2StreamingFlags.revealMaxCharsPerTick(_conversationSettings);
+    final minBufferChars =
+        MarkstreamV2StreamingFlags.revealMinBufferChars(_conversationSettings);
+    final maxLagChars =
+        MarkstreamV2StreamingFlags.revealMaxLagChars(_conversationSettings);
+
+    final needCatchUpNow = maxLagChars > 0 && backlog > maxLagChars;
+    var desiredMin = displayedLen;
+    if (needCatchUpNow) {
+      desiredMin = fullLen - maxLagChars;
+      if (desiredMin < displayedLen) desiredMin = displayedLen;
+    }
+
+    final keepBuffer = backlog > minBufferChars;
+    var desiredMax = keepBuffer ? fullLen - minBufferChars : fullLen;
+    if (desiredMax < desiredMin) desiredMax = desiredMin;
+
+    var proposed = displayedLen + maxCharsPerTick;
+    if (proposed < desiredMin) proposed = desiredMin;
+    if (proposed > desiredMax) proposed = desiredMax;
+
+    final safeEnd = _clampStableRevealEnd(
+      fullText,
+      proposed,
+      floor: displayedLen,
     );
 
-    _chatController.updateMessage(oldPlaceholder, newMsg);
-    _activeAssistantPlaceholder = newMsg;
-    _requestAutoFollow(smooth: false);
+    if (safeEnd <= displayedLen) return;
+
+    _stableRevealTicking = true;
+    try {
+      _stableRevealDisplayedLen = safeEnd;
+
+      final newText = fullText.substring(0, safeEnd);
+      final newMsg = chat.TextMessage(
+        id: oldPlaceholder.id,
+        authorId: oldPlaceholder.authorId,
+        createdAt: oldPlaceholder.createdAt,
+        text: newText,
+        metadata: {
+          ...(oldPlaceholder.metadata ?? const <String, dynamic>{}),
+          'streaming': true,
+        },
+      );
+
+      MarkstreamV2StreamingMetrics.onUpdateMessage();
+      _chatController.updateMessage(oldPlaceholder, newMsg);
+      _activeAssistantPlaceholder = newMsg;
+      _requestAutoFollow(smooth: true);
+    } finally {
+      _stableRevealTicking = false;
+    }
+  }
+
+
+  int _clampStableRevealEnd(
+    String text,
+    int desiredEnd, {
+    required int floor,
+  }) {
+    var end = desiredEnd;
+    if (end > text.length) end = text.length;
+    if (end <= floor) return floor;
+
+    // Avoid splitting surrogate pairs.
+    if (end > floor) {
+      final cu = text.codeUnitAt(end - 1);
+      if (cu >= 0xD800 && cu <= 0xDBFF) {
+        end -= 1;
+        if (end <= floor) return floor;
+      }
+    }
+
+    // Avoid ending on a dangling CR in "\r\n".
+    if (end > floor && text.codeUnitAt(end - 1) == 0x0D) {
+      end -= 1;
+      if (end <= floor) return floor;
+    }
+
+    end = _stripPartialRun(text, end, floor: floor, charCode: 0x60); // `
+    end = _stripPartialRun(text, end, floor: floor, charCode: 0x7E); // ~
+
+    // Prevent leaking half of a "$"/"$$" across chunk boundaries.
+    final dollarRun = _countTrailingRun(text, end, floor: floor, charCode: 0x24);
+    if (dollarRun == 1) {
+      end -= 1;
+      if (end <= floor) return floor;
+    }
+
+    // Avoid ending on a dangling escape.
+    if (end > floor && text.codeUnitAt(end - 1) == 0x5C) {
+      end -= 1;
+      if (end <= floor) return floor;
+    }
+
+    end = _stripDanglingHtmlTagStart(text, end, floor: floor);
+    if (end <= floor) return floor;
+
+    // Reuse `StablePrefixParser` to avoid revealing unstable blocks (e.g. $$
+    // blocks, HTML blocks, tables) before they are safely closed.
+    //
+    // IMPORTANT: code fences are explicitly allowed, because `OwuiStableBody`
+    // will render them via the streaming code block shell (no raw backticks
+    // shown).
+    final windowStart = (end - 768) > floor ? (end - 768) : floor;
+    final window = text.substring(windowStart, end);
+    final maybeSensitive =
+        window.contains(r'$$') || window.contains('<') || window.contains('|');
+
+    if (maybeSensitive) {
+      final parts = const StablePrefixParser().split(text.substring(0, end));
+      if (parts.tail.isNotEmpty) {
+        final tailHasLeadingFence = RegExp(r'^\s*(```|~~~)').hasMatch(parts.tail);
+        if (!tailHasLeadingFence) {
+          final stableLen = parts.stable.length;
+          if (stableLen <= floor) return floor;
+          return stableLen;
+        }
+      }
+    }
+
+    return end;
+  }
+
+  int _stripDanglingHtmlTagStart(
+    String text,
+    int end, {
+    required int floor,
+  }) {
+    final windowStart = (end - 256) > floor ? (end - 256) : floor;
+    var searchFrom = end - 1;
+    while (true) {
+      final idx = text.lastIndexOf('<', searchFrom);
+      if (idx < windowStart) return end;
+      if (idx + 1 >= end) return idx <= floor ? floor : idx;
+
+      final first = text.codeUnitAt(idx + 1);
+      final looksLikeTag =
+          first == 47 || first == 33 || first == 63 || _isAsciiLetter(first);
+      if (!looksLikeTag) {
+        searchFrom = idx - 1;
+        continue;
+      }
+
+      final closeIdx = text.indexOf('>', idx + 2);
+      if (closeIdx == -1 || closeIdx >= end) {
+        end = idx;
+        if (end <= floor) return floor;
+      }
+
+      searchFrom = idx - 1;
+    }
+  }
+
+
+  bool _isAsciiLetter(int codeUnit) {
+    return (codeUnit >= 65 && codeUnit <= 90) || (codeUnit >= 97 && codeUnit <= 122);
+  }
+
+  int _stripPartialRun(
+    String text,
+    int end, {
+    required int floor,
+    required int charCode,
+  }) {
+    final run = _countTrailingRun(text, end, floor: floor, charCode: charCode);
+    if (run > 0 && run < 3) {
+      return end - run;
+    }
+    return end;
+  }
+
+  int _countTrailingRun(
+    String text,
+    int end, {
+    required int floor,
+    required int charCode,
+  }) {
+    var count = 0;
+    var i = end - 1;
+    while (i >= floor && text.codeUnitAt(i) == charCode) {
+      count++;
+      i--;
+    }
+    return count;
   }
 
   Future<void> _finalizeStreamingMessage({
@@ -299,18 +552,22 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     final streamId = _activeStreamId;
     final placeholder = _activeAssistantPlaceholder;
 
+    _stopStableFlowRevealTimer();
+
     _activeStreamId = null;
     _activeAssistantPlaceholder = null;
     _currentProvider = null;
+
     final promptTokens = _activePromptTokensEstimate;
     _activePromptTokensEstimate = null;
+
 
     if (streamId != null) {
       _streamManager.end(streamId);
     }
 
     if (error != null && mounted && !_isDisposed) {
-      GlobalToast.error(context, message: '娑堟伅鍙戦€佸け璐n${error.toString()}');
+      GlobalToast.error(context, message: '消息发送失败\n${error.toString()}');
     }
 
     if (placeholder != null && streamId != null) {
@@ -350,9 +607,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         widget.onConversationUpdated();
         widget.onTokenUsageUpdated(widget.conversation);
 
-        final converted = ChatMessageAdapter.toFlutterChatMessage(
-          assistantMessage,
-        );
+        final converted = _toFlutterChatMessage(assistantMessage);
         // NOTE: `flutter_chat_ui` may not reliably repaint when a message's
         // runtime type changes (e.g. streaming `TextMessage` -> finalized
         // `CustomMessage` for <think> content). To prevent "duplicate/ghost"
@@ -377,10 +632,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       }
       _streamManager.removeStream(streamId);
     }
-
-    // 成功/失败都清空附件并恢复附件栏
+// 成功/失败都清空附件并恢复附件栏
     _conversationSettings = _conversationSettings.clearFiles();
     globalModelServiceManager.updateConversationSettings(_conversationSettings);
+
 
     if (!mounted || _isDisposed) return;
     setState(() {
@@ -388,9 +643,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       _attachmentBarVisible = true;
     });
   }
-
+  @override
   Future<void> _stopStreaming() async {
     if (_isDisposed) return;
+
     final provider = _currentProvider;
     if (provider != null) {
       try {
@@ -401,9 +657,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         // ignore
       }
     }
+    _currentProvider = null;
 
-    String modelName = 'Unknown';
-    String providerName = 'Unknown';
+    var modelName = 'Unknown';
+    var providerName = 'Unknown';
     final modelId = _conversationSettings.selectedModelId;
     if (modelId != null) {
       final modelWithProvider = globalModelServiceManager.getModelWithProvider(
@@ -428,17 +685,21 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     );
   }
 
+
+  @override
   bool _isProbablyNetworkUrl(String source) {
     final uri = Uri.tryParse(source);
     if (uri == null || !uri.hasScheme) return false;
     return uri.scheme == 'http' || uri.scheme == 'https';
   }
 
+  @override
   String _toFilePathIfNeeded(String source) {
     final uri = Uri.tryParse(source);
     if (uri == null) return source;
     if (uri.scheme == 'file') return uri.toFilePath();
     return source;
   }
+
 }
 

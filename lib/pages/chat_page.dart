@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../chat_ui/owui/components/owui_dialog.dart';
 import '../chat_ui/owui/components/owui_menu.dart';
@@ -576,6 +577,9 @@ class _ChatPageState extends State<ChatPage> {
                       case 'settings':
                         _openSettings();
                         break;
+                      case 'streaming_tuning':
+                        _conversationKeys[_currentIndex].currentState?.showTuningPanel();
+                        break;
                     }
                   },
                   itemBuilder: (context) => [
@@ -619,6 +623,17 @@ class _ChatPageState extends State<ChatPage> {
                         ],
                       ),
                     ),
+                    if (kDebugMode)
+                      const PopupMenuItem(
+                        value: 'streaming_tuning',
+                        child: Row(
+                          children: [
+                            Icon(Icons.tune, size: 20),
+                            SizedBox(width: 8),
+                            Text('流式调试'),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ],

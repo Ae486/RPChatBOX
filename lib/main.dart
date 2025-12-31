@@ -221,6 +221,16 @@ class MyAppState extends State<MyApp> {
       textTheme: textTheme,
       primaryTextTheme: textTheme,
       iconTheme: base.iconTheme.copyWith(size: 20 * scale),
+      // 桌面端使用 Fade 转场，避免 scale/translate 导致的子像素抖动
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.macOS: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.android: ZoomPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
+      ),
       scrollbarTheme: ScrollbarThemeData(
         thickness: WidgetStatePropertyAll((8 * scale).clamp(6, 12).toDouble()),
         radius: Radius.circular(tokens.radius.rFull),
