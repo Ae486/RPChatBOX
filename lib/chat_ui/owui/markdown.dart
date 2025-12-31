@@ -12,6 +12,7 @@ import '../../rendering/markdown_stream/language_utils.dart';
 import '../../rendering/markdown_stream/stable_prefix_parser.dart';
 import 'code_block.dart';
 import 'mermaid_block.dart';
+import 'owui_tokens_ext.dart';
 import 'palette.dart';
 import 'stable_body.dart';
 
@@ -419,6 +420,13 @@ class OwuiMarkdown extends StatelessWidget {
         ? MarkdownConfig.darkConfig
         : MarkdownConfig.defaultConfig;
 
+    // 获取 UI 缩放系数
+    final uiScale = context.owui.uiScale;
+
+    // 基础文本颜色
+    final textColor = isDark ? const Color(0xFFE5E7EB) : const Color(0xFF111827);
+    final secondaryColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
+
     Widget codeBuilder(String code, String language) {
       final inferred = inferCodeLanguage(
         declaredLanguage: language.trim().toLowerCase(),
@@ -441,12 +449,71 @@ class OwuiMarkdown extends StatelessWidget {
       );
     }
 
+    // 段落配置（基础文本样式）
+    final pConfig = PConfig(
+      textStyle: TextStyle(
+        fontSize: 15 * uiScale,
+        height: 1.6,
+        color: textColor,
+      ),
+    );
+
+    // 标题配置
+    final h1Config = H1Config(
+      style: TextStyle(
+        fontSize: 28 * uiScale,
+        fontWeight: FontWeight.bold,
+        height: 1.4,
+        color: textColor,
+      ),
+    );
+    final h2Config = H2Config(
+      style: TextStyle(
+        fontSize: 24 * uiScale,
+        fontWeight: FontWeight.bold,
+        height: 1.4,
+        color: textColor,
+      ),
+    );
+    final h3Config = H3Config(
+      style: TextStyle(
+        fontSize: 20 * uiScale,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+        color: textColor,
+      ),
+    );
+    final h4Config = H4Config(
+      style: TextStyle(
+        fontSize: 18 * uiScale,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+        color: textColor,
+      ),
+    );
+    final h5Config = H5Config(
+      style: TextStyle(
+        fontSize: 16 * uiScale,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+        color: textColor,
+      ),
+    );
+    final h6Config = H6Config(
+      style: TextStyle(
+        fontSize: 15 * uiScale,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+        color: textColor,
+      ),
+    );
+
     final blockquoteConfig = BlockquoteConfig(
       sideColor: isDark ? const Color(0xFF60A5FA) : const Color(0xFF1A73E8),
-      textColor: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+      textColor: secondaryColor,
       sideWith: 4,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      margin: const EdgeInsets.fromLTRB(0, 10, 0, 10),
+      padding: EdgeInsets.fromLTRB(12 * uiScale, 10 * uiScale, 12 * uiScale, 10 * uiScale),
+      margin: EdgeInsets.fromLTRB(0, 10 * uiScale, 0, 10 * uiScale),
     );
 
     final tableConfig = TableConfig(
@@ -454,14 +521,16 @@ class OwuiMarkdown extends StatelessWidget {
         color: isDark ? const Color(0xFF141821) : const Color(0xFFF3F4F6),
       ),
       headerStyle: TextStyle(
+        fontSize: 15 * uiScale,
         fontWeight: FontWeight.w700,
         color: isDark ? const Color(0xFFE5E7EB) : const Color(0xFF111827),
       ),
       bodyStyle: TextStyle(
+        fontSize: 15 * uiScale,
         color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF111827),
       ),
-      headPadding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-      bodyPadding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      headPadding: EdgeInsets.fromLTRB(10 * uiScale, 8 * uiScale, 10 * uiScale, 8 * uiScale),
+      bodyPadding: EdgeInsets.fromLTRB(10 * uiScale, 8 * uiScale, 10 * uiScale, 8 * uiScale),
       wrapper: (child) => _OwuiMarkdownTableWrapper(isDark: isDark, child: child),
     );
 
@@ -472,8 +541,16 @@ class OwuiMarkdown extends StatelessWidget {
       padding: EdgeInsets.zero,
       config: config.copy(
         configs: [
+          pConfig,
+          h1Config,
+          h2Config,
+          h3Config,
+          h4Config,
+          h5Config,
+          h6Config,
           LinkConfig(
             style: TextStyle(
+              fontSize: 15 * uiScale,
               color: isDark ? const Color(0xFF8AB4F8) : const Color(0xFF1A73E8),
               decoration: TextDecoration.underline,
             ),
@@ -500,9 +577,16 @@ class OwuiMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final config = isDark
-        ? MarkdownConfig.darkConfig
-        : MarkdownConfig.defaultConfig;
+    // 获取 UI 缩放系数
+    final uiScale = context.owui.uiScale;
+    final textColor = isDark ? const Color(0xFFE5E7EB) : const Color(0xFF111827);
+
+    // 用于流式渲染的尾部文本样式
+    final plainTextStyle = TextStyle(
+      fontSize: 15 * uiScale,
+      height: 1.6,
+      color: textColor,
+    );
 
     final parts = _splitStableMarkdown(text);
     final needsStableRenderer = isStreaming || parts.tail.isNotEmpty;
@@ -515,7 +599,7 @@ class OwuiMarkdown extends StatelessWidget {
       splitStableMarkdown: _splitStableMarkdown,
       stableCacheKey: stableCacheKey,
       markdown: (markdownText) => _buildMarkdownWidget(context, markdownText),
-      plainTextStyle: config.p.textStyle,
+      plainTextStyle: plainTextStyle,
       enableFadeIn: enableFadeIn && isStreaming,
       fadeInDuration: fadeInDuration,
       fadeInStartOpacity: fadeInStartOpacity,

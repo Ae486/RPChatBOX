@@ -6,6 +6,7 @@ part of '../conversation_view_v2.dart';
 
 mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
   Widget _buildUserBubble({required chat.TextMessage message}) {
+    final uiScale = context.owui.uiScale;
     final attached = message.metadata?['attachedFiles'] as List?;
     final attachedFiles = attached
         ?.whereType<Map>()
@@ -15,7 +16,7 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
     final children = <Widget>[];
 
     if (attachedFiles != null && attachedFiles.isNotEmpty) {
-      children.add(_buildAttachmentsPreview(attachedFiles));
+      children.add(_buildAttachmentsPreview(attachedFiles, uiScale));
     }
 
     if (message.text.isNotEmpty) {
@@ -24,7 +25,7 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
           message.text,
           style: TextStyle(
             color: OwuiPalette.textPrimary(context),
-            fontSize: 15,
+            fontSize: 15 * uiScale,
             height: 1.5,
           ),
         ),
@@ -43,8 +44,8 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              constraints: const BoxConstraints(maxWidth: 520),
-              padding: const EdgeInsets.all(12),
+              constraints: BoxConstraints(maxWidth: 520 * uiScale),
+              padding: EdgeInsets.all(12 * uiScale),
               decoration: OwuiChatTheme.userBubbleDecoration(context),
               child: SelectionArea(
                 child: Column(
@@ -55,14 +56,14 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
               ),
             ),
             _buildTokenFooter(message, isSentByMe: true),
-            _buildAssistantVariantSwitcher(message),
+            _buildAssistantVariantSwitcher(message, uiScale),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildAssistantVariantSwitcher(chat.TextMessage message) {
+  Widget _buildAssistantVariantSwitcher(chat.TextMessage message, double uiScale) {
     if (_isExportMode) return const SizedBox.shrink();
 
     final thread = _getThread(rebuildFromMessagesIfMismatch: false);
@@ -90,14 +91,14 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
         onTap: disabled ? null : () => _switchAssistantVariant(message.id, delta),
         customBorder: const CircleBorder(),
         child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Icon(icon, size: 16, color: fg),
+          padding: EdgeInsets.all(4 * uiScale),
+          child: Icon(icon, size: 16 * uiScale, color: fg),
         ),
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.only(top: 6),
+      padding: EdgeInsets.only(top: 6 * uiScale),
       child: Align(
         alignment: Alignment.centerRight,
         child: DecoratedBox(
@@ -107,17 +108,17 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
             border: Border.all(color: border),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: EdgeInsets.symmetric(horizontal: 6 * uiScale, vertical: 2 * uiScale),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 navButton(Icons.chevron_left_rounded, -1),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  padding: EdgeInsets.symmetric(horizontal: 4 * uiScale),
                   child: Text(
                     '< ${index + 1}/${variants.length} >',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 11 * uiScale,
                       height: 1.1,
                       fontWeight: FontWeight.w600,
                       color: fg,
@@ -133,24 +134,24 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
     );
   }
 
-  Widget _buildAttachmentsPreview(List<AttachedFileSnapshot> files) {
+  Widget _buildAttachmentsPreview(List<AttachedFileSnapshot> files, double uiScale) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ...files.map(
           (f) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: EdgeInsets.only(bottom: 8 * uiScale),
             child: Row(
               children: [
-                const Icon(Icons.attach_file, size: 16),
-                const SizedBox(width: 6),
+                Icon(Icons.attach_file, size: 16 * uiScale),
+                SizedBox(width: 6 * uiScale),
                 Expanded(
                   child: Text(
                     f.name,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: OwuiPalette.textPrimary(context),
-                      fontSize: 13,
+                      fontSize: 13 * uiScale,
                     ),
                   ),
                 ),
@@ -159,7 +160,7 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
           ),
         ),
         const Divider(height: 1),
-        const SizedBox(height: 8),
+        SizedBox(height: 8 * uiScale),
       ],
     );
   }

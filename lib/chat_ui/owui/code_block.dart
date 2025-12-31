@@ -4,6 +4,8 @@ import 'package:flutter_highlight/themes/github.dart';
 import 'package:flutter_highlight/themes/vs2015.dart';
 import 'package:highlight/highlight.dart' show highlight, Node, Result;
 
+import 'owui_tokens_ext.dart';
+
 /// OpenWebUI-inspired enhanced code block.
 ///
 /// Ported from Demo: `lib/pages/flyer_chat_demo/enhanced_code_block.dart`.
@@ -373,53 +375,54 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
 
   Widget _buildHeader() {
     final iconColor = widget.isDark ? Colors.grey.shade400 : Colors.grey.shade600;
+    final uiScale = context.owui.uiScale;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 8 * uiScale),
       decoration: BoxDecoration(
         color: widget.isDark ? const Color(0xFF1A1D23) : const Color(0xFFEEF1F5),
         borderRadius: _isCollapsed
-            ? BorderRadius.circular(12)
-            : const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
+            ? BorderRadius.circular(12 * uiScale)
+            : BorderRadius.only(
+                topLeft: Radius.circular(12 * uiScale),
+                topRight: Radius.circular(12 * uiScale),
               ),
       ),
       child: Row(
         children: [
           Container(
-            width: 20,
-            height: 20,
+            width: 20 * uiScale,
+            height: 20 * uiScale,
             decoration: BoxDecoration(
               color: _getLanguageColor(widget.language),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(4 * uiScale),
             ),
             child: Center(
               child: Text(
                 _getLanguageIcon(widget.language),
-                style: const TextStyle(
-                  fontSize: 10,
+                style: TextStyle(
+                  fontSize: 10 * uiScale,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8 * uiScale),
           Text(
             widget.language.isNotEmpty ? widget.language : 'plaintext',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 13 * uiScale,
               fontWeight: FontWeight.w500,
               color: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
             ),
           ),
           if (widget.isStreaming) ...[
-            const SizedBox(width: 8),
+            SizedBox(width: 8 * uiScale),
             Text(
               'Streaming…',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 12 * uiScale,
                 color: widget.isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
               ),
             ),
@@ -443,10 +446,12 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
   }
 
   Widget _buildCodeContentInternal() {
+    final uiScale = context.owui.uiScale;
+
     final textStyle = TextStyle(
       fontFamily: 'monospace',
       fontFamilyFallback: const ['Consolas', 'Menlo', 'Monaco', 'monospace'],
-      fontSize: 13,
+      fontSize: 13 * uiScale,
       height: 1.5,
       color: widget.isDark ? const Color(0xFFE5E7EB) : const Color(0xFF1F2937),
     );
@@ -467,7 +472,9 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
 
     final lineCount = _cachedLines.length;
     final lineNumberDigits = lineCount.toString().length;
-    final lineNumberWidth = 16.0 + lineNumberDigits * 8.0;
+    // 行号宽度：基础 padding + 每位数字宽度（增加系数以确保缩小时不换行）
+    // 使用 10.0 而非 8.0，确保即使在 0.85 缩放时也有足够空间
+    final lineNumberWidth = (16.0 + lineNumberDigits * 10.0) * uiScale;
 
     final maxHeight = MediaQuery.sizeOf(context).height * 0.7;
     final constrainedMaxHeight = maxHeight > 500 ? 500.0 : maxHeight;
@@ -534,14 +541,14 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
               child: SelectionArea(
                 child: Container(
                   color: codeBgColor,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: EdgeInsets.symmetric(vertical: 8 * uiScale),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       SelectionContainer.disabled(
                         child: Container(
                           width: lineNumberWidth,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          padding: EdgeInsets.symmetric(horizontal: 8 * uiScale),
                           decoration: BoxDecoration(
                             color: gutterBgColor,
                             border: Border(
@@ -564,7 +571,7 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
                       ),
                       Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: EdgeInsets.symmetric(horizontal: 12 * uiScale),
                           child: codeContent,
                         ),
                       ),

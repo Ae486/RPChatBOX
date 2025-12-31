@@ -172,6 +172,43 @@ class MyAppState extends State<MyApp> {
     }
   }
 
+  /// 安全地缩放 TextTheme，避免 fontSize 为 null 时的断言错误
+  TextTheme _scaleTextTheme(
+    TextTheme base, {
+    required double scale,
+    String? fontFamily,
+    Color? displayColor,
+    Color? bodyColor,
+  }) {
+    TextStyle? scaleStyle(TextStyle? style, {Color? color}) {
+      if (style == null) return null;
+      final baseFontSize = style.fontSize ?? 14.0;
+      return style.copyWith(
+        fontFamily: fontFamily ?? style.fontFamily,
+        fontSize: baseFontSize * scale,
+        color: color ?? style.color,
+      );
+    }
+
+    return TextTheme(
+      displayLarge: scaleStyle(base.displayLarge, color: displayColor),
+      displayMedium: scaleStyle(base.displayMedium, color: displayColor),
+      displaySmall: scaleStyle(base.displaySmall, color: displayColor),
+      headlineLarge: scaleStyle(base.headlineLarge, color: displayColor),
+      headlineMedium: scaleStyle(base.headlineMedium, color: displayColor),
+      headlineSmall: scaleStyle(base.headlineSmall, color: bodyColor),
+      titleLarge: scaleStyle(base.titleLarge, color: bodyColor),
+      titleMedium: scaleStyle(base.titleMedium, color: bodyColor),
+      titleSmall: scaleStyle(base.titleSmall, color: bodyColor),
+      bodyLarge: scaleStyle(base.bodyLarge, color: bodyColor),
+      bodyMedium: scaleStyle(base.bodyMedium, color: bodyColor),
+      bodySmall: scaleStyle(base.bodySmall, color: displayColor),
+      labelLarge: scaleStyle(base.labelLarge, color: bodyColor),
+      labelMedium: scaleStyle(base.labelMedium, color: bodyColor),
+      labelSmall: scaleStyle(base.labelSmall, color: bodyColor),
+    );
+  }
+
   ThemeData _buildOwuiTheme({
     required Brightness brightness,
     required OwuiTokens tokens,
@@ -200,9 +237,11 @@ class MyAppState extends State<MyApp> {
       ),
     );
 
-    final textTheme = base.textTheme.apply(
+    // 使用安全的 textTheme 缩放，避免 fontSize 为 null 时的断言错误
+    final textTheme = _scaleTextTheme(
+      base.textTheme,
+      scale: scale,
       fontFamily: fontFamily,
-      fontSizeFactor: scale,
       displayColor: colors.textPrimary,
       bodyColor: colors.textPrimary,
     );

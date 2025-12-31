@@ -26,7 +26,10 @@
       "mcp__augment-context-engine__prompt-enhancer",
       "Bash(flutter build:*)",
       "Bash(/mnt/h/flutter/bin/flutter analyze:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cd /d H:chatboxapp)",
+      "Bash(dir:*)",
+      "Bash(H:/flutter/bin/flutter.bat analyze:*)"
     ],
     "deny": [],
     "ask": []

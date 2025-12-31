@@ -19,6 +19,7 @@ import '../../../models/provider_config.dart';
 import '../../../services/model_service_manager.dart';
 import '../../../utils/global_toast.dart';
 import '../../../widgets/conversation_config_dialog.dart';
+import '../owui_tokens_ext.dart';
 import '../palette.dart';
 import 'owui_model_selector_sheet.dart';
 
@@ -269,6 +270,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
 
   @override
   Widget build(BuildContext context) {
+    final uiScale = context.owui.uiScale;
     final bottomSafeArea = widget.handleSafeArea
         ? MediaQuery.of(context).padding.bottom
         : 0.0;
@@ -313,47 +315,50 @@ class _OwuiComposerState extends State<OwuiComposer> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (hasFiles) _buildAttachedFilesPreview(),
+                if (hasFiles) _buildAttachedFilesPreview(uiScale),
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 140),
                   decoration: BoxDecoration(
                     color: fieldSurface,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(16 * uiScale),
                     border: Border.all(color: barBorderColor),
                   ),
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                  padding: EdgeInsets.fromLTRB(12 * uiScale, 12 * uiScale, 12 * uiScale, 10 * uiScale),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _buildInputField(),
-                      const SizedBox(height: 10),
+                      _buildInputField(uiScale),
+                      SizedBox(height: 10 * uiScale),
                       Row(
                         children: [
                           _buildActionButton(
                             tooltip: '上传文件',
                             icon: Icons.add_circle_outline,
                             onPressed: _pickFiles,
+                            uiScale: uiScale,
                           ),
-                          const SizedBox(width: 6),
+                          SizedBox(width: 6 * uiScale),
                           _buildActionButton(
                             tooltip: '联网',
                             icon: Icons.language,
                             isActive: widget.conversationSettings.enableNetwork,
                             onPressed: _toggleNetwork,
+                            uiScale: uiScale,
                           ),
-                          const SizedBox(width: 6),
+                          SizedBox(width: 6 * uiScale),
                           _buildActionButton(
                             tooltip: '对话配置',
                             icon: Icons.tune,
                             onPressed: _showConfigDialog,
+                            uiScale: uiScale,
                           ),
                           const Spacer(),
-                          _buildModelPill(currentModel: currentModel),
-                          const SizedBox(width: 10),
+                          _buildModelPill(currentModel: currentModel, uiScale: uiScale),
+                          SizedBox(width: 10 * uiScale),
                           ValueListenableBuilder<bool>(
                             valueListenable: _hasTextNotifier,
                             builder: (context, _, __) {
-                              return _buildSendButton();
+                              return _buildSendButton(uiScale);
                             },
                           ),
                         ],
@@ -413,6 +418,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
     required IconData icon,
     bool isActive = false,
     required VoidCallback? onPressed,
+    required double uiScale,
   }) {
     final baseColor = isActive
         ? Theme.of(context).colorScheme.primary
@@ -423,21 +429,21 @@ class _OwuiComposerState extends State<OwuiComposer> {
       child: IconButton(
         icon: Icon(icon),
         onPressed: onPressed,
-        constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+        constraints: BoxConstraints.tightFor(width: 40 * uiScale, height: 40 * uiScale),
         padding: EdgeInsets.zero,
-        iconSize: 22,
+        iconSize: 22 * uiScale,
         color: baseColor,
-        splashRadius: 20,
+        splashRadius: 20 * uiScale,
       ),
     );
   }
 
-  Widget _buildInputField() {
+  Widget _buildInputField(double uiScale) {
     final hintColor = OwuiPalette.textSecondary(context);
     final textColor = OwuiPalette.textPrimary(context);
 
     return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 44 * 1, maxHeight: 44 * 3),
+      constraints: BoxConstraints(minHeight: 44 * uiScale, maxHeight: 44 * 3 * uiScale),
       child: TextField(
         controller: widget.textController,
         focusNode: _focusNode,
@@ -450,15 +456,16 @@ class _OwuiComposerState extends State<OwuiComposer> {
           contentPadding: EdgeInsets.zero,
           border: InputBorder.none,
           hintText: '输入消息...',
-          hintStyle: TextStyle(color: hintColor),
+          hintStyle: TextStyle(color: hintColor, fontSize: 15 * uiScale),
         ),
-        style: TextStyle(fontSize: 15, height: 1.45, color: textColor),
+        style: TextStyle(fontSize: 15 * uiScale, height: 1.45, color: textColor),
       ),
     );
   }
 
   Widget _buildModelPill({
     required ({ProviderConfig provider, ModelConfig model})? currentModel,
+    required double uiScale,
   }) {
     final label = currentModel?.model.displayName ?? '选择模型';
     final border = OwuiPalette.borderSubtle(context);
@@ -470,8 +477,8 @@ class _OwuiComposerState extends State<OwuiComposer> {
       onTap: _showModelSelector,
       borderRadius: BorderRadius.circular(999),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 170),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        constraints: BoxConstraints(maxWidth: 170 * uiScale),
+        padding: EdgeInsets.symmetric(horizontal: 10 * uiScale, vertical: 8 * uiScale),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(999),
@@ -480,28 +487,28 @@ class _OwuiComposerState extends State<OwuiComposer> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.psychology, size: 18, color: sub),
-            const SizedBox(width: 6),
+            Icon(Icons.psychology, size: 18 * uiScale, color: sub),
+            SizedBox(width: 6 * uiScale),
             Flexible(
               child: Text(
                 label,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 13 * uiScale,
                   color: textColor,
                   fontWeight: FontWeight.w500,
                 ),
               ),
             ),
-            const SizedBox(width: 4),
-            Icon(Icons.arrow_drop_down, size: 18, color: sub),
+            SizedBox(width: 4 * uiScale),
+            Icon(Icons.arrow_drop_down, size: 18 * uiScale, color: sub),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSendButton() {
+  Widget _buildSendButton(double uiScale) {
     final enabled = _canSend();
     final border = OwuiPalette.borderSubtle(context);
 
@@ -519,7 +526,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
     }
 
     return ConstrainedBox(
-      constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+      constraints: BoxConstraints.tightFor(width: 40 * uiScale, height: 40 * uiScale),
       child: Material(
         color: bgColor,
         shape: CircleBorder(side: BorderSide(color: border)),
@@ -529,7 +536,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
           child: Center(
             child: Icon(
               widget.isStreaming ? Icons.stop_circle : Icons.arrow_upward,
-              size: 20,
+              size: 20 * uiScale,
               color: iconColor,
             ),
           ),
@@ -538,36 +545,36 @@ class _OwuiComposerState extends State<OwuiComposer> {
     );
   }
 
-  Widget _buildAttachedFilesPreview() {
+  Widget _buildAttachedFilesPreview(double uiScale) {
     final files = widget.conversationSettings.attachedFiles;
     final border = OwuiPalette.borderSubtle(context);
     final bg = OwuiPalette.surfaceCard(context);
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
+      margin: EdgeInsets.only(bottom: 8 * uiScale),
+      padding: EdgeInsets.all(10 * uiScale),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12 * uiScale),
         border: Border.all(color: border),
       ),
       child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+        spacing: 8 * uiScale,
+        runSpacing: 8 * uiScale,
         children: files.map((file) {
           return InputChip(
             label: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 260),
+              constraints: BoxConstraints(maxWidth: 260 * uiScale),
               child: Text(
                 file.name,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
+                style: TextStyle(fontSize: 12 * uiScale),
               ),
             ),
-            avatar: Icon(_fileIcon(file.type), size: 18),
+            avatar: Icon(_fileIcon(file.type), size: 18 * uiScale),
             onDeleted: () => _removeFile(file),
-            deleteIcon: const Icon(Icons.close, size: 16),
+            deleteIcon: Icon(Icons.close, size: 16 * uiScale),
             backgroundColor: bg,
             side: BorderSide(color: border),
             visualDensity: VisualDensity.compact,

@@ -6,6 +6,7 @@ import '../../widgets/conversation_view_v2.dart';
 import '../../widgets/stream_manager.dart';
 import 'chat_theme.dart';
 import 'markdown.dart';
+import 'owui_tokens_ext.dart';
 import 'palette.dart';
 
 class OwuiAssistantMessage extends StatelessWidget {
@@ -30,6 +31,7 @@ class OwuiAssistantMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final uiScale = context.owui.uiScale;
     final isDark = OwuiPalette.isDark(context);
     final thinking = streamData?.thinkingContent ?? '';
     final thinkingOpen = streamData?.isThinkingOpen ?? false;
@@ -63,7 +65,7 @@ class OwuiAssistantMessage extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 13 * uiScale,
                 fontWeight: FontWeight.w600,
                 color: OwuiPalette.textPrimary(context),
               ),
@@ -72,21 +74,21 @@ class OwuiAssistantMessage extends StatelessWidget {
           Text(
             '${createdAt.toLocal().hour.toString().padLeft(2, '0')}:${createdAt.toLocal().minute.toString().padLeft(2, '0')}',
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 12 * uiScale,
               color: OwuiPalette.textSecondary(context),
             ),
           ),
         ],
       ),
-      const SizedBox(height: 8),
+      SizedBox(height: 8 * uiScale),
     ];
 
     if (thinking.trim().isNotEmpty || thinkingOpen) {
       children.add(
         Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
+          margin: EdgeInsets.only(bottom: 10 * uiScale),
+          padding: EdgeInsets.all(12 * uiScale),
           decoration: OwuiChatTheme.thinkingDecoration(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -96,21 +98,21 @@ class OwuiAssistantMessage extends StatelessWidget {
                   Text(
                     'Thinking',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 12 * uiScale,
                       fontWeight: FontWeight.w700,
                       color: isDark ? const Color(0xFFBFDBFE) : const Color(0xFF1D4ED8),
                       letterSpacing: 0.2,
                     ),
                   ),
                   if (thinkingOpen) ...[
-                    const SizedBox(width: 8),
-                    const _ThinkingDots(),
+                    SizedBox(width: 8 * uiScale),
+                    _ThinkingDots(uiScale: uiScale),
                   ],
                 ],
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8 * uiScale),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 160, minHeight: 44),
+                constraints: BoxConstraints(maxHeight: 160 * uiScale, minHeight: 44 * uiScale),
                 child: ScrollConfiguration(
                   behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
                   child: SingleChildScrollView(
@@ -155,7 +157,7 @@ class OwuiAssistantMessage extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: EdgeInsets.fromLTRB(12 * uiScale, 10 * uiScale, 12 * uiScale, 10 * uiScale),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: children,
@@ -165,7 +167,9 @@ class OwuiAssistantMessage extends StatelessWidget {
 }
 
 class _ThinkingDots extends StatefulWidget {
-  const _ThinkingDots();
+  final double uiScale;
+
+  const _ThinkingDots({required this.uiScale});
 
   @override
   State<_ThinkingDots> createState() => _ThinkingDotsState();
@@ -193,7 +197,7 @@ class _ThinkingDotsState extends State<_ThinkingDots> with SingleTickerProviderS
         return Text(
           '.' * count,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: 12 * widget.uiScale,
             fontWeight: FontWeight.w700,
             color: OwuiPalette.textSecondary(context),
           ),
