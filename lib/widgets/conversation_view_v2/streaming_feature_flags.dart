@@ -41,47 +41,47 @@ class MarkstreamV2StreamingFlags {
   }
 
   static bool anchorAutoFollow(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return true;
-    // 调试面板参数优先
+    // 始终使用运行时参数，不受主开关限制
     return StreamingTuningParams.instance.anchorAutoFollow && _p0AnchorAutoFollow;
   }
 
   static bool stableFlowReveal(ConversationSettings settings) {
-    return _masterEnabled(settings) && _p0StableFlowReveal;
+    // 始终启用渐进式渲染，不受主开关限制
+    return _p0StableFlowReveal;
   }
 
   static double nearBottomPx(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 80.0;
+    // 始终使用运行时参数
     return StreamingTuningParams.instance.nearBottomPx;
   }
 
   static int revealTickMs(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 32;
+    // 始终使用运行时参数
     return StreamingTuningParams.instance.revealTickMs;
   }
 
   static int revealMinBufferChars(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 64;
+    // 始终使用运行时参数
     return StreamingTuningParams.instance.revealMinBufferChars;
   }
 
   static int revealMaxCharsPerTick(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 180;
+    // 始终使用运行时参数
     return StreamingTuningParams.instance.revealMaxCharsPerTick;
   }
 
   static int revealMaxLagChars(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 1200;
+    // 始终使用运行时参数
     return StreamingTuningParams.instance.revealMaxLagChars;
   }
 
   static int scrollDurationMs(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 160;
+    // 始终使用运行时参数
     return StreamingTuningParams.instance.scrollDurationMs;
   }
 
   static int scrollThrottleMs(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 800;
+    // 始终使用运行时参数
     return StreamingTuningParams.instance.scrollThrottleMs;
   }
 
@@ -196,7 +196,7 @@ class StreamingTuningParams extends ChangeNotifier {
 
       final tickMs = readInt('revealTickMs');
       if (tickMs != null) {
-        final clamped = tickMs.clamp(8, 100);
+        final clamped = tickMs.clamp(8, 500);
         if (clamped != _revealTickMs) {
           _revealTickMs = clamped;
           changed = true;
@@ -223,7 +223,7 @@ class StreamingTuningParams extends ChangeNotifier {
 
       final maxLag = readInt('revealMaxLagChars');
       if (maxLag != null) {
-        final clamped = maxLag.clamp(200, 3000);
+        final clamped = maxLag.clamp(200, 10000);
         if (clamped != _revealMaxLagChars) {
           _revealMaxLagChars = clamped;
           changed = true;
@@ -498,7 +498,7 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
             _buildSlider(
               label: 'Tick 间隔',
               value: _params.revealTickMs.toDouble(),
-              min: 8, max: 100,
+              min: 8, max: 500,
               unit: 'ms',
               onChanged: (v) => _params.revealTickMs = v.round(),
             ),
@@ -519,7 +519,7 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
             _buildSlider(
               label: '最大滞后',
               value: _params.revealMaxLagChars.toDouble(),
-              min: 200, max: 3000,
+              min: 200, max: 10000,
               unit: '字符',
               onChanged: (v) => _params.revealMaxLagChars = v.round(),
             ),

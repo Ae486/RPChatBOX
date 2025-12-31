@@ -414,9 +414,8 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
   void scrollToMessage(String messageId);
 
-  /// 显示流式渲染调试面板（仅 debug 模式有效）
+  /// 显示流式渲染参数调试面板
   void showTuningPanel() {
-    if (!kDebugMode) return;
     setState(() => _showTuningPanel = true);
   }
 

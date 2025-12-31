@@ -276,7 +276,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     _streamManager.append(streamId, content);
 
-    if (!MarkstreamV2StreamingFlags.stableFlowReveal(_conversationSettings)) {
+    final useStableFlow = MarkstreamV2StreamingFlags.stableFlowReveal(_conversationSettings);
+    if (!useStableFlow) {
+      debugPrint('[streaming] stableFlowReveal=false, 走旧逻辑');
       final state = _streamManager.getState(streamId);
 
       final newMsg = chat.TextMessage(
@@ -312,6 +314,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
   void _ensureStableFlowRevealTimer() {
     if (_stableRevealTimer != null) return;
     final tickMs = MarkstreamV2StreamingFlags.revealTickMs(_conversationSettings);
+    debugPrint('[streaming] 创建 Timer: tickMs=$tickMs');
     _stableRevealTimer = Timer.periodic(
       Duration(milliseconds: tickMs),
       (_) => _stableFlowRevealTick(),
@@ -361,6 +364,11 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         MarkstreamV2StreamingFlags.revealMinBufferChars(_conversationSettings);
     final maxLagChars =
         MarkstreamV2StreamingFlags.revealMaxLagChars(_conversationSettings);
+
+    // 调试日志：首次 tick 时输出参数
+    if (displayedLen == 0) {
+      debugPrint('[streaming] tick 参数: maxChars=$maxCharsPerTick, minBuffer=$minBufferChars, maxLag=$maxLagChars');
+    }
 
     final needCatchUpNow = maxLagChars > 0 && backlog > maxLagChars;
     var desiredMin = displayedLen;

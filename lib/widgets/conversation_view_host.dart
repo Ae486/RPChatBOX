@@ -48,9 +48,8 @@ class ConversationViewHostState extends State<ConversationViewHost>
     }
   }
 
-  /// 显示流式渲染调试面板（仅 V2 + debug 模式）
+  /// 显示流式渲染参数调试面板（仅 V2）
   void showTuningPanel() {
-    if (!kDebugMode) return;
     if (widget.settings.enableChatUiV2) {
       _v2Key.currentState?.showTuningPanel();
     }

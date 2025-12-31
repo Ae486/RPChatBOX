@@ -352,8 +352,8 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
           child: chatWidget,
         ),
         animatedScrollToBottomButton(),
-        // 调试面板（仅 debug 模式，通过菜单打开）
-        if (!_isExportMode && _showTuningPanel && kDebugMode)
+        // 调试面板（通过菜单打开）
+        if (!_isExportMode && _showTuningPanel)
           Positioned(
             left: 12,
             right: 12,
