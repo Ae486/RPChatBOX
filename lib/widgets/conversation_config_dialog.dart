@@ -1,5 +1,9 @@
+/// INPUT: ConversationSettings + onSave 回调
+/// OUTPUT: ConversationConfigDialog - 单会话配置（参数/上下文长度/实验开关）
+/// POS: UI 层 / Widgets - 对话配置对话框（由 V2 输入区/菜单触发）
+
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import '../models/conversation_settings.dart';
 import '../models/model_config.dart';
 import '../design_system/design_tokens.dart';
@@ -66,7 +70,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
               child: Row(
                 children: [
                   Icon(
-                    Icons.tune,
+                    OwuiIcons.tune,
                     color: Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
                   SizedBox(width: ChatBoxTokens.spacing.md),
@@ -78,7 +82,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(AppleIcons.close),
+                    icon: const Icon(OwuiIcons.close),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -179,7 +183,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                           Row(
                             children: [
                               Icon(
-                                AppleIcons.info,
+                                OwuiIcons.info,
                                 size: 18,
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),

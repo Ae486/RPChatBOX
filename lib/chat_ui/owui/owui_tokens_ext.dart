@@ -1,3 +1,7 @@
+/// INPUT: BuildContext -> Theme.of(context) + OwuiTokens ThemeExtension
+/// OUTPUT: context.owui / context.owuiColors / ... 便捷访问器
+/// POS: UI 层 / Design System / Owui - Token 访问扩展
+
 import 'package:flutter/material.dart';
 
 import 'owui_tokens.dart';

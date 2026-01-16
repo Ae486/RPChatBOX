@@ -1,5 +1,10 @@
+/// INPUT: controller/focusNode/hint/onChanged 等 + OwuiTokens
+/// OUTPUT: OwuiTextField/OwuiSearchField - OpenWebUI 风格输入框
+/// POS: UI 层 / Owui Components - 表单输入组件
+
 import 'package:flutter/material.dart';
 
+import '../owui_icons.dart';
 import '../owui_tokens_ext.dart';
 
 class OwuiTextField extends StatelessWidget {
@@ -95,7 +100,7 @@ class OwuiSearchField extends StatelessWidget {
       hintText: hintText,
       onChanged: onChanged,
       textInputAction: TextInputAction.search,
-      prefixIcon: const Icon(Icons.search_rounded),
+      prefixIcon: const Icon(OwuiIcons.search),
     );
   }
 }

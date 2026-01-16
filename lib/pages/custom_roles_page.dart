@@ -1,3 +1,7 @@
+/// INPUT: CustomRoleService + HiveConversationService
+/// OUTPUT: CustomRolesPage - 自定义角色增删改查（含关联会话处理）
+/// POS: UI 层 / Pages - 角色管理页
+
 import 'package:flutter/material.dart';
 
 import '../chat_ui/owui/components/owui_app_bar.dart';

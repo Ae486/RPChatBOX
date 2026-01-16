@@ -1,3 +1,7 @@
+/// INPUT: BuildContext + message + kind/duration
+/// OUTPUT: OwuiSnackBars.show/success/warning/error - 统一浮动 SnackBar
+/// POS: UI 层 / Owui Components - 提示反馈组件（避免各处重复样式）
+
 import 'package:flutter/material.dart';
 
 import '../owui_tokens_ext.dart';

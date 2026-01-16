@@ -1,5 +1,8 @@
+/// INPUT: 会话列表/自定义角色/全局 ModelServiceManager + Storage/Hive 服务
+/// OUTPUT: ChatPage - 应用主页面（Drawer + Chat 视图 + 搜索/设置等入口）
+/// POS: UI 层 / Pages - Home（路由入口）
+
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 
 import '../chat_ui/owui/components/owui_dialog.dart';
 import '../chat_ui/owui/components/owui_menu.dart';
@@ -407,10 +410,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// 进入导出模式
-  void _enterExportMode() {
-    _conversationKeys[_currentIndex].currentState?.enterExportMode();
-  }
-
   /// 打开自定义角色页面
   Future<void> _openCustomRoles() async {
     // 🔧 修复：从 ConversationDrawer 点击时会自动关闭 Drawer（见 conversation_drawer.dart 第109行）
@@ -587,7 +586,7 @@ class _ChatPageState extends State<ChatPage> {
                       value: 'token_stats',
                       child: Row(
                         children: [
-                          Icon(Icons.analytics, size: 20),
+                          Icon(OwuiIcons.analytics, size: 20),
                           SizedBox(width: 8),
                           Text('Token 统计'),
                         ],
@@ -597,7 +596,7 @@ class _ChatPageState extends State<ChatPage> {
                       value: 'theme',
                       child: Row(
                         children: [
-                          Icon(Icons.palette, size: 20),
+                          Icon(OwuiIcons.palette, size: 20),
                           SizedBox(width: 8),
                           Text('主题切换'),
                         ],
@@ -623,17 +622,16 @@ class _ChatPageState extends State<ChatPage> {
                         ],
                       ),
                     ),
-                    if (kDebugMode)
-                      const PopupMenuItem(
-                        value: 'streaming_tuning',
-                        child: Row(
-                          children: [
-                            Icon(Icons.tune, size: 20),
-                            SizedBox(width: 8),
-                            Text('流式调试'),
-                          ],
-                        ),
+                    const PopupMenuItem(
+                      value: 'streaming_tuning',
+                      child: Row(
+                        children: [
+                          Icon(OwuiIcons.tune, size: 20),
+                          SizedBox(width: 8),
+                          Text('流式调试'),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ],

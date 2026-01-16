@@ -1,3 +1,7 @@
+/// INPUT: child +（可选）margin/padding/radius + OwuiTokens
+/// OUTPUT: OwuiCard - OpenWebUI 风格 Card（surface + subtle border）
+/// POS: UI 层 / Owui Components - 基础容器组件
+
 import 'package:flutter/material.dart';
 
 import '../owui_tokens_ext.dart';

@@ -1,3 +1,7 @@
+/// INPUT: appBar/body/drawer/fab 等 Scaffold 槽位
+/// OUTPUT: OwuiScaffold - 背景色对齐 OwuiTokens 的 Scaffold
+/// POS: UI 层 / Owui Components - 页面壳（统一 pageBg）
+
 import 'package:flutter/material.dart';
 
 import '../owui_tokens_ext.dart';

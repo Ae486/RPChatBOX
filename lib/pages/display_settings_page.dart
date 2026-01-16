@@ -1,3 +1,7 @@
+/// INPUT: MyAppState（themeMode/uiScale/fontFamily/codeFontFamily）
+/// OUTPUT: DisplaySettingsPage - 显示设置（缩放/字体/主题等）
+/// POS: UI 层 / Pages - 外观设置页
+
 import 'package:flutter/material.dart';
 
 import '../chat_ui/owui/components/owui_app_bar.dart';

@@ -1,3 +1,7 @@
+/// INPUT: ModelConfig + ModelServiceManager
+/// OUTPUT: ModelEditPage - 编辑模型能力/参数（capabilities presets 等）
+/// POS: UI 层 / Pages - 模型编辑页
+
 import 'package:flutter/material.dart';
 
 import '../chat_ui/owui/components/owui_app_bar.dart';

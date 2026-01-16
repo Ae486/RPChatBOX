@@ -356,7 +356,7 @@ class ApiErrorWidget extends StatelessWidget {
               if (onRetry != null && error.isRetryable)
                 ElevatedButton.icon(
                   onPressed: onRetry,
-                  icon: const Icon(Icons.refresh, size: 16),
+                  icon: const Icon(OwuiIcons.refresh, size: 16),
                   label: const Text('重试'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.orange,

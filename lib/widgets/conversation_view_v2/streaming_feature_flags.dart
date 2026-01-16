@@ -1,3 +1,7 @@
+/// INPUT: ConversationSettings +（可选）dart-define 覆盖
+/// OUTPUT: MarkstreamV2StreamingFlags - P0 实验开关集合（供 V2/OWUI 渲染读）
+/// POS: UI 层 / Chat / V2 - 流式渲染功能开关（part of ConversationViewV2）
+
 part of '../conversation_view_v2.dart';
 
 /// Phase 4 (P0) feature flags for ConversationViewV2 smooth streaming.
@@ -462,7 +466,7 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
         children: [
           Row(
             children: [
-              Icon(Icons.tune, size: 18, color: textColor),
+              Icon(OwuiIcons.tune, size: 18, color: textColor),
               const SizedBox(width: 8),
               Text('流式渲染参数调试', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
               const Spacer(),
@@ -484,7 +488,7 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
               if (widget.onClose != null)
                 IconButton(
                   onPressed: widget.onClose,
-                  icon: const Icon(Icons.close, size: 18),
+                  icon: const Icon(OwuiIcons.close, size: 18),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   tooltip: '关闭',
@@ -651,9 +655,7 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
   }
 }
 
-/// Debug-only lightweight counters for streaming-related hot paths.
-
-/// Enable by passing `--dart-define=MS_STREAM_METRICS=true`.
+/// 轻量计数器：用于监控流式渲染热路径（全版本可用）
 class MarkstreamV2StreamingMetrics {
   static const bool _enabled = bool.fromEnvironment(
     'MS_STREAM_METRICS',
@@ -664,12 +666,12 @@ class MarkstreamV2StreamingMetrics {
   static final _Counter _scrollToIndex = _Counter('scrollToIndex');
 
   static void onUpdateMessage() {
-    if (!kDebugMode || !_enabled) return;
+    if (!_enabled) return;
     _updateMessage.tick();
   }
 
   static void onScrollToIndex() {
-    if (!kDebugMode || !_enabled) return;
+    if (!_enabled) return;
     _scrollToIndex.tick();
   }
 }

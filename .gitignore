@@ -32,6 +32,15 @@ migrate_working_dir/
 .pub/
 /build/
 
+# Node / frontend tooling
+node_modules/
+package-lock.json
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
 # Symbolication related
 app.*.symbols
 
@@ -112,6 +121,9 @@ coverage/
 # ==========================================
 # 项目特定配置
 # ==========================================
+
+# Local AI/agent config
+.claude/settings.local.json
 
 # 用户数据和配置（包含 API Key 等敏感信息）
 **/storage/

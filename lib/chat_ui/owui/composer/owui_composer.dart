@@ -19,6 +19,7 @@ import '../../../models/provider_config.dart';
 import '../../../services/model_service_manager.dart';
 import '../../../utils/global_toast.dart';
 import '../../../widgets/conversation_config_dialog.dart';
+import '../owui_icons.dart';
 import '../owui_tokens_ext.dart';
 import '../palette.dart';
 import 'owui_model_selector_sheet.dart';
@@ -333,14 +334,14 @@ class _OwuiComposerState extends State<OwuiComposer> {
                         children: [
                           _buildActionButton(
                             tooltip: '上传文件',
-                            icon: Icons.add_circle_outline,
+                            icon: OwuiIcons.addCircle,
                             onPressed: _pickFiles,
                             uiScale: uiScale,
                           ),
                           SizedBox(width: 6 * uiScale),
                           _buildActionButton(
                             tooltip: '联网',
-                            icon: Icons.language,
+                            icon: OwuiIcons.language,
                             isActive: widget.conversationSettings.enableNetwork,
                             onPressed: _toggleNetwork,
                             uiScale: uiScale,
@@ -348,7 +349,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
                           SizedBox(width: 6 * uiScale),
                           _buildActionButton(
                             tooltip: '对话配置',
-                            icon: Icons.tune,
+                            icon: OwuiIcons.tune,
                             onPressed: _showConfigDialog,
                             uiScale: uiScale,
                           ),
@@ -487,7 +488,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.psychology, size: 18 * uiScale, color: sub),
+            Icon(OwuiIcons.psychology, size: 18 * uiScale, color: sub),
             SizedBox(width: 6 * uiScale),
             Flexible(
               child: Text(
@@ -501,7 +502,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
               ),
             ),
             SizedBox(width: 4 * uiScale),
-            Icon(Icons.arrow_drop_down, size: 18 * uiScale, color: sub),
+            Icon(OwuiIcons.expandMore, size: 18 * uiScale, color: sub),
           ],
         ),
       ),
@@ -535,7 +536,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
           onTap: enabled ? _handleSendOrStop : null,
           child: Center(
             child: Icon(
-              widget.isStreaming ? Icons.stop_circle : Icons.arrow_upward,
+              widget.isStreaming ? OwuiIcons.stop : OwuiIcons.arrowUp,
               size: 20 * uiScale,
               color: iconColor,
             ),
@@ -574,7 +575,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
             ),
             avatar: Icon(_fileIcon(file.type), size: 18 * uiScale),
             onDeleted: () => _removeFile(file),
-            deleteIcon: Icon(Icons.close, size: 16 * uiScale),
+            deleteIcon: Icon(OwuiIcons.close, size: 16 * uiScale),
             backgroundColor: bg,
             side: BorderSide(color: border),
             visualDensity: VisualDensity.compact,
@@ -587,17 +588,17 @@ class _OwuiComposerState extends State<OwuiComposer> {
   IconData _fileIcon(FileType type) {
     switch (type) {
       case FileType.image:
-        return Icons.image_outlined;
+        return OwuiIcons.image;
       case FileType.video:
-        return Icons.movie_outlined;
+        return OwuiIcons.video;
       case FileType.audio:
-        return Icons.audiotrack_outlined;
+        return OwuiIcons.audio;
       case FileType.document:
-        return Icons.description_outlined;
+        return OwuiIcons.document;
       case FileType.code:
-        return Icons.code;
+        return OwuiIcons.code;
       case FileType.other:
-        return Icons.insert_drive_file_outlined;
+        return OwuiIcons.file;
     }
   }
 }

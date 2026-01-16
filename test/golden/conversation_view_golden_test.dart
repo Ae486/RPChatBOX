@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:golden_toolkit/golden_toolkit.dart';
-import 'package:chatboxapp/widgets/conversation_view.dart';
+import 'package:chatboxapp/widgets/conversation_view_host.dart';
 import 'package:chatboxapp/models/chat_settings.dart';
 import '../helpers/test_data.dart';
 import '../helpers/test_setup.dart';
@@ -41,7 +41,7 @@ void main() {
             debugShowCheckedModeBanner: false,
             theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
             home: Scaffold(
-              body: ConversationView(
+              body: ConversationViewHost(
                 conversation: conversation,
                 settings: ChatSettings(),
                 onConversationUpdated: () {},

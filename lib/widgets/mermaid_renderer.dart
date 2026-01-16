@@ -1,11 +1,17 @@
+/// INPUT: Mermaid 代码 + 平台能力（WebView/外部预览）+ 主题/高度
+/// OUTPUT: MermaidRenderer - Mermaid 图表渲染（内嵌 WebView 或外部预览）
+/// POS: UI 层 / Widgets - Mermaid 渲染底层（供 OwuiMermaidBlock/Demo 使用）
+
 import 'dart:io';
-import '../design_system/apple_icons.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart' as windows_webview;
+
+import '../chat_ui/owui/owui_icons.dart';
 import '../design_system/design_tokens.dart';
 
 /// Mermaid 图表渲染器
@@ -343,7 +349,7 @@ class _MermaidRendererState extends State<MermaidRenderer> {
             Row(
               children: [
                 Icon(
-                  AppleIcons.info,
+                  OwuiIcons.info,
                   color: Colors.blue.shade700,
                   size: 16,
                 ),
@@ -360,7 +366,7 @@ class _MermaidRendererState extends State<MermaidRenderer> {
                   tooltip: '复制源码',
                   onPressed: _copyMermaidCode,
                   icon: Icon(
-                    AppleIcons.copy,
+                    OwuiIcons.copy,
                     size: 16,
                     color: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
                   ),
@@ -407,7 +413,7 @@ class _MermaidRendererState extends State<MermaidRenderer> {
         children: [
           Row(
             children: [
-              Icon(AppleIcons.error, color: Colors.red.shade700),
+              Icon(OwuiIcons.error, color: Colors.red.shade700),
               SizedBox(width: ChatBoxTokens.spacing.sm),
               Text(
                 'Mermaid 渲染失败',

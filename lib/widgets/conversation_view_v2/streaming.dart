@@ -244,18 +244,24 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         onDone: () async {
           if (_isDisposed) return;
           _chunkBuffer?.flush();
-          await _finalizeStreamingMessage(
+          // 设置待 finalize 状态，等待渐进式渲染完成后再执行
+          _pendingFinalize = (
             modelName: modelWithProvider.model.displayName,
             providerName: modelWithProvider.provider.name,
+            error: null,
           );
+          // 确保 Timer 继续运行以完成剩余渲染
+          _scheduleNextRevealTick();
         },
         onError: (error) async {
           if (_isDisposed) return;
-          await _finalizeStreamingMessage(
+          // 错误情况：设置待 finalize 状态，等待渐进式渲染完成
+          _pendingFinalize = (
             modelName: modelWithProvider.model.displayName,
             providerName: modelWithProvider.provider.name,
             error: error,
           );
+          _scheduleNextRevealTick();
         },
       );
     } catch (e) {
@@ -275,6 +281,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     if (streamId == null || oldPlaceholder == null) return;
 
     _streamManager.append(streamId, content);
+
+    _scheduleStreamingImagePrefetch(streamId);
 
     final useStableFlow = MarkstreamV2StreamingFlags.stableFlowReveal(_conversationSettings);
     if (!useStableFlow) {
@@ -307,17 +315,45 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     _stableRevealTimer?.cancel();
     _stableRevealTimer = null;
 
+    _streamImagePrefetchTimer?.cancel();
+    _streamImagePrefetchTimer = null;
+    _streamPrefetchedImageUrls.clear();
+
     _stableRevealTicking = false;
     _stableRevealDisplayedLen = 0;
+    _pendingFinalize = null;
+  }
+
+  void _scheduleStreamingImagePrefetch(String streamId) {
+    _streamImagePrefetchTimer?.cancel();
+    _streamImagePrefetchTimer = Timer(const Duration(milliseconds: 280), () {
+      if (_isDisposed) return;
+      if (_activeStreamId != streamId) return;
+
+      final fullText = _streamManager.getState(streamId).text;
+      for (final url in ImagePersistenceService.extractNetworkImageUrlsFromMarkdown(fullText)) {
+        if (_streamPrefetchedImageUrls.add(url)) {
+          unawaited(ImagePersistenceService().persistNetworkImage(url));
+        }
+      }
+    });
   }
 
   void _ensureStableFlowRevealTimer() {
     if (_stableRevealTimer != null) return;
+    _scheduleNextRevealTick();
+  }
+
+  /// 调度下一次 reveal tick（使用单次 Timer，每次读取最新的 tickMs）
+  void _scheduleNextRevealTick() {
+    if (_isDisposed || _stableRevealTimer != null) return;
     final tickMs = MarkstreamV2StreamingFlags.revealTickMs(_conversationSettings);
-    debugPrint('[streaming] 创建 Timer: tickMs=$tickMs');
-    _stableRevealTimer = Timer.periodic(
+    _stableRevealTimer = Timer(
       Duration(milliseconds: tickMs),
-      (_) => _stableFlowRevealTick(),
+      () {
+        _stableRevealTimer = null;
+        _stableFlowRevealTick();
+      },
     );
   }
 
@@ -343,20 +379,60 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     final streamId = _activeStreamId;
     final oldPlaceholder = _activeAssistantPlaceholder;
     if (streamId == null || oldPlaceholder == null) {
+      // 流已结束或被清理，检查是否需要 finalize
+      final pending = _pendingFinalize;
+      if (pending != null) {
+        _pendingFinalize = null;
+        unawaited(_finalizeStreamingMessage(
+          modelName: pending.modelName,
+          providerName: pending.providerName,
+          error: pending.error,
+        ));
+      }
       _stopStableFlowRevealTimer();
       return;
     }
 
     final fullText = _streamManager.getState(streamId).text;
     final fullLen = fullText.length;
-    if (fullLen <= 0) return;
+    if (fullLen <= 0) {
+      // 无内容，如果有待 finalize 则执行
+      final pending = _pendingFinalize;
+      if (pending != null) {
+        _pendingFinalize = null;
+        _stopStableFlowRevealTimer();
+        unawaited(_finalizeStreamingMessage(
+          modelName: pending.modelName,
+          providerName: pending.providerName,
+          error: pending.error,
+        ));
+        return;
+      }
+      _scheduleNextRevealTick();
+      return;
+    }
 
     var displayedLen = _stableRevealDisplayedLen;
     if (displayedLen < 0) displayedLen = 0;
     if (displayedLen > fullLen) displayedLen = fullLen;
 
     final backlog = fullLen - displayedLen;
-    if (backlog <= 0) return;
+    if (backlog <= 0) {
+      // 已显示完所有内容，检查是否需要 finalize
+      final pending = _pendingFinalize;
+      if (pending != null) {
+        _pendingFinalize = null;
+        _stopStableFlowRevealTimer();
+        unawaited(_finalizeStreamingMessage(
+          modelName: pending.modelName,
+          providerName: pending.providerName,
+          error: pending.error,
+        ));
+        return;
+      }
+      _scheduleNextRevealTick();
+      return;
+    }
 
     final maxCharsPerTick =
         MarkstreamV2StreamingFlags.revealMaxCharsPerTick(_conversationSettings);
@@ -391,11 +467,21 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       floor: displayedLen,
     );
 
-    if (safeEnd <= displayedLen) return;
+    if (safeEnd <= displayedLen) {
+      _scheduleNextRevealTick();
+      return;
+    }
 
     _stableRevealTicking = true;
     try {
+      final actualChars = safeEnd - displayedLen;
       _stableRevealDisplayedLen = safeEnd;
+
+      // 调试日志：显示实际输出的字符数（仅在 MS_STREAM_METRICS 启用时）
+      if (const bool.fromEnvironment('MS_STREAM_METRICS', defaultValue: false)) {
+        final tickMs = MarkstreamV2StreamingFlags.revealTickMs(_conversationSettings);
+        debugPrint('[tick] +$actualChars chars (max=$maxCharsPerTick, tick=${tickMs}ms, displayed=$safeEnd/$fullLen)');
+      }
 
       final newText = fullText.substring(0, safeEnd);
       final newMsg = chat.TextMessage(
@@ -415,6 +501,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       _requestAutoFollow(smooth: true);
     } finally {
       _stableRevealTicking = false;
+      _scheduleNextRevealTick();
     }
   }
 
@@ -562,6 +649,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     _stopStableFlowRevealTimer();
 
+    _streamImagePrefetchTimer?.cancel();
+    _streamImagePrefetchTimer = null;
+    _streamPrefetchedImageUrls.clear();
+
     _activeStreamId = null;
     _activeAssistantPlaceholder = null;
     _currentProvider = null;
@@ -628,6 +719,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         }
         _syncConversationToChatController();
         _requestAutoFollow(smooth: true);
+
+        // 将过期的网络图片 URL 替换为持久化的本地文件 URI
+        unawaited(_persistMarkdownImagesForMessageId(assistantMessage.id));
       } else {
         // No content (e.g. request failed before any chunk or user stopped immediately).
         // Remove the placeholder to avoid a stuck "未落盘" item.
@@ -686,6 +780,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     } catch (_) {
       // ignore
     }
+
+    // 清空待 finalize 状态，避免重复执行
+    _pendingFinalize = null;
 
     await _finalizeStreamingMessage(
       modelName: modelName,

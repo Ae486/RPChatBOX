@@ -1,9 +1,14 @@
+/// INPUT: 代码文本 + 语言 + 主题/缩放 +（可选）流式状态
+/// OUTPUT: OwuiCodeBlock - 高亮/复制/折叠/自动滚动的代码块 Widget
+/// POS: UI 层 / Markdown / Owui - 代码块渲染（供 OwuiMarkdown 使用）
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_highlight/themes/github.dart';
 import 'package:flutter_highlight/themes/vs2015.dart';
 import 'package:highlight/highlight.dart' show highlight, Node, Result;
 
+import 'owui_icons.dart';
 import 'owui_tokens_ext.dart';
 
 /// OpenWebUI-inspired enhanced code block.
@@ -429,13 +434,13 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
           ],
           const Spacer(),
           _buildIconBtn(
-            icon: _isCollapsed ? Icons.unfold_more_rounded : Icons.unfold_less_rounded,
+            icon: _isCollapsed ? OwuiIcons.unfoldMore : OwuiIcons.unfoldLess,
             tooltip: _isCollapsed ? '展开' : '收起',
             onPressed: () => setState(() => _isCollapsed = !_isCollapsed),
             iconColor: iconColor,
           ),
           _buildIconBtn(
-            icon: Icons.content_copy_rounded,
+            icon: OwuiIcons.copy,
             tooltip: '复制',
             onPressed: _copyCode,
             iconColor: iconColor,

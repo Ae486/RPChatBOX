@@ -7,7 +7,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart' as chat;
@@ -21,6 +20,7 @@ import '../adapters/ai_provider.dart' as ai;
 import '../adapters/chat_message_adapter.dart';
 import '../chat_ui/owui/assistant_message.dart';
 import '../chat_ui/owui/chat_theme.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/composer/owui_composer.dart';
 import '../chat_ui/owui/message_highlight_sweep.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
@@ -37,6 +37,7 @@ import '../models/model_config.dart';
 import '../models/message.dart' as app;
 import '../models/provider_config.dart';
 import '../services/export_service.dart';
+import '../services/image_persistence_service.dart';
 import '../utils/chunk_buffer.dart';
 import '../utils/token_counter.dart';
 import '../utils/global_toast.dart';
@@ -134,6 +135,19 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   bool _stableRevealTicking = false;
   int _stableRevealDisplayedLen = 0;
 
+  // 待 finalize 状态（流结束后等待渐进式渲染完成）
+  ({String modelName, String providerName, Object? error})? _pendingFinalize;
+
+  // 图片持久化：将过期的网络图片保存到本地
+  String? _imagePersistenceSweptConversationId;
+  int _imagePersistenceSweepEpoch = 0;
+  bool _imagePersistenceSweepRunning = false;
+  final Set<String> _persistingMarkdownMessageIds = <String>{};
+
+  // 流式输出期间预取图片（抢在 URL 过期前）
+  Timer? _streamImagePrefetchTimer;
+  final Set<String> _streamPrefetchedImageUrls = <String>{};
+
 
   @override
   void initState() {
@@ -163,6 +177,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     scheduleMicrotask(() {
       if (!mounted) return;
       _syncConversationToChatController();
+      _scheduleImagePersistenceSweep();
     });
   }
 
@@ -182,6 +197,9 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     _chunkBuffer?.dispose();
     _stableRevealTimer?.cancel();
     _stableRevealTimer = null;
+    _streamImagePrefetchTimer?.cancel();
+    _streamImagePrefetchTimer = null;
+    _pendingFinalize = null;
     _clearHighlightTimer?.cancel();
     _persistThreadTimer?.cancel();
     _persistThreadTimer = null;
@@ -200,6 +218,16 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       _stableRevealTimer = null;
       _stableRevealTicking = false;
       _stableRevealDisplayedLen = 0;
+      _pendingFinalize = null;
+
+      _streamImagePrefetchTimer?.cancel();
+      _streamImagePrefetchTimer = null;
+      _streamPrefetchedImageUrls.clear();
+
+      _imagePersistenceSweepEpoch++;
+      _imagePersistenceSweepRunning = false;
+      _imagePersistenceSweptConversationId = null;
+      _persistingMarkdownMessageIds.clear();
 
       _flushPersistThreadNow();
       _conversationSettings = globalModelServiceManager.getConversationSettings(
@@ -212,6 +240,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       scheduleMicrotask(() {
         if (!mounted) return;
         _syncConversationToChatController();
+        _scheduleImagePersistenceSweep();
       });
     }
   }
@@ -324,6 +353,106 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     messages
       ..clear()
       ..addAll(chain);
+  }
+
+  void _scheduleImagePersistenceSweep({
+    Duration delay = const Duration(milliseconds: 650),
+  }) {
+    if (_isDisposed) return;
+
+    final conversationId = widget.conversation.id;
+    if (_imagePersistenceSweptConversationId == conversationId) return;
+
+    final epoch = ++_imagePersistenceSweepEpoch;
+    unawaited(() async {
+      await Future<void>.delayed(delay);
+      if (_isDisposed || !mounted) return;
+      if (epoch != _imagePersistenceSweepEpoch) return;
+      if (widget.conversation.id != conversationId) return;
+      if (_imagePersistenceSweptConversationId == conversationId) return;
+      if (_imagePersistenceSweepRunning) return;
+
+      _imagePersistenceSweepRunning = true;
+      try {
+        await _runImagePersistenceSweep(
+          epoch: epoch,
+          conversationId: conversationId,
+        );
+        if (_isDisposed || !mounted) return;
+        if (epoch != _imagePersistenceSweepEpoch) return;
+        if (widget.conversation.id != conversationId) return;
+        _imagePersistenceSweptConversationId = conversationId;
+      } finally {
+        if (epoch == _imagePersistenceSweepEpoch) {
+          _imagePersistenceSweepRunning = false;
+        }
+      }
+    }());
+  }
+
+  Future<void> _runImagePersistenceSweep({
+    required int epoch,
+    required String conversationId,
+  }) async {
+    if (_isDisposed) return;
+    if (epoch != _imagePersistenceSweepEpoch) return;
+    if (widget.conversation.id != conversationId) return;
+
+    final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+    final chain = buildActiveMessageChain(thread);
+
+    var changed = false;
+    for (final msg in chain) {
+      if (_isDisposed) return;
+      if (epoch != _imagePersistenceSweepEpoch) return;
+      if (widget.conversation.id != conversationId) return;
+      if (msg.isUser) continue;
+
+      final result = await ImagePersistenceService()
+          .persistMarkdownImagesToLocalFiles(msg.content);
+      if (!result.changed) continue;
+
+      msg.content = result.markdown;
+      _chatMessageCache.remove(msg.id);
+      _chatMessageCacheFingerprints.remove(msg.id);
+      changed = true;
+    }
+
+    if (!changed) return;
+
+    _syncConversationMessagesSnapshotFromThread(thread);
+    _persistThreadNoSave(thread);
+    _schedulePersistThread(delay: Duration.zero);
+    _syncConversationToChatController();
+  }
+
+  Future<void> _persistMarkdownImagesForMessageId(String messageId) async {
+    if (_isDisposed) return;
+    if (_persistingMarkdownMessageIds.contains(messageId)) return;
+
+    _persistingMarkdownMessageIds.add(messageId);
+    try {
+      final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+      final node = thread.nodes[messageId];
+      if (node == null || node.message.isUser) return;
+
+      final msg = node.message;
+      final result = await ImagePersistenceService()
+          .persistMarkdownImagesToLocalFiles(msg.content);
+      if (_isDisposed) return;
+      if (!result.changed) return;
+
+      msg.content = result.markdown;
+      _chatMessageCache.remove(messageId);
+      _chatMessageCacheFingerprints.remove(messageId);
+
+      _syncConversationMessagesSnapshotFromThread(thread);
+      _persistThreadNoSave(thread);
+      _schedulePersistThread(delay: Duration.zero);
+      _syncConversationToChatController();
+    } finally {
+      _persistingMarkdownMessageIds.remove(messageId);
+    }
   }
 
   int _fingerprintAppMessage(app.Message message) {

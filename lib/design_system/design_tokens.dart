@@ -1,3 +1,7 @@
+/// INPUT: Material Theme/ColorScheme + 基础数值常量
+/// OUTPUT: ChatBoxTokens - 设计令牌集合（spacing/radius/elevation/animation/breakpoints）
+/// POS: UI 层 / DesignSystem - Token 定义
+
 import 'package:flutter/material.dart';
 
 /// ChatBox 设计系统 - 设计令牌

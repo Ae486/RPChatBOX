@@ -1,3 +1,7 @@
+/// INPUT: conversations 列表 + onResultTap 回调
+/// OUTPUT: SearchPage - 全局搜索并跳转到指定会话/消息
+/// POS: UI 层 / Pages - 搜索页
+
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
@@ -223,7 +227,7 @@ class _SearchPageState extends State<SearchPage> {
       leading: CircleAvatar(
         child: Icon(
           result.type == SearchResultType.conversationTitle
-              ? Icons.chat_bubble_outline
+              ? OwuiIcons.messageBubbleOutline
               : (result.message?.isUser ?? false
                   ? OwuiIcons.person
                   : OwuiIcons.chatbot),
@@ -312,7 +316,7 @@ class _SearchPageState extends State<SearchPage> {
                   child: Row(
                     children: [
                       Icon(
-                        Icons.chat_bubble_outline,
+                        OwuiIcons.messageBubbleOutline,
                         size: 16,
                         color: colors.textSecondary,
                       ),
@@ -349,7 +353,7 @@ class _SearchPageState extends State<SearchPage> {
                   result.message!.id,
                 );
               },
-              icon: const Icon(Icons.my_location),
+              icon: const Icon(OwuiIcons.locationPin),
               label: const Text('跳转到消息'),
             ),
           ],

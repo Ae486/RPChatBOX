@@ -1,3 +1,7 @@
+/// INPUT: BuildContext（Brightness）
+/// OUTPUT: OwuiPalette - OpenWebUI 灰阶色板与语义色工具
+/// POS: UI 层 / Design System / Owui - 调色板（低层依赖）
+
 import 'package:flutter/material.dart';
 
 /// OpenWebUI-inspired grayscale palette and primitives.
@@ -38,4 +42,3 @@ class OwuiPalette {
   static Color textSecondary(BuildContext context) =>
       isDark(context) ? gray400 : gray600;
 }
-

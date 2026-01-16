@@ -1,3 +1,7 @@
+/// INPUT: conversations/customRoles/currentConversationId + 一组导航/编辑回调
+/// OUTPUT: ConversationDrawer - 会话列表侧边栏（分组/新建/重命名/删除/角色入口）
+/// POS: UI 层 / Widgets - ChatPage Drawer
+
 import 'package:flutter/material.dart';
 
 import '../chat_ui/owui/components/owui_card.dart';
@@ -432,4 +436,3 @@ class _RoleGroup {
     this.customRole,
   });
 }
-

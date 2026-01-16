@@ -59,22 +59,11 @@ class DataMigrationService {
       
       print('✨ 数据迁移完成！');
       
-      // 可选：清理 SharedPreferences 中的旧数据（保留以防万一）
-      // await _cleanupOldData();
-      
     } catch (e, stackTrace) {
       print('❌ 数据迁移失败: $e');
       print('Stack trace: $stackTrace');
       rethrow;
     }
-  }
-  
-  /// 清理旧数据（可选，慎用）
-  Future<void> _cleanupOldData() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('conversations');
-    await prefs.remove('current_conversation_id');
-    print('🧹 已清理 SharedPreferences 中的旧数据');
   }
   
   /// 重置迁移状态（用于测试）

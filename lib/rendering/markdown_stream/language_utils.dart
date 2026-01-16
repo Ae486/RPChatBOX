@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../chat_ui/owui/owui_icons.dart';
+
 /// 语言别名映射
 /// 参考 markstream-vue: src/utils/languageIcon.ts
 const Map<String, String> _languageAliasMap = {
@@ -87,26 +89,26 @@ const Map<String, String> _languageDisplayNames = {
   'plaintext': 'Plain Text',
 };
 
-/// 语言图标数据 (使用 Material Icons)
+/// 语言图标数据 (使用 OwuiIcons)
 const Map<String, IconData> _languageIcons = {
-  'javascript': Icons.javascript,
-  'typescript': Icons.code,
-  'python': Icons.code,
-  'dart': Icons.flutter_dash,
-  'html': Icons.html,
-  'css': Icons.css,
-  'json': Icons.data_object,
-  'markdown': Icons.description,
-  'shell': Icons.terminal,
-  'powershell': Icons.terminal,
-  'sql': Icons.storage,
-  'docker': Icons.cloud,
-  'dockerfile': Icons.cloud,
-  'yaml': Icons.settings,
-  'xml': Icons.code,
-  'diff': Icons.difference,
-  'mermaid': Icons.account_tree,
-  'plain': Icons.text_snippet,
+  'javascript': OwuiIcons.code,
+  'typescript': OwuiIcons.code,
+  'python': OwuiIcons.code,
+  'dart': OwuiIcons.code,
+  'html': OwuiIcons.code,
+  'css': OwuiIcons.code,
+  'json': OwuiIcons.code,
+  'markdown': OwuiIcons.document,
+  'shell': OwuiIcons.terminal,
+  'powershell': OwuiIcons.terminal,
+  'sql': OwuiIcons.database,
+  'docker': OwuiIcons.cloud,
+  'dockerfile': OwuiIcons.cloud,
+  'yaml': OwuiIcons.settings,
+  'xml': OwuiIcons.code,
+  'diff': OwuiIcons.code,
+  'mermaid': OwuiIcons.accountTree,
+  'plain': OwuiIcons.document,
 };
 
 /// 提取语言标识符
@@ -137,11 +139,11 @@ String getLanguageDisplayName(String lang) {
 }
 
 /// 获取语言图标
-/// 
-/// 返回对应的 Material Icon，如果没有则返回默认代码图标
+///
+/// 返回对应的 OwuiIcons 图标，如果没有则返回默认代码图标
 IconData getLanguageIcon(String lang) {
   final normalized = normalizeLanguageIdentifier(lang);
-  return _languageIcons[normalized] ?? Icons.code;
+  return _languageIcons[normalized] ?? OwuiIcons.code;
 }
 
 /// 检测是否为 diff 代码

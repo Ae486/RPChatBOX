@@ -1,3 +1,11 @@
+/// INPUT: Markdown 文本 + UI Tokens/主题 +（可选）图片/链接交互
+/// OUTPUT: OwuiMarkdown - Markdown 渲染（表格/代码块/LaTeX/图片/Mermaid 扩展）
+/// POS: UI 层 / Markdown / Owui - 主 Markdown 渲染入口
+
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +20,7 @@ import '../../rendering/markdown_stream/language_utils.dart';
 import '../../rendering/markdown_stream/stable_prefix_parser.dart';
 import 'code_block.dart';
 import 'mermaid_block.dart';
+import 'owui_icons.dart';
 import 'owui_tokens_ext.dart';
 import 'palette.dart';
 import 'stable_body.dart';
@@ -86,7 +95,7 @@ class _OwuiContextMenuWrapper extends StatelessWidget {
             children: [
               ListTile(title: Text(title), subtitle: const Text('长按块级内容的快捷操作')),
               ListTile(
-                leading: const Icon(Icons.copy_rounded),
+                leading: const Icon(OwuiIcons.copy),
                 title: const Text('复制'),
                 onTap: () async {
                   Navigator.of(ctx).pop();
@@ -534,6 +543,17 @@ class OwuiMarkdown extends StatelessWidget {
       wrapper: (child) => _OwuiMarkdownTableWrapper(isDark: isDark, child: child),
     );
 
+    // 图片配置
+    final imgConfig = ImgConfig(
+      builder: (url, attributes) {
+        return _OwuiMarkdownImage(
+          url: url,
+          attributes: attributes,
+          isDark: isDark,
+        );
+      },
+    );
+
     return MarkdownWidget(
       data: safeText,
       shrinkWrap: true,
@@ -566,6 +586,7 @@ class OwuiMarkdown extends StatelessWidget {
           ),
           blockquoteConfig,
           tableConfig,
+          imgConfig,
         ],
       ),
       markdownGenerator: MarkdownGenerator(
@@ -762,7 +783,7 @@ class _StreamingThinkContainer extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.lightbulb_outline, size: 16, color: headerColor),
+              Icon(OwuiIcons.lightbulb, size: 16, color: headerColor),
               const SizedBox(width: 6),
               Text(
                 '思考中',
@@ -799,5 +820,276 @@ class _StreamingThinkContainer extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Markdown 图片组件
+class _OwuiMarkdownImage extends StatelessWidget {
+  final String url;
+  final Map<String, String> attributes;
+  final bool isDark;
+
+  const _OwuiMarkdownImage({
+    required this.url,
+    required this.attributes,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final alt = attributes['alt'] ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: GestureDetector(
+        onTap: () => _showImagePreview(context),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480, maxHeight: 400),
+            child: _buildInlineImage(alt),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInlineImage(String alt) {
+    final dataBytes = _tryDecodeDataImage(url);
+    if (dataBytes != null) {
+      return Image.memory(
+        dataBytes,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildError(_errorText(alt)),
+      );
+    }
+
+    final file = _tryResolveLocalFile(url);
+    if (file != null) {
+      return Image.file(
+        file,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildError(_errorText(alt)),
+      );
+    }
+
+    return CachedNetworkImage(
+      imageUrl: url,
+      fit: BoxFit.contain,
+      placeholder: (_, __) => _buildPlaceholder(),
+      errorWidget: (_, __, ___) => _buildError(_errorText(alt)),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      width: 200,
+      height: 150,
+      color: isDark
+          ? Colors.white.withValues(alpha: 0.05)
+          : Colors.black.withValues(alpha: 0.03),
+      child: Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: isDark ? Colors.white54 : Colors.black45,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildError(String message) {
+    final text = message.trim().isNotEmpty ? message : 'Failed to load image';
+    return Container(
+      width: 200,
+      height: 100,
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.1)
+            : Colors.black.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            OwuiIcons.brokenImage,
+            size: 32,
+            color: isDark ? Colors.white54 : Colors.black45,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImagePreview(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: _buildFullImage(ctx),
+              ),
+            ),
+            // 关闭按钮
+            Positioned(
+              top: 0,
+              right: 0,
+              child: IconButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                icon: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Icon(OwuiIcons.close, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFullImage(BuildContext context) {
+    final dataBytes = _tryDecodeDataImage(url);
+    if (dataBytes != null) {
+      return Image.memory(
+        dataBytes,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _fullError(context),
+      );
+    }
+
+    final file = _tryResolveLocalFile(url);
+    if (file != null) {
+      return Image.file(
+        file,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _fullError(context),
+      );
+    }
+
+    return CachedNetworkImage(
+      imageUrl: url,
+      fit: BoxFit.contain,
+      errorWidget: (_, __, ___) => _fullError(context),
+    );
+  }
+
+  Widget _fullError(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            OwuiIcons.brokenImage,
+            size: 48,
+            color: isDark ? Colors.white54 : Colors.black45,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Failed to load image',
+            style: TextStyle(
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Uint8List? _tryDecodeDataImage(String raw) {
+    if (!raw.startsWith('data:image')) return null;
+    final comma = raw.indexOf(',');
+    if (comma == -1) return null;
+    final meta = raw.substring(0, comma);
+    final data = raw.substring(comma + 1);
+    if (!meta.contains(';base64')) return null;
+    try {
+      return base64Decode(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  File? _tryResolveLocalFile(String raw) {
+    final uri = Uri.tryParse(raw);
+    if (uri != null && uri.scheme == 'file') {
+      try {
+        return File.fromUri(uri);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final isNetwork = raw.startsWith('http://') || raw.startsWith('https://');
+    if (isNetwork) return null;
+
+    // Windows 驱动器路径 (C:\path)
+    final isWindowsDrivePath = RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(raw);
+    // UNC 路径 (\\server\share)
+    final isUncPath = raw.startsWith(r'\\');
+    if (isWindowsDrivePath || isUncPath) return File(raw);
+
+    // 其他非网络字符串视为本地路径
+    if (uri != null && uri.hasScheme) return null;
+    return File(raw);
+  }
+
+  String _errorText(String alt) {
+    if (alt.trim().isNotEmpty) return alt.trim();
+
+    final uri = Uri.tryParse(url);
+    if (uri != null) {
+      // 检测 URL 过期
+      final expires = uri.queryParameters['x-expires'];
+      final exp = int.tryParse(expires ?? '');
+      if (exp != null) {
+        final ms = exp > 100000000000 ? exp : exp * 1000;
+        final at = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+        if (DateTime.now().toUtc().isAfter(at)) {
+          return 'Image URL expired';
+        }
+      }
+      if (uri.scheme == 'file') {
+        return 'Local image not found';
+      }
+    }
+
+    if (url.startsWith('data:image')) {
+      return 'Invalid image data';
+    }
+
+    return 'Failed to load image';
   }
 }

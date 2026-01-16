@@ -1,3 +1,7 @@
+/// INPUT: ProviderConfig? + ModelServiceManager
+/// OUTPUT: ProviderDetailPage - Provider 详情（API 配置 + 模型列表/编辑/添加）
+/// POS: UI 层 / Pages - Provider 详情页
+
 import 'package:flutter/material.dart';
 
 import '../chat_ui/owui/components/owui_app_bar.dart';
@@ -448,7 +452,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                 trailing: TextButton.icon(
                   onPressed: _isTestingMode ? _exitTestMode : _enterTestMode,
                   icon: Icon(
-                    _isTestingMode ? OwuiIcons.close : Icons.wifi_tethering,
+                    _isTestingMode ? OwuiIcons.close : OwuiIcons.signal,
                   ),
                   label: Text(_isTestingMode ? '取消' : '检测'),
                 ),
@@ -590,13 +594,13 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   IconData _getProviderIcon(ProviderType type) {
     switch (type) {
       case ProviderType.openai:
-        return Icons.auto_awesome;
+        return OwuiIcons.auto;
       case ProviderType.gemini:
-        return Icons.stars;
+        return OwuiIcons.star;
       case ProviderType.deepseek:
-        return Icons.travel_explore;
+        return OwuiIcons.psychology;
       case ProviderType.claude:
-        return Icons.psychology;
+        return OwuiIcons.chatBubble;
     }
   }
 
@@ -839,4 +843,3 @@ class _BreathingBorderCardState extends State<_BreathingBorderCard>
     );
   }
 }
-

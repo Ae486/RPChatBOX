@@ -1,3 +1,7 @@
+/// INPUT: title/content/actions + OwuiTokens
+/// OUTPUT: OwuiDialog - OpenWebUI 风格 AlertDialog（surface + border + radius）
+/// POS: UI 层 / Owui Components - 对话框样式壳
+
 import 'package:flutter/material.dart';
 
 import '../owui_tokens_ext.dart';

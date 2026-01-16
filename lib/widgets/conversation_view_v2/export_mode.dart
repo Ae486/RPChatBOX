@@ -164,7 +164,7 @@ mixin _ConversationViewV2ExportMixin on _ConversationViewV2StateBase {
         ),
         child: selected
             ? Icon(
-                Icons.check_rounded,
+                OwuiIcons.check,
                 size: 16,
                 color: Theme.of(context).colorScheme.onPrimary,
               )
@@ -222,7 +222,7 @@ mixin _ConversationViewV2ExportMixin on _ConversationViewV2StateBase {
             children: [
               IconButton(
                 onPressed: _exitExportMode,
-                icon: const Icon(Icons.close_rounded),
+                icon: const Icon(OwuiIcons.close),
                 tooltip: '退出导出模式',
               ),
               const SizedBox(width: 4),

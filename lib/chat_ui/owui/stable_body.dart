@@ -1,3 +1,7 @@
+/// INPUT: 流式文本 + stable/tail 分割函数 + Markdown builder +（可选）块级占位渲染
+/// OUTPUT: OwuiStableBody - 稳定前缀 Markdown + 尾巴增量渲染容器
+/// POS: UI 层 / Markdown / Owui - 流式渲染稳定性（减少重排与抖动）
+
 import 'package:flutter/material.dart';
 
 /// Streaming Markdown body: renders stable prefix as Markdown and tail as plain
@@ -175,6 +179,32 @@ class OwuiStableBody extends StatefulWidget {
 
     return null;
   }
+
+  /// 检测文本中是否包含完整的 Markdown 图片语法
+  /// 返回: 图片语法列表和剩余文本
+  static ({List<String> images, String rest}) extractImages(String input) {
+    final images = <String>[];
+    var rest = input;
+
+    // 匹配 Markdown 图片语法: ![alt](url)
+    final imageRegex = RegExp(r'!\[[^\]]*\]\([^)]+\)');
+
+    while (true) {
+      final match = imageRegex.firstMatch(rest);
+      if (match == null) break;
+
+      images.add(match.group(0)!);
+      rest = rest.substring(0, match.start) + rest.substring(match.end);
+    }
+
+    return (images: images, rest: rest.trim());
+  }
+
+  /// 检测 tail 是否需要 Markdown 渲染（包含完整的图片语法）
+  static bool tailNeedsMarkdown(String tail) {
+    // 检测完整的图片语法: ![alt](url)
+    return RegExp(r'!\[[^\]]*\]\([^)]+\)').hasMatch(tail);
+  }
 }
 
 class _OwuiStableBodyState extends State<OwuiStableBody>
@@ -343,6 +373,11 @@ class _OwuiStableBodyState extends State<OwuiStableBody>
   }
 
   Widget _buildTailText(String text) {
+    // 检测是否包含完整的图片语法，如果有则用 Markdown 渲染
+    if (OwuiStableBody.tailNeedsMarkdown(text)) {
+      return widget.markdown(text);
+    }
+
     final textWidget = Text(text, style: widget.plainTextStyle);
     final animation = _fadeAnimation;
     if (!_fadeEnabled || animation == null) {

@@ -128,11 +128,11 @@ class ModelConfig {
 
 /// 模型能力枚举
 enum ModelCapability {
-  text('文本', Icons.text_fields, Color(0xFF4CAF50)),
-  vision('视觉', Icons.visibility, Color(0xFF2196F3)),
-  network('联网', Icons.public, Color(0xFFFF9800)),
-  tool('工具', Icons.build, Color(0xFF9C27B0)),
-  audio('音频', Icons.mic, Color(0xFFE91E63)),
+  text('文本', OwuiIcons.text, Color(0xFF4CAF50)),
+  vision('视觉', OwuiIcons.visibility, Color(0xFF2196F3)),
+  network('联网', OwuiIcons.globe, Color(0xFFFF9800)),
+  tool('工具', OwuiIcons.tool, Color(0xFF9C27B0)),
+  audio('音频', OwuiIcons.mic, Color(0xFFE91E63)),
   video('视频', OwuiIcons.video, Color(0xFFF44336));
 
   final String displayName;

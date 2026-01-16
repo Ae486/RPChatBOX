@@ -40,6 +40,17 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                   ? _streamManager.getData(message.id)
                   : null;
 
+              // 解析图片数据
+              final imagesRaw = metadata['images'] as List?;
+              final images = imagesRaw
+                  ?.map((e) => e is Map<String, dynamic>
+                      ? GeneratedImage.fromJson(e)
+                      : e is String
+                          ? GeneratedImage(source: e)
+                          : null)
+                  .whereType<GeneratedImage>()
+                  .toList() ?? <GeneratedImage>[];
+
               final body = GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onLongPress: _isExportMode
@@ -62,6 +73,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                         modelName: modelName,
                         providerName: providerName,
                         streamData: data,
+                        images: images,
                       ),
                       _buildTokenFooter(message, isSentByMe: false),
                     ],
@@ -82,6 +94,17 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
               final body = (metadata['body'] as String?) ?? '';
               final modelName = metadata['modelName'] as String?;
               final providerName = metadata['providerName'] as String?;
+
+              // 解析图片数据
+              final imagesRaw = metadata['images'] as List?;
+              final images = imagesRaw
+                  ?.map((e) => e is Map<String, dynamic>
+                      ? GeneratedImage.fromJson(e)
+                      : e is String
+                          ? GeneratedImage(source: e)
+                          : null)
+                  .whereType<GeneratedImage>()
+                  .toList() ?? <GeneratedImage>[];
 
               final bodyWidget = GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -112,6 +135,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                           thinkingContent: thinking,
                           isThinkingOpen: false,
                         ),
+                        images: images,
                       ),
                       _buildTokenFooter(message, isSentByMe: false),
                     ],
@@ -131,7 +155,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
               ) {
                 return Container(
                   color: Colors.black.withValues(alpha: 0.06),
-                  child: const Center(child: Icon(Icons.broken_image_outlined)),
+                  child: const Center(child: Icon(OwuiIcons.brokenImage)),
                 );
               }
 
@@ -160,7 +184,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                             child: Row(
                               children: [
                                 const Icon(
-                                  Icons.broken_image_outlined,
+                                  OwuiIcons.brokenImage,
                                   size: 18,
                                 ),
                                 const SizedBox(width: 8),
@@ -313,7 +337,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
             },
             customBorder: const CircleBorder(),
             child: Center(
-              child: Icon(Icons.arrow_downward_rounded, size: 20, color: fg),
+              child: Icon(OwuiIcons.arrowDown, size: 20, color: fg),
             ),
           ),
         ),

@@ -1,3 +1,7 @@
+/// INPUT: Mermaid 代码 + 主题/缩放 + 本地文件/剪贴板能力
+/// OUTPUT: OwuiMermaidBlock - Mermaid 预览/源码切换 + 全屏预览
+/// POS: UI 层 / Markdown / Owui - Mermaid 区块渲染（供 OwuiMarkdown 使用）
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../widgets/mermaid_renderer.dart';
+import 'owui_icons.dart';
 import 'owui_tokens_ext.dart';
 
 enum OwuiMermaidTab { preview, source }
@@ -183,7 +188,7 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
       ),
       child: Row(
         children: [
-          Icon(Icons.account_tree_rounded, size: 16 * uiScale, color: Colors.purple.shade400),
+          Icon(OwuiIcons.accountTree, size: 16 * uiScale, color: Colors.purple.shade400),
           SizedBox(width: 6 * uiScale),
           Text(
             'Mermaid',
@@ -211,28 +216,28 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
           SizedBox(width: 6 * uiScale),
           if (_isDesktop)
             _buildIconBtn(
-              icon: Icons.open_in_new_rounded,
+              icon: OwuiIcons.openInNew,
               tooltip: '外部预览',
               onPressed: _openExternalPreview,
               iconColor: iconColor,
               uiScale: uiScale,
             ),
           _buildIconBtn(
-            icon: Icons.content_copy_rounded,
+            icon: OwuiIcons.copy,
             tooltip: '复制',
             onPressed: _copySource,
             iconColor: iconColor,
             uiScale: uiScale,
           ),
           _buildIconBtn(
-            icon: _isCollapsed ? Icons.unfold_more_rounded : Icons.unfold_less_rounded,
+            icon: _isCollapsed ? OwuiIcons.unfoldMore : OwuiIcons.unfoldLess,
             tooltip: _isCollapsed ? '展开' : '收起',
             onPressed: () => setState(() => _isCollapsed = !_isCollapsed),
             iconColor: iconColor,
             uiScale: uiScale,
           ),
           _buildIconBtn(
-            icon: Icons.fullscreen_rounded,
+            icon: OwuiIcons.fullscreen,
             tooltip: '全屏',
             onPressed: _toggleFullscreen,
             iconColor: iconColor,
@@ -335,7 +340,7 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.account_tree_rounded, size: 20 * uiScale, color: Colors.purple.shade400),
+                  Icon(OwuiIcons.accountTree, size: 20 * uiScale, color: Colors.purple.shade400),
                   SizedBox(width: 8 * uiScale),
                   Text(
                     'Mermaid 全屏预览',
@@ -347,7 +352,7 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
                   ),
                   const Spacer(),
                   _buildIconBtn(
-                    icon: Icons.zoom_in,
+                    icon: OwuiIcons.zoomIn,
                     tooltip: '放大',
                     onPressed: _zoomIn,
                     iconColor: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
@@ -355,7 +360,7 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
                     iconSize: 20,
                   ),
                   _buildIconBtn(
-                    icon: Icons.zoom_out,
+                    icon: OwuiIcons.zoomOut,
                     tooltip: '缩小',
                     onPressed: _zoomOut,
                     iconColor: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
@@ -378,7 +383,7 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
                   ),
                   SizedBox(width: 16 * uiScale),
                   _buildIconBtn(
-                    icon: Icons.close,
+                    icon: OwuiIcons.close,
                     tooltip: '关闭',
                     onPressed: _toggleFullscreen,
                     iconColor: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
@@ -448,4 +453,3 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
     );
   }
 }
-

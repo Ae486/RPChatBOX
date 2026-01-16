@@ -1,5 +1,9 @@
+/// INPUT: ProviderConfig + models +（管理模式）回调集合
+/// OUTPUT: ProviderCard - Provider 展示卡片（启用/编辑/删除/模型开关）
+/// POS: UI 层 / Widgets - ModelServicesPage 列表项
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
@@ -135,7 +139,7 @@ class _ProviderCardState extends State<ProviderCard> {
                   onTapDown: (_) {}, // 🔧 阻止拖动手势传播
                   child: IconButton(
                     icon: const Icon(
-                      Icons.remove_circle,
+                      OwuiIcons.removeCircle,
                       color: Colors.red,
                       size: 28,
                     ),
@@ -152,7 +156,7 @@ class _ProviderCardState extends State<ProviderCard> {
                 SizedBox(width: ChatBoxTokens.spacing.sm),
                 // 箭头图标
                 Icon(
-                  Icons.arrow_forward_ios,
+                  OwuiIcons.chevronRight,
                   size: 16,
                   color: Colors.grey.shade400,
                 ),
@@ -168,13 +172,13 @@ class _ProviderCardState extends State<ProviderCard> {
   IconData _getProviderIcon(ProviderType type) {
     switch (type) {
       case ProviderType.openai:
-        return Icons.auto_awesome;
+        return OwuiIcons.auto;
       case ProviderType.gemini:
-        return Icons.stars;
+        return OwuiIcons.star;
       case ProviderType.deepseek:
-        return Icons.psychology;
+        return OwuiIcons.psychology;
       case ProviderType.claude:
-        return Icons.chat_bubble_outline;
+        return OwuiIcons.chatBubble;
       // 🔧 修复：已移除 custom 选项
     }
   }

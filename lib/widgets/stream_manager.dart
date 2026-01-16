@@ -1,3 +1,7 @@
+/// INPUT: 流式 chunk/状态事件（start/update/complete/error）+ thinking 标签解析
+/// OUTPUT: StreamManager/StreamData - 供 UI 订阅的流式状态容器
+/// POS: UI 层 / Widgets - V2 流式渲染状态管理（与 flutter_chat_ui TextStreamMessage 协作）
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 

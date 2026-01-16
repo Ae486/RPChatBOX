@@ -1,5 +1,9 @@
+/// INPUT: ProviderConfig + AIProvider(listAvailableModels) + 用户输入/选择
+/// OUTPUT: AddModelDialog - 返回模型 ID（支持批量：逗号分隔）
+/// POS: UI 层 / Widgets - Provider 详情页的“添加模型”对话框
+
 import 'package:flutter/material.dart';
-import '../design_system/apple_icons.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import '../models/provider_config.dart';
 import '../adapters/ai_provider.dart';
 import '../design_system/design_tokens.dart';
@@ -140,7 +144,7 @@ class _AddModelDialogState extends State<AddModelDialog> {
                   children: _selectedModels.map((modelId) {
                     return Chip(
                       label: Text(modelId),
-                      deleteIcon: const Icon(AppleIcons.close, size: 18),
+                      deleteIcon: const Icon(OwuiIcons.close, size: 18),
                       onDeleted: () => _removeSelectedModel(modelId),
                       backgroundColor: Theme.of(context).colorScheme.primaryContainer,
                       labelStyle: TextStyle(
@@ -163,7 +167,7 @@ class _AddModelDialogState extends State<AddModelDialog> {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(AppleIcons.search),
+                    : const Icon(OwuiIcons.search),
                 label: Text(_isDetecting ? '检测中...' : '检测可用模型'),
               ),
               
@@ -182,7 +186,7 @@ class _AddModelDialogState extends State<AddModelDialog> {
                   child: Row(
                     children: [
                       Icon(
-                        AppleIcons.error,
+                        OwuiIcons.error,
                         size: 18,
                         color: Theme.of(context).colorScheme.error,
                       ),
@@ -238,10 +242,10 @@ class _AddModelDialogState extends State<AddModelDialog> {
                           style: const TextStyle(fontSize: 13),
                         ),
                         trailing: Icon(
-                          isSelected ? AppleIcons.checkCircle : AppleIcons.addCircle,
+                          isSelected ? OwuiIcons.checkCircle : OwuiIcons.addCircle,
                           size: 20,
-                          color: isSelected 
-                              ? Theme.of(context).colorScheme.primary 
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primary
                               : null,
                         ),
                       );
@@ -262,7 +266,7 @@ class _AddModelDialogState extends State<AddModelDialog> {
                 child: Row(
                   children: [
                     Icon(
-                      AppleIcons.info,
+                      OwuiIcons.info,
                       size: 18,
                       color: Theme.of(context).colorScheme.primary,
                     ),

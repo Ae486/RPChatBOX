@@ -10,6 +10,7 @@
 - `palette.dart` - 核心 - OpenWebUI 灰阶色板与语义色
 - `owui_tokens.dart` - 核心 - OpenWebUI tokens（ThemeExtension：颜色/圆角/间距/缩放）
 - `owui_tokens_ext.dart` - 核心 - `BuildContext` 便捷访问（`context.owui*`）
+- `owui_icons.dart` - 核心 - 项目内统一图标入口（避免散落依赖与命名漂移）
 - `chat_theme.dart` - 核心 - `flutter_chat_ui.ChatTheme` 映射与气泡装饰
 - `assistant_message.dart` - UI - 助手消息（Markdown/Thinking/Meta）
 - `markdown.dart` - UI - Markdown 渲染与扩展（代码块/mermaid/表格横向滚动 等）

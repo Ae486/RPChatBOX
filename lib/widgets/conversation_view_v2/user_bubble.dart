@@ -112,7 +112,7 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                navButton(Icons.chevron_left_rounded, -1),
+                navButton(OwuiIcons.chevronLeft, -1),
                 Padding(
                   padding: EdgeInsets.symmetric(horizontal: 4 * uiScale),
                   child: Text(
@@ -125,7 +125,7 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
                     ),
                   ),
                 ),
-                navButton(Icons.chevron_right_rounded, 1),
+                navButton(OwuiIcons.chevronRight, 1),
               ],
             ),
           ),
@@ -135,15 +135,30 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
   }
 
   Widget _buildAttachmentsPreview(List<AttachedFileSnapshot> files, double uiScale) {
+    // 分离图片和非图片文件
+    final imageFiles = files.where((f) => f.isImage).toList();
+    final otherFiles = files.where((f) => !f.isImage).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ...files.map(
+        // 图片网格预览
+        if (imageFiles.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.only(bottom: 8 * uiScale),
+            child: Wrap(
+              spacing: 8 * uiScale,
+              runSpacing: 8 * uiScale,
+              children: imageFiles.map((f) => _buildImageThumbnail(f, uiScale)).toList(),
+            ),
+          ),
+        // 其他文件列表
+        ...otherFiles.map(
           (f) => Padding(
             padding: EdgeInsets.only(bottom: 8 * uiScale),
             child: Row(
               children: [
-                Icon(Icons.attach_file, size: 16 * uiScale),
+                Icon(OwuiIcons.attachment, size: 16 * uiScale),
                 SizedBox(width: 6 * uiScale),
                 Expanded(
                   child: Text(
@@ -159,9 +174,123 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
             ),
           ),
         ),
-        const Divider(height: 1),
-        SizedBox(height: 8 * uiScale),
+        if (files.isNotEmpty) ...[
+          const Divider(height: 1),
+          SizedBox(height: 8 * uiScale),
+        ],
       ],
+    );
+  }
+
+  /// 构建图片缩略图
+  Widget _buildImageThumbnail(AttachedFileSnapshot file, double uiScale) {
+    final size = 80.0 * uiScale;
+    final imageFile = File(file.path);
+
+    return GestureDetector(
+      onTap: () => _showImagePreview(file),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8 * uiScale),
+        child: FutureBuilder<bool>(
+          future: imageFile.exists(),
+          builder: (context, snapshot) {
+            if (snapshot.data != true) {
+              // 文件不存在，显示占位符
+              return Container(
+                width: size,
+                height: size,
+                color: OwuiPalette.isDark(context)
+                    ? Colors.white.withValues(alpha: 0.1)
+                    : Colors.black.withValues(alpha: 0.05),
+                child: Icon(
+                  OwuiIcons.brokenImage,
+                  size: 24 * uiScale,
+                  color: OwuiPalette.textSecondary(context),
+                ),
+              );
+            }
+            return Image.file(
+              imageFile,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              cacheWidth: (size * 2).toInt(), // 2x 用于高清屏
+              errorBuilder: (_, __, ___) => Container(
+                width: size,
+                height: size,
+                color: OwuiPalette.isDark(context)
+                    ? Colors.white.withValues(alpha: 0.1)
+                    : Colors.black.withValues(alpha: 0.05),
+                child: Icon(
+                  OwuiIcons.brokenImage,
+                  size: 24 * uiScale,
+                  color: OwuiPalette.textSecondary(context),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// 显示图片预览
+  void _showImagePreview(AttachedFileSnapshot file) {
+    final imageFile = File(file.path);
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 图片
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Image.file(
+                  imageFile,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => Container(
+                    padding: const EdgeInsets.all(32),
+                    decoration: BoxDecoration(
+                      color: Theme.of(ctx).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(OwuiIcons.brokenImage, size: 48, color: OwuiPalette.textSecondary(ctx)),
+                        const SizedBox(height: 8),
+                        Text('无法加载图片', style: TextStyle(color: OwuiPalette.textSecondary(ctx))),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // 关闭按钮
+            Positioned(
+              top: 0,
+              right: 0,
+              child: IconButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                icon: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Icon(OwuiIcons.close, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

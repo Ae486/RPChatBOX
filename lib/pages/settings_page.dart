@@ -1,3 +1,7 @@
+/// INPUT: 全局 ModelServiceManager + 图片缓存/持久化服务 + UI Tokens
+/// OUTPUT: SettingsPage - 设置与工具入口（外观/模型管理/缓存清理/调试入口）
+/// POS: UI 层 / Pages - 设置页
+
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
@@ -11,10 +15,8 @@ import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../pages/display_settings_page.dart';
 import '../pages/model_services_page.dart';
-import '../pages/flyer_chat_demo_page.dart';
 import '../main.dart' show globalModelServiceManager;
-import '../models/chat_settings.dart';
-import '../services/storage_service.dart';
+import '../services/image_persistence_service.dart';
 
 /// 设置页面
 class SettingsPage extends StatefulWidget {
@@ -25,38 +27,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  final _storageService = StorageService();
-
-  ChatSettings _settings = ChatSettings();
-  bool _isLoadingSettings = true;
   bool _isClearing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSettings();
-  }
-
-  Future<void> _loadSettings() async {
-    final settings = await _storageService.loadSettings();
-    if (!mounted) return;
-    setState(() {
-      _settings = settings;
-      _isLoadingSettings = false;
-    });
-  }
-
-  Future<void> _toggleChatUiV2(bool enabled) async {
-    // Prevent flutter_chat_ui keyboard observer from hitting a deactivated context
-    // when toggling V1/V2 while the keyboard is visible.
-    FocusManager.instance.primaryFocus?.unfocus();
-    await Future<void>.delayed(const Duration(milliseconds: 16));
-
-    setState(() {
-      _settings = _settings.copyWith(enableChatUiV2: enabled);
-    });
-    await _storageService.saveSettings(_settings);
-  }
 
   /// 清除图片缓存
   Future<void> _clearImageCache() async {
@@ -89,6 +60,9 @@ class _SettingsPageState extends State<SettingsPage> {
       // 清除 cached_network_image 的缓存
       await DefaultCacheManager().emptyCache();
 
+      // 清理持久化图片中的陈旧文件
+      await ImagePersistenceService().cleanupStaleFiles();
+
       // 清除 Flutter 的图片缓存
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();
@@ -118,35 +92,6 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           OwuiCard(
             child: ListTile(
-              leading: const Icon(Icons.chat_bubble_outline, size: 32),
-              title: const Text('Flyer Chat Demo'),
-              subtitle: const Text('查看 flutter_chat_ui 默认风格效果'),
-              trailing: const Icon(OwuiIcons.chevronRight),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const FlyerChatDemoPage(),
-                  ),
-                );
-              },
-            ),
-          ),
-          SizedBox(height: context.owuiSpacing.lg),
-
-          OwuiCard(
-            child: SwitchListTile(
-              secondary: const Icon(Icons.auto_awesome, size: 32),
-              title: const Text('启用新聊天界面（V2）'),
-              subtitle: const Text('flutter_chat_ui + 助手无气泡输出'),
-              value: _settings.enableChatUiV2,
-              onChanged: _isLoadingSettings ? null : _toggleChatUiV2,
-            ),
-          ),
-          SizedBox(height: context.owuiSpacing.lg),
-
-          OwuiCard(
-            child: ListTile(
               leading: const Icon(OwuiIcons.sliders, size: 32),
               title: const Text('显示设置'),
               subtitle: const Text('UI 缩放、字体与样式'),
@@ -166,7 +111,7 @@ class _SettingsPageState extends State<SettingsPage> {
           // 模型服务管理入口
           OwuiCard(
             child: ListTile(
-              leading: const Icon(Icons.cloud_outlined, size: 32),
+              leading: const Icon(OwuiIcons.cloud, size: 32),
               title: const Text('模型服务'),
               subtitle: const Text('管理AI服务提供商和模型配置'),
               trailing: const Icon(OwuiIcons.chevronRight),
@@ -187,7 +132,7 @@ class _SettingsPageState extends State<SettingsPage> {
           // 缓存管理
           OwuiCard(
             child: ListTile(
-              leading: const Icon(Icons.cleaning_services_outlined, size: 32),
+              leading: const Icon(OwuiIcons.cleaning, size: 32),
               title: const Text('清除图片缓存'),
               subtitle: const Text('清除应用内所有缓存的图片数据'),
               trailing: _isClearing

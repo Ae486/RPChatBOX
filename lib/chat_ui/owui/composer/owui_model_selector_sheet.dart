@@ -40,12 +40,12 @@ class OwuiModelSelectorSheet extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text('閫夋嫨妯″瀷', style: Theme.of(context).textTheme.titleLarge),
+                Text('选择模型', style: Theme.of(context).textTheme.titleLarge),
                 const Spacer(),
                 IconButton(
                   icon: const Icon(OwuiIcons.close),
                   onPressed: () => Navigator.pop(context),
-                  tooltip: '鍏抽棴',
+                  tooltip: '关闭',
                 ),
               ],
             ),
@@ -54,7 +54,7 @@ class OwuiModelSelectorSheet extends StatelessWidget {
               Center(
                 child: Padding(
                   padding: EdgeInsets.all(ChatBoxTokens.spacing.xxl),
-                  child: const Text('鏆傛棤鍙敤妯″瀷鏈嶅姟\n璇峰厛鍦ㄨ缃腑娣诲姞'),
+                  child: const Text('暂无可用模型服务\n请先在设置中添加'),
                 ),
               )
             else
@@ -86,7 +86,7 @@ class OwuiModelSelectorSheet extends StatelessWidget {
                           return ListTile(
                             selected: isSelected,
                             leading: Icon(
-                              Icons.psychology,
+                              OwuiIcons.psychology,
                               color: isSelected
                                   ? Theme.of(context).colorScheme.primary
                                   : OwuiPalette.textSecondary(context),
@@ -130,5 +130,3 @@ class OwuiModelSelectorSheet extends StatelessWidget {
     );
   }
 }
-
-

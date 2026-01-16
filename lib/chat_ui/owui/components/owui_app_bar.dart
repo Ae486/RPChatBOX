@@ -1,3 +1,7 @@
+/// INPUT: leading/title/actions/bottom + OwuiTokens
+/// OUTPUT: OwuiAppBar - 带底部分割线的 AppBar 壳
+/// POS: UI 层 / Owui Components - 页面级通用 AppBar
+
 import 'package:flutter/material.dart';
 
 import '../owui_tokens_ext.dart';

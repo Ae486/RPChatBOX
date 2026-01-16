@@ -1,3 +1,7 @@
+/// INPUT: BuildContext（主题/调色板）
+/// OUTPUT: OwuiChatTheme.chatTheme()/userBubbleDecoration()/thinkingDecoration()
+/// POS: UI 层 / Chat / Owui - flutter_chat_ui 主题映射与气泡装饰
+
 import 'package:flutter/material.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 

@@ -570,7 +570,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.copy_rounded),
+                leading: const Icon(OwuiIcons.copy),
                 title: const Text('复制'),
                 onTap: () async {
                   Navigator.of(ctx).pop();
@@ -579,7 +579,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
               ),
               if (isUser && appMsg != null)
                 ListTile(
-                  leading: const Icon(Icons.edit_outlined),
+                  leading: const Icon(OwuiIcons.edit),
                   title: const Text('编辑'),
                   onTap: () async {
                     Navigator.of(ctx).pop();
@@ -588,7 +588,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
                 ),
               if (isAssistant && appMsg != null)
                 ListTile(
-                  leading: const Icon(Icons.edit_outlined),
+                  leading: const Icon(OwuiIcons.edit),
                   title: const Text('编辑'),
                   onTap: () async {
                     Navigator.of(ctx).pop();
@@ -597,7 +597,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
                 ),
               if (liveText != null || appMsg != null)
                 ListTile(
-                  leading: const Icon(Icons.file_upload_outlined),
+                  leading: const Icon(OwuiIcons.upload),
                   title: const Text('导出此消息'),
                   onTap: () async {
                     Navigator.of(ctx).pop();
@@ -605,7 +605,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
                   },
                 ),
               ListTile(
-                leading: const Icon(Icons.ios_share_outlined),
+                leading: const Icon(OwuiIcons.share),
                 title: const Text('导出当前会话'),
                 onTap: () async {
                   Navigator.of(ctx).pop();
@@ -614,7 +614,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
               ),
               if ((isAssistant || isUser) && messageIndex >= 0)
                 ListTile(
-                  leading: const Icon(Icons.refresh_rounded),
+                  leading: const Icon(OwuiIcons.refresh),
                   title: const Text('重新生成（从此处）'),
                   onTap: () async {
                     Navigator.of(ctx).pop();
@@ -622,7 +622,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
                   },
                 ),
               ListTile(
-                leading: const Icon(Icons.delete_outline_rounded),
+                leading: const Icon(OwuiIcons.trash),
                 title: const Text('删除'),
                 textColor: Colors.red,
                 iconColor: Colors.red,

@@ -1,3 +1,7 @@
+/// INPUT: uiScale/typography（可选）+ ThemeData
+/// OUTPUT: OwuiTokens ThemeExtension（颜色/圆角/间距/字体）+ light/dark 构建器
+/// POS: UI 层 / Design System / Owui - 主题 Token（供全局 Theme 与组件读取）
+
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';

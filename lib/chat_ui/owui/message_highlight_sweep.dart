@@ -1,3 +1,7 @@
+/// INPUT: 高亮开关/颜色/时序参数（通常来自搜索跳转）
+/// OUTPUT: OwuiMessageHighlightSweep - 不改布局的 overlay 高亮效果
+/// POS: UI 层 / Chat / Owui - 消息定位高亮（避免滚动抖动）
+
 import 'package:flutter/material.dart';
 
 class OwuiMessageHighlightSweep extends StatefulWidget {

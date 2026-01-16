@@ -1,3 +1,7 @@
+/// INPUT: ModelServiceManager
+/// OUTPUT: ModelServicesPage - Provider/Model 管理入口（列表/启用/编辑/删除）
+/// POS: UI 层 / Pages - 模型服务管理页
+
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
@@ -211,7 +215,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              Icons.cloud_off,
+              OwuiIcons.cloudOff,
               size: 64,
               color: context.owuiColors.textSecondary,
             ),
