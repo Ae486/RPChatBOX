@@ -98,6 +98,9 @@ dependencies:
   # ZIP/压缩文件处理（用于解析 .docx 文件）
   archive: ^4.0.7
 
+  # SVG 渲染（用于 Mermaid 原生展示，避免 ListView 中直接放 WebView）
+  flutter_svg: ^2.0.10+1
+
   # Chat UI 组件库 (flutter_chat_ui 生态系统)
   flutter_chat_ui: ^2.0.0
   flutter_chat_core: ^2.0.0

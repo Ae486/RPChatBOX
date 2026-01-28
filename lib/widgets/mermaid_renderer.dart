@@ -1,7 +1,8 @@
 /// INPUT: Mermaid 代码 + 平台能力（WebView/外部预览）+ 主题/高度
-/// OUTPUT: MermaidRenderer - Mermaid 图表渲染（内嵌 WebView 或外部预览）
+/// OUTPUT: MermaidRenderer - Mermaid 图表渲染（优先 SVG 缓存，降级 WebView）
 /// POS: UI 层 / Widgets - Mermaid 渲染底层（供 OwuiMermaidBlock/Demo 使用）
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,24 @@ import 'package:webview_windows/webview_windows.dart' as windows_webview;
 
 import '../chat_ui/owui/owui_icons.dart';
 import '../design_system/design_tokens.dart';
+import '../services/mermaid_svg_cache.dart';
+import 'mermaid_svg_widget.dart';
+
+/// 全局高度缓存，避免重建时高度跳变
+/// 使用 LRU 策略，限制最大条目数
+final Map<int, double> _mermaidHeightCache = {};
+const int _maxCacheSize = 50;
+
+/// 生成 Mermaid 代码的缓存 key
+int _cacheKey(String code) => code.hashCode;
+
+/// 添加缓存条目，超出限制时移除最早的条目
+void _addToCache(int key, double height) {
+  if (_mermaidHeightCache.length >= _maxCacheSize) {
+    _mermaidHeightCache.remove(_mermaidHeightCache.keys.first);
+  }
+  _mermaidHeightCache[key] = height;
+}
 
 /// Mermaid 图表渲染器
 /// 使用 WebView + Mermaid.js 渲染流程图、时序图等
@@ -39,15 +58,29 @@ class MermaidRenderer extends StatefulWidget {
 class _MermaidRendererState extends State<MermaidRenderer> {
   WebViewController? _controller;
   windows_webview.WebviewController? _windowsController;
-  double _webViewHeight = 300; // 默认高度
+  late double _webViewHeight;
   bool _isLoading = true;
   String? _error;
   Uri? _previewUri;
   bool _isWindowsWebViewReady = false;
 
+  /// 缓存的 SVG 数据（优先使用，避免 WebView 重建）
+  MermaidSvgData? _cachedSvgData;
+
+  int get _cacheKeyValue => _cacheKey(widget.mermaidCode);
+
   @override
   void initState() {
     super.initState();
+    // 暂时禁用 SVG 缓存渲染（flutter_svg 兼容性问题待调试）
+    // TODO: 调试 flutter_svg 渲染 Mermaid SVG 的兼容性
+    // _cachedSvgData = MermaidSvgCache.instance.get(
+    //   widget.mermaidCode,
+    //   isDark: widget.isDark,
+    // );
+
+    // 使用高度缓存或默认值，然后初始化 WebView
+    _webViewHeight = _mermaidHeightCache[_cacheKeyValue] ?? 360;
     _initializeWebView();
   }
 
@@ -81,13 +114,25 @@ class _MermaidRendererState extends State<MermaidRenderer> {
       _controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
         ..setBackgroundColor(Colors.transparent)
+        ..addJavaScriptChannel(
+          'FlutterChannel',
+          onMessageReceived: (message) {
+            _handleHeightMessage(message.message);
+          },
+        )
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (String url) {
               setState(() {
                 _isLoading = false;
               });
-              _getWebViewHeight();
+              // 降级方案：始终延迟探测高度，确保 WebView 内容可见
+              // 即使有缓存高度也要探测，以防缓存失效
+              Future.delayed(const Duration(milliseconds: 800), () {
+                if (mounted) {
+                  _getWebViewHeight();
+                }
+              });
             },
             onWebResourceError: (WebResourceError error) {
               debugPrint('Mermaid WebView error: ${error.description}');
@@ -132,6 +177,8 @@ class _MermaidRendererState extends State<MermaidRenderer> {
           _isWindowsWebViewReady = true;
           _isLoading = false;
         });
+        // Windows 平台：延迟轮询获取高度（暂不支持 JS channel）
+        Future.delayed(const Duration(milliseconds: 800), _getWindowsWebViewHeight);
       }
     } catch (e) {
       debugPrint('Windows WebView initialization error: $e');
@@ -184,22 +231,98 @@ class _MermaidRendererState extends State<MermaidRenderer> {
     );
   }
 
-  /// 获取 WebView 实际高度
+  /// 处理 JS channel 回传的消息（高度 + SVG）
+  void _handleHeightMessage(String message) {
+    try {
+      final data = jsonDecode(message) as Map<String, dynamic>;
+      final type = data['type'] as String?;
+
+      if (type == 'rendered') {
+        final height = (data['height'] as num?)?.toDouble();
+        // 暂时禁用 SVG 缓存（flutter_svg 兼容性问题待调试）
+        // final width = (data['width'] as num?)?.toDouble();
+        // final svgString = data['svg'] as String?;
+
+        if (height != null && height > 0 && mounted) {
+          setState(() {
+            _webViewHeight = height;
+            _addToCache(_cacheKeyValue, height);
+          });
+
+          // TODO: 调试 flutter_svg 渲染 Mermaid SVG 的兼容性后启用
+          // if (svgString != null && svgString.isNotEmpty) {
+          //   final svgData = MermaidSvgData(
+          //     svgString: svgString,
+          //     width: width ?? 400,
+          //     height: height,
+          //     createdAt: DateTime.now(),
+          //   );
+          //   MermaidSvgCache.instance.put(
+          //     widget.mermaidCode,
+          //     svgData,
+          //     isDark: widget.isDark,
+          //   );
+          //   setState(() {
+          //     _cachedSvgData = svgData;
+          //   });
+          // }
+        }
+      } else {
+        // 兼容旧格式（仅高度）
+        final height = (data['height'] as num?)?.toDouble();
+        if (height != null && height > 0 && mounted) {
+          setState(() {
+            _webViewHeight = height;
+            _addToCache(_cacheKeyValue, height);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to parse message: $e');
+    }
+  }
+
+  /// 获取 WebView 实际高度（降级方案）
   Future<void> _getWebViewHeight() async {
     if (_controller == null) return;
     try {
-      // 执行 JavaScript 获取内容高度
       final heightStr = await _controller!.runJavaScriptReturningResult(
         'document.getElementById("diagram").scrollHeight'
       );
-      
-      final height = double.tryParse(heightStr.toString()) ?? 300;
-      
-      setState(() {
-        _webViewHeight = height + 32; // 加上 padding
-      });
+
+      final height = double.tryParse(heightStr.toString()) ?? 360;
+
+      if (mounted && height > 0) {
+        final finalHeight = height + 32;
+        setState(() {
+          _webViewHeight = finalHeight;
+          _addToCache(_cacheKeyValue, finalHeight);
+        });
+      }
     } catch (e) {
       debugPrint('Failed to get WebView height: $e');
+    }
+  }
+
+  /// Windows 平台获取 WebView 高度
+  Future<void> _getWindowsWebViewHeight() async {
+    if (_windowsController == null) return;
+    try {
+      final result = await _windowsController!.executeScript(
+        'document.getElementById("diagram").scrollHeight'
+      );
+
+      final height = double.tryParse(result.toString()) ?? 360;
+
+      if (mounted && height > 0) {
+        final finalHeight = height + 32;
+        setState(() {
+          _webViewHeight = finalHeight;
+          _addToCache(_cacheKeyValue, finalHeight);
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to get Windows WebView height: $e');
     }
   }
 
@@ -223,6 +346,16 @@ class _MermaidRendererState extends State<MermaidRenderer> {
     if (_error != null) {
       return _buildErrorWidget();
     }
+
+    // 暂时禁用 SVG 缓存渲染（flutter_svg 兼容性问题待调试）
+    // if (_cachedSvgData != null) {
+    //   return MermaidSvgWidget(
+    //     svgData: _cachedSvgData!,
+    //     isDark: widget.isDark,
+    //     includeOuterContainer: widget.includeOuterContainer,
+    //     margin: widget.margin,
+    //   );
+    // }
 
     // Windows 平台使用 webview_windows
     if (Platform.isWindows && _isWindowsWebViewReady && _windowsController != null) {

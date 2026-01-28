@@ -170,6 +170,44 @@ class ConversationThread {
     nodes[message.id] = existing.copyWith(message: message);
   }
 
+  /// 删除指定节点及其所有子节点
+  void removeNode(String nodeId) {
+    final node = nodes[nodeId];
+    if (node == null) return;
+
+    // 递归删除所有子节点
+    final toRemove = <String>[nodeId];
+    var i = 0;
+    while (i < toRemove.length) {
+      final id = toRemove[i];
+      final n = nodes[id];
+      if (n != null) {
+        toRemove.addAll(n.children);
+      }
+      i++;
+    }
+
+    // 从父节点的 children 列表中移除
+    final parentId = node.parentId;
+    if (parentId != null && parentId.isNotEmpty) {
+      final parent = nodes[parentId];
+      if (parent != null) {
+        final newChildren = parent.children.where((c) => c != nodeId).toList();
+        nodes[parentId] = parent.copyWith(children: newChildren);
+      }
+      selectedChild.remove(parentId);
+    }
+
+    // 删除所有相关节点
+    for (final id in toRemove) {
+      nodes.remove(id);
+      selectedChild.remove(id);
+    }
+
+    // 重新规范化
+    normalize();
+  }
+
   void appendToActiveLeaf(Message message) {
     // If the node already exists, treat this as an update and move the active leaf.
     if (nodes.containsKey(message.id)) {

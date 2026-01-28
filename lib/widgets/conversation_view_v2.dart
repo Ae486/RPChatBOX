@@ -203,6 +203,8 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     _streamImagePrefetchTimer = null;
     _pendingFinalize = null;
     _clearHighlightTimer?.cancel();
+    // Flush pending thread changes before cancelling timer to prevent data loss.
+    _flushPersistThreadNow();
     _persistThreadTimer?.cancel();
     _persistThreadTimer = null;
     _streamController.dispose();

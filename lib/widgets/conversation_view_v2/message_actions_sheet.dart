@@ -295,6 +295,14 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
 
       appMsg.content = newContent;
       appMsg.outputTokens = TokenCounter.estimateTokens(newContent);
+
+      // Update thread structure (source of truth for persistence).
+      final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+      thread.upsertMessage(appMsg);
+      _syncConversationMessagesSnapshotFromThread(thread);
+      _persistThreadNoSave(thread);
+      _schedulePersistThread();
+
       widget.conversation.updatedAt = DateTime.now();
       widget.onConversationUpdated();
       widget.onTokenUsageUpdated(widget.conversation);
@@ -413,7 +421,16 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       if (!mounted || _isDisposed) return;
 
       if (messageIndex >= 0) {
-        widget.conversation.removeMessage(message.id);
+        // Update thread structure (source of truth for persistence).
+        final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+        thread.removeNode(message.id);
+
+        // Sync linear messages snapshot from thread.
+        _syncConversationMessagesSnapshotFromThread(thread);
+        _persistThreadNoSave(thread);
+        _schedulePersistThread();
+
+        widget.conversation.updatedAt = DateTime.now();
         widget.onConversationUpdated();
       }
 

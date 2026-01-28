@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+
+        // 初始化 Mermaid（不自动渲染）
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: '{{THEME}}'
+        });
+
+        // 渲染函数：返回 SVG 字符串 + 尺寸
+        window.renderMermaidToSvg = async function(code) {
+            try {
+                // 使用 mermaid.render() 获取 SVG
+                const { svg } = await mermaid.render('mermaid-diagram', code);
+
+                // 解析 SVG 获取尺寸
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(svg, 'image/svg+xml');
+                const svgEl = doc.querySelector('svg');
+
+                let width = 400, height = 300;
+                if (svgEl) {
+                    // 尝试从 viewBox 获取尺寸
+                    const viewBox = svgEl.getAttribute('viewBox');
+                    if (viewBox) {
+                        const parts = viewBox.split(' ');
+                        if (parts.length === 4) {
+                            width = parseFloat(parts[2]) || width;
+                            height = parseFloat(parts[3]) || height;
+                        }
+                    }
+                    // 或从 width/height 属性获取
+                    const attrWidth = svgEl.getAttribute('width');
+                    const attrHeight = svgEl.getAttribute('height');
+                    if (attrWidth) width = parseFloat(attrWidth) || width;
+                    if (attrHeight) height = parseFloat(attrHeight) || height;
+                }
+
+                return JSON.stringify({
+                    success: true,
+                    svg: svg,
+                    width: Math.ceil(width),
+                    height: Math.ceil(height)
+                });
+            } catch (e) {
+                return JSON.stringify({
+                    success: false,
+                    error: e.message || 'Unknown error'
+                });
+            }
+        };
+
+        // 通知 Flutter 渲染引擎已就绪
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.FlutterChannel) {
+                window.FlutterChannel.postMessage(JSON.stringify({ type: 'ready' }));
+            }
+        });
+    </script>
+    <style>
+        body { margin: 0; padding: 0; background: transparent; }
+    </style>
+</head>
+<body></body>
+</html>

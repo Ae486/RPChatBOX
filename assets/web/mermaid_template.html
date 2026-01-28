@@ -5,9 +5,63 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({ 
+
+        mermaid.initialize({
             startOnLoad: true,
             theme: '{{THEME}}'
+        });
+
+        let dataSent = false;
+
+        function measureAndSend() {
+            if (dataSent) return;
+            const svg = document.querySelector('.mermaid svg');
+            if (!svg) return;
+
+            try {
+                const bbox = svg.getBBox();
+                const height = Math.ceil(bbox.height + Math.abs(bbox.y) + 32);
+                const width = Math.ceil(bbox.width + Math.abs(bbox.x) + 32);
+
+                // 获取 SVG 字符串用于缓存
+                const svgString = svg.outerHTML;
+
+                if (window.FlutterChannel) {
+                    window.FlutterChannel.postMessage(JSON.stringify({
+                        type: 'rendered',
+                        width,
+                        height,
+                        svg: svgString
+                    }));
+                    dataSent = true;
+                }
+            } catch (e) {
+                console.error('getBBox error:', e);
+            }
+        }
+
+        // 使用 MutationObserver 监听 SVG 渲染完成
+        document.addEventListener('DOMContentLoaded', () => {
+            const observer = new MutationObserver(() => {
+                measureAndSend();
+                if (dataSent) observer.disconnect();
+            });
+
+            const diagram = document.getElementById('diagram');
+            if (diagram) {
+                observer.observe(diagram, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+
+            // 超时自动断开，防止内存泄漏
+            setTimeout(() => observer.disconnect(), 5000);
+
+            // 保底：延迟后直接测量
+            setTimeout(() => {
+                if (!dataSent) measureAndSend();
+            }, 500);
         });
     </script>
     <style>
@@ -18,14 +72,13 @@
         }
         body {
             background: transparent;
-            overflow: hidden;
+            overflow: visible;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         #diagram {
             padding: 16px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            display: inline-block;
+            min-width: 100%;
         }
         .mermaid {
             background: transparent !important;

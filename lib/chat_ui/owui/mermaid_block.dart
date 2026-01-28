@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../widgets/mermaid_renderer.dart';
+import 'mermaid_fullscreen_page.dart';
 import 'owui_icons.dart';
 import 'owui_tokens_ext.dart';
 
@@ -36,7 +37,7 @@ class OwuiMermaidBlock extends StatefulWidget {
     required this.mermaidCode,
     required this.isDark,
     required this.isStreaming,
-    this.enableStablePlaceholder = false,
+    this.enableStablePlaceholder = true,
   });
 
   @override
@@ -46,41 +47,8 @@ class OwuiMermaidBlock extends StatefulWidget {
 class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
   OwuiMermaidTab _tab = OwuiMermaidTab.preview;
   bool _isCollapsed = false;
-  bool _isFullscreen = false;
-
-  double _zoom = 1.0;
-  Offset _offset = Offset.zero;
-  Offset? _dragStart;
-  Offset? _lastOffset;
-
-  static const double _minZoom = 0.25;
-  static const double _maxZoom = 3.0;
-  static const double _zoomStep = 0.1;
 
   bool get _isDesktop => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-
-  void _zoomIn() => setState(() => _zoom = (_zoom + _zoomStep).clamp(_minZoom, _maxZoom));
-  void _zoomOut() => setState(() => _zoom = (_zoom - _zoomStep).clamp(_minZoom, _maxZoom));
-
-  void _resetZoom() => setState(() {
-        _zoom = 1.0;
-        _offset = Offset.zero;
-      });
-
-  void _onPanStart(DragStartDetails details) {
-    _dragStart = details.localPosition;
-    _lastOffset = _offset;
-  }
-
-  void _onPanUpdate(DragUpdateDetails details) {
-    if (_dragStart == null || _lastOffset == null) return;
-    setState(() => _offset = _lastOffset! + (details.localPosition - _dragStart!));
-  }
-
-  void _onPanEnd(DragEndDetails details) {
-    _dragStart = null;
-    _lastOffset = null;
-  }
 
   Future<void> _copySource() async {
     await Clipboard.setData(ClipboardData(text: widget.mermaidCode));
@@ -92,14 +60,20 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
     );
   }
 
-  void _toggleFullscreen() {
-    setState(() {
-      _isFullscreen = !_isFullscreen;
-      if (_isFullscreen) {
-        _zoom = 1.0;
-        _offset = Offset.zero;
-      }
-    });
+  /// 打开全屏预览（使用独立路由，解决 z-index 问题）
+  void _openFullscreen() {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: true,
+        pageBuilder: (_, __, ___) => MermaidFullscreenPage(
+          mermaidCode: widget.mermaidCode,
+          isDark: widget.isDark,
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
   }
 
   String _escapeMermaidCode(String code) {
@@ -239,7 +213,7 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
           _buildIconBtn(
             icon: OwuiIcons.fullscreen,
             tooltip: '全屏',
-            onPressed: _toggleFullscreen,
+            onPressed: _openFullscreen,
             iconColor: iconColor,
             uiScale: uiScale,
           ),
@@ -322,111 +296,9 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
     );
   }
 
-  Widget _buildFullscreenOverlay(BuildContext context) {
-    final uiScale = context.owui.uiScale;
-    return Material(
-      color: widget.isDark ? const Color(0xFF0D0D0D) : Colors.white,
-      child: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 16 * uiScale, vertical: 12 * uiScale),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: widget.isDark ? const Color(0x26FFFFFF) : const Color(0x1A000000),
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(OwuiIcons.accountTree, size: 20 * uiScale, color: Colors.purple.shade400),
-                  SizedBox(width: 8 * uiScale),
-                  Text(
-                    'Mermaid 全屏预览',
-                    style: TextStyle(
-                      fontSize: 16 * uiScale,
-                      fontWeight: FontWeight.w600,
-                      color: widget.isDark ? Colors.white : Colors.grey.shade800,
-                    ),
-                  ),
-                  const Spacer(),
-                  _buildIconBtn(
-                    icon: OwuiIcons.zoomIn,
-                    tooltip: '放大',
-                    onPressed: _zoomIn,
-                    iconColor: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
-                    uiScale: uiScale,
-                    iconSize: 20,
-                  ),
-                  _buildIconBtn(
-                    icon: OwuiIcons.zoomOut,
-                    tooltip: '缩小',
-                    onPressed: _zoomOut,
-                    iconColor: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
-                    uiScale: uiScale,
-                    iconSize: 20,
-                  ),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8 * uiScale),
-                    child: GestureDetector(
-                      onTap: _resetZoom,
-                      child: Text(
-                        '${(_zoom * 100).round()}%',
-                        style: TextStyle(
-                          fontSize: 13 * uiScale,
-                          fontWeight: FontWeight.w500,
-                          color: widget.isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 16 * uiScale),
-                  _buildIconBtn(
-                    icon: OwuiIcons.close,
-                    tooltip: '关闭',
-                    onPressed: _toggleFullscreen,
-                    iconColor: widget.isDark ? Colors.grey.shade300 : Colors.grey.shade700,
-                    uiScale: uiScale,
-                    iconSize: 22,
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: GestureDetector(
-                onPanStart: _onPanStart,
-                onPanUpdate: _onPanUpdate,
-                onPanEnd: _onPanEnd,
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.grab,
-                  child: Center(
-                    child: Transform.translate(
-                      offset: _offset,
-                      child: Transform.scale(
-                        scale: _zoom,
-                        child: MermaidRenderer(
-                          mermaidCode: widget.mermaidCode,
-                          isDark: widget.isDark,
-                          includeOuterContainer: false,
-                          margin: EdgeInsets.zero,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final uiScale = context.owui.uiScale;
-    if (_isFullscreen) return _buildFullscreenOverlay(context);
 
     final borderRadius = BorderRadius.circular(12 * uiScale);
     final borderColor = widget.isDark ? const Color(0xFF2E3138) : const Color(0xFFD8DCE2);
@@ -446,11 +318,8 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _buildHeader(context),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              child: _buildContent(context),
-            ),
+            // 移除 AnimatedSize：WebView 在动画期间调整大小会导致纹理脱离/灰色块
+            _buildContent(context),
           ],
         ),
       ),
