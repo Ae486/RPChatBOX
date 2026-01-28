@@ -3,9 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:provider/provider.dart';
+
 import 'chat_ui/owui/owui_tokens.dart';
 import 'pages/chat_page.dart';
+import 'providers/chat_session_provider.dart';
 import 'services/data_migration_service.dart';
+import 'services/hive_conversation_service.dart';
 import 'services/model_service_manager.dart';
 
 // 全局ModelServiceManager实例
@@ -352,13 +356,20 @@ class MyAppState extends State<MyApp> {
     final owuiLight = OwuiTokens.light(uiScale: _uiScale, typography: typography);
     final owuiDark = OwuiTokens.dark(uiScale: _uiScale, typography: typography);
 
-    return MaterialApp(
-      title: 'AI ChatBox',
-      debugShowCheckedModeBanner: false,
-      theme: _buildOwuiTheme(brightness: Brightness.light, tokens: owuiLight),
-      darkTheme: _buildOwuiTheme(brightness: Brightness.dark, tokens: owuiDark),
-      themeMode: _themeMode,
-      home: const ChatPage(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) => ChatSessionProvider(HiveConversationService()),
+        ),
+      ],
+      child: MaterialApp(
+        title: 'AI ChatBox',
+        debugShowCheckedModeBanner: false,
+        theme: _buildOwuiTheme(brightness: Brightness.light, tokens: owuiLight),
+        darkTheme: _buildOwuiTheme(brightness: Brightness.dark, tokens: owuiDark),
+        themeMode: _themeMode,
+        home: const ChatPage(),
+      ),
     );
   }
 }

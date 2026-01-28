@@ -593,20 +593,23 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: widget.isDark ? const Color(0xFF14161A) : const Color(0xFFF6F8FA),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: widget.isDark ? const Color(0x26FFFFFF) : const Color(0x1A000000),
+    final borderRadius = BorderRadius.circular(12);
+    final borderColor = widget.isDark ? const Color(0xFF2E3138) : const Color(0xFFD8DCE2);
+    final bgColor = widget.isDark ? const Color(0xFF14161A) : const Color(0xFFF6F8FA);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Material(
+        color: bgColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: borderRadius,
+          side: BorderSide(color: borderColor),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
           if (widget.showHeader) _buildHeader(),
           AnimatedCrossFade(
             duration: const Duration(milliseconds: 200),
@@ -616,6 +619,7 @@ class _OwuiCodeBlockState extends State<OwuiCodeBlock> {
             secondChild: _buildCodeContentInternal(),
           ),
         ],
+      ),
       ),
     );
   }

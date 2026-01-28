@@ -250,3 +250,7 @@ $RECYCLE.BIN/
 # Agents
 .claude
 .snow
+
+# 忽略整个 research 文件夹
+docs/research/
+.ace-tool/

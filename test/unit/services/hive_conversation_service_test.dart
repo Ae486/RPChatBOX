@@ -1,3 +1,6 @@
+/// INPUT: HiveConversationService + Temp Hive env
+/// OUTPUT: Storage behavior assertions for conversation/message persistence
+/// POS: Tests / Services / HiveConversationService
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:chatboxapp/models/conversation.dart';
@@ -73,6 +76,7 @@ void main() {
 
         // Assert
         expect(Hive.isBoxOpen('conversations'), isTrue);
+        expect(Hive.isBoxOpen('messages'), isTrue);
         expect(Hive.isBoxOpen('settings'), isTrue);
       });
 

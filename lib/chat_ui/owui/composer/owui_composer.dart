@@ -276,6 +276,10 @@ class _OwuiComposerState extends State<OwuiComposer> {
         ? MediaQuery.of(context).padding.bottom
         : 0.0;
 
+    // DEBUG: 验证安全区突变是否是"顿一下"的原因
+    // print('[COMPOSER] padding.bottom=$bottomSafeArea, '
+    //       'viewInsets.bottom=${MediaQuery.of(context).viewInsets.bottom}');
+
     final containerBorder = BorderSide(
       color: OwuiPalette.borderSubtle(context),
     );
@@ -302,18 +306,20 @@ class _OwuiComposerState extends State<OwuiComposer> {
       child: SizeChangedLayoutNotifier(
         child: KeyedSubtree(
           key: _measureKey,
-          child: Container(
-            decoration: BoxDecoration(
+          // 使用 AnimatedPadding 平滑过渡底部安全区变化，避免键盘弹出结束时的"顿一下"
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            padding: EdgeInsets.only(bottom: bottomSafeArea),
+            child: Container(
               color: surface,
-              border: Border(top: containerBorder),
-            ),
-            padding: EdgeInsets.fromLTRB(
-              ChatBoxTokens.spacing.md,
-              ChatBoxTokens.spacing.sm,
-              ChatBoxTokens.spacing.md,
-              ChatBoxTokens.spacing.sm + bottomSafeArea,
-            ),
-            child: Column(
+              padding: EdgeInsets.fromLTRB(
+                ChatBoxTokens.spacing.md,
+                ChatBoxTokens.spacing.sm,
+                ChatBoxTokens.spacing.md,
+                ChatBoxTokens.spacing.sm,
+              ),
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (hasFiles) _buildAttachedFilesPreview(uiScale),
@@ -369,6 +375,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
                 ),
               ],
             ),
+          ),
           ),
         ),
       ),
@@ -456,6 +463,11 @@ class _OwuiComposerState extends State<OwuiComposer> {
           isDense: true,
           contentPadding: EdgeInsets.zero,
           border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          disabledBorder: InputBorder.none,
+          errorBorder: InputBorder.none,
+          focusedErrorBorder: InputBorder.none,
           hintText: '输入消息...',
           hintStyle: TextStyle(color: hintColor, fontSize: 15 * uiScale),
         ),

@@ -2,6 +2,7 @@ import 'dart:async';
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import 'openai_provider.dart';
+import 'langchain_provider.dart';
 
 /// AI服务提供商抽象接口
 /// 定义所有Provider适配器必须实现的方法
@@ -198,8 +199,17 @@ class AttachedFileData {
 }
 /// Provider工厂
 class ProviderFactory {
+  /// 是否使用 LangChain 实现（用于 A/B 测试和回滚）
+  static bool useLangChain = false;
+
   /// 创建 Provider实例
   static AIProvider createProvider(ProviderConfig config) {
+    if (useLangChain) {
+      // 使用 LangChain.dart 实现
+      return LangChainProvider.fromConfig(config);
+    }
+
+    // 回滚：使用原有实现
     switch (config.type) {
       case ProviderType.openai:
         return OpenAIProvider(config);
@@ -211,7 +221,6 @@ class ProviderFactory {
         return DeepSeekProvider(config);
       case ProviderType.claude:
         return ClaudeProvider(config);
-      // 🔧 修复：已移除 custom 选项
     }
   }
 }

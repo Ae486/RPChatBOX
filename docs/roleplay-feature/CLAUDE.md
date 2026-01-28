@@ -66,7 +66,9 @@
 
 2.开发期间随时使用合适的skills
 
-3.遵照skill与sessionID = 019b8e40-021b-7563-b300-cf99e87f76ec的codex进行协作交流开发
+3.遵照skill与sessionID进行协作交流开发：
+  - **Codex**: `019b8e40-021b-7563-b300-cf99e87f76ec` (后端逻辑、算法、调试)
+  - **Gemini**: `29ea2ac3-7e60-4c04-9ca1-ecc144d1bfc6` (前端UI、样式、交互)
 
 ### 0.6 Mx 实现状态
 
@@ -75,9 +77,9 @@
 | 里程碑 | 状态 | 完成日期 |
 |--------|------|----------|
 | M0 Foundation | ✅ 已完成 | 2026-01-15 |
-| M1 Context Compiler | 🔄 进行中 | - |
-| M2 Consistency Gate | ⏳ 待开始 | - |
-| M3 Worker Isolate | ⏳ 待开始 | - |
+| M1 Context Compiler | ✅ 已完成 | 2026-01-18 |
+| M2 Consistency Gate | ✅ 已完成 | 2026-01-19 |
+| M3 Worker Isolate | ✅ 已完成 | 2026-01-20 |
 
 ---
 

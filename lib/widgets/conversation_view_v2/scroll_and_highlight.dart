@@ -10,11 +10,11 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
     _pendingScrollToMessageAttempts = 0;
     _tryScrollToPendingMessage();
   }
-void _syncConversationToChatController() {
+
+  void _syncConversationToChatController() {
     final thread = _getThread();
     final chain = buildActiveMessageChain(thread);
     final msgs = chain.map(ChatMessageAdapter.toFlutterChatMessage).toList();
-
 
     // Keep the active streaming placeholder in the list during a best-effort sync,
     // otherwise a mid-stream sync (e.g. from a catch/fallback path) may remove the
@@ -29,6 +29,11 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
 
     _chatController.setMessages(msgs, animated: false);
     _tryScrollToPendingMessage();
+
+    // Scroll to bottom after messages are set
+    if (_pendingScrollToMessageId == null) {
+      _requestAutoFollow(smooth: false, force: true);
+    }
   }
 
   void _setHighlightedMessage(String messageId) {

@@ -8,7 +8,7 @@
 
 ## 文件清单
 - `conversation_view_host.dart` - 聊天视图宿主（当前固定委派 V2，暴露 scroll/export/tuning 等 state API）
-- `conversation_view_v2.dart` - V2 主聊天视图入口（`flutter_chat_ui` 集成）
+- `conversation_view_v2.dart` - V2 主聊天视图入口（`flutter_chat_ui` 集成；维护 threadJson/activeLeafId）
 - `conversation_view_v2/` - V2 子模块拆分（见该目录 `INDEX.md`）
 - `conversation_drawer.dart` - 会话列表 Drawer（分组/重命名/删除/角色入口）
 - `conversation_config_dialog.dart` - 单会话配置对话框（参数/上下文/实验开关）

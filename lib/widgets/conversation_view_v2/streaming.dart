@@ -189,6 +189,18 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       chatMessages.add(ai.ChatMessage(role: 'system', content: systemPrompt));
     }
 
+    // Roleplay context injection (M1 Context Compiler)
+    if (_isRoleplaySession(widget.conversation)) {
+      try {
+        final rpContext = await _compileRoleplayContext(widget.conversation);
+        if (rpContext.isNotEmpty) {
+          chatMessages.add(ai.ChatMessage(role: 'system', content: rpContext));
+        }
+      } catch (e) {
+        debugPrint('[streaming] Roleplay context compilation failed: $e');
+      }
+    }
+
     final thread = _getThread();
     final history = buildActiveMessageChain(thread);
     final safeHistory = history.isNotEmpty &&
@@ -204,6 +216,26 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
                 safeHistory.length <= contextLength)
             ? 0
             : safeHistory.length - contextLength;
+
+    // 注入 summary：如果存在已压缩消息的摘要，在 systemPrompt 后注入
+    final summary = widget.conversation.summary ?? '';
+    final summaryRangeEndId = widget.conversation.summaryRangeEndId;
+    if (summary.isNotEmpty && summaryRangeEndId != null) {
+      final summaryEndIndex =
+          safeHistory.indexWhere((msg) => msg.id == summaryRangeEndId);
+      if (summaryEndIndex == -1) {
+        debugPrint('[streaming] summaryRangeEndId=$summaryRangeEndId not found in history, skipping injection');
+      } else if (summaryEndIndex < startIndex) {
+        // 只有当 summaryRangeEndId 在当前窗口之前时才注入（表示有被压缩的消息）
+        chatMessages.add(
+          ai.ChatMessage(
+            role: 'system',
+            content: _formatSummaryForPrompt(summary),
+          ),
+        );
+      }
+    }
+
     for (final msg in safeHistory.skip(startIndex)) {
       chatMessages.add(
         ai.ChatMessage(
@@ -610,6 +642,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     return (codeUnit >= 65 && codeUnit <= 90) || (codeUnit >= 97 && codeUnit <= 122);
   }
 
+  String _formatSummaryForPrompt(String summaryJson) {
+    return '[Previous conversation summary]\n$summaryJson';
+  }
+
   int _stripPartialRun(
     String text,
     int end, {
@@ -804,6 +840,44 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     if (uri == null) return source;
     if (uri.scheme == 'file') return uri.toFilePath();
     return source;
+  }
+
+  /// Check if conversation is a roleplay session
+  bool _isRoleplaySession(Conversation conversation) {
+    return conversation.roleType == 'roleplay';
+  }
+
+  /// Lazy-initialized roleplay context compiler
+  RpMemoryRepository? _rpRepository;
+  RpContextCompiler? _rpContextCompiler;
+
+  /// Ensure roleplay compiler is initialized
+  Future<RpContextCompiler> _ensureRpCompiler() async {
+    if (_rpContextCompiler != null) return _rpContextCompiler!;
+
+    _rpRepository = RpMemoryRepository();
+    await _rpRepository!.initialize();
+    _rpContextCompiler = RpContextCompiler(repository: _rpRepository!);
+    return _rpContextCompiler!;
+  }
+
+  /// Compile roleplay context for injection
+  Future<String> _compileRoleplayContext(Conversation conversation) async {
+    const defaultRpBudget = 2000;
+
+    final compiler = await _ensureRpCompiler();
+
+    final result = await compiler.compile(
+      storyId: conversation.id,
+      branchId: 'main',
+      maxTokensTotal: defaultRpBudget,
+    );
+
+    if (result.hasP0Overflow) {
+      debugPrint('[streaming] Roleplay context P0 overflow - some required content dropped');
+    }
+
+    return result.renderedText;
   }
 
 }

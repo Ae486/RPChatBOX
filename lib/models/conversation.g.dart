@@ -27,13 +27,19 @@ class ConversationAdapter extends TypeAdapter<Conversation> {
       roleId: fields[7] as String?,
       roleType: fields[8] as String?,
       threadJson: fields[9] as String?,
+      activeLeafId: fields[10] as String?,
+      summary: fields[11] as String?,
+      summaryRangeStartId: fields[12] as String?,
+      summaryRangeEndId: fields[13] as String?,
+      summaryUpdatedAt: fields[14] as DateTime?,
+      messageIds: (fields[15] as List?)?.cast<String>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, Conversation obj) {
     writer
-      ..writeByte(10)
+      ..writeByte(16)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -53,7 +59,19 @@ class ConversationAdapter extends TypeAdapter<Conversation> {
       ..writeByte(8)
       ..write(obj.roleType)
       ..writeByte(9)
-      ..write(obj.threadJson);
+      ..write(obj.threadJson)
+      ..writeByte(10)
+      ..write(obj.activeLeafId)
+      ..writeByte(11)
+      ..write(obj.summary)
+      ..writeByte(12)
+      ..write(obj.summaryRangeStartId)
+      ..writeByte(13)
+      ..write(obj.summaryRangeEndId)
+      ..writeByte(14)
+      ..write(obj.summaryUpdatedAt)
+      ..writeByte(15)
+      ..write(obj.messageIds);
   }
 
   @override

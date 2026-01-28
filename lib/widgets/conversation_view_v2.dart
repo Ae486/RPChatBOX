@@ -1,4 +1,4 @@
-/// INPUT: Conversation/ChatSettings + globalModelServiceManager + flutter_chat_ui
+/// INPUT: Conversation/ChatSettings + threadJson/activeLeafId + globalModelServiceManager + flutter_chat_ui
 /// OUTPUT: ConversationViewV2() - 被 ConversationViewHost 使用；State API: scrollToMessage()/enterExportMode()
 /// POS: UI 层 / Chat / V2（flutter_chat_ui 集成）核心模块（改动需全量回归）
 
@@ -38,6 +38,8 @@ import '../models/message.dart' as app;
 import '../models/provider_config.dart';
 import '../services/export_service.dart';
 import '../services/image_persistence_service.dart';
+import '../services/roleplay/context_compiler/rp_context_compiler.dart';
+import '../services/roleplay/rp_memory_repository.dart';
 import '../utils/chunk_buffer.dart';
 import '../utils/token_counter.dart';
 import '../utils/global_toast.dart';
@@ -307,6 +309,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     final encoded = jsonEncode(thread.toJson());
     _lastPersistedThreadJson = encoded;
     widget.conversation.threadJson = encoded;
+    widget.conversation.activeLeafId = thread.activeLeafId;
   }
 
   void _schedulePersistThread({
@@ -324,6 +327,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
       _lastPersistedThreadJson = encoded;
       widget.conversation.threadJson = encoded;
+      widget.conversation.activeLeafId = thread.activeLeafId;
       widget.onConversationUpdated();
     });
   }
@@ -342,6 +346,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
     _lastPersistedThreadJson = encoded;
     widget.conversation.threadJson = encoded;
+    widget.conversation.activeLeafId = thread.activeLeafId;
     if (mounted && !_isDisposed) {
       widget.onConversationUpdated();
     }

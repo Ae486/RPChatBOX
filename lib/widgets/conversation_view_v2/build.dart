@@ -20,6 +20,13 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
         theme: chatTheme,
         backgroundColor: colors.pageBg,
         builders: chat.Builders(
+        // 注：键盘滚动延迟来自 KeyboardMixin 的 100ms debounce，非此处动画时长
+        // 使用框架默认的 250ms 滚动动画
+        chatAnimatedListBuilder: (context, itemBuilder) {
+          return ChatAnimatedList(
+            itemBuilder: itemBuilder,
+          );
+        },
         textMessageBuilder:
             (context, message, index, {required isSentByMe, groupStatus}) {
               if (isSentByMe) {
@@ -53,7 +60,8 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
 
               final body = GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onLongPress: _isExportMode
+                // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
+                onDoubleTap: _isExportMode
                     ? null
                     : () => _showMessageActionsSheet(message),
                 onSecondaryTap: _isExportMode
@@ -108,7 +116,8 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
 
               final bodyWidget = GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onLongPress: _isExportMode
+                // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
+                onDoubleTap: _isExportMode
                     ? null
                     : () => _showMessageActionsSheet(message),
                 onSecondaryTap: _isExportMode
@@ -250,7 +259,8 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
             (context, message, index, {required isSentByMe, groupStatus}) {
               final body = GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onLongPress: _isExportMode
+                // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
+                onDoubleTap: _isExportMode
                     ? null
                     : () => _showMessageActionsSheet(message),
                 onSecondaryTap: _isExportMode

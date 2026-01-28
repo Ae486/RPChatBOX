@@ -1,5 +1,6 @@
-
-
+/// INPUT: Optional overrides for test fixtures
+/// OUTPUT: TestData builders for conversations/messages
+/// POS: Tests / Helpers
 import 'package:chatboxapp/models/conversation.dart';
 import 'package:chatboxapp/models/message.dart';
 

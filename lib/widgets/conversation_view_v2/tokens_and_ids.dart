@@ -33,7 +33,7 @@ mixin _ConversationViewV2TokensMixin on _ConversationViewV2StateBase {
     return '${DateTime.now().microsecondsSinceEpoch}_${_v2MessageIdSeq++}';
   }
 
-  Widget _buildTokenFooter(chat.Message message, {required bool isSentByMe}) {  
+  Widget _buildTokenFooter(chat.Message message, {required bool isSentByMe}) {
     final meta = message.metadata ?? const <String, dynamic>{};
     if (meta['streaming'] == true) return const SizedBox.shrink();
     final input = meta['inputTokens'];
@@ -44,14 +44,18 @@ mixin _ConversationViewV2TokensMixin on _ConversationViewV2StateBase {
     if (inputTokens == 0 && outputTokens == 0) return const SizedBox.shrink();
 
     final total = inputTokens + outputTokens;
+    final uiScale = context.owui.uiScale;
+    // 统一左对齐，与消息内容左侧对齐
+    // 对于助手消息：与 OwuiAssistantMessage 内部 padding 对齐（12 * uiScale）
+    // 对于用户消息：无额外 padding，但需要强制左对齐覆盖父级 Column 的 end 对齐
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: EdgeInsets.only(top: 8 * uiScale, left: isSentByMe ? 0 : 12 * uiScale),
       child: Align(
-        alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+        alignment: Alignment.centerLeft,
         child: Text(
           'Tokens:$total ↑$inputTokens ↓$outputTokens',
           style: TextStyle(
-            fontSize: 11,
+            fontSize: 11 * uiScale,
             height: 1.2,
             color: OwuiPalette.textSecondary(context).withValues(alpha: 0.85),
           ),

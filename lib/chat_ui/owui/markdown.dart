@@ -526,6 +526,8 @@ class OwuiMarkdown extends StatelessWidget {
     );
 
     final tableConfig = TableConfig(
+      // 去除内部网格线，仅保留外层圆角边框
+      border: const TableBorder(),
       headerRowDecoration: BoxDecoration(
         color: isDark ? const Color(0xFF141821) : const Color(0xFFF3F4F6),
       ),
@@ -554,11 +556,14 @@ class OwuiMarkdown extends StatelessWidget {
       },
     );
 
+    // 流式输出时禁用选择功能，避免 SelectionArea 布局 bug
+    // 参见: https://github.com/nickvdyck/MarkdownWidget/issues/xxx
     return MarkdownWidget(
       data: safeText,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
+      selectable: !isStreaming, // 流式时禁用选择，避免 RenderBox 布局错误
       config: config.copy(
         configs: [
           pConfig,

@@ -1,3 +1,6 @@
+/// INPUT: Conversation metadata + message snapshot + message index
+/// OUTPUT: Conversation model for persistence and UI
+/// POS: Models / Base Chat / Conversation
 import 'package:hive/hive.dart';
 import 'message.dart';
 
@@ -26,6 +29,18 @@ class Conversation {
   String? roleType; // 角色类型：'preset'（内置）或 'custom'（自定义）
   @HiveField(9)
   String? threadJson; // 树状消息链 JSON（V2 message branching）
+  @HiveField(10)
+  String? activeLeafId; // 活动叶子节点（可空，兼容旧数据）
+  @HiveField(11)
+  String? summary; // 会话摘要（可空，metadata）
+  @HiveField(12)
+  String? summaryRangeStartId; // 摘要覆盖范围起点
+  @HiveField(13)
+  String? summaryRangeEndId; // 摘要覆盖范围终点
+  @HiveField(14)
+  DateTime? summaryUpdatedAt; // 摘要更新时间
+  @HiveField(15)
+  List<String> messageIds; // message ID index (nullable, legacy-compatible)
 
   Conversation({
     required this.id,
@@ -38,25 +53,39 @@ class Conversation {
     this.roleId,
     this.roleType,
     this.threadJson,
+    this.activeLeafId,
+    this.summary,
+    this.summaryRangeStartId,
+    this.summaryRangeEndId,
+    this.summaryUpdatedAt,
+    List<String>? messageIds,
   })  : messages = messages ?? [],
         createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
+        updatedAt = updatedAt ?? DateTime.now(),
+        messageIds = List<String>.from(
+          messageIds ?? (messages?.map((msg) => msg.id).toList() ?? const []),
+        );
 
   /// 添加消息
   void addMessage(Message message) {
     messages.add(message);
+    if (!messageIds.contains(message.id)) {
+      messageIds.add(message.id);
+    }
     updatedAt = DateTime.now();
   }
 
   /// 删除消息
   void removeMessage(String messageId) {
     messages.removeWhere((msg) => msg.id == messageId);
+    messageIds.remove(messageId);
     updatedAt = DateTime.now();
   }
 
   /// 清空消息
   void clearMessages() {
     messages.clear();
+    messageIds.clear();
     updatedAt = DateTime.now();
   }
 
@@ -82,17 +111,29 @@ class Conversation {
       'roleId': roleId,
       'roleType': roleType,
       'threadJson': threadJson,
+      'activeLeafId': activeLeafId,
+      'summary': summary,
+      'summaryRangeStartId': summaryRangeStartId,
+      'summaryRangeEndId': summaryRangeEndId,
+      'summaryUpdatedAt': summaryUpdatedAt?.toIso8601String(),
+      'messageIds': messageIds,
     };
   }
 
   factory Conversation.fromJson(Map<String, dynamic> json) {
+    final parsedMessages = (json['messages'] as List?)
+            ?.whereType<Map<String, dynamic>>()
+            .map((msg) => Message.fromJson(msg))
+            .toList() ??
+        <Message>[];
+    final parsedMessageIds = (json['messageIds'] as List?)
+        ?.whereType<String>()
+        .toList();
+
     return Conversation(
       id: json['id'] as String,
       title: json['title'] as String,
-      messages: (json['messages'] as List?)
-              ?.map((msg) => Message.fromJson(msg))
-              .toList() ??
-          [],
+      messages: parsedMessages,
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
       systemPrompt: json['systemPrompt'] as String?,
@@ -100,6 +141,15 @@ class Conversation {
       roleId: json['roleId'] as String?,
       roleType: json['roleType'] as String?,
       threadJson: json['threadJson'] as String?,
+      activeLeafId: json['activeLeafId'] as String?,
+      summary: json['summary'] as String?,
+      summaryRangeStartId: json['summaryRangeStartId'] as String?,
+      summaryRangeEndId: json['summaryRangeEndId'] as String?,
+      summaryUpdatedAt: json['summaryUpdatedAt'] != null
+          ? DateTime.tryParse(json['summaryUpdatedAt'] as String)
+          : null,
+      messageIds:
+          parsedMessageIds ?? parsedMessages.map((msg) => msg.id).toList(),
     );
   }
 
@@ -114,6 +164,12 @@ class Conversation {
     String? roleId,
     String? roleType,
     String? threadJson,
+    String? activeLeafId,
+    String? summary,
+    String? summaryRangeStartId,
+    String? summaryRangeEndId,
+    DateTime? summaryUpdatedAt,
+    List<String>? messageIds,
   }) {
     return Conversation(
       id: id ?? this.id,
@@ -126,7 +182,12 @@ class Conversation {
       roleId: roleId ?? this.roleId,
       roleType: roleType ?? this.roleType,
       threadJson: threadJson ?? this.threadJson,
+      activeLeafId: activeLeafId ?? this.activeLeafId,
+      summary: summary ?? this.summary,
+      summaryRangeStartId: summaryRangeStartId ?? this.summaryRangeStartId,
+      summaryRangeEndId: summaryRangeEndId ?? this.summaryRangeEndId,
+      summaryUpdatedAt: summaryUpdatedAt ?? this.summaryUpdatedAt,
+      messageIds: messageIds ?? this.messageIds,
     );
   }
 }
-

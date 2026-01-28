@@ -428,27 +428,31 @@ class _OwuiMermaidBlockState extends State<OwuiMermaidBlock> {
     final uiScale = context.owui.uiScale;
     if (_isFullscreen) return _buildFullscreenOverlay(context);
 
-    return Container(
-      margin: EdgeInsets.symmetric(vertical: 8 * uiScale),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: widget.isDark ? const Color(0xFF14161A) : const Color(0xFFF6F8FA),
-        borderRadius: BorderRadius.circular(12 * uiScale),
-        border: Border.all(
-          color: widget.isDark ? const Color(0x26FFFFFF) : const Color(0x1A000000),
+    final borderRadius = BorderRadius.circular(12 * uiScale);
+    final borderColor = widget.isDark ? const Color(0xFF2E3138) : const Color(0xFFD8DCE2);
+    final bgColor = widget.isDark ? const Color(0xFF14161A) : const Color(0xFFF6F8FA);
+
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 8 * uiScale),
+      child: Material(
+        color: bgColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: borderRadius,
+          side: BorderSide(color: borderColor),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildHeader(context),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            child: _buildContent(context),
-          ),
-        ],
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildHeader(context),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              child: _buildContent(context),
+            ),
+          ],
+        ),
       ),
     );
   }

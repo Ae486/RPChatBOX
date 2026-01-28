@@ -85,6 +85,13 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
 
+  # LangChain.dart - LLM 编排框架
+  langchain: ^0.8.1
+  langchain_core: ^0.4.1
+  langchain_openai: ^0.8.1+1
+  langchain_google: ^0.7.1+2
+  anthropic_sdk_dart: ^0.3.1
+
   # PDF 文本提取
   syncfusion_flutter_pdf: ^27.2.5
 
@@ -122,6 +129,21 @@ dev_dependencies:
   mockito: ^5.4.4 # Mock 框架
   golden_toolkit: ^0.15.0 # Golden 测试
   # 注：当前仓库未使用 integration_test / fake_async / package:test，先移除以降低维护面
+
+# ============================================================================
+# dependency_overrides: 使用本地 fork 的 flutter_chat_ui
+# ============================================================================
+# 改动说明：
+#   1. KeyboardMixin: 移除 100ms debounce，改用逐帧调度，实现键盘滚动即时响应
+#   2. ChatAnimatedList: 追踪基准偏移，避免多次调用导致的过度滚动
+#
+# 切换方式：
+#   - 使用 fork 版本: 保持下面的 dependency_overrides 取消注释
+#   - 使用 pub cache 版本: 注释掉整个 dependency_overrides 块
+# ============================================================================
+dependency_overrides:
+  flutter_chat_ui:
+    path: packages/flutter_chat_ui
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

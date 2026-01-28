@@ -1,3 +1,6 @@
+/// INPUT: ConversationThread tree + Message nodes
+/// OUTPUT: Active-chain projection + branch selection state
+/// POS: Models / Base Chat / Thread
 import 'message.dart';
 
 class ConversationThread {
@@ -40,7 +43,9 @@ class ConversationThread {
       selectedChild:
           (json['selectedChild'] as Map?)?.cast<String, String>() ?? {},
       activeLeafId: json['activeLeafId'] as String?,
-    )..normalize();
+    )
+      ..rebuildFromParentIds()
+      ..normalize();
   }
 
   static ConversationThread fromLinearMessages(
@@ -60,17 +65,27 @@ class ConversationThread {
     final nodes = <String, ThreadNode>{};
     String? previousId;
     for (final message in messages) {
+      final parentId =
+          (message.parentId != null && message.parentId!.isNotEmpty)
+              ? message.parentId
+              : previousId;
+      if (message.parentId == null || message.parentId!.isEmpty) {
+        message.parentId = parentId;
+      }
       final node = ThreadNode(
         id: message.id,
-        parentId: previousId,
+        parentId: parentId,
         message: message,
         children: const [],
       );
       nodes[node.id] = node;
-      if (previousId != null) {
-        nodes[previousId] = nodes[previousId]!.copyWith(
-          children: [...nodes[previousId]!.children, node.id],
-        );
+      if (parentId != null) {
+        final parent = nodes[parentId];
+        if (parent != null) {
+          nodes[parentId] = parent.copyWith(
+            children: [...parent.children, node.id],
+          );
+        }
       }
       previousId = node.id;
     }
@@ -113,6 +128,7 @@ class ConversationThread {
     for (final nodeId in nodeIds) {
       final node = nodes[nodeId];
       if (node == null || node.children.isEmpty) continue;
+      _syncMessageParentId(nodeId);
 
       final validChildren = node.children
           .where(nodes.containsKey)
@@ -120,6 +136,11 @@ class ConversationThread {
       if (validChildren.length != node.children.length) {
         nodes[nodeId] = node.copyWith(children: validChildren);
       }
+    }
+
+    // Ensure message.parentId is aligned for any remaining nodes.
+    for (final nodeId in nodes.keys) {
+      _syncMessageParentId(nodeId);
     }
 
     var currentId = rootId;
@@ -143,6 +164,9 @@ class ConversationThread {
   void upsertMessage(Message message) {
     final existing = nodes[message.id];
     if (existing == null) return;
+    if (message.parentId == null || message.parentId!.isEmpty) {
+      message.parentId = existing.parentId;
+    }
     nodes[message.id] = existing.copyWith(message: message);
   }
 
@@ -156,6 +180,7 @@ class ConversationThread {
 
     // Empty thread: initialize root.
     if (nodes.isEmpty || rootId.isEmpty) {
+      message.parentId ??= null;
       nodes[message.id] = ThreadNode(
         id: message.id,
         parentId: null,
@@ -186,6 +211,9 @@ class ConversationThread {
       return;
     }
 
+    if (message.parentId == null || message.parentId!.isEmpty) {
+      message.parentId = parentId;
+    }
     nodes[message.id] = ThreadNode(
       id: message.id,
       parentId: parentId,
@@ -218,6 +246,9 @@ class ConversationThread {
           'assistantMessage.id must equal childId',
         );
       }
+      if (assistantMessage.parentId == null || assistantMessage.parentId!.isEmpty) {
+        assistantMessage.parentId = userId;
+      }
       if (assistantMessage.isUser) {
         throw ArgumentError.value(
           assistantMessage.id,
@@ -240,6 +271,9 @@ class ConversationThread {
         );
       }
       if (assistantMessage != null) {
+        if (assistantMessage.parentId == null || assistantMessage.parentId!.isEmpty) {
+          assistantMessage.parentId = userId;
+        }
         upsertMessage(assistantMessage);
       }
     } else {
@@ -249,6 +283,9 @@ class ConversationThread {
           'childId',
           'assistantMessage is required when creating a new child node',
         );
+      }
+      if (assistantMessage.parentId == null || assistantMessage.parentId!.isEmpty) {
+        assistantMessage.parentId = userId;
       }
       nodes[childId] = ThreadNode(
         id: childId,
@@ -302,6 +339,109 @@ class ConversationThread {
       if (parent == null) continue;
       if (!parent.children.contains(childId)) continue;
       selectedChild[parentId] = childId;
+    }
+  }
+
+  void _syncMessageParentId(String nodeId) {
+    final node = nodes[nodeId];
+    if (node == null) return;
+    if (node.message.parentId != node.parentId) {
+      node.message.parentId = node.parentId;
+    }
+  }
+
+  List<Message> buildActiveChain() {
+    if (nodes.isEmpty || rootId.isEmpty) {
+      return const <Message>[];
+    }
+
+    final chain = <Message>[];
+    var currentId = rootId;
+    final visited = <String>{};
+
+    while (currentId.isNotEmpty) {
+      if (!visited.add(currentId)) break;
+
+      final node = nodes[currentId];
+      if (node == null) break;
+      chain.add(node.message);
+
+      if (node.children.isEmpty) break;
+
+      final selected = selectedChild[currentId];
+      final nextId =
+          (selected != null && node.children.contains(selected))
+              ? selected
+              : node.children.last;
+
+      currentId = nextId;
+    }
+
+    return chain;
+  }
+
+  void rebuildFromParentIds() {
+    if (nodes.isEmpty) return;
+
+    final nodeIds = nodes.keys.toList(growable: false);
+    final parentMap = <String, String?>{};
+    for (final nodeId in nodeIds) {
+      final node = nodes[nodeId];
+      if (node == null) continue;
+      final parentId = (node.message.parentId != null &&
+              node.message.parentId!.isNotEmpty)
+          ? node.message.parentId
+          : node.parentId;
+      parentMap[nodeId] = parentId;
+      if (parentId != node.parentId) {
+        nodes[nodeId] = node.copyWith(parentId: parentId);
+      }
+    }
+
+    for (final nodeId in nodeIds) {
+      final node = nodes[nodeId];
+      if (node == null) continue;
+      if (node.children.isNotEmpty) {
+        nodes[nodeId] = node.copyWith(children: const []);
+      }
+    }
+
+    final childrenMap = <String, List<String>>{};
+    for (final entry in parentMap.entries) {
+      final childId = entry.key;
+      final parentId = entry.value;
+      if (parentId == null || parentId.isEmpty) continue;
+      if (!nodes.containsKey(parentId)) continue;
+      childrenMap.putIfAbsent(parentId, () => []).add(childId);
+    }
+
+    for (final entry in childrenMap.entries) {
+      final parentId = entry.key;
+      final desired = entry.value;
+      final parent = nodes[parentId];
+      if (parent == null) continue;
+
+      final existing = parent.children;
+      final ordered = <String>[];
+      for (final childId in existing) {
+        if (desired.contains(childId)) ordered.add(childId);
+      }
+      final remaining = desired.where((id) => !ordered.contains(id)).toList();
+      remaining.sort((a, b) => nodes[a]!.message.timestamp
+          .compareTo(nodes[b]!.message.timestamp));
+      ordered.addAll(remaining);
+
+      nodes[parentId] = parent.copyWith(children: ordered);
+    }
+
+    final roots = nodeIds.where((nodeId) {
+      final parentId = parentMap[nodeId];
+      return parentId == null || parentId.isEmpty || !nodes.containsKey(parentId);
+    }).toList();
+    if (roots.isNotEmpty) {
+      roots.sort((a, b) => nodes[a]!.message.timestamp
+          .compareTo(nodes[b]!.message.timestamp));
+      rootId = roots.first;
     }
   }
 }

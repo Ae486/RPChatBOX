@@ -79,6 +79,12 @@ class Conversation {
   @HiveField(7)  String? roleId;           // 角色ID
   @HiveField(8)  String? roleType;         // 'preset' | 'custom'
   @HiveField(9)  String? threadJson;       // 树状消息链 JSON
+  @HiveField(10) String? activeLeafId;     // 活动叶子节点
+  @HiveField(11) String? summary;          // 会话摘要
+  @HiveField(12) String? summaryRangeStartId;
+  @HiveField(13) String? summaryRangeEndId;
+  @HiveField(14) DateTime? summaryUpdatedAt;
+  @HiveField(15) List<String> messageIds;  // 消息ID索引
 }
 ```
 
@@ -104,6 +110,8 @@ class Message {
   @HiveField(6)  String? modelName;        // AI消息的模型名
   @HiveField(7)  String? providerName;     // AI消息的供应商名
   @HiveField(8)  List<AttachedFileSnapshot>? attachedFiles;  // 附件快照
+  @HiveField(9)  String? parentId;         // 父消息ID
+  @HiveField(10) DateTime? editedAt;       // 编辑时间
 }
 ```
 
@@ -142,6 +150,7 @@ class CustomRole {
 class HiveConversationService {
   // Box 名称
   static const String _conversationsBoxName = 'conversations';
+  static const String _messagesBoxName = 'messages';
   static const String _currentConversationKey = 'current_conversation_id';
 
   // 核心方法

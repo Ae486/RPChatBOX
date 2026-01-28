@@ -240,7 +240,10 @@ class _MermaidRendererState extends State<MermaidRenderer> {
         children: [
           SizedBox(
             height: widget.height ?? _webViewHeight,
-            child: WebViewWidget(controller: _controller!),
+            // 禁止 WebView 捕获触摸事件，让父级 ListView 正常滚动
+            child: IgnorePointer(
+              child: WebViewWidget(controller: _controller!),
+            ),
           ),
           if (_isLoading) _buildLoadingOverlay(),
         ],
@@ -269,7 +272,10 @@ class _MermaidRendererState extends State<MermaidRenderer> {
       borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
       child: SizedBox(
         height: widget.height ?? _webViewHeight,
-        child: windows_webview.Webview(_windowsController!),
+        // 禁止 WebView 捕获触摸事件，让父级 ListView 正常滚动
+        child: IgnorePointer(
+          child: windows_webview.Webview(_windowsController!),
+        ),
       ),
     );
 

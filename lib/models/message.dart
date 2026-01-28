@@ -1,3 +1,6 @@
+/// INPUT: User/assistant message content + metadata (tokens, provider, attachments)
+/// OUTPUT: Message model for persistence and UI adapters
+/// POS: Models / Base Chat / Message
 import 'package:hive/hive.dart';
 import 'attached_file.dart';
 
@@ -24,6 +27,10 @@ class Message {
   String? providerName; // AI消息的供应商名称
   @HiveField(8)
   List<AttachedFileSnapshot>? attachedFiles; // 用户消息的附件快照列表
+  @HiveField(9)
+  String? parentId; // 树结构父节点（可空，兼容旧数据）
+  @HiveField(10)
+  DateTime? editedAt; // 编辑时间（可空，兼容旧数据）
 
   Message({
     required this.id,
@@ -35,6 +42,8 @@ class Message {
     this.modelName,
     this.providerName,
     this.attachedFiles,
+    this.parentId,
+    this.editedAt,
   });
 
   Map<String, dynamic> toJson() {
@@ -48,6 +57,8 @@ class Message {
       'modelName': modelName,
       'providerName': providerName,
       'attachedFiles': attachedFiles?.map((f) => f.toJson()).toList(),
+      'parentId': parentId,
+      'editedAt': editedAt?.toIso8601String(),
     };
   }
 
@@ -62,8 +73,13 @@ class Message {
       modelName: json['modelName'] as String?,
       providerName: json['providerName'] as String?,
       attachedFiles: (json['attachedFiles'] as List?)
-          ?.map((f) => AttachedFileSnapshot.fromJson(f as Map<String, dynamic>))
+          ?.whereType<Map<String, dynamic>>()
+          .map((f) => AttachedFileSnapshot.fromJson(f))
           .toList(),
+      parentId: json['parentId'] as String?,
+      editedAt: json['editedAt'] != null
+          ? DateTime.tryParse(json['editedAt'] as String)
+          : null,
     );
   }
 }
