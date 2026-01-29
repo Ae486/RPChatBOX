@@ -11,7 +11,7 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
     _tryScrollToPendingMessage();
   }
 
-  void _syncConversationToChatController() {
+  void _syncConversationToChatController({bool autoFollow = true}) {
     final thread = _getThread();
     final chain = buildActiveMessageChain(thread);
     final msgs = chain.map(ChatMessageAdapter.toFlutterChatMessage).toList();
@@ -31,7 +31,7 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
     _tryScrollToPendingMessage();
 
     // Scroll to bottom after messages are set
-    if (_pendingScrollToMessageId == null) {
+    if (autoFollow && _pendingScrollToMessageId == null) {
       _requestAutoFollow(smooth: false, force: true);
     }
   }
@@ -128,7 +128,7 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
           child: OwuiMessageHighlightSweep(
             key: ValueKey('$messageId-$_highlightNonce'),
             color: primary,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.zero,
             maxOpacity: maxOpacity,
           ),
         ),

@@ -113,6 +113,14 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       if (action == 'save') {
         appMsg.content = newContent;
         appMsg.inputTokens = TokenCounter.estimateTokens(newContent);
+
+        // Update thread structure (source of truth for persistence).
+        final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+        thread.upsertMessage(appMsg);
+        _syncConversationMessagesSnapshotFromThread(thread);
+        _persistThreadNoSave(thread);
+        _schedulePersistThread();
+
         widget.conversation.updatedAt = DateTime.now();
         widget.onConversationUpdated();
         widget.onTokenUsageUpdated(widget.conversation);
@@ -400,6 +408,12 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
     }
 
     Future<void> doDelete() async {
+      // 检查是否正在流式传输
+      if (_streamController.isStreaming) {
+        GlobalToast.warning(context, message: '请等待消息生成完成');
+        return;
+      }
+
       final confirm = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -420,9 +434,35 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       if (confirm != true) return;
       if (!mounted || _isDisposed) return;
 
+      ConversationThread? thread;
+      String? scrollTargetId;
+      var needsFullSync = true;
+
       if (messageIndex >= 0) {
         // Update thread structure (source of truth for persistence).
-        final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+        thread = _getThread(rebuildFromMessagesIfMismatch: false);
+        final node = thread.nodes[message.id];
+        final parentId = node?.parentId;
+        final hasChildren = node?.children.isNotEmpty ?? false;
+        final siblingCount = (parentId != null && parentId.isNotEmpty)
+            ? (thread.nodes[parentId]?.children.length ?? 0)
+            : 0;
+        final hasSiblings = siblingCount > 1;
+        final canRemoveOnly = node != null && !hasChildren && !hasSiblings;
+
+        // 记录被提升的子节点列表（在删除前）
+        final childrenToPromote = node?.children ?? [];
+
+        if (!canRemoveOnly) {
+          // 优先滚动到第一个提升的子节点（缝合点），而非父节点
+          // 这样用户可以直接看到新的连接，而不是跳回旧的上下文
+          if (childrenToPromote.isNotEmpty) {
+            scrollTargetId = childrenToPromote.first;
+          } else if (parentId != null && parentId.isNotEmpty) {
+            scrollTargetId = parentId;
+          }
+        }
+
         thread.removeNode(message.id);
 
         // Sync linear messages snapshot from thread.
@@ -432,9 +472,39 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
 
         widget.conversation.updatedAt = DateTime.now();
         widget.onConversationUpdated();
+
+        if (canRemoveOnly) {
+          chat.Message? liveMessage;
+          for (final m in _chatController.messages) {
+            if (m.id == message.id) {
+              liveMessage = m;
+              break;
+            }
+          }
+          if (liveMessage != null) {
+            try {
+              await _chatController.removeMessage(liveMessage);
+              needsFullSync = false;
+            } catch (_) {
+              needsFullSync = true;
+            }
+          }
+        }
       }
 
-      await _chatController.removeMessage(message, animated: true);
+      if (needsFullSync) {
+        // Refresh entire chat view to show the new active chain (sibling branch).
+        _syncConversationToChatController(autoFollow: false);
+        if ((scrollTargetId == null || scrollTargetId!.isEmpty) &&
+            thread != null &&
+            thread.rootId.isNotEmpty) {
+          scrollTargetId = thread.rootId;
+        }
+        if (scrollTargetId != null && scrollTargetId!.isNotEmpty) {
+          // 使用平滑滚动但不高亮，减少视觉干扰
+          scrollToMessageSilently(scrollTargetId!);
+        }
+      }
       if (!mounted || _isDisposed) return;
       GlobalToast.success(context, message: '已删除');
     }

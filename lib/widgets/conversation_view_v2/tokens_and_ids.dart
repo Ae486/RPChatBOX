@@ -47,11 +47,11 @@ mixin _ConversationViewV2TokensMixin on _ConversationViewV2StateBase {
     final uiScale = context.owui.uiScale;
     // 统一左对齐，与消息内容左侧对齐
     // 对于助手消息：与 OwuiAssistantMessage 内部 padding 对齐（12 * uiScale）
-    // 对于用户消息：无额外 padding，但需要强制左对齐覆盖父级 Column 的 end 对齐
+    // 对于用户消息：右对齐，与用户气泡对齐
     return Padding(
       padding: EdgeInsets.only(top: 8 * uiScale, left: isSentByMe ? 0 : 12 * uiScale),
       child: Align(
-        alignment: Alignment.centerLeft,
+        alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
         child: Text(
           'Tokens:$total ↑$inputTokens ↓$outputTokens',
           style: TextStyle(

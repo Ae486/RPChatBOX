@@ -170,39 +170,113 @@ class ConversationThread {
     nodes[message.id] = existing.copyWith(message: message);
   }
 
-  /// 删除指定节点及其所有子节点
-  void removeNode(String nodeId) {
+  /// 级联删除节点及其所有子孙节点
+  void _cascadeDelete(String nodeId) {
     final node = nodes[nodeId];
     if (node == null) return;
 
     // 递归删除所有子节点
-    final toRemove = <String>[nodeId];
-    var i = 0;
-    while (i < toRemove.length) {
-      final id = toRemove[i];
-      final n = nodes[id];
-      if (n != null) {
-        toRemove.addAll(n.children);
-      }
-      i++;
+    for (final childId in List.from(node.children)) {
+      _cascadeDelete(childId);
     }
 
-    // 从父节点的 children 列表中移除
+    // 删除节点本身
+    nodes.remove(nodeId);
+    selectedChild.remove(nodeId);
+  }
+
+  /// 删除单条消息，将其子节点提升到父节点
+  void removeNode(String nodeId) {
+    final node = nodes[nodeId];
+    if (node == null) return;
+
     final parentId = node.parentId;
-    if (parentId != null && parentId.isNotEmpty) {
-      final parent = nodes[parentId];
-      if (parent != null) {
-        final newChildren = parent.children.where((c) => c != nodeId).toList();
-        nodes[parentId] = parent.copyWith(children: newChildren);
+    final childrenToPromote = List<String>.from(node.children);
+
+    // 场景6：删除根节点且有多个子节点 - 只保留当前链路的子节点
+    if ((parentId == null || parentId.isEmpty) && childrenToPromote.length > 1) {
+      // 确定当前选中的子节点
+      String? currentChild = selectedChild[nodeId];
+
+      // 如果没有选中的子节点，选择第一个子节点
+      if (currentChild == null || !childrenToPromote.contains(currentChild)) {
+        currentChild = childrenToPromote.first;
       }
-      selectedChild.remove(parentId);
+
+      // 删除其他子节点（级联删除）
+      for (final childId in childrenToPromote) {
+        if (childId != currentChild) {
+          _cascadeDelete(childId);
+        }
+      }
+
+      // 当前子节点成为新根
+      rootId = currentChild!;
+      final newRoot = nodes[currentChild];
+      if (newRoot != null) {
+        newRoot.message.parentId = null;
+        nodes[currentChild] = newRoot.copyWith(parentId: null);
+      }
+
+      // 删除旧根节点
+      nodes.remove(nodeId);
+      selectedChild.remove(nodeId);
+      normalize();
+      return;
     }
 
-    // 删除所有相关节点
-    for (final id in toRemove) {
-      nodes.remove(id);
-      selectedChild.remove(id);
+    // 其他场景：提升所有子节点到父节点
+    // 更新被提升子节点的 parentId
+    for (final childId in childrenToPromote) {
+      final child = nodes[childId];
+      if (child != null) {
+        child.message.parentId = parentId;
+        nodes[childId] = child.copyWith(parentId: parentId);
+      }
     }
+
+    if (parentId != null && parentId.isNotEmpty && nodes.containsKey(parentId)) {
+      // 有父节点：将子节点插入到被删除节点原来的位置
+      final parent = nodes[parentId]!;
+      final parentChildren = List<String>.from(parent.children);
+      final nodeIndex = parentChildren.indexOf(nodeId);
+
+      if (nodeIndex >= 0) {
+        parentChildren.removeAt(nodeIndex);
+        parentChildren.insertAll(nodeIndex, childrenToPromote);
+      } else {
+        parentChildren.addAll(childrenToPromote);
+      }
+
+      nodes[parentId] = parent.copyWith(children: parentChildren);
+
+      // 清理 selectedChild：如果父节点选中的是被删除节点，改选第一个提升的子节点
+      if (selectedChild[parentId] == nodeId) {
+        // 优先选择被删除节点的第一个子节点，保持原分支连续性
+        if (childrenToPromote.isNotEmpty) {
+          selectedChild[parentId] = childrenToPromote.first;
+        } else {
+          selectedChild.remove(parentId);
+        }
+      }
+    } else {
+      // 删除的是根节点（只有一个或零个子节点）
+      if (childrenToPromote.isEmpty) {
+        rootId = '';
+      } else {
+        // 只有一个子节点：直接成为新根
+        rootId = childrenToPromote.first;
+        final newRoot = nodes[rootId];
+        if (newRoot != null) {
+          newRoot.message.parentId = null;
+          nodes[rootId] = newRoot.copyWith(parentId: null);
+        }
+      }
+    }
+
+    // 删除节点本身
+    nodes.remove(nodeId);
+    selectedChild.remove(nodeId);
 
     // 重新规范化
     normalize();

@@ -27,15 +27,32 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
             itemBuilder: itemBuilder,
           );
         },
+        chatMessageBuilder: (
+          context,
+          message,
+          index,
+          animation,
+          child, {
+          isRemoved,
+          required isSentByMe,
+          groupStatus,
+        }) {
+          final messageWidget = chat_ui.ChatMessage(
+            message: message,
+            index: index,
+            animation: animation,
+            isRemoved: isRemoved,
+            groupStatus: groupStatus,
+            child: child,
+          );
+          return _wrapHighlighted(messageId: message.id, child: messageWidget);
+        },
         textMessageBuilder:
             (context, message, index, {required isSentByMe, groupStatus}) {
               if (isSentByMe) {
                 return _wrapExportSelectable(
                   message: message,
-                  child: _wrapHighlighted(
-                    messageId: message.id,
-                    child: _buildUserBubble(message: message),
-                  ),
+                  child: _buildUserBubble(message: message),
                 );
               }
 
@@ -67,25 +84,22 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                 onSecondaryTap: _isExportMode
                     ? null
                     : () => _showMessageActionsSheet(message),
-                child: _wrapHighlighted(
-                  messageId: message.id,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      OwuiAssistantMessage(
-                        messageId: message.id,
-                        createdAt: message.createdAt ?? DateTime.now(),
-                        bodyMarkdown: message.text,
-                        isStreaming: streaming,
-                        modelName: modelName,
-                        providerName: providerName,
-                        streamData: data,
-                        images: images,
-                      ),
-                      _buildTokenFooter(message, isSentByMe: false),
-                    ],
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OwuiAssistantMessage(
+                      messageId: message.id,
+                      createdAt: message.createdAt ?? DateTime.now(),
+                      bodyMarkdown: message.text,
+                      isStreaming: streaming,
+                      modelName: modelName,
+                      providerName: providerName,
+                      streamData: data,
+                      images: images,
+                    ),
+                    _buildTokenFooter(message, isSentByMe: false),
+                  ],
                 ),
               );
 
@@ -123,32 +137,29 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                 onSecondaryTap: _isExportMode
                     ? null
                     : () => _showMessageActionsSheet(message),
-                child: _wrapHighlighted(
-                  messageId: message.id,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      OwuiAssistantMessage(
-                        messageId: message.id,
-                        createdAt: message.createdAt ?? DateTime.now(),
-                        bodyMarkdown: body,
-                        isStreaming: false,
-                        modelName: modelName,
-                        providerName: providerName,
-                        streamData: StreamData(
-                          streamId: message.id,
-                          status: StreamStatus.completed,
-                          startTime: message.createdAt,
-                          content: body,
-                          thinkingContent: thinking,
-                          isThinkingOpen: false,
-                        ),
-                        images: images,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OwuiAssistantMessage(
+                      messageId: message.id,
+                      createdAt: message.createdAt ?? DateTime.now(),
+                      bodyMarkdown: body,
+                      isStreaming: false,
+                      modelName: modelName,
+                      providerName: providerName,
+                      streamData: StreamData(
+                        streamId: message.id,
+                        status: StreamStatus.completed,
+                        startTime: message.createdAt,
+                        content: body,
+                        thinkingContent: thinking,
+                        isThinkingOpen: false,
                       ),
-                      _buildTokenFooter(message, isSentByMe: false),
-                    ],
-                  ),
+                      images: images,
+                    ),
+                    _buildTokenFooter(message, isSentByMe: false),
+                  ],
                 ),
               );
 
@@ -174,72 +185,46 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                 if (!file.existsSync()) {
                   return _wrapExportSelectable(
                     message: message,
-                    child: _wrapHighlighted(
-                      messageId: message.id,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 240,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.06),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Colors.black.withValues(alpha: 0.08),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  OwuiIcons.brokenImage,
-                                  size: 18,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    '图片文件不存在',
-                                    style: TextStyle(
-                                      color: OwuiPalette.textSecondary(context),
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 240,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.black.withValues(alpha: 0.08),
                             ),
                           ),
-                          _buildTokenFooter(message, isSentByMe: isSentByMe),
-                        ],
-                      ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                OwuiIcons.brokenImage,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '图片文件不存在',
+                                  style: TextStyle(
+                                    color: OwuiPalette.textSecondary(context),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        _buildTokenFooter(message, isSentByMe: isSentByMe),
+                      ],
                     ),
                   );
                 }
                 return _wrapExportSelectable(
                   message: message,
-                  child: _wrapHighlighted(
-                    messageId: message.id,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        FlyerChatImageMessage(
-                          message: message,
-                          index: index,
-                          customImageProvider: FileImage(file),
-                          errorBuilder: errorBuilder,
-                        ),
-                        _buildTokenFooter(message, isSentByMe: isSentByMe),
-                      ],
-                    ),
-                  ),
-                );
-              }
-
-              return _wrapExportSelectable(
-                message: message,
-                child: _wrapHighlighted(
-                  messageId: message.id,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -247,11 +232,28 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                       FlyerChatImageMessage(
                         message: message,
                         index: index,
+                        customImageProvider: FileImage(file),
                         errorBuilder: errorBuilder,
                       ),
                       _buildTokenFooter(message, isSentByMe: isSentByMe),
                     ],
                   ),
+                );
+              }
+
+              return _wrapExportSelectable(
+                message: message,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FlyerChatImageMessage(
+                      message: message,
+                      index: index,
+                      errorBuilder: errorBuilder,
+                    ),
+                    _buildTokenFooter(message, isSentByMe: isSentByMe),
+                  ],
                 ),
               );
             },
@@ -266,16 +268,13 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                 onSecondaryTap: _isExportMode
                     ? null
                     : () => _showMessageActionsSheet(message),
-                child: _wrapHighlighted(
-                  messageId: message.id,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      FlyerChatFileMessage(message: message, index: index),
-                      _buildTokenFooter(message, isSentByMe: false),
-                    ],
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FlyerChatFileMessage(message: message, index: index),
+                    _buildTokenFooter(message, isSentByMe: false),
+                  ],
                 ),
               );
 

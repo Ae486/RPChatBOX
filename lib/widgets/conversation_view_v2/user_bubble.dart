@@ -97,8 +97,12 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
       );
     }
 
+    // 分支按钮高度约为 24 * uiScale (icon 16 + vertical padding 4*2)
+    // 添加等量的底部间距，使消息间距保持一致
+    final buttonHeight = 24 * uiScale;
+
     return Padding(
-      padding: EdgeInsets.only(top: 6 * uiScale),
+      padding: EdgeInsets.only(top: 6 * uiScale, bottom: buttonHeight),
       child: Align(
         alignment: Alignment.centerRight,
         child: DecoratedBox(

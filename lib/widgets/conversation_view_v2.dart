@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart' as chat;
+import 'package:flutter_chat_ui/flutter_chat_ui.dart' as chat_ui;
 import 'package:flutter_chat_ui/flutter_chat_ui.dart' hide ChatMessage;
 import 'package:flyer_chat_file_message/flyer_chat_file_message.dart';
 import 'package:flyer_chat_image_message/flyer_chat_image_message.dart';
@@ -149,6 +150,32 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   // 流式输出期间预取图片（抢在 URL 过期前）
   Timer? _streamImagePrefetchTimer;
   final Set<String> _streamPrefetchedImageUrls = <String>{};
+
+  /// 平滑滚动到指定消息，但不触发高亮动画
+  /// 用于删除操作等需要视觉简洁的场景
+  void scrollToMessageSilently(String messageId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isDisposed) return;
+
+      final idx = _chatController.messages.indexWhere((m) => m.id == messageId);
+      if (idx < 0) {
+        Future.delayed(const Duration(milliseconds: 16), () {
+          if (!mounted || _isDisposed) return;
+          scrollToMessageSilently(messageId);
+        });
+        return;
+      }
+
+      try {
+        _chatController.scrollToIndex(
+          idx,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          alignment: 0.1,
+        );
+      } catch (_) {}
+    });
+  }
 
 
   @override
@@ -509,14 +536,9 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     if (node == null) return const <String>[];
     if (!node.message.isUser) return const <String>[];
 
-    final result = <String>[];
-    for (final childId in node.children) {
-      final child = thread.nodes[childId];
-      if (child == null) continue;
-      if (child.message.isUser) continue;
-      result.add(childId);
-    }
-    return result;
+    // 返回所有子节点（允许混合 user 和 assistant 类型）
+    // 这样删除中间节点后，提升的不同类型子节点仍然可以切换
+    return List<String>.from(node.children);
   }
 
   Future<void> _switchAssistantVariant(String userMessageId, int delta) async {
@@ -555,7 +577,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     setState(() => _showTuningPanel = true);
   }
 
-  void _syncConversationToChatController();
+  void _syncConversationToChatController({bool autoFollow = true});
 
   void _handleStreamFlush(String content);
 
