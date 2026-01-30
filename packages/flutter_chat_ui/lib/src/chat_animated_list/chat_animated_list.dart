@@ -219,16 +219,13 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
   // This flag prevents infinite pagination loops when reaching the start of available messages.
   bool _startPaginationShouldTrigger = false;
 
-  // MODIFIED: Track base scroll offset when keyboard starts appearing.
-  // This prevents over-scrolling when onKeyboardHeightChanged is called multiple times
-  // during keyboard animation (after removing the 100ms debounce from KeyboardMixin).
-  double? _keyboardBaseOffset;
-  // MODIFIED: Track the initial viewport slack (when content is shorter than the viewport).
-  // This prevents overshooting when the list becomes scrollable only after the keyboard appears.
-  double? _keyboardBaseViewportSlack;
-  // MODIFIED: Lock the near-bottom decision at the START of keyboard animation.
-  // maxScrollExtent changes during animation, so we must not re-evaluate each frame.
-  bool? _keyboardOpenedNearBottom;
+  // Keyboard scroll state (delta-based approach).
+  // Instead of locking a base offset, we apply incremental deltas to the
+  // current scroll position each frame, which naturally handles content
+  // changes (e.g. new messages) during keyboard animation.
+  bool _keyboardActive = false;
+  bool _keyboardAutoScroll = false;
+  double _lastKeyboardHeight = 0.0;
 
   @override
   void initState() {
@@ -288,63 +285,77 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
   }
 
   void onKeyboardHeightChanged(double height) {
-    // Reversed lists handle keyboard automatically
-    if (widget.reversed) {
+    // Reversed lists handle keyboard automatically via Scaffold resize
+    if (widget.reversed) return;
+    if (!mounted || !_scrollController.hasClients) return;
+
+    // Skip if user is actively dragging to avoid fighting with user input
+    final position = _scrollController.position;
+    if (position.isScrollingNotifier.value &&
+        position.userScrollDirection != ScrollDirection.idle) {
       return;
     }
 
-    // Treat "almost zero" as closed to match KeyboardMixin's filter
-    const closeEpsilon = 0.5;
-    if (height <= closeEpsilon) {
-      _keyboardBaseOffset = null;
-      _keyboardBaseViewportSlack = null;
-      _keyboardOpenedNearBottom = null;
-      return;
+    const nearBottomThreshold = 80.0;
+    const heightEpsilon = 1.0;
+    final nearBottom = position.extentAfter <= nearBottomThreshold ||
+        position.maxScrollExtent <= 0.0;
+
+    final opening = _lastKeyboardHeight < heightEpsilon && height >= heightEpsilon;
+    final closing = height < heightEpsilon && _lastKeyboardHeight >= heightEpsilon;
+
+    // Lock autoScroll decision only when keyboard opens
+    if (opening) {
+      _keyboardActive = true;
+      _keyboardAutoScroll = nearBottom;
     }
 
-    if (!mounted || !_scrollController.hasClients) {
-      return;
+    // Apply delta-based scroll if autoScroll is enabled
+    if (_keyboardAutoScroll && _keyboardActive && _scrollController.hasClients) {
+      final delta = height - _lastKeyboardHeight;
+      final target = (position.pixels + delta)
+          .clamp(position.minScrollExtent, position.maxScrollExtent);
+      if ((target - position.pixels).abs() > heightEpsilon) {
+        _scrollController.jumpTo(target);
+      }
     }
 
-    // MODIFIED: Lock near-bottom decision on FIRST frame of keyboard animation.
-    // Use extentAfter (content remaining below viewport) instead of maxScrollExtent,
-    // as extentAfter is stable during resize while maxScrollExtent changes.
-    if (_keyboardOpenedNearBottom == null) {
-      const nearBottomThreshold = 80.0;
-      final extentAfter = _scrollController.position.extentAfter;
-      _keyboardOpenedNearBottom = extentAfter <= nearBottomThreshold;
+    _lastKeyboardHeight = height;
+
+    // Reset state when keyboard fully closes
+    if (closing) {
+      _keyboardActive = false;
+      _keyboardAutoScroll = false;
+      _lastKeyboardHeight = 0.0;
     }
 
-    // If user was NOT near bottom when keyboard started, don't scroll at all
-    if (!_keyboardOpenedNearBottom!) {
-      return;
+    // Suppress scroll-to-bottom button during keyboard animation
+    if (_keyboardActive) {
+      _scrollToBottomShowTimer?.cancel();
     }
+  }
 
-    // Capture base offset when keyboard starts appearing (only if near bottom)
-    _keyboardBaseOffset ??= _scrollController.offset;
+  /// Allows user to opt-out (scroll away from bottom) or opt-back-in
+  /// (scroll back to bottom) during an active keyboard session.
+  void _handleUserScrollDuringKeyboard() {
+    if (!_keyboardActive || !_scrollController.hasClients) return;
 
-    // Capture initial viewport slack (content shorter than viewport)
-    _keyboardBaseViewportSlack ??= max(
-      0.0,
-      _scrollController.position.viewportDimension -
-          _scrollController.position.extentInside,
-    );
+    const nearBottomThreshold = 80.0;
+    final metrics = _scrollController.position;
+    final nearBottom = metrics.extentAfter <= nearBottomThreshold ||
+        metrics.maxScrollExtent <= 0.0;
 
-    // Adjust height by the initial slack so we don't overshoot when content
-    // wasn't scrollable before the keyboard appeared.
-    final effectiveHeight =
-        max(0.0, height - (_keyboardBaseViewportSlack ?? 0.0));
-
-    // Use base offset instead of current offset to prevent over-scrolling.
-    // Avoid clamping to maxScrollExtent here because keyboard callbacks can
-    // arrive before scroll metrics update for the new viewport.
-    final targetOffset = _keyboardBaseOffset! + effectiveHeight;
-
-    // Use jumpTo during keyboard animation for instant response
-    _scrollController.jumpTo(targetOffset);
-
-    // Don't show scroll-to-bottom button during automatic keyboard scrolling
-    _scrollToBottomShowTimer?.cancel();
+    if (!nearBottom && _keyboardAutoScroll) {
+      _keyboardAutoScroll = false;
+    } else if (nearBottom && !_keyboardAutoScroll) {
+      _keyboardAutoScroll = true;
+      // Reset baseline to current keyboard height using same formula as KeyboardMixin
+      final view = View.of(context);
+      final keyboardHeight = view.viewInsets.bottom;
+      final pixelRatio = view.devicePixelRatio;
+      final initialSafeArea = MediaQuery.of(context).padding.bottom;
+      _lastKeyboardHeight = max(keyboardHeight / pixelRatio - initialSafeArea, 0.0);
+    }
   }
 
   @override
@@ -477,6 +488,9 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
         }
 
         if (notification is UserScrollNotification) {
+          // Handle keyboard auto-scroll opt-in/opt-out during active keyboard
+          _handleUserScrollDuringKeyboard();
+
           // When user scrolls up, save it to `_userHasScrolled`
           if (notification.direction ==
               (widget.reversed

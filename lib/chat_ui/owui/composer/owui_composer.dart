@@ -323,8 +323,11 @@ class _OwuiComposerState extends State<OwuiComposer> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (hasFiles) _buildAttachedFilesPreview(uiScale),
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
+                // NOTE: 使用 Container 替代 AnimatedContainer 以优化键盘动画性能
+                // 原始代码（如需回退）:
+                // AnimatedContainer(
+                //   duration: const Duration(milliseconds: 140),
+                Container(
                   decoration: BoxDecoration(
                     color: fieldSurface,
                     borderRadius: BorderRadius.circular(16 * uiScale),

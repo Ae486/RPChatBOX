@@ -15,6 +15,7 @@ import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../pages/display_settings_page.dart';
 import '../pages/model_services_page.dart';
+import '../pages/keyboard_test_page.dart';
 import '../main.dart' show globalModelServiceManager;
 import '../services/image_persistence_service.dart';
 
@@ -142,6 +143,25 @@ class _SettingsPageState extends State<SettingsPage> {
                     )
                   : const Icon(OwuiIcons.chevronRight),
               onTap: _isClearing ? null : _clearImageCache,
+            ),
+          ),
+          SizedBox(height: context.owuiSpacing.lg),
+
+          // 键盘动画测试（调试入口）
+          OwuiCard(
+            child: ListTile(
+              leading: const Icon(OwuiIcons.play, size: 32),
+              title: const Text('键盘动画测试'),
+              subtitle: const Text('验证 flutter_chat_ui 键盘滚动行为'),
+              trailing: const Icon(OwuiIcons.chevronRight),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const KeyboardTestPage(),
+                  ),
+                );
+              },
             ),
           ),
           SizedBox(height: context.owuiSpacing.lg),
