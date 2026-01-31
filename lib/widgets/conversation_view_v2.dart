@@ -137,6 +137,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   Timer? _stableRevealTimer;
   bool _stableRevealTicking = false;
   int _stableRevealDisplayedLen = 0;
+  bool _stableRevealKickstarted = false;  // FIX-2: 首次 tick 一次性标志
 
   // 待 finalize 状态（流结束后等待渐进式渲染完成）
   ({String modelName, String providerName, Object? error})? _pendingFinalize;
@@ -249,6 +250,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       _stableRevealTimer = null;
       _stableRevealTicking = false;
       _stableRevealDisplayedLen = 0;
+      _stableRevealKickstarted = false;  // FIX-2: 重置首次标志
       _pendingFinalize = null;
 
       _streamImagePrefetchTimer?.cancel();

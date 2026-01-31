@@ -60,7 +60,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
               final streaming = metadata['streaming'] == true;
               final modelName = metadata['modelName'] as String?;
               final providerName = metadata['providerName'] as String?;
-              final data = streaming && _streamManager.hasStream(message.id)
+              final data = _streamManager.hasStream(message.id)
                   ? _streamManager.getData(message.id)
                   : null;
 
@@ -155,6 +155,9 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                         content: body,
                         thinkingContent: thinking,
                         isThinkingOpen: false,
+                        // 历史消息：用 createdAt 作为思考结束时间
+                        thinkingStartTime: thinking.isNotEmpty ? message.createdAt : null,
+                        thinkingEndTime: thinking.isNotEmpty ? message.createdAt : null,
                       ),
                       images: images,
                     ),

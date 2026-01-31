@@ -2,11 +2,14 @@
 /// OUTPUT: OwuiAssistantMessage - 助手消息渲染（Markdown/Thinking/Meta/图片）
 /// POS: UI 层 / Chat / Owui - V2 助手消息组件（由 ConversationViewV2 组装）
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_chat_ui/flutter_chat_ui.dart' show IsTypingIndicator;
 import 'package:provider/provider.dart';
 
 import '../../models/conversation_settings.dart';
@@ -136,57 +139,35 @@ class OwuiAssistantMessage extends StatelessWidget {
       SizedBox(height: 8 * uiScale),
     ];
 
-    if (thinking.trim().isNotEmpty || thinkingOpen) {
+    // 判断思考是否完成：必须有结束时间才算完成
+    final hasThinking = thinking.trim().isNotEmpty || thinkingOpen;
+    final thinkingCompleted = streamData?.thinkingEndTime != null && thinking.trim().isNotEmpty;
+
+    if (hasThinking) {
       children.add(
-        Container(
-          width: double.infinity,
-          margin: EdgeInsets.only(bottom: 10 * uiScale),
-          padding: EdgeInsets.all(12 * uiScale),
-          decoration: OwuiChatTheme.thinkingDecoration(context),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Thinking',
-                    style: TextStyle(
-                      fontSize: 12 * uiScale,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? const Color(0xFFBFDBFE) : const Color(0xFF1D4ED8),
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                  if (thinkingOpen) ...[
-                    SizedBox(width: 8 * uiScale),
-                    _ThinkingDots(uiScale: uiScale),
-                  ],
-                ],
-              ),
-              SizedBox(height: 8 * uiScale),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: 160 * uiScale, minHeight: 44 * uiScale),
-                child: ScrollConfiguration(
-                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    child: thinking.trim().isEmpty && thinkingOpen
-                        ? Text('...', style: TextStyle(color: OwuiPalette.textSecondary(context)))
-                        : OwuiMarkdown(
-                            text: thinking,
-                            isDark: isDark,
-                            isStreaming: isStreaming,
-                            stableCacheKey: Object.hash(isDark, messageId, 'thinking'),
-                            enableSmoothCodeBlock: enableSmoothCode,
-                            enableSmoothMermaid: enableSmoothMermaid,
-                            enableFadeIn: enableFadeIn,
-                            fadeInDuration: Duration(milliseconds: fadeInDurationMs),
-                            fadeInStartOpacity: fadeInStartOpacity,
-                          ),
-                  ),
-                ),
-              ),
-            ],
+        Padding(
+          padding: EdgeInsets.only(bottom: 10 * uiScale),
+          child: OwuiThinkBubble(
+            thinkingContent: thinking,
+            isThinkingOpen: thinkingOpen,
+            isCompleted: thinkingCompleted,
+            thinkingStartTime: streamData?.thinkingStartTime,
+            thinkingEndTime: streamData?.thinkingEndTime,
+            uiScale: uiScale,
+          ),
+        ),
+      );
+    }
+
+    // 加载指示器：流式输出中但还没有任何内容
+    if (isStreaming && bodyMarkdown.trim().isEmpty && thinking.trim().isEmpty && !thinkingOpen) {
+      children.add(
+        Padding(
+          padding: EdgeInsets.only(bottom: 8 * uiScale),
+          child: IsTypingIndicator(
+            size: 5 * uiScale,
+            color: OwuiPalette.textSecondary(context),
+            spacing: 3 * uiScale,
           ),
         ),
       );
@@ -455,43 +436,407 @@ class _ImageItem extends StatelessWidget {
   }
 }
 
-class _ThinkingDots extends StatefulWidget {
+/// 思考气泡组件
+///
+/// 支持收起/展开。
+/// - 思考中：两行布局（第一行：灯泡+文字+秒数，第二行：摘要），灯泡较大并居中
+/// - 思考完成：单行布局（灯泡+完成文字），灯泡较小
+class OwuiThinkBubble extends StatefulWidget {
+  final String thinkingContent;
+  final bool isThinkingOpen;
+  final bool isCompleted;
+  final DateTime? thinkingStartTime;
+  final DateTime? thinkingEndTime;
   final double uiScale;
 
-  const _ThinkingDots({required this.uiScale});
+  const OwuiThinkBubble({
+    super.key,
+    required this.thinkingContent,
+    required this.isThinkingOpen,
+    required this.isCompleted,
+    this.thinkingStartTime,
+    this.thinkingEndTime,
+    required this.uiScale,
+  });
+
+  /// 提取最新的 **粗体** 摘要
+  static String? extractLatestBoldSummary(String content) {
+    final matches = RegExp(r'\*\*([^*]+)\*\*').allMatches(content);
+    if (matches.isEmpty) return null;
+    final raw = matches.last.group(1)!.trim();
+    return raw.length > 40 ? '${raw.substring(0, 40)}...' : raw;
+  }
 
   @override
-  State<_ThinkingDots> createState() => _ThinkingDotsState();
+  State<OwuiThinkBubble> createState() => _OwuiThinkBubbleState();
 }
 
-class _ThinkingDotsState extends State<_ThinkingDots> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat();
+class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
+    with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+
+  // 使用 ValueNotifier 实现局部更新
+  final ValueNotifier<int> _secondsNotifier = ValueNotifier(0);
+  final ValueNotifier<String?> _summaryNotifier = ValueNotifier(null);
+  Timer? _secondsTimer;
+
+  late AnimationController _breatheController;
+  late Animation<double> _breatheAnimation;
+
+  final ScrollController _scrollController = ScrollController();
+  bool _userScrolledAway = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _breatheController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    _breatheAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _breatheController, curve: Curves.easeInOut),
+    );
+
+    _scrollController.addListener(_onScroll);
+    _syncState();
+    _updateSummary();
+  }
+
+  @override
+  void didUpdateWidget(covariant OwuiThinkBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // 状态变化时同步 timer 和动画
+    if (widget.isCompleted != oldWidget.isCompleted ||
+        widget.isThinkingOpen != oldWidget.isThinkingOpen ||
+        widget.thinkingStartTime != oldWidget.thinkingStartTime ||
+        widget.thinkingEndTime != oldWidget.thinkingEndTime) {
+      _syncState();
+    }
+
+    // 内容变化时更新摘要和自动滚动
+    if (widget.thinkingContent != oldWidget.thinkingContent) {
+      _updateSummary();
+      _autoFollowScroll();
+    }
+  }
+
+  void _syncState() {
+    _updateSeconds();
+
+    // 正在思考的判断：标签打开 OR (有开始时间但没有结束时间)
+    final isThinking = widget.isThinkingOpen ||
+        (widget.thinkingStartTime != null && widget.thinkingEndTime == null);
+    if (isThinking) {
+      if (!_breatheController.isAnimating) {
+        _breatheController.repeat(reverse: true);
+      }
+      _startTimer();
+    } else {
+      _breatheController.stop();
+      _breatheController.value = 1.0;
+      _stopTimer();
+      // 完成时最后更新一次秒数
+      _updateSeconds();
+    }
+  }
+
+  void _startTimer() {
+    if (_secondsTimer != null) return;
+    // 100ms 轮询检测秒数变化，只在变化时更新 notifier（不造成额外重建）
+    _secondsTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!mounted) return;
+      final start = widget.thinkingStartTime;
+      if (start == null) return;
+      final newSeconds = DateTime.now().difference(start).inSeconds;
+      if (_secondsNotifier.value != newSeconds) {
+        _secondsNotifier.value = newSeconds;
+      }
+    });
+  }
+
+  void _stopTimer() {
+    _secondsTimer?.cancel();
+    _secondsTimer = null;
+  }
+
+  void _updateSeconds() {
+    final start = widget.thinkingStartTime;
+    if (start == null) {
+      _secondsNotifier.value = 0;
+      return;
+    }
+    final end = widget.thinkingEndTime ?? DateTime.now();
+    _secondsNotifier.value = end.difference(start).inSeconds;
+  }
+
+  void _updateSummary() {
+    // 正在思考的判断：标签打开 OR (有开始时间但没有结束时间)
+    final isThinking = widget.isThinkingOpen ||
+        (widget.thinkingStartTime != null && widget.thinkingEndTime == null);
+    if (isThinking) {
+      _summaryNotifier.value =
+          OwuiThinkBubble.extractLatestBoldSummary(widget.thinkingContent);
+    } else {
+      _summaryNotifier.value = null;
+    }
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    final atBottom = pos.pixels >= pos.maxScrollExtent - 20;
+    if (atBottom) {
+      _userScrolledAway = false;
+    } else if (pos.userScrollDirection != ScrollDirection.idle) {
+      _userScrolledAway = true;
+    }
+  }
+
+  void _autoFollowScroll() {
+    if (!_expanded || _userScrolledAway) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    });
+  }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _secondsTimer?.cancel();
+    _secondsNotifier.dispose();
+    _summaryNotifier.dispose();
+    _breatheController.dispose();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        final t = _controller.value;
-        final count = (t * 3).floor() + 1;
-        return Text(
-          '.' * count,
-          style: TextStyle(
-            fontSize: 12 * widget.uiScale,
-            fontWeight: FontWeight.w700,
-            color: OwuiPalette.textSecondary(context),
+    final isDark = OwuiPalette.isDark(context);
+    final us = widget.uiScale;
+    // 正在思考的判断：标签打开 OR (有开始时间但没有结束时间)
+    final isThinking = widget.isThinkingOpen ||
+        (widget.thinkingStartTime != null && widget.thinkingEndTime == null);
+
+    final activeIconColor = isDark ? Colors.amber[400]! : Colors.amber[600]!;
+    final inactiveIconColor = OwuiPalette.textSecondary(context);
+    final textColor = OwuiPalette.textSecondary(context);
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.06);
+
+    return GestureDetector(
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: Container(
+        width: double.infinity,
+        decoration: OwuiChatTheme.thinkingDecoration(context),
+        clipBehavior: Clip.hardEdge,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header area
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: 12 * us,
+                vertical: 10 * us,
+              ),
+              child: isThinking
+                  ? _buildThinkingHeader(
+                      us: us,
+                      activeIconColor: activeIconColor,
+                      textColor: textColor,
+                      borderColor: borderColor,
+                    )
+                  : _buildCompletedHeader(
+                      us: us,
+                      inactiveIconColor: inactiveIconColor,
+                      textColor: textColor,
+                    ),
+            ),
+
+            // Expanded content area
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.fastOutSlowIn,
+              alignment: Alignment.topCenter,
+              clipBehavior: Clip.hardEdge,
+              child: _expanded
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Divider(height: 1, color: borderColor),
+                        ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: 160 * us),
+                          child: ScrollConfiguration(
+                            behavior: ScrollConfiguration.of(context)
+                                .copyWith(scrollbars: false),
+                            child: SingleChildScrollView(
+                              controller: _scrollController,
+                              physics: const ClampingScrollPhysics(),
+                              padding: EdgeInsets.all(12 * us),
+                              child: OwuiMarkdown(
+                                text: widget.thinkingContent,
+                                isDark: isDark,
+                                isStreaming: isThinking,
+                                stableCacheKey: null,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 思考中：两行布局
+  /// 第一行：灯泡（大，居中两行）| 正在思考 xx秒 | 箭头
+  /// 第二行：摘要
+  Widget _buildThinkingHeader({
+    required double us,
+    required Color activeIconColor,
+    required Color textColor,
+    required Color borderColor,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // 灯泡 - 较大，呼吸动画
+        AnimatedBuilder(
+          animation: _breatheAnimation,
+          builder: (context, child) => Opacity(
+            opacity: _breatheAnimation.value,
+            child: child,
           ),
-        );
-      },
+          child: Icon(
+            OwuiIcons.lightbulb,
+            size: 20 * us,
+            color: activeIconColor,
+          ),
+        ),
+
+        SizedBox(width: 10 * us),
+
+        // 右侧内容：两行
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 第一行：正在思考 + 秒数
+              Row(
+                children: [
+                  Text(
+                    '正在思考 ',
+                    style: TextStyle(
+                      fontSize: 12 * us,
+                      color: textColor,
+                    ),
+                  ),
+                  // 秒数：局部更新
+                  ValueListenableBuilder<int>(
+                    valueListenable: _secondsNotifier,
+                    builder: (context, seconds, _) => Text(
+                      '$seconds秒',
+                      style: TextStyle(
+                        fontSize: 12 * us,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              SizedBox(height: 4 * us),
+
+              // 第二行：摘要（局部更新）
+              ValueListenableBuilder<String?>(
+                valueListenable: _summaryNotifier,
+                builder: (context, summary, _) => AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: Text(
+                    summary ?? '...',
+                    key: ValueKey(summary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12 * us,
+                      fontStyle: FontStyle.italic,
+                      color: textColor.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        SizedBox(width: 4 * us),
+
+        // 箭头
+        AnimatedRotation(
+          turns: _expanded ? 0.5 : 0.0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.fastOutSlowIn,
+          child: Icon(OwuiIcons.chevronDown, size: 14 * us, color: textColor),
+        ),
+      ],
+    );
+  }
+
+  /// 思考完成：单行布局
+  /// 灯泡（小）| 已完成思考（用时xx秒）| 箭头
+  Widget _buildCompletedHeader({
+    required double us,
+    required Color inactiveIconColor,
+    required Color textColor,
+  }) {
+    return Row(
+      children: [
+        // 灯泡 - 较小，静止
+        Icon(
+          OwuiIcons.lightbulb,
+          size: 14 * us,
+          color: inactiveIconColor,
+        ),
+
+        SizedBox(width: 6 * us),
+
+        // 完成文字 + 秒数
+        Expanded(
+          child: ValueListenableBuilder<int>(
+            valueListenable: _secondsNotifier,
+            builder: (context, seconds, _) => Text(
+              '已完成思考（用时$seconds秒）',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12 * us,
+                color: textColor,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ),
+
+        SizedBox(width: 4 * us),
+
+        // 箭头
+        AnimatedRotation(
+          turns: _expanded ? 0.5 : 0.0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.fastOutSlowIn,
+          child: Icon(OwuiIcons.chevronDown, size: 14 * us, color: textColor),
+        ),
+      ],
     );
   }
 }

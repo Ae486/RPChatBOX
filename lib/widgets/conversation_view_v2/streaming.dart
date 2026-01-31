@@ -312,11 +312,53 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     final oldPlaceholder = _activeAssistantPlaceholder;
     if (streamId == null || oldPlaceholder == null) return;
 
+    final beforeData = _streamManager.getData(streamId);
+    final beforeThinkingLen = beforeData?.thinkingContent.length ?? 0;
+    final beforeThinkingOpen = beforeData?.isThinkingOpen ?? false;
+
     _streamManager.append(streamId, content);
 
     _scheduleStreamingImagePrefetch(streamId);
 
     final useStableFlow = MarkstreamV2StreamingFlags.stableFlowReveal(_conversationSettings);
+
+    if (useStableFlow) {
+      final afterData = _streamManager.getData(streamId);
+      final afterThinkingLen = afterData?.thinkingContent.length ?? 0;
+      final afterThinkingOpen = afterData?.isThinkingOpen ?? false;
+      final thinkingChanged =
+          afterThinkingLen != beforeThinkingLen || afterThinkingOpen != beforeThinkingOpen;
+
+      if (thinkingChanged && (afterData?.content.isEmpty ?? true)) {
+        final oldMeta = oldPlaceholder.metadata ?? const <String, dynamic>{};
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        final lastBump = oldMeta['thinkingBumpTs'] as int?;
+        const bumpThrottleMs = 120;
+
+        if (lastBump == null || (nowMs - lastBump) >= bumpThrottleMs) {
+          final revRaw = oldMeta['thinkingRev'];
+          final rev = (revRaw is int) ? revRaw : int.tryParse('$revRaw') ?? 0;
+          final oldText = (oldPlaceholder is chat.TextMessage) ? oldPlaceholder.text : '';
+
+          final newMsg = chat.TextMessage(
+            id: oldPlaceholder.id,
+            authorId: oldPlaceholder.authorId,
+            createdAt: oldPlaceholder.createdAt,
+            text: oldText,
+            metadata: {
+              ...oldMeta,
+              'streaming': true,
+              'thinkingRev': rev + 1,
+              'thinkingBumpTs': nowMs,
+            },
+          );
+
+          _chatController.updateMessage(oldPlaceholder, newMsg);
+          _activeAssistantPlaceholder = newMsg;
+        }
+      }
+    }
+
     if (!useStableFlow) {
       debugPrint('[streaming] stableFlowReveal=false, 走旧逻辑');
       final state = _streamManager.getState(streamId);
@@ -340,7 +382,14 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     }
 
     _ensureStableFlowRevealTimer();
-    _stableFlowRevealTick();
+
+    // FIX-1 + FIX-2: 解耦生产者与消费者
+    // 删除直接调用 _stableFlowRevealTick()，让 timer 控制渲染节奏
+    // 仅在首次 flush 时立即触发一次，避免用户感知延迟
+    if (!_stableRevealKickstarted) {
+      _stableRevealKickstarted = true;
+      _stableFlowRevealTick();
+    }
   }
 
   void _resetStableFlowRevealForNewStream() {
@@ -353,6 +402,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     _stableRevealTicking = false;
     _stableRevealDisplayedLen = 0;
+    _stableRevealKickstarted = false;  // FIX-2 改进：使用一次性标志
     _pendingFinalize = null;
   }
 
@@ -485,18 +535,33 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       if (desiredMin < displayedLen) desiredMin = displayedLen;
     }
 
-    final keepBuffer = backlog > minBufferChars;
+    // FIX-3 改进: 流结束时绕过 minBufferChars 限制
+    final isFinishing = _pendingFinalize != null;
+    final keepBuffer = !isFinishing && backlog > minBufferChars;
     var desiredMax = keepBuffer ? fullLen - minBufferChars : fullLen;
     if (desiredMax < desiredMin) desiredMax = desiredMin;
 
     var proposed = displayedLen + maxCharsPerTick;
+
+    // FIX-3: 流结束时快进，消除完成延迟
+    // 如果流已结束且 backlog 较小（≤ 3 倍 maxCharsPerTick），一次性显示完
+    if (isFinishing && backlog > 0 && backlog <= maxCharsPerTick * 3) {
+      proposed = fullLen;
+    }
+
     if (proposed < desiredMin) proposed = desiredMin;
     if (proposed > desiredMax) proposed = desiredMax;
+
+    // FIX-4: 流结束时直接绕过稳定性检查，避免死锁
+    // 根因：StablePrefixParser 对未闭合结构返回 stable=""，导致渲染无法前进
+    // 流结束后不会有更多内容来闭合这些结构，继续等待是无意义的
+    final bypassStableCheck = isFinishing;
 
     final safeEnd = _clampStableRevealEnd(
       fullText,
       proposed,
       floor: displayedLen,
+      bypassStableCheck: bypassStableCheck,
     );
 
     if (safeEnd <= displayedLen) {
@@ -542,18 +607,24 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     String text,
     int desiredEnd, {
     required int floor,
+    bool bypassStableCheck = false,  // FIX-4: 流结束时绕过稳定性检查
   }) {
     var end = desiredEnd;
     if (end > text.length) end = text.length;
     if (end <= floor) return floor;
 
-    // Avoid splitting surrogate pairs.
+    // Avoid splitting surrogate pairs (always keep this check for safety).
     if (end > floor) {
       final cu = text.codeUnitAt(end - 1);
       if (cu >= 0xD800 && cu <= 0xDBFF) {
         end -= 1;
         if (end <= floor) return floor;
       }
+    }
+
+    // FIX-4: 流结束时绕过其他稳定性检查，避免死锁
+    if (bypassStableCheck) {
+      return end;
     }
 
     // Avoid ending on a dangling CR in "\r\n".
@@ -753,7 +824,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         } catch (_) {
           // ignore: full sync below is the source of truth
         }
-        _syncConversationToChatController();
+        // FIX-5: 不强制跳转底部，尊重用户的滚动位置
+        _syncConversationToChatController(autoFollow: false);
         _requestAutoFollow(smooth: true);
 
         // 将过期的网络图片 URL 替换为持久化的本地文件 URI
@@ -815,6 +887,17 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       await _streamController.stop();
     } catch (_) {
       // ignore
+    }
+
+    // FIX-6: 截断基于渲染器当前进度，而非 chunk 完整内容
+    // 避免点击截断后瞬间释放大量未渲染内容
+    final streamId = _activeStreamId;
+    if (streamId != null && _stableRevealDisplayedLen > 0) {
+      final fullText = _streamManager.getState(streamId).text;
+      if (_stableRevealDisplayedLen < fullText.length) {
+        // 截断到当前渲染位置
+        _streamManager.truncate(streamId, _stableRevealDisplayedLen);
+      }
     }
 
     // 清空待 finalize 状态，避免重复执行
@@ -881,4 +964,3 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
   }
 
 }
-

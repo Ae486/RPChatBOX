@@ -116,6 +116,9 @@ class StreamManager extends ChangeNotifier {
   void _parseThinkingContent(StreamData data, String chunk) {
     var remaining = chunk;
 
+    // 调试：打印收到的 chunk
+    debugPrint('[StreamManager] chunk received: ${chunk.length} chars, contains <think>: ${chunk.contains('<think>')}');
+
     // 如果之前有未结束的思考段，优先补齐
     if (data.isThinkingOpen) {
       final endTag = data.currentThinkingEndTag ?? '</think>';
@@ -126,8 +129,10 @@ class StreamManager extends ChangeNotifier {
         data.isThinkingOpen = false;
         data.currentThinkingEndTag = null;
         data.thinkingEndTime = DateTime.now();
+        debugPrint('[StreamManager] thinking closed, total: ${data.thinkingContent.length} chars');
       } else {
         data.thinkingContent += remaining;
+        debugPrint('[StreamManager] thinking continues, total: ${data.thinkingContent.length} chars');
         return;
       }
     }
@@ -149,6 +154,8 @@ class StreamManager extends ChangeNotifier {
 
       if (earliestIndex == -1) break;
 
+      debugPrint('[StreamManager] found $detectedStartTag at index $earliestIndex');
+
       final before = remaining.substring(0, earliestIndex);
       final afterStart = earliestIndex + detectedStartTag!.length;
 
@@ -168,10 +175,12 @@ class StreamManager extends ChangeNotifier {
         data.isThinkingOpen = false;
         data.currentThinkingEndTag = null;
         data.thinkingEndTime = DateTime.now();
+        debugPrint('[StreamManager] thinking block complete: ${data.thinkingContent.length} chars');
       } else {
         data.thinkingContent += remaining.substring(afterStart);
         data.isThinkingOpen = true;
         data.currentThinkingEndTag = detectedEndTag;
+        debugPrint('[StreamManager] thinking block open, waiting for $detectedEndTag');
         return;
       }
     }
@@ -272,6 +281,18 @@ class StreamManager extends ChangeNotifier {
     _controllers[streamId]?.close();
     _controllers.remove(streamId);
     notifyListeners();
+  }
+
+  /// 截断流内容到指定长度
+  /// 用于用户点击截断按钮时，基于渲染器当前进度截断
+  void truncate(String streamId, int length) {
+    final data = _streams[streamId];
+    if (data == null) return;
+
+    if (length >= 0 && length < data.content.length) {
+      data.content = data.content.substring(0, length);
+      notifyListeners();
+    }
   }
 
   @override

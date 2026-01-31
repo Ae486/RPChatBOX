@@ -209,7 +209,7 @@ class StreamingTuningParams extends ChangeNotifier {
 
       final maxChars = readInt('revealMaxCharsPerTick');
       if (maxChars != null) {
-        final clamped = maxChars.clamp(20, 500);
+        final clamped = maxChars.clamp(1, 500);
         if (clamped != _revealMaxCharsPerTick) {
           _revealMaxCharsPerTick = clamped;
           changed = true;
@@ -509,7 +509,7 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
             _buildSlider(
               label: '每 Tick 字符',
               value: _params.revealMaxCharsPerTick.toDouble(),
-              min: 20, max: 500,
+              min: 1, max: 500,
               unit: '字符',
               onChanged: (v) => _params.revealMaxCharsPerTick = v.round(),
             ),

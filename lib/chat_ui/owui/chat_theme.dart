@@ -40,10 +40,12 @@ class OwuiChatTheme {
   static BoxDecoration thinkingDecoration(BuildContext context) {
     final isDark = OwuiPalette.isDark(context);
     return BoxDecoration(
-      color: isDark ? const Color(0x331D4ED8) : const Color(0x1A3B82F6),
+      color: isDark ? const Color(0xFF171717) : const Color(0xFFF9F9F9),
       borderRadius: BorderRadius.circular(12),
       border: Border.all(
-        color: isDark ? const Color(0x33493BFF) : const Color(0x33493BFF),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.1)
+            : Colors.black.withValues(alpha: 0.06),
       ),
     );
   }

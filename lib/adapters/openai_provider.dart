@@ -151,6 +151,7 @@ class OpenAIProvider extends AIProvider {
       final responseStream = (response.data as ResponseBody).stream;
       // 🧠 Gemini思考块控制（仅在 ProviderType.gemini 时启用）
       final isGemini = config.type == ProviderType.gemini;
+      debugPrint('🔍 [Provider] type=${config.type}, isGemini=$isGemini');
       bool geminiReasoningOpen = false;      // 是否已输出 <think>
       bool geminiEmittedBody = false;        // 是否已开始输出正文
       await for (var chunk in responseStream
@@ -183,9 +184,17 @@ class OpenAIProvider extends AIProvider {
 
           final choices = parsed['choices'] as List?;
           if (choices != null && choices.isNotEmpty) {
-            final delta = choices[0]['delta'] as Map<String, dynamic>?;
+            final choice = choices[0] as Map<String, dynamic>;
+            final delta = choice['delta'] as Map<String, dynamic>?;
+
+            // 调试：打印完整的 choice 结构
+            debugPrint('🔍 [choice keys] ${choice.keys.toList()}');
+
             if (delta != null) {
-              // 1) 尝试识别不同供应商可能使用的“思考/推理”字段
+              // 调试：打印 delta 的所有 key
+              debugPrint('🔍 [delta keys] ${delta.keys.toList()}');
+
+              // 1) 尝试识别不同供应商可能使用的"思考/推理"字段
               final possibleKeys = [
                 'reasoning',
                 'reasoning_content',
@@ -449,7 +458,21 @@ class OpenAIProvider extends AIProvider {
       'model': model,
       'messages': await _convertMessages(messages, files),
       'stream': stream,
+      // 🆕 启用 reasoning 输出（OpenRouter 等聚合服务需要此参数）
+      'include_reasoning': true,
     };
+
+    // 🆕 Gemini 模型特殊处理：添加 thinking_config
+    final modelLower = model.toLowerCase();
+    if (modelLower.contains('gemini')) {
+      body['extra_body'] = {
+        'google': {
+          'thinking_config': {
+            'include_thoughts': true,
+          },
+        },
+      };
+    }
 
     // 🆕 根据Provider类型添加支持的参数
     switch (config.type) {
