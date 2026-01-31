@@ -31,6 +31,8 @@ class Message {
   String? parentId; // 树结构父节点（可空，兼容旧数据）
   @HiveField(10)
   DateTime? editedAt; // 编辑时间（可空，兼容旧数据）
+  @HiveField(11)
+  int? thinkingDurationSeconds; // 思考耗时（秒），用于 UI 显示
 
   Message({
     required this.id,
@@ -44,6 +46,7 @@ class Message {
     this.attachedFiles,
     this.parentId,
     this.editedAt,
+    this.thinkingDurationSeconds,
   });
 
   Map<String, dynamic> toJson() {
@@ -59,6 +62,7 @@ class Message {
       'attachedFiles': attachedFiles?.map((f) => f.toJson()).toList(),
       'parentId': parentId,
       'editedAt': editedAt?.toIso8601String(),
+      'thinkingDurationSeconds': thinkingDurationSeconds,
     };
   }
 
@@ -80,6 +84,7 @@ class Message {
       editedAt: json['editedAt'] != null
           ? DateTime.tryParse(json['editedAt'] as String)
           : null,
+      thinkingDurationSeconds: json['thinkingDurationSeconds'] as int?,
     );
   }
 }

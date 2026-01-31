@@ -148,6 +148,7 @@ class OwuiAssistantMessage extends StatelessWidget {
         Padding(
           padding: EdgeInsets.only(bottom: 10 * uiScale),
           child: OwuiThinkBubble(
+            key: ValueKey('${messageId}_thinking'),
             thinkingContent: thinking,
             isThinkingOpen: thinkingOpen,
             isCompleted: thinkingCompleted,
@@ -459,6 +460,9 @@ class OwuiThinkBubble extends StatefulWidget {
     required this.uiScale,
   });
 
+  /// 正在思考的判断：标签打开 OR (有开始时间但没有结束时间)
+  bool get isThinking => isThinkingOpen || (thinkingStartTime != null && thinkingEndTime == null);
+
   /// 提取最新的 **粗体** 摘要
   static String? extractLatestBoldSummary(String content) {
     final matches = RegExp(r'\*\*([^*]+)\*\*').allMatches(content);
@@ -524,10 +528,7 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
   void _syncState() {
     _updateSeconds();
 
-    // 正在思考的判断：标签打开 OR (有开始时间但没有结束时间)
-    final isThinking = widget.isThinkingOpen ||
-        (widget.thinkingStartTime != null && widget.thinkingEndTime == null);
-    if (isThinking) {
+    if (widget.isThinking) {
       if (!_breatheController.isAnimating) {
         _breatheController.repeat(reverse: true);
       }
@@ -571,10 +572,7 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
   }
 
   void _updateSummary() {
-    // 正在思考的判断：标签打开 OR (有开始时间但没有结束时间)
-    final isThinking = widget.isThinkingOpen ||
-        (widget.thinkingStartTime != null && widget.thinkingEndTime == null);
-    if (isThinking) {
+    if (widget.isThinking) {
       _summaryNotifier.value =
           OwuiThinkBubble.extractLatestBoldSummary(widget.thinkingContent);
     } else {
@@ -616,9 +614,7 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
   Widget build(BuildContext context) {
     final isDark = OwuiPalette.isDark(context);
     final us = widget.uiScale;
-    // 正在思考的判断：标签打开 OR (有开始时间但没有结束时间)
-    final isThinking = widget.isThinkingOpen ||
-        (widget.thinkingStartTime != null && widget.thinkingEndTime == null);
+    final isThinking = widget.isThinking;
 
     final activeIconColor = isDark ? Colors.amber[400]! : Colors.amber[600]!;
     final inactiveIconColor = OwuiPalette.textSecondary(context);
@@ -707,11 +703,11 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // 灯泡 - 较大，呼吸动画
+        // 灯泡 - 较大，呼吸动画（缩放）
         AnimatedBuilder(
           animation: _breatheAnimation,
-          builder: (context, child) => Opacity(
-            opacity: _breatheAnimation.value,
+          builder: (context, child) => Transform.scale(
+            scale: 0.85 + 0.15 * _breatheAnimation.value,
             child: child,
           ),
           child: Icon(
@@ -729,7 +725,7 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 第一行：正在思考 + 秒数
+              // 第一行：正在思考 + 秒数（正常字体）
               Row(
                 children: [
                   Text(
@@ -739,14 +735,13 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
                       color: textColor,
                     ),
                   ),
-                  // 秒数：局部更新
+                  // 秒数：局部更新，正常字体
                   ValueListenableBuilder<int>(
                     valueListenable: _secondsNotifier,
                     builder: (context, seconds, _) => Text(
                       '$seconds秒',
                       style: TextStyle(
                         fontSize: 12 * us,
-                        fontWeight: FontWeight.w600,
                         color: textColor,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
@@ -757,7 +752,7 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
 
               SizedBox(height: 4 * us),
 
-              // 第二行：摘要（局部更新）
+              // 第二行：摘要（粗体）
               ValueListenableBuilder<String?>(
                 valueListenable: _summaryNotifier,
                 builder: (context, summary, _) => AnimatedSwitcher(
@@ -769,7 +764,7 @@ class _OwuiThinkBubbleState extends State<OwuiThinkBubble>
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12 * us,
-                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w600,
                       color: textColor.withValues(alpha: 0.8),
                     ),
                   ),

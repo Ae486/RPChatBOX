@@ -329,7 +329,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       final thinkingChanged =
           afterThinkingLen != beforeThinkingLen || afterThinkingOpen != beforeThinkingOpen;
 
-      if (thinkingChanged && (afterData?.content.isEmpty ?? true)) {
+      // FIX: 移除 content.isEmpty 门控，thinking 变化时始终触发 thinkingBump
+      // 根因：<think> 和 </think> 经常在同一 flush 中到达，如果 body 也在同一 chunk，
+      // content.isEmpty 为 false 会跳过 thinkingBump，导致 UI 从未显示 thinking 状态
+      if (thinkingChanged) {
         final oldMeta = oldPlaceholder.metadata ?? const <String, dynamic>{};
         final nowMs = DateTime.now().millisecondsSinceEpoch;
         final lastBump = oldMeta['thinkingBumpTs'] as int?;
@@ -355,12 +358,13 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
           _chatController.updateMessage(oldPlaceholder, newMsg);
           _activeAssistantPlaceholder = newMsg;
+          // 思考气泡出现/更新时也需要自动跟随到底部
+          _requestAutoFollow(smooth: true);
         }
       }
     }
 
     if (!useStableFlow) {
-      debugPrint('[streaming] stableFlowReveal=false, 走旧逻辑');
       final state = _streamManager.getState(streamId);
 
       final newMsg = chat.TextMessage(
@@ -522,11 +526,6 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         MarkstreamV2StreamingFlags.revealMinBufferChars(_conversationSettings);
     final maxLagChars =
         MarkstreamV2StreamingFlags.revealMaxLagChars(_conversationSettings);
-
-    // 调试日志：首次 tick 时输出参数
-    if (displayedLen == 0) {
-      debugPrint('[streaming] tick 参数: maxChars=$maxCharsPerTick, minBuffer=$minBufferChars, maxLag=$maxLagChars');
-    }
 
     final needCatchUpNow = maxLagChars > 0 && backlog > maxLagChars;
     var desiredMin = displayedLen;
@@ -787,6 +786,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
       if (finalContent.trim().isNotEmpty) {
         final outputTokens = TokenCounter.estimateTokens(finalContent);
+        final thinkingDuration = data?.thinkingDurationSeconds ?? 0;
         final assistantMessage = app.Message(
           id: placeholder.id,
           content: finalContent,
@@ -796,6 +796,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           outputTokens: outputTokens,
           modelName: modelName,
           providerName: providerName,
+          thinkingDurationSeconds: thinkingDuration > 0 ? thinkingDuration : null,
         );
 
         final thread = _getThread(rebuildFromMessagesIfMismatch: false);
@@ -839,6 +840,11 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           // ignore
         }
         _syncConversationToChatController();
+      }
+      // 保存思考秒数到缓存，防止 removeStream 后丢失
+      final thinkingDuration = data?.thinkingDurationSeconds ?? 0;
+      if (thinkingDuration > 0) {
+        _thinkingDurationCache[streamId] = thinkingDuration;
       }
       _streamManager.removeStream(streamId);
     }

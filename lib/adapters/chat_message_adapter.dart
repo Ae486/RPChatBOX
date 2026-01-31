@@ -82,6 +82,7 @@ class ChatMessageAdapter {
           'inputTokens': msg.inputTokens,
           'modelName': msg.modelName,
           'providerName': msg.providerName,
+          'thinkingDurationSeconds': msg.thinkingDurationSeconds,
         },
       );
     }

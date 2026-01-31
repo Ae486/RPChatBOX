@@ -92,6 +92,9 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   ChunkBuffer? _chunkBuffer;
   final StreamManager _streamManager = StreamManager();
 
+  /// 思考时间缓存：流 finalize 后保留秒数，防止 removeStream 后丢失
+  final Map<String, int> _thinkingDurationCache = {};
+
   bool _isLoading = false;
   bool _attachmentBarVisible = true;
   ai.AIProvider? _currentProvider;
@@ -235,6 +238,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     _flushPersistThreadNow();
     _persistThreadTimer?.cancel();
     _persistThreadTimer = null;
+    _thinkingDurationCache.clear();
     _streamController.dispose();
     _messageController.dispose();
     _chatController.dispose();

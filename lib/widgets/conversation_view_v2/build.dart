@@ -117,6 +117,33 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
               final modelName = metadata['modelName'] as String?;
               final providerName = metadata['providerName'] as String?;
 
+              // FIX: 尝试从 StreamManager 获取真实的 thinking 时间数据
+              // 优先级：StreamManager > 内存缓存 > 持久化字段 > createdAt 回退
+              final realStreamData = _streamManager.getData(message.id);
+              final cachedDuration = _thinkingDurationCache[message.id];
+              final persistedDuration = metadata['thinkingDurationSeconds'] as int?;
+
+              DateTime? thinkingStartTime;
+              DateTime? thinkingEndTime;
+
+              if (realStreamData?.thinkingStartTime != null) {
+                // StreamManager 中有真实数据（流式进行中）
+                thinkingStartTime = realStreamData!.thinkingStartTime;
+                thinkingEndTime = realStreamData.thinkingEndTime;
+              } else if (cachedDuration != null && cachedDuration > 0 && thinking.isNotEmpty) {
+                // 内存缓存（刚 finalize）
+                thinkingEndTime = message.createdAt;
+                thinkingStartTime = message.createdAt?.subtract(Duration(seconds: cachedDuration));
+              } else if (persistedDuration != null && persistedDuration > 0 && thinking.isNotEmpty) {
+                // 持久化字段（历史消息）
+                thinkingEndTime = message.createdAt;
+                thinkingStartTime = message.createdAt?.subtract(Duration(seconds: persistedDuration));
+              } else if (thinking.isNotEmpty) {
+                // 兜底回退（旧数据无时长记录）
+                thinkingStartTime = message.createdAt;
+                thinkingEndTime = message.createdAt;
+              }
+
               // 解析图片数据
               final imagesRaw = metadata['images'] as List?;
               final images = imagesRaw
@@ -155,9 +182,8 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                         content: body,
                         thinkingContent: thinking,
                         isThinkingOpen: false,
-                        // 历史消息：用 createdAt 作为思考结束时间
-                        thinkingStartTime: thinking.isNotEmpty ? message.createdAt : null,
-                        thinkingEndTime: thinking.isNotEmpty ? message.createdAt : null,
+                        thinkingStartTime: thinkingStartTime,
+                        thinkingEndTime: thinkingEndTime,
                       ),
                       images: images,
                     ),

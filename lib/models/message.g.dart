@@ -28,13 +28,14 @@ class MessageAdapter extends TypeAdapter<Message> {
       attachedFiles: (fields[8] as List?)?.cast<AttachedFileSnapshot>(),
       parentId: fields[9] as String?,
       editedAt: fields[10] as DateTime?,
+      thinkingDurationSeconds: fields[11] as int?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Message obj) {
     writer
-      ..writeByte(11)
+      ..writeByte(12)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -56,7 +57,9 @@ class MessageAdapter extends TypeAdapter<Message> {
       ..writeByte(9)
       ..write(obj.parentId)
       ..writeByte(10)
-      ..write(obj.editedAt);
+      ..write(obj.editedAt)
+      ..writeByte(11)
+      ..write(obj.thinkingDurationSeconds);
   }
 
   @override
