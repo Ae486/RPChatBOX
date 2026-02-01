@@ -53,8 +53,8 @@ class ConversationSettings {
       enableNetwork: json['enableNetwork'] as bool? ?? false,
       enableExperimentalStreamingMarkdown: json['enableExperimentalStreamingMarkdown'] as bool? ?? false,
       contextLength: json['contextLength'] as int? ?? 10,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt'] as String) : null,
+      updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt'] as String) : null,
     );
   }
 

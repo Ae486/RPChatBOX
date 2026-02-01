@@ -2,6 +2,7 @@
 /// OUTPUT: SettingsPage - 设置与工具入口（外观/模型管理/缓存清理/调试入口）
 /// POS: UI 层 / Pages - 设置页
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
@@ -147,23 +148,24 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           SizedBox(height: context.owuiSpacing.lg),
 
-          // 键盘动画测试（调试入口）
-          OwuiCard(
-            child: ListTile(
-              leading: const Icon(OwuiIcons.play, size: 32),
-              title: const Text('键盘动画测试'),
-              subtitle: const Text('验证 flutter_chat_ui 键盘滚动行为'),
-              trailing: const Icon(OwuiIcons.chevronRight),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const KeyboardTestPage(),
-                  ),
-                );
-              },
+          // 键盘动画测试（调试入口，仅 debug 模式可见）
+          if (kDebugMode)
+            OwuiCard(
+              child: ListTile(
+                leading: const Icon(OwuiIcons.play, size: 32),
+                title: const Text('键盘动画测试'),
+                subtitle: const Text('验证 flutter_chat_ui 键盘滚动行为'),
+                trailing: const Icon(OwuiIcons.chevronRight),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const KeyboardTestPage(),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
           SizedBox(height: context.owuiSpacing.lg),
 
           // 关于信息

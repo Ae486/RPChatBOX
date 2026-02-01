@@ -39,7 +39,7 @@ void main() async {
     try {
       await migrationService.migrate();
     } catch (e) {
-      print('⚠️ 数据迁移失败，将继续使用旧数据: $e');
+      debugPrint('⚠️ 数据迁移失败，将继续使用旧数据: $e');
     }
   }
 

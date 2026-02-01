@@ -1,0 +1,70 @@
+## COMPREHENSIVE CODEX REVIEW REQUEST - Folders 13, 14, 15
+
+### REQUEST 1: Flutter Chat UI Fork (13-flutter_chat_ui)
+
+**Code Volume**: ~4024 lines across 20 files
+
+**Preliminary Findings**:
+- Large codebase requiring upstream sync tracking
+- Key files: chat.dart, composer.dart, chat_message.dart, chat_animated_list.dart
+- No FORK.md / UPSTREAM.md documentation found
+
+**Codex Task**: Quick strategic assessment
+1. Identify all custom modifications (search for "FORK:" comments)
+2. List breaking API changes from upstream
+3. Assess upstream merge risk (rebaseable vs entangled)
+4. Flag highest-risk files (>500 lines + major rewrites)
+5. Check architecture: state management pattern, Provider integration
+
+**Scope**: Analysis only, provide file paths + line ranges for findings
+
+---
+
+### REQUEST 2: Test Suite (14-tests)
+
+**Code Volume**: ~6220 lines across 28 files in test/ folder structure
+
+**Preliminary Findings**:
+- Three test categories: unit_test (~1500), widget_test (~2000), golden/integration (~2720)
+- From Phase 1-2 audits: StablePrefixParser, Provider initialization, lifecycle bugs have NO test coverage
+- Unknown: test coverage %, mock strategy, golden test maintenance cost
+
+**Codex Task**: Coverage gap analysis
+1. Scan test/ for unit tests of: StablePrefixParser.split(), inferCodeLanguage(), ModelCapabilityPresets
+2. Check Provider tests (ChatSessionProvider async initialization bug from Phase 2)
+3. Check lifecycle tests (setState after dispose scenario - Phase 2 found 4 instances)
+4. Check Mock pattern: type safety, reusability
+5. Estimate overall test coverage % and critical gaps
+
+**Scope**: Analysis only, no modifications. Provide specific test file paths or "NOT FOUND" for uncovered components
+
+---
+
+### REQUEST 3: Root Files / App Initialization (15-root-files)
+
+**Code Volume**: lib/main.dart (376 lines) + pubspec.yaml (~150 lines)
+
+**Preliminary Findings**:
+- Initialization order: WidgetsFlutterBinding → SharedPreferences → DataMigration → ModelServiceManager → runApp
+- Global state: late globalModelServiceManager (potential uninitialized access risk)
+- Provider setup: ChatSessionProvider(HiveConversationService()) - no use of globalModelServiceManager
+- Data migration catch block: only print(), not logged for production
+- Theme system: OwuiTokens integration complete, but ColorScheme.fromSeed hardcoded seedColor
+
+**Codex Task**: Startup safety assessment
+1. Analyze initialization sequence: are there await gaps or missing error handling?
+2. Check globalModelServiceManager usage: is it actually used? If deprecated, should remove?
+3. Assess data migration failure scenarios: what happens if migration fails? Fallback adequate?
+4. Check ModelServiceManager.initialize() timeout risk
+5. Verify provider dependencies: should ChatSessionProvider use globalModelServiceManager or HiveConversationService?
+
+**Scope**: Analysis only. Provide specific risk assessment with line references
+
+---
+
+**Common Instructions for All Three**:
+- English technical review format
+- Specific file paths and line ranges for findings
+- No code modifications (analysis only)
+- Focus on: architectural issues, initialization risks, test coverage gaps, breaking changes
+- Return quick assessment suitable for triage prioritization

@@ -85,11 +85,10 @@ class RolePresets {
 
   /// 根据 ID 获取预设
   static RolePreset? getById(String id) {
-    try {
-      return presets.firstWhere((preset) => preset.id == id);
-    } catch (e) {
-      return null;
+    for (final preset in presets) {
+      if (preset.id == id) return preset;
     }
+    return null;
   }
 }
 

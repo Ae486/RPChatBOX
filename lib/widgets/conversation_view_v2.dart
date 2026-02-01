@@ -28,6 +28,7 @@ import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../chat_ui/owui/palette.dart';
 
 import '../controllers/stream_output_controller.dart';
+import '../controllers/thread_manager.dart';
 import '../main.dart' show globalModelServiceManager;
 import '../models/attached_file.dart';
 import '../models/chat_settings.dart';
@@ -105,6 +106,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
   String? _pendingScrollToMessageId;
   int _pendingScrollToMessageAttempts = 0;
+  static const int _maxScrollToMessageAttempts = 30;
   String? _highlightedMessageId;
   int _highlightNonce = 0;
   Timer? _clearHighlightTimer;
@@ -112,9 +114,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   String? _activeStreamId;
   chat.Message? _activeAssistantPlaceholder;
   int? _activePromptTokensEstimate;
-  ConversationThread? _thread;
-  Timer? _persistThreadTimer;
-  String? _lastPersistedThreadJson;
+  late ThreadManager _threadManager;
 
   final Map<String, chat.Message> _chatMessageCache = <String, chat.Message>{};
   final Map<String, int> _chatMessageCacheFingerprints = <String, int>{};
@@ -157,15 +157,16 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
   /// 平滑滚动到指定消息，但不触发高亮动画
   /// 用于删除操作等需要视觉简洁的场景
-  void scrollToMessageSilently(String messageId) {
+  void scrollToMessageSilently(String messageId, {int attempt = 0}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _isDisposed) return;
 
       final idx = _chatController.messages.indexWhere((m) => m.id == messageId);
       if (idx < 0) {
+        if (attempt >= _maxScrollToMessageAttempts) return;
         Future.delayed(const Duration(milliseconds: 16), () {
           if (!mounted || _isDisposed) return;
-          scrollToMessageSilently(messageId);
+          scrollToMessageSilently(messageId, attempt: attempt + 1);
         });
         return;
       }
@@ -190,6 +191,12 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
     // Start loading persisted tuning params as early as possible.
     unawaited(StreamingTuningParams.instance.ensureLoaded());
+
+    _threadManager = ThreadManager(
+      getConversation: () => widget.conversation,
+      isDisposed: () => _isDisposed,
+      onConversationUpdated: () => widget.onConversationUpdated(),
+    );
 
     _conversationSettings = globalModelServiceManager.getConversationSettings(
       widget.conversation.id,
@@ -234,10 +241,8 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     _streamImagePrefetchTimer = null;
     _pendingFinalize = null;
     _clearHighlightTimer?.cancel();
-    // Flush pending thread changes before cancelling timer to prevent data loss.
-    _flushPersistThreadNow();
-    _persistThreadTimer?.cancel();
-    _persistThreadTimer = null;
+    // Flush pending thread changes before disposing to prevent data loss.
+    _threadManager.dispose();
     _thinkingDurationCache.clear();
     _streamController.dispose();
     _messageController.dispose();
@@ -266,11 +271,10 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       _imagePersistenceSweptConversationId = null;
       _persistingMarkdownMessageIds.clear();
 
-      _flushPersistThreadNow();
+      _threadManager.reset();
       _conversationSettings = globalModelServiceManager.getConversationSettings(
         widget.conversation.id,
       );
-      _thread = null;
 
       _chatMessageCache.clear();
       _chatMessageCacheFingerprints.clear();
@@ -282,117 +286,23 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     }
   }
 
+  // Thread management delegates to ThreadManager
   ConversationThread _getThread({bool rebuildFromMessagesIfMismatch = true}) {
-    final conversation = widget.conversation;
-
-    if (_thread == null || _thread!.conversationId != conversation.id) {
-      _thread = _loadThreadFromConversation(conversation);
-    }
-
-    if (rebuildFromMessagesIfMismatch) {
-      final raw = (conversation.threadJson ?? '').trim();
-      final hasUsableThreadJson = raw.isNotEmpty && _thread!.nodes.isNotEmpty;
-
-      final hasBranches = _thread!.nodes.values.any((n) => n.children.length > 1);
-      final messages = conversation.messages;
-      final messagesLastId = messages.isEmpty ? '' : messages.last.id;
-
-      // Phase 1 (tree as source-of-truth):
-      // - If there is NO usable threadJson yet, build a linear thread from messages.
-      // - If the current thread is still linear (no branches), keep it synced with
-      //   the legacy linear list to avoid breaking existing delete/truncate paths.
-      // - Once branches exist, never rebuild from `conversation.messages`.
-      final shouldRebuildFromMessages = !hasUsableThreadJson ||
-          (!hasBranches &&
-              (_thread!.nodes.length != messages.length ||
-                  _thread!.activeLeafId != messagesLastId));
-
-      if (shouldRebuildFromMessages) {
-        _thread = ConversationThread.fromLinearMessages(conversation.id, messages);
-        _persistThreadNoSave(_thread!);
-      }
-    }
-
-    return _thread!;
-  }
-
-  ConversationThread _loadThreadFromConversation(Conversation conversation) {
-    final raw = (conversation.threadJson ?? '').trim();
-    if (raw.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map<String, dynamic>) {
-          _lastPersistedThreadJson = raw;
-          return ConversationThread.fromJson(decoded);
-        }
-        if (decoded is Map) {
-          _lastPersistedThreadJson = raw;
-          return ConversationThread.fromJson(decoded.cast<String, dynamic>());
-        }
-      } catch (_) {
-        // Fall back to linear messages.
-      }
-    }
-
-    return ConversationThread.fromLinearMessages(
-      conversation.id,
-      conversation.messages,
-    );
+    return _threadManager.getThread(rebuildFromMessagesIfMismatch: rebuildFromMessagesIfMismatch);
   }
 
   void _persistThreadNoSave(ConversationThread thread) {
-    final encoded = jsonEncode(thread.toJson());
-    _lastPersistedThreadJson = encoded;
-    widget.conversation.threadJson = encoded;
-    widget.conversation.activeLeafId = thread.activeLeafId;
+    _threadManager.persistNoSave(thread);
   }
 
   void _schedulePersistThread({
     Duration delay = const Duration(milliseconds: 350),
   }) {
-    if (_isDisposed) return;
-    _persistThreadTimer?.cancel();
-    _persistThreadTimer = Timer(delay, () {
-      if (_isDisposed) return;
-      final thread = _thread;
-      if (thread == null) return;
-
-      final encoded = jsonEncode(thread.toJson());
-      if (encoded == _lastPersistedThreadJson) return;
-
-      _lastPersistedThreadJson = encoded;
-      widget.conversation.threadJson = encoded;
-      widget.conversation.activeLeafId = thread.activeLeafId;
-      widget.onConversationUpdated();
-    });
-  }
-
-  void _flushPersistThreadNow() {
-    if (_isDisposed) return;
-
-    _persistThreadTimer?.cancel();
-    _persistThreadTimer = null;
-
-    final thread = _thread;
-    if (thread == null) return;
-
-    final encoded = jsonEncode(thread.toJson());
-    if (encoded == _lastPersistedThreadJson) return;
-
-    _lastPersistedThreadJson = encoded;
-    widget.conversation.threadJson = encoded;
-    widget.conversation.activeLeafId = thread.activeLeafId;
-    if (mounted && !_isDisposed) {
-      widget.onConversationUpdated();
-    }
+    _threadManager.schedulePersist(delay: delay);
   }
 
   void _syncConversationMessagesSnapshotFromThread(ConversationThread thread) {
-    final chain = buildActiveMessageChain(thread);
-    final messages = widget.conversation.messages;
-    messages
-      ..clear()
-      ..addAll(chain);
+    _threadManager.syncMessagesSnapshot(thread);
   }
 
   void _scheduleImagePersistenceSweep({
@@ -538,13 +448,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     String userMessageId,
     ConversationThread thread,
   ) {
-    final node = thread.nodes[userMessageId];
-    if (node == null) return const <String>[];
-    if (!node.message.isUser) return const <String>[];
-
-    // 返回所有子节点（允许混合 user 和 assistant 类型）
-    // 这样删除中间节点后，提升的不同类型子节点仍然可以切换
-    return List<String>.from(node.children);
+    return _threadManager.getAssistantVariantIds(userMessageId, thread);
   }
 
   Future<void> _switchAssistantVariant(String userMessageId, int delta) async {
@@ -554,25 +458,10 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       return;
     }
 
-    final thread = _getThread(rebuildFromMessagesIfMismatch: false);
-    final variants = _assistantVariantIdsForUser(userMessageId, thread);
-    if (variants.length <= 1) return;
+    final newVariantId = _threadManager.switchVariant(userMessageId, delta);
+    if (newVariantId == null) return;
 
-    final selected = thread.selectedChild[userMessageId];
-    var index = selected == null ? -1 : variants.indexOf(selected);
-    if (index < 0) index = variants.length - 1;
-
-    final rawNext = index + delta;
-    final nextIndex = ((rawNext % variants.length) + variants.length) % variants.length;
-
-    thread.selectedChild[userMessageId] = variants[nextIndex];
-    thread.normalize();
-
-    _syncConversationMessagesSnapshotFromThread(thread);
-    _persistThreadNoSave(thread);
-    _schedulePersistThread(delay: const Duration(milliseconds: 220));
-
-    _syncConversationToChatController();
+    _syncConversationToChatController(autoFollow: false);
     scrollToMessage(userMessageId);
   }
 

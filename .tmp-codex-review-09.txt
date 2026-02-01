@@ -1,0 +1,19 @@
+Please review code quality for lib/utils/ - utility functions and helpers.
+
+## Context
+4 files, 561 lines total:
+- api_url_helper.dart (99 lines) - API URL cleaning and normalization
+- chunk_buffer.dart (63 lines) - Streaming data buffering
+- global_toast.dart (262 lines) - Global toast notifications (OWUI style)
+- token_counter.dart (137 lines) - Token counting and cost estimation
+
+All files are small, focused utility functions. No complex logic observed.
+
+## Questions
+
+1. Any null safety / input validation issues in URL/token parsing?
+2. Are singleton/global state patterns appropriate here, or should these be more injectable?
+3. Any performance or memory concerns in chunk_buffer streaming?
+4. Is token counting accuracy acceptable for cost estimation display?
+
+Please review and provide findings.

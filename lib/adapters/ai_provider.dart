@@ -73,7 +73,8 @@ abstract class AIProvider {
   String? validateConfig() {
     if (config.apiUrl.isEmpty) return 'API地址不能为空';
     if (config.apiKey.isEmpty) return 'API密钥不能为空';
-    if (!Uri.tryParse(config.apiUrl)!.isAbsolute) return 'API地址格式不正确';
+    final uri = Uri.tryParse(config.apiUrl);
+    if (uri == null || !uri.isAbsolute) return 'API地址格式不正确';
     return null;
   }
 

@@ -1,0 +1,47 @@
+Please review code quality analysis for lib/chat_ui/ - UI components and theme system.
+
+## Context
+~7900 lines total, includes:
+- owui/ subdirectory (~4000 lines) - OpenWebUI-style theme components
+  - assistant_message.dart (600 lines) - Assistant message rendering
+  - markdown.dart (500 lines) - Markdown rendering with code/mermaid/tables
+  - code_block.dart (200 lines) - Syntax-highlighted code blocks
+  - mermaid_block.dart (250 lines) - Diagram rendering
+  - composer/ (500 lines) - V2 input area
+  - components/ (600 lines) - UI component shells
+  - Other core files (palette, tokens, icons, chat_theme)
+- packages/flutter_chat_ui/ (~2000 lines) - Forked chat UI framework from Flyer Chat
+- Supporting files
+
+## Key Findings
+
+### Warnings
+1. **W-001**: 6 catch(_) blocks with silent exception handling
+   - markdown.dart:1045, 1055 (base64, file ops)
+   - mermaid_block.dart:96 (file + launchUrl)
+   - assistant_message.dart:316, 423 (image decode)
+   - code_block.dart:337 (syntax highlight)
+
+2. **W-002**: assistant_message.dart (600 lines) approaches complexity threshold
+   - Multiple responsibilities: Markdown, Thinking bubble, streaming state, images
+
+3. **W-003**: markdown.dart (500 lines) handles multiple markdown syntax types
+   - Code blocks, Mermaid, tables, LaTeX - all in single file
+
+4. **W-004**: Flutter_chat_ui is a fork - upstream sync and merge strategy unclear
+
+5. **W-005**: Error widgets for image failures (errorBuilder) - no logging
+
+## Questions
+
+1. Should exception handling in markdown parsing be more explicit (try/catch with logging)?
+
+2. For the image decode failures (assistant_message:423, code_block:337), should these log errors or silently degrade?
+
+3. The flutter_chat_ui fork - is there a documented merge strategy with upstream?
+
+4. Should assistant_message.dart split into sub-components to reduce file size?
+
+5. Any critical rendering paths that need extra caution (scrolling perf, memory)?
+
+Please review and provide findings.

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'conversation_service.dart';
 import 'hive_conversation_service.dart';
@@ -27,7 +28,7 @@ class DataMigrationService {
   
   /// 执行迁移
   Future<void> migrate() async {
-    print('🔄 开始数据迁移: SharedPreferences -> Hive');
+    debugPrint('开始数据迁移: SharedPreferences -> Hive');
     
     try {
       // 从 SharedPreferences 加载数据
@@ -35,7 +36,7 @@ class DataMigrationService {
       final conversations = await oldService.loadConversations();
       final currentConversationId = await oldService.loadCurrentConversationId();
       
-      print('📦 从 SharedPreferences 读取到 ${conversations.length} 个会话');
+      debugPrint('从 SharedPreferences 读取到 ${conversations.length} 个会话');
       
       // 初始化并保存到 Hive
       final newService = HiveConversationService();
@@ -44,24 +45,24 @@ class DataMigrationService {
       // 迁移会话数据
       if (conversations.isNotEmpty) {
         await newService.saveConversations(conversations);
-        print('✅ 成功迁移 ${conversations.length} 个会话到 Hive');
+        debugPrint('成功迁移 ${conversations.length} 个会话到 Hive');
       }
       
       // 迁移当前会话 ID
       if (currentConversationId != null) {
         await newService.saveCurrentConversationId(currentConversationId);
-        print('✅ 成功迁移当前会话 ID: $currentConversationId');
+        debugPrint('成功迁移当前会话 ID: $currentConversationId');
       }
       
       // 标记迁移完成
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_migrationCompleteKey, true);
       
-      print('✨ 数据迁移完成！');
+      debugPrint('数据迁移完成');
       
     } catch (e, stackTrace) {
-      print('❌ 数据迁移失败: $e');
-      print('Stack trace: $stackTrace');
+      debugPrint('数据迁移失败: $e');
+      debugPrint('Stack trace: $stackTrace');
       rethrow;
     }
   }
@@ -70,6 +71,6 @@ class DataMigrationService {
   Future<void> resetMigrationStatus() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_migrationCompleteKey);
-    print('🔄 已重置迁移状态');
+    debugPrint('已重置迁移状态');
   }
 }

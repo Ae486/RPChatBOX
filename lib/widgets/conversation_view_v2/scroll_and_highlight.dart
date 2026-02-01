@@ -93,7 +93,7 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
           idx,
           duration: const Duration(milliseconds: 260),
           curve: Curves.easeOutCubic,
-          alignment: 0.2,
+          alignment: 0.0,
         );
       } catch (_) {
         // Ignore: chat list may not be attached yet; next frame/sync will retry.

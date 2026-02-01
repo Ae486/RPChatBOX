@@ -50,8 +50,8 @@ class ModelConfig {
           : ModelParameters(),
       isEnabled: json['isEnabled'] as bool? ?? true,
       description: json['description'] as String?,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt'] as String) : null,
+      updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt'] as String) : null,
     );
   }
 

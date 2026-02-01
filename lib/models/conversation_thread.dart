@@ -1,7 +1,24 @@
 /// INPUT: ConversationThread tree + Message nodes
 /// OUTPUT: Active-chain projection + branch selection state
 /// POS: Models / Base Chat / Thread
+import 'package:flutter/foundation.dart';
+
 import 'message.dart';
+
+/// Soft limits for tree size to prevent performance degradation.
+/// These are warnings only - operations are not blocked.
+class ThreadLimits {
+  /// Maximum recommended node count before warning.
+  static const int maxNodes = 2000;
+
+  /// Maximum recommended tree depth before warning.
+  static const int maxDepth = 500;
+
+  /// Maximum recommended children per node before warning.
+  static const int maxChildrenPerNode = 100;
+
+  const ThreadLimits._();
+}
 
 class ConversationThread {
   final String conversationId;
@@ -556,6 +573,102 @@ class ConversationThread {
       rootId = roots.first;
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Soft limits detection (warnings only, does not block operations)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Calculates the maximum depth of the tree (root = depth 1).
+  int calculateDepth() {
+    if (nodes.isEmpty || rootId.isEmpty) return 0;
+
+    int maxDepth = 0;
+    final visited = <String>{};
+
+    void dfs(String nodeId, int depth) {
+      if (!visited.add(nodeId)) return; // Cycle protection
+      final node = nodes[nodeId];
+      if (node == null) return;
+
+      if (depth > maxDepth) maxDepth = depth;
+
+      for (final childId in node.children) {
+        dfs(childId, depth + 1);
+      }
+    }
+
+    dfs(rootId, 1);
+    return maxDepth;
+  }
+
+  /// Finds the maximum number of children for any single node.
+  int calculateMaxChildren() {
+    if (nodes.isEmpty) return 0;
+    int max = 0;
+    for (final node in nodes.values) {
+      if (node.children.length > max) {
+        max = node.children.length;
+      }
+    }
+    return max;
+  }
+
+  /// Checks if the tree exceeds any soft limits and logs warnings.
+  /// Returns a [ThreadLimitStatus] with details.
+  ThreadLimitStatus checkLimits() {
+    final nodeCount = nodes.length;
+    final depth = calculateDepth();
+    final maxChildren = calculateMaxChildren();
+
+    final nodeCountExceeded = nodeCount > ThreadLimits.maxNodes;
+    final depthExceeded = depth > ThreadLimits.maxDepth;
+    final childrenExceeded = maxChildren > ThreadLimits.maxChildrenPerNode;
+
+    if (nodeCountExceeded || depthExceeded || childrenExceeded) {
+      final warnings = <String>[];
+      if (nodeCountExceeded) {
+        warnings.add('nodes=$nodeCount > ${ThreadLimits.maxNodes}');
+      }
+      if (depthExceeded) {
+        warnings.add('depth=$depth > ${ThreadLimits.maxDepth}');
+      }
+      if (childrenExceeded) {
+        warnings.add('maxChildren=$maxChildren > ${ThreadLimits.maxChildrenPerNode}');
+      }
+      debugPrint('[ConversationThread] Soft limit warning: ${warnings.join(', ')}');
+    }
+
+    return ThreadLimitStatus(
+      nodeCount: nodeCount,
+      depth: depth,
+      maxChildren: maxChildren,
+      nodeCountExceeded: nodeCountExceeded,
+      depthExceeded: depthExceeded,
+      childrenExceeded: childrenExceeded,
+    );
+  }
+}
+
+/// Status of tree limit checks.
+class ThreadLimitStatus {
+  final int nodeCount;
+  final int depth;
+  final int maxChildren;
+  final bool nodeCountExceeded;
+  final bool depthExceeded;
+  final bool childrenExceeded;
+
+  const ThreadLimitStatus({
+    required this.nodeCount,
+    required this.depth,
+    required this.maxChildren,
+    required this.nodeCountExceeded,
+    required this.depthExceeded,
+    required this.childrenExceeded,
+  });
+
+  /// Returns true if any limit is exceeded.
+  bool get anyExceeded => nodeCountExceeded || depthExceeded || childrenExceeded;
 }
 
 

@@ -80,6 +80,8 @@
 | M1 Context Compiler | ✅ 已完成 | 2026-01-18 |
 | M2 Consistency Gate | ✅ 已完成 | 2026-01-19 |
 | M3 Worker Isolate | ✅ 已完成 | 2026-01-20 |
+| M4 Agent Integration | ✅ 已完成 | 2026-02-01 |
+| M4.5 Performance & UX | ✅ 已完成 | 2026-02-01 |
 
 ---
 

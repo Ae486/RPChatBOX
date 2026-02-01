@@ -26,7 +26,7 @@ class OwuiMermaidBlock extends StatefulWidget {
 
   /// P0-4: 流式阶段启用固定高度占位，避免 WebView 抖动/跳变。
   ///
-  /// MUST default to false so existing behavior is unaffected.
+  /// Defaults to true for stable streaming experience.
   final bool enableStablePlaceholder;
 
   /// P0-4: 固定占位高度（单位 dp），默认 360。

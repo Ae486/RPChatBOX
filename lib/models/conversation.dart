@@ -86,6 +86,12 @@ class Conversation {
   void clearMessages() {
     messages.clear();
     messageIds.clear();
+    threadJson = null;
+    activeLeafId = null;
+    summary = null;
+    summaryRangeStartId = null;
+    summaryRangeEndId = null;
+    summaryUpdatedAt = null;
     updatedAt = DateTime.now();
   }
 

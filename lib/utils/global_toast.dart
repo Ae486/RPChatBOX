@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
@@ -10,6 +12,7 @@ import '../chat_ui/owui/owui_tokens_ext.dart';
 class GlobalToast {
   static OverlayEntry? _currentEntry;
   static bool _isShowing = false;
+  static Timer? _autoDismissTimer;
 
   static void loading(BuildContext context, {required String message}) =>
       showLoading(context, message);
@@ -79,6 +82,8 @@ class GlobalToast {
   }
 
   static void hide() {
+    _autoDismissTimer?.cancel();
+    _autoDismissTimer = null;
     if (_currentEntry == null || !_isShowing) return;
     _currentEntry!.remove();
     _currentEntry = null;
@@ -105,7 +110,8 @@ class GlobalToast {
     Overlay.of(context).insert(_currentEntry!);
 
     if (duration != null) {
-      Future.delayed(duration, hide);
+      _autoDismissTimer?.cancel();
+      _autoDismissTimer = Timer(duration, hide);
     }
   }
 }

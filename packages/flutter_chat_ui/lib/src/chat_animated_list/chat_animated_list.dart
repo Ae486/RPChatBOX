@@ -904,41 +904,48 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
         // Show loading indicator.
         context.read<LoadMoreNotifier>().setLoadingOlder(true);
 
-        // Load older messages.
-        await widget.onEndReached!();
+        try {
+          // Load older messages.
+          await widget.onEndReached!();
 
-        // Ensure mounted after await, as onEndReached might unmount the widget
-        if (!mounted) return;
+          // Ensure mounted after await, as onEndReached might unmount the widget
+          if (!mounted) return;
 
-        // Wait for the next frame for UI updates.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!_scrollController.hasClients || !mounted) return;
+          // Wait for the next frame for UI updates.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!_scrollController.hasClients || !mounted) return;
 
-          final notifier = context.read<LoadMoreNotifier>();
+            final notifier = context.read<LoadMoreNotifier>();
 
-          // --- Scroll Anchoring Action: Only for non-reversed lists ---
-          if (!widget.reversed) {
-            // initialMessageCount will be non-null here if !widget.reversed
-            final didAddMessages = _oldList.length > initialMessagesCount!;
-            if (didAddMessages && anchorMessageId != null) {
-              final newIndex = _oldList.indexWhere(
-                (m) => m.id == anchorMessageId,
-              );
-              if (newIndex != -1) {
-                _scrollToIndex(
-                  newIndex,
-                  duration: Duration.zero,
-                  alignment: 0,
-                  offset: 0,
+            // --- Scroll Anchoring Action: Only for non-reversed lists ---
+            if (!widget.reversed) {
+              // initialMessageCount will be non-null here if !widget.reversed
+              final didAddMessages = _oldList.length > initialMessagesCount!;
+              if (didAddMessages && anchorMessageId != null) {
+                final newIndex = _oldList.indexWhere(
+                  (m) => m.id == anchorMessageId,
                 );
+                if (newIndex != -1) {
+                  _scrollToIndex(
+                    newIndex,
+                    duration: Duration.zero,
+                    alignment: 0,
+                    offset: 0,
+                  );
+                }
               }
             }
-          }
-          // --- End Scroll Anchoring Action ---
+            // --- End Scroll Anchoring Action ---
 
-          // Hide loading indicator.
-          notifier.setLoadingOlder(false);
-        });
+            // Hide loading indicator.
+            notifier.setLoadingOlder(false);
+          });
+        } catch (_) {
+          // On error, ensure loading indicator is hidden
+          if (mounted) {
+            context.read<LoadMoreNotifier>().setLoadingOlder(false);
+          }
+        }
 
         return;
       }
@@ -1000,40 +1007,47 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
 
         context.read<LoadMoreNotifier>().setLoadingNewer(true);
 
-        await widget.onStartReached!();
+        try {
+          await widget.onStartReached!();
 
-        if (!mounted) return;
+          if (!mounted) return;
 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!_scrollController.hasClients || !mounted) return;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!_scrollController.hasClients || !mounted) return;
 
-          final notifier = context.read<LoadMoreNotifier>();
+            final notifier = context.read<LoadMoreNotifier>();
 
-          // --- Scroll Anchoring Action: Only for reversed lists ---
-          if (widget.reversed) {
-            // initialMessageCount will be non-null here if widget.reversed
-            final didAddMessages = _oldList.length > initialMessagesCount!;
-            if (didAddMessages && anchorMessageId != null) {
-              final newIndex = _oldList.indexWhere(
-                (m) => m.id == anchorMessageId,
-              );
-              if (newIndex != -1) {
-                final composerHeight =
-                    context.read<ComposerHeightNotifier>().height;
-                _scrollToIndex(
-                  newIndex,
-                  duration: Duration.zero,
-                  alignment: 0,
-                  offset: composerHeight,
+            // --- Scroll Anchoring Action: Only for reversed lists ---
+            if (widget.reversed) {
+              // initialMessageCount will be non-null here if widget.reversed
+              final didAddMessages = _oldList.length > initialMessagesCount!;
+              if (didAddMessages && anchorMessageId != null) {
+                final newIndex = _oldList.indexWhere(
+                  (m) => m.id == anchorMessageId,
                 );
+                if (newIndex != -1) {
+                  final composerHeight =
+                      context.read<ComposerHeightNotifier>().height;
+                  _scrollToIndex(
+                    newIndex,
+                    duration: Duration.zero,
+                    alignment: 0,
+                    offset: composerHeight,
+                  );
+                }
               }
             }
-          }
-          // --- End Scroll Anchoring Action ---
+            // --- End Scroll Anchoring Action ---
 
-          // Hide loading indicator.
-          notifier.setLoadingNewer(false);
-        });
+            // Hide loading indicator.
+            notifier.setLoadingNewer(false);
+          });
+        } catch (_) {
+          // On error, ensure loading indicator is hidden
+          if (mounted) {
+            context.read<LoadMoreNotifier>().setLoadingNewer(false);
+          }
+        }
       }
     }
   }

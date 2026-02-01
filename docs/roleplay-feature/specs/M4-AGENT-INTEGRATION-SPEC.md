@@ -1,8 +1,10 @@
 # M4: Agent Integration 技术规格（商业级版本）
 
-> 状态：规划中
+> 状态：✅ 已完成
 >
-> 最后更新：2026-01-20
+> 最后更新：2026-02-01
+>
+> 实现说明：Handler 逻辑内置于 ProposalTransformer，无需独立 `impl/` 目录。功能等效于 Spec 设计。
 >
 > 协作记录：Codex Session `019b8e40-021b-7563-b300-cf99e87f76ec`
 

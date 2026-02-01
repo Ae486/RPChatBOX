@@ -59,6 +59,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
 
   Future<void> _loadRoles() async {
     final roles = await _service.loadCustomRoles();
+    if (!mounted) return;
     setState(() {
       _customRoles = roles;
     });

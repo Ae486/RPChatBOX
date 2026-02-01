@@ -1,0 +1,81 @@
+## CODE QUALITY REVIEW REQUEST - lib/rendering/ Module
+
+### Preliminary Audit Summary (For Codex Deep Supplement)
+
+**Folder**: `lib/rendering/` (markdown_stream utilities)
+**Files Analyzed**:
+1. `lib/rendering/markdown_stream/language_utils.dart` (199 lines)
+2. `lib/rendering/markdown_stream/stable_prefix_parser.dart` (302 lines)
+
+### Preliminary Findings to Supplement:
+
+#### Architecture & Dependencies ✓
+- Pure utility modules with zero dependencies on pages/widgets/services
+- No global state mutations
+- language_utils: language alias/display name/icon mapping
+- stable_prefix_parser: Markdown safe prefix streaming parser
+
+#### Code Complexity Assessment
+- **language_utils.dart (199 lines)**:
+  - normalizeLanguageIdentifier(): ~30 lines
+  - inferCodeLanguage(): ~25 lines (7 branches, medium complexity)
+  - Other helpers: 20-40 lines range
+  - Nested depth: 1-2 levels (shallow)
+
+- **stable_prefix_parser.dart (302 lines)**:
+  - split() method: ~130 lines (core logic lines 26-154)
+  - Multiple state machine tracking: inFence, inMathBlock, thinkDepth, htmlBlockStack, tableMode
+  - Helper validation methods: fence markers, HTML tags, table separators, unclosed tags
+  - Nested depth: ~3 levels in main loop (acceptable for parser)
+
+#### Type Safety ✓
+- No dynamic usage found
+- const Maps used for language aliases (compile-time optimization)
+- Proper null safety with fallback values
+
+#### Documentation Assessment
+- language_utils: Most functions have dartdoc comments ✓
+- stable_prefix_parser: Good inline comments, but public method dartdoc may be incomplete
+- No TODO/FIXME/dead code found
+
+### Areas Requiring Codex Deep Analysis:
+
+1. **Boundary Conditions (CRITICAL)**:
+   - stable_prefix_parser.split() state machine edge cases
+   - HTML tag nesting validation correctness
+   - Table separator detection boundary conditions
+   - Unclosed fence/math block handling
+
+2. **Performance Analysis**:
+   - looksLikeUnifiedDiff(): Sampling threshold and regex efficiency
+   - Language alias lookup caching strategy
+   - Memory footprint of three const Maps (~80-100 KB estimated)
+   - Markdown state tracking temporary objects (List/Set allocations)
+
+3. **Correctness Verification**:
+   - Regex patterns in inferCodeLanguage() correctness
+   - Character boundary checks in string operations
+   - Markdown spec compliance verification
+   - Edge cases: empty strings, special characters, unicode handling
+
+4. **Type Safety Details**:
+   - LanguageInfo factory constructor pattern safety
+   - Any unsafe as casts present?
+   - Null propagation through return values
+
+5. **Test Coverage**:
+   - Critical paths test coverage status
+   - Edge case tests for parser (nested blocks, unclosed tags)
+   - Language inference correctness tests
+
+### Questions for Codex Review:
+1. Are there any boundary condition edge cases in stable_prefix_parser that could cause incorrect parsing?
+2. Is the performance of looksLikeUnifiedDiff() acceptable for large content?
+3. Does the markdown parser handle all valid Markdown syntax correctly per spec?
+4. Are there any type safety gaps or potential runtime errors?
+5. What is the test coverage level, and should additional tests be added?
+6. Any recommendations for optimization or refactoring?
+
+Please provide detailed analysis addressing these areas and supplement my preliminary findings with deeper technical review.
+
+**Review scope**: Code analysis only, NO code modifications suggested.

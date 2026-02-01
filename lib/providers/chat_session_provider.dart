@@ -37,41 +37,43 @@ class ChatSessionProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    await _conversationService.initialize();
-    
-    // Load settings & other data parallel
-    final results = await Future.wait([
-      _conversationService.loadConversations(), // Currently loads all messages (safe for search)
-      _storageService.loadSettings(),
-      _storageService.loadTokenUsage(),
-      _customRoleService.loadCustomRoles(),
-      _conversationService.loadCurrentConversationId(),
-    ]);
+    try {
+      await _conversationService.initialize();
 
-    _conversations = results[0] as List<Conversation>;
-    _settings = results[1] as ChatSettings;
-    _tokenUsage = results[2] as TokenUsage;
-    _customRoles = results[3] as List<CustomRole>;
-    final currentId = results[4] as String?;
+      final results = await Future.wait([
+        _conversationService.loadConversations(),
+        _storageService.loadSettings(),
+        _storageService.loadTokenUsage(),
+        _customRoleService.loadCustomRoles(),
+        _conversationService.loadCurrentConversationId(),
+      ]);
 
-    if (_conversations.isNotEmpty) {
-      if (currentId != null) {
-        final index = _conversations.indexWhere((c) => c.id == currentId);
-        if (index >= 0) {
-          await _selectConversation(_conversations[index]);
+      _conversations = results[0] as List<Conversation>;
+      _settings = results[1] as ChatSettings;
+      _tokenUsage = results[2] as TokenUsage;
+      _customRoles = results[3] as List<CustomRole>;
+      final currentId = results[4] as String?;
+
+      if (_conversations.isNotEmpty) {
+        if (currentId != null) {
+          final index = _conversations.indexWhere((c) => c.id == currentId);
+          if (index >= 0) {
+            await _selectConversation(_conversations[index]);
+          } else {
+            await _selectConversation(_conversations.first);
+          }
         } else {
           await _selectConversation(_conversations.first);
         }
       } else {
-        await _selectConversation(_conversations.first);
+        await createNewConversation();
       }
-    } else {
-      // Create default if none
-      await createNewConversation();
+    } catch (e) {
+      debugPrint('ChatSessionProvider init failed: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
-
-    _isLoading = false;
-    notifyListeners();
   }
 
   Future<void> _selectConversation(Conversation conversation) async {
@@ -190,6 +192,5 @@ class ChatSessionProvider extends ChangeNotifier {
   /// Trigger a save of the current state
   Future<void> saveCurrentConversation() async {
     await _conversationService.saveConversations(_conversations);
-    notifyListeners();
   }
 }
