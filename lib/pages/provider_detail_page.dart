@@ -15,6 +15,7 @@ import '../data/model_capability_presets.dart';
 import '../models/model_config.dart';
 import '../models/provider_config.dart';
 import '../services/model_service_manager.dart';
+import '../utils/api_url_helper.dart';
 import '../utils/global_toast.dart';
 import '../widgets/add_model_dialog.dart';
 import 'model_edit_page.dart';
@@ -98,23 +99,19 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     }
   }
 
-  /// 🆕 获取实际使用的API地址预览
+  /// 获取实际使用的完整 API 地址预览
   String get _apiUrlPreview {
     final url = _apiUrlController.text.trim();
     if (url.isEmpty) return '未设置';
-    // 自动补全 /v1 后缀
-    if (_selectedType == ProviderType.openai || _selectedType == ProviderType.claude) {
-      if (!url.endsWith('/v1') && !url.contains('/v1/')) {
-        return '$url/v1';
-      }
-    }
-    return url;
+    return ApiUrlHelper.getActualApiUrl(url, _selectedType);
   }
 
-  /// 🆕 判断是否显示API预览（仅支持补全的服务商类型）
+  /// 判断是否显示 API 预览
+  /// 当输入非空且预览与输入不同时显示（说明会有补全）
   bool _shouldShowApiPreview() {
-    // 只有 OpenAI 和 Claude 类型支持补全
-    return _selectedType == ProviderType.openai || _selectedType == ProviderType.claude;
+    final url = _apiUrlController.text.trim();
+    if (url.isEmpty) return false;
+    return _apiUrlPreview != url;
   }
 
   void _enterTestMode() {

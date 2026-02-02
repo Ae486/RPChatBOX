@@ -1,4 +1,6 @@
 import '../utils/api_url_helper.dart';
+import 'backend_mode.dart';
+import 'circuit_breaker_config.dart';
 
 /// AI服务提供商配置模型
 /// 支持多种AI服务提供商(OpenAI, Gemini, Claude等)
@@ -14,6 +16,17 @@ class ProviderConfig {
   final Map<String, dynamic> customHeaders;
   final String? description;
 
+  // Backend routing (新增)
+  final BackendMode backendMode;
+  final String? proxyApiUrl;
+  final String? proxyApiKey;
+  final Map<String, dynamic>? proxyHeaders;
+
+  // Fallback control (新增)
+  final bool fallbackEnabled;
+  final int fallbackTimeoutMs;
+  final CircuitBreakerConfig? circuitBreaker;
+
   ProviderConfig({
     required this.id,
     required this.name,
@@ -25,6 +38,14 @@ class ProviderConfig {
     DateTime? updatedAt,
     Map<String, dynamic>? customHeaders,
     this.description,
+    // Backend routing defaults
+    this.backendMode = BackendMode.direct,
+    this.proxyApiUrl,
+    this.proxyApiKey,
+    this.proxyHeaders,
+    this.fallbackEnabled = true,
+    this.fallbackTimeoutMs = 5000,
+    this.circuitBreaker,
   })  : createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now(),
         customHeaders = customHeaders ?? {};
@@ -45,6 +66,21 @@ class ProviderConfig {
       updatedAt: DateTime.parse(json['updatedAt'] as String),
       customHeaders: Map<String, dynamic>.from(json['customHeaders'] ?? {}),
       description: json['description'] as String?,
+      // Backend routing (新增，缺失时使用默认值)
+      backendMode: BackendMode.values.firstWhere(
+        (e) => e.name == json['backendMode'],
+        orElse: () => BackendMode.direct,
+      ),
+      proxyApiUrl: json['proxyApiUrl'] as String?,
+      proxyApiKey: json['proxyApiKey'] as String?,
+      proxyHeaders: json['proxyHeaders'] != null
+          ? Map<String, dynamic>.from(json['proxyHeaders'])
+          : null,
+      fallbackEnabled: json['fallbackEnabled'] as bool? ?? true,
+      fallbackTimeoutMs: json['fallbackTimeoutMs'] as int? ?? 5000,
+      circuitBreaker: json['circuitBreaker'] != null
+          ? CircuitBreakerConfig.fromJson(json['circuitBreaker'])
+          : null,
     );
   }
 
@@ -61,6 +97,14 @@ class ProviderConfig {
       'updatedAt': updatedAt.toIso8601String(),
       'customHeaders': customHeaders,
       'description': description,
+      // Backend routing (新增)
+      'backendMode': backendMode.name,
+      'proxyApiUrl': proxyApiUrl,
+      'proxyApiKey': proxyApiKey,
+      'proxyHeaders': proxyHeaders,
+      'fallbackEnabled': fallbackEnabled,
+      'fallbackTimeoutMs': fallbackTimeoutMs,
+      'circuitBreaker': circuitBreaker?.toJson(),
     };
   }
 
@@ -76,6 +120,14 @@ class ProviderConfig {
     DateTime? updatedAt,
     Map<String, dynamic>? customHeaders,
     String? description,
+    // Backend routing (新增)
+    BackendMode? backendMode,
+    String? proxyApiUrl,
+    String? proxyApiKey,
+    Map<String, dynamic>? proxyHeaders,
+    bool? fallbackEnabled,
+    int? fallbackTimeoutMs,
+    CircuitBreakerConfig? circuitBreaker,
   }) {
     return ProviderConfig(
       id: id ?? this.id,
@@ -88,6 +140,14 @@ class ProviderConfig {
       updatedAt: updatedAt ?? DateTime.now(),
       customHeaders: customHeaders ?? this.customHeaders,
       description: description ?? this.description,
+      // Backend routing (新增)
+      backendMode: backendMode ?? this.backendMode,
+      proxyApiUrl: proxyApiUrl ?? this.proxyApiUrl,
+      proxyApiKey: proxyApiKey ?? this.proxyApiKey,
+      proxyHeaders: proxyHeaders ?? this.proxyHeaders,
+      fallbackEnabled: fallbackEnabled ?? this.fallbackEnabled,
+      fallbackTimeoutMs: fallbackTimeoutMs ?? this.fallbackTimeoutMs,
+      circuitBreaker: circuitBreaker ?? this.circuitBreaker,
     );
   }
 

@@ -46,11 +46,21 @@ class ConversationThread {
     };
   }
 
-  factory ConversationThread.fromJson(Map<String, dynamic> json) {
+  /// Deserializes from JSON.
+  ///
+  /// [messageLookup] resolves messageId → Message for compact format nodes.
+  /// If null, falls back to inline message (legacy format).
+  factory ConversationThread.fromJson(
+    Map<String, dynamic> json, {
+    Message? Function(String id)? messageLookup,
+  }) {
     final nodesJson = (json['nodes'] as Map?)?.cast<String, dynamic>() ?? {};
     final nodes = <String, ThreadNode>{
       for (final entry in nodesJson.entries)
-        entry.key: ThreadNode.fromJson(entry.value as Map<String, dynamic>),
+        entry.key: ThreadNode.fromJson(
+          entry.value as Map<String, dynamic>,
+          messageLookup: messageLookup,
+        ),
     };
 
     return ConversationThread(
@@ -699,21 +709,67 @@ class ThreadNode {
     );
   }
 
+  /// Serializes to compact format: only stores messageId reference.
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'parentId': parentId,
-      'message': message.toJson(),
+      'messageId': message.id,
       'children': children,
     };
   }
 
-  factory ThreadNode.fromJson(Map<String, dynamic> json) {
+  /// Deserializes from JSON.
+  ///
+  /// Supports two formats:
+  /// - **New (compact)**: `messageId` only → requires [messageLookup] to resolve
+  /// - **Legacy**: inline `message` object → self-contained
+  ///
+  /// If [messageLookup] is provided and the node has `messageId`, it will be
+  /// used to resolve the full Message. Falls back to inline `message` if present.
+  factory ThreadNode.fromJson(
+    Map<String, dynamic> json, {
+    Message? Function(String id)? messageLookup,
+  }) {
+    final nodeId = json['id'] as String;
+    final parentId = json['parentId'] as String?;
+    final children = (json['children'] as List?)?.cast<String>() ?? const [];
+
+    // Try compact format first: messageId reference
+    final messageId = json['messageId'] as String?;
+    if (messageId != null && messageLookup != null) {
+      final resolved = messageLookup(messageId);
+      if (resolved != null) {
+        return ThreadNode(
+          id: nodeId, parentId: parentId, message: resolved, children: children,
+        );
+      }
+    }
+
+    // Legacy format: inline message object
+    final messageJson = json['message'] as Map<String, dynamic>?;
+    if (messageJson != null) {
+      return ThreadNode(
+        id: nodeId,
+        parentId: parentId,
+        message: Message.fromJson(messageJson),
+        children: children,
+      );
+    }
+
+    // Fallback: messageId exists but no lookup / lookup failed
+    // Create a minimal placeholder; caller should handle missing messages.
+    final fallbackId = messageId ?? nodeId;
     return ThreadNode(
-      id: json['id'] as String,
-      parentId: json['parentId'] as String?,
-      message: Message.fromJson(json['message'] as Map<String, dynamic>),
-      children: (json['children'] as List?)?.cast<String>() ?? const [],
+      id: nodeId,
+      parentId: parentId,
+      message: Message(
+        id: fallbackId,
+        content: '',
+        isUser: false,
+        timestamp: DateTime.now(),
+      ),
+      children: children,
     );
   }
 }

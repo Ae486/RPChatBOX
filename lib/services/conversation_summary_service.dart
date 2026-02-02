@@ -147,12 +147,23 @@ Output JSON with this exact structure:
     final raw = (conversation.threadJson ?? '').trim();
     if (raw.isEmpty) return null;
     try {
+      // Build lookup from conversation.messages for compact format
+      final messageMap = <String, Message>{};
+      for (final msg in conversation.messages) {
+        messageMap[msg.id] = msg;
+      }
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, dynamic>) {
-        return ConversationThread.fromJson(decoded);
+        return ConversationThread.fromJson(
+          decoded,
+          messageLookup: (id) => messageMap[id],
+        );
       }
       if (decoded is Map) {
-        return ConversationThread.fromJson(decoded.cast<String, dynamic>());
+        return ConversationThread.fromJson(
+          decoded.cast<String, dynamic>(),
+          messageLookup: (id) => messageMap[id],
+        );
       }
     } catch (_) {
       // Fall back to linear messages.

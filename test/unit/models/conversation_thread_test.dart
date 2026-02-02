@@ -450,7 +450,15 @@ void main() {
       thread.removeNode('a3');
 
       final json = thread.toJson();
-      final restored = ConversationThread.fromJson(json);
+      // Build lookup from existing nodes for compact format
+      final messageMap = <String, Message>{};
+      for (final node in thread.nodes.values) {
+        messageMap[node.message.id] = node.message;
+      }
+      final restored = ConversationThread.fromJson(
+        json,
+        messageLookup: (id) => messageMap[id],
+      );
 
       expect(restored.rootId, equals(thread.rootId));
       expect(restored.activeLeafId, equals(thread.activeLeafId));
@@ -536,6 +544,146 @@ void main() {
       expect(ThreadLimits.maxNodes, isPositive);
       expect(ThreadLimits.maxDepth, isPositive);
       expect(ThreadLimits.maxChildrenPerNode, isPositive);
+    });
+  });
+
+  group('ConversationThread / compact serialization', () {
+    test('toJson outputs messageId instead of full message', () {
+      final t = DateTime(2024, 1, 1, 12);
+      final thread = ConversationThread.fromLinearMessages('c1', [
+        _msg(id: 'u1', isUser: true, timestamp: t),
+        _msg(id: 'a1', isUser: false, timestamp: t.add(const Duration(minutes: 1))),
+      ]);
+
+      final json = thread.toJson();
+      final nodesJson = json['nodes'] as Map<String, dynamic>;
+
+      // Check that nodes have messageId, not full message
+      final u1Node = nodesJson['u1'] as Map<String, dynamic>;
+      expect(u1Node['messageId'], equals('u1'));
+      expect(u1Node.containsKey('message'), isFalse);
+
+      final a1Node = nodesJson['a1'] as Map<String, dynamic>;
+      expect(a1Node['messageId'], equals('a1'));
+      expect(a1Node.containsKey('message'), isFalse);
+    });
+
+    test('fromJson with messageLookup restores full messages', () {
+      final t = DateTime(2024, 1, 1, 12);
+      final u1 = _msg(id: 'u1', isUser: true, timestamp: t);
+      final a1 = _msg(id: 'a1', isUser: false, timestamp: t.add(const Duration(minutes: 1)));
+
+      final thread = ConversationThread.fromLinearMessages('c1', [u1, a1]);
+      final json = thread.toJson();
+
+      // Restore with lookup
+      final messageMap = {'u1': u1, 'a1': a1};
+      final restored = ConversationThread.fromJson(
+        json,
+        messageLookup: (id) => messageMap[id],
+      );
+
+      expect(restored.nodes['u1']!.message.content, equals('content:u1'));
+      expect(restored.nodes['a1']!.message.content, equals('content:a1'));
+      expect(restored.nodes['u1']!.message.isUser, isTrue);
+      expect(restored.nodes['a1']!.message.isUser, isFalse);
+    });
+
+    test('fromJson without messageLookup falls back to legacy format', () {
+      // Simulate legacy JSON with inline message
+      final legacyJson = {
+        'conversationId': 'c1',
+        'nodes': {
+          'u1': {
+            'id': 'u1',
+            'parentId': null,
+            'message': {
+              'id': 'u1',
+              'content': 'Hello',
+              'isUser': true,
+              'timestamp': '2024-01-01T12:00:00.000',
+            },
+            'children': ['a1'],
+          },
+          'a1': {
+            'id': 'a1',
+            'parentId': 'u1',
+            'message': {
+              'id': 'a1',
+              'content': 'Hi there',
+              'isUser': false,
+              'timestamp': '2024-01-01T12:01:00.000',
+            },
+            'children': <String>[],
+          },
+        },
+        'rootId': 'u1',
+        'selectedChild': <String, String>{},
+        'activeLeafId': 'a1',
+      };
+
+      // No messageLookup - should use inline message
+      final restored = ConversationThread.fromJson(legacyJson);
+
+      expect(restored.nodes['u1']!.message.content, equals('Hello'));
+      expect(restored.nodes['a1']!.message.content, equals('Hi there'));
+    });
+
+    test('fromJson creates placeholder when message not found', () {
+      // Compact JSON without lookup and without inline message
+      final compactJson = {
+        'conversationId': 'c1',
+        'nodes': {
+          'u1': {
+            'id': 'u1',
+            'parentId': null,
+            'messageId': 'u1',
+            'children': <String>[],
+          },
+        },
+        'rootId': 'u1',
+        'selectedChild': <String, String>{},
+        'activeLeafId': 'u1',
+      };
+
+      // No lookup provided - should create placeholder
+      final restored = ConversationThread.fromJson(compactJson);
+
+      expect(restored.nodes['u1']!.message.id, equals('u1'));
+      expect(restored.nodes['u1']!.message.content, equals(''));
+    });
+
+    test('compact format significantly reduces JSON size', () {
+      final t = DateTime(2024, 1, 1, 12);
+      final messages = List.generate(10, (i) {
+        final isUser = i.isEven;
+        return Message(
+          id: 'msg_$i',
+          content: 'A' * 500, // 500 chars per message
+          isUser: isUser,
+          timestamp: t.add(Duration(minutes: i)),
+        );
+      });
+
+      final thread = ConversationThread.fromLinearMessages('c1', messages);
+      final compactJson = thread.toJson();
+
+      // Build legacy format for comparison
+      final legacyNodes = <String, dynamic>{};
+      for (final node in thread.nodes.values) {
+        legacyNodes[node.id] = {
+          'id': node.id,
+          'parentId': node.parentId,
+          'message': node.message.toJson(), // Full message
+          'children': node.children,
+        };
+      }
+
+      final compactSize = compactJson.toString().length;
+      final legacySize = legacyNodes.toString().length;
+
+      // Compact should be at least 50% smaller
+      expect(compactSize, lessThan(legacySize * 0.5));
     });
   });
 }

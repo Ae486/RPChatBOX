@@ -44,6 +44,15 @@ class OwuiStableBody extends StatefulWidget {
     required bool isClosed,
   })? streamingThinkBlock;
 
+  /// 流式 Error 块渲染回调
+  final Widget Function({
+    required String errorType,
+    required int? errorCode,
+    required String brief,
+    required String details,
+    required bool isClosed,
+  })? streamingErrorBlock;
+
   final Object? stableCacheKey;
 
   const OwuiStableBody({
@@ -58,6 +67,7 @@ class OwuiStableBody extends StatefulWidget {
     this.streamingCodeBlock,
     this.streamingLatexBlock,
     this.streamingThinkBlock,
+    this.streamingErrorBlock,
     this.stableCacheKey,
   });
 
@@ -137,9 +147,85 @@ class OwuiStableBody extends StatefulWidget {
     return null;
   }
 
+  /// 提取 tail 开头的 Error 块 (`<error type="..." ...>...</error>`)
+  static ({
+    String errorType,
+    int? errorCode,
+    String brief,
+    String details,
+    String rest,
+    bool isClosed,
+  })? extractLeadingError(String input) {
+    final trimmed = input.trimLeft();
+    if (!trimmed.startsWith('<error')) return null;
+
+    // 匹配 <error type="xxx" code="xxx" brief="xxx">
+    final openMatch = RegExp(
+      r'^<error\s+type="(\w+)"(?:\s+code="(\d+)")?(?:\s+brief="([^"]*)")?\s*>',
+    ).firstMatch(trimmed);
+    if (openMatch == null) {
+      // 可能是未完成的标签
+      if (!trimmed.contains('>')) {
+        return (
+          errorType: 'unknown',
+          errorCode: null,
+          brief: '',
+          details: '',
+          rest: '',
+          isClosed: false,
+        );
+      }
+      return null;
+    }
+
+    final errorType = openMatch.group(1) ?? 'unknown';
+    final codeStr = openMatch.group(2);
+    final errorCode = codeStr != null ? int.tryParse(codeStr) : null;
+    final brief = _unescapeXml(openMatch.group(3) ?? '');
+
+    final openTagEnd = input.indexOf(trimmed) + openMatch.end;
+    final after = input.substring(openTagEnd);
+    final closeIdx = after.indexOf('</error>');
+
+    if (closeIdx == -1) {
+      return (
+        errorType: errorType,
+        errorCode: errorCode,
+        brief: brief,
+        details: _unescapeXml(after),
+        rest: '',
+        isClosed: false,
+      );
+    }
+
+    return (
+      errorType: errorType,
+      errorCode: errorCode,
+      brief: brief,
+      details: _unescapeXml(after.substring(0, closeIdx)),
+      rest: after.substring(closeIdx + '</error>'.length),
+      isClosed: true,
+    );
+  }
+
+  static String _unescapeXml(String input) {
+    return input
+        .replaceAll('&quot;', '"')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&');
+  }
+
   /// 统一块级信号检测
-  /// 返回: (type, language?, content, rest, isClosed)
-  static ({String type, String? language, String content, String rest, bool isClosed})?
+  /// 返回: (type, language?, content, rest, isClosed, errorMeta?)
+  static ({
+    String type,
+    String? language,
+    String content,
+    String rest,
+    bool isClosed,
+    ({String errorType, int? errorCode, String brief})? errorMeta,
+  })?
   extractLeadingBlock(String input) {
     // 1. 代码块检测（优先级最高）
     final fence = extractLeadingFence(input);
@@ -150,6 +236,7 @@ class OwuiStableBody extends StatefulWidget {
         content: fence.code,
         rest: fence.rest,
         isClosed: fence.isClosed,
+        errorMeta: null,
       );
     }
 
@@ -162,6 +249,7 @@ class OwuiStableBody extends StatefulWidget {
         content: latex.content,
         rest: latex.rest,
         isClosed: latex.isClosed,
+        errorMeta: null,
       );
     }
 
@@ -174,6 +262,24 @@ class OwuiStableBody extends StatefulWidget {
         content: think.content,
         rest: think.rest,
         isClosed: think.isClosed,
+        errorMeta: null,
+      );
+    }
+
+    // 4. Error 块检测
+    final error = extractLeadingError(input);
+    if (error != null) {
+      return (
+        type: 'error',
+        language: null,
+        content: error.details,
+        rest: error.rest,
+        isClosed: error.isClosed,
+        errorMeta: (
+          errorType: error.errorType,
+          errorCode: error.errorCode,
+          brief: error.brief,
+        ),
       );
     }
 
@@ -283,7 +389,14 @@ class _OwuiStableBodyState extends State<OwuiStableBody>
   }
 
   bool _canRenderBlock(
-    ({String type, String? language, String content, String rest, bool isClosed}) block,
+    ({
+      String type,
+      String? language,
+      String content,
+      String rest,
+      bool isClosed,
+      ({String errorType, int? errorCode, String brief})? errorMeta,
+    }) block,
   ) {
     switch (block.type) {
       case 'code':
@@ -292,6 +405,8 @@ class _OwuiStableBodyState extends State<OwuiStableBody>
         return widget.streamingLatexBlock != null;
       case 'think':
         return widget.streamingThinkBlock != null;
+      case 'error':
+        return widget.streamingErrorBlock != null;
       default:
         return false;
     }
@@ -348,7 +463,14 @@ class _OwuiStableBodyState extends State<OwuiStableBody>
 
   /// 根据块类型渲染对应的流式容器
   Widget? _buildBlockWidget(
-    ({String type, String? language, String content, String rest, bool isClosed}) block,
+    ({
+      String type,
+      String? language,
+      String content,
+      String rest,
+      bool isClosed,
+      ({String errorType, int? errorCode, String brief})? errorMeta,
+    }) block,
   ) {
     switch (block.type) {
       case 'code':
@@ -365,6 +487,15 @@ class _OwuiStableBodyState extends State<OwuiStableBody>
       case 'think':
         return widget.streamingThinkBlock?.call(
           content: block.content,
+          isClosed: block.isClosed,
+        );
+      case 'error':
+        final meta = block.errorMeta;
+        return widget.streamingErrorBlock?.call(
+          errorType: meta?.errorType ?? 'unknown',
+          errorCode: meta?.errorCode,
+          brief: meta?.brief ?? '',
+          details: block.content,
           isClosed: block.isClosed,
         );
       default:

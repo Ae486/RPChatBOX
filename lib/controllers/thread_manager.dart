@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/conversation.dart';
 import '../models/conversation_thread.dart';
+import '../models/message.dart';
 
 /// Result of threadJson validation.
 enum ThreadJsonValidationResult {
@@ -234,7 +235,15 @@ class ThreadManager {
     // Case 5: Parse and validate internal consistency
     ConversationThread thread;
     try {
-      thread = ConversationThread.fromJson(json);
+      // Build message lookup from conversation.messages for compact format
+      final messageMap = <String, Message>{};
+      for (final msg in conversation.messages) {
+        messageMap[msg.id] = msg;
+      }
+      thread = ConversationThread.fromJson(
+        json,
+        messageLookup: (id) => messageMap[id],
+      );
     } catch (e) {
       debugPrint('[ThreadManager] ConversationThread.fromJson failed: $e');
       return ThreadLoadResult(
@@ -340,8 +349,12 @@ class ThreadManager {
         return 'Node value is not a Map';
       }
       final node = entry.value as Map;
-      if (!node.containsKey('id') || !node.containsKey('message')) {
-        return 'Node missing id or message';
+      if (!node.containsKey('id')) {
+        return 'Node missing id';
+      }
+      // 支持两种格式：inline message 或 messageId 引用
+      if (!node.containsKey('message') && !node.containsKey('messageId')) {
+        return 'Node missing message or messageId';
       }
     }
 

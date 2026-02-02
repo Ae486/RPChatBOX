@@ -2,11 +2,14 @@
 /// OUTPUT: SettingsPage - 设置与工具入口（外观/模型管理/缓存清理/调试入口）
 /// POS: UI 层 / Pages - 设置页
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../adapters/ai_provider.dart';
 import '../chat_ui/owui/components/owui_app_bar.dart';
 import '../chat_ui/owui/components/owui_card.dart';
 import '../chat_ui/owui/components/owui_dialog.dart';
@@ -29,7 +32,74 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  static const String _backendEnabledKey = 'python_backend_enabled';
+
   bool _isClearing = false;
+  bool _backendEnabled = ProviderFactory.pythonBackendEnabled;
+  String _backendStatus = '';
+  bool _isCheckingBackend = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBackendEnabled();
+  }
+
+  Future<void> _loadBackendEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getBool(_backendEnabledKey) ?? false;
+    if (mounted) {
+      setState(() {
+        _backendEnabled = saved;
+        ProviderFactory.pythonBackendEnabled = saved;
+      });
+      if (saved) {
+        _checkBackendHealth();
+      }
+    }
+  }
+
+  Future<void> _saveBackendEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_backendEnabledKey, value);
+  }
+
+  /// 检测 Python 后端状态
+  Future<void> _checkBackendHealth() async {
+    setState(() => _isCheckingBackend = true);
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 3),
+        receiveTimeout: const Duration(seconds: 3),
+      ));
+      final response = await dio.get('http://localhost:8765/api/health');
+      if (response.statusCode == 200 && mounted) {
+        final data = response.data as Map<String, dynamic>;
+        setState(() {
+          _backendStatus = 'v${data['version'] ?? '?'}';
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _backendStatus = '未运行');
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingBackend = false);
+    }
+  }
+
+  void _toggleBackend(bool value) {
+    setState(() {
+      _backendEnabled = value;
+      ProviderFactory.pythonBackendEnabled = value;
+    });
+    _saveBackendEnabled(value);
+    if (value) {
+      _checkBackendHealth();
+    } else {
+      setState(() => _backendStatus = '');
+    }
+  }
 
   /// 清除图片缓存
   Future<void> _clearImageCache() async {
@@ -127,6 +197,54 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 );
               },
+            ),
+          ),
+          SizedBox(height: context.owuiSpacing.lg),
+
+          // Python 后端路由
+          OwuiCard(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: Icon(
+                    _backendEnabled ? OwuiIcons.link : OwuiIcons.linkOff,
+                    size: 32,
+                    color: _backendEnabled
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  title: const Text('Python 后端'),
+                  subtitle: Text(
+                    _backendEnabled
+                        ? (_backendStatus.isNotEmpty
+                            ? '已启用 ($_backendStatus)'
+                            : '已启用')
+                        : '直连 LLM API',
+                  ),
+                  value: _backendEnabled,
+                  onChanged: _toggleBackend,
+                ),
+                if (_backendEnabled) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    dense: true,
+                    leading: const SizedBox(width: 32),
+                    title: const Text('后端地址'),
+                    subtitle: const SelectableText('http://localhost:8765'),
+                    trailing: _isCheckingBackend
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : IconButton(
+                            icon: const Icon(OwuiIcons.refresh, size: 18),
+                            onPressed: _checkBackendHealth,
+                            tooltip: '检测连接',
+                          ),
+                  ),
+                ],
+              ],
             ),
           ),
           SizedBox(height: context.owuiSpacing.lg),

@@ -123,7 +123,10 @@ class HiveConversationService {
     // 返回所有会话，按更新时间排序（只读，不写）
     final conversations = box.values.toList();
     for (final conversation in conversations) {
-      final thread = _loadThread(conversation.threadJson);
+      final thread = _loadThread(
+        conversation.threadJson,
+        messageBox: messageBox,
+      );
       if (thread != null && thread.nodes.isNotEmpty) {
         final allMessages = _collectThreadMessages(thread);
         final ordered = _sortMessages(allMessages);
@@ -230,16 +233,23 @@ class HiveConversationService {
     await _settingsBox?.close();
   }
 
-  ConversationThread? _loadThread(String? raw) {
+  ConversationThread? _loadThread(String? raw, {Box<Message>? messageBox}) {
     final text = (raw ?? '').trim();
     if (text.isEmpty) return null;
     try {
       final decoded = jsonDecode(text);
+      Message? Function(String)? lookup;
+      if (messageBox != null) {
+        lookup = (id) => messageBox.get(id);
+      }
       if (decoded is Map<String, dynamic>) {
-        return ConversationThread.fromJson(decoded);
+        return ConversationThread.fromJson(decoded, messageLookup: lookup);
       }
       if (decoded is Map) {
-        return ConversationThread.fromJson(decoded.cast<String, dynamic>());
+        return ConversationThread.fromJson(
+          decoded.cast<String, dynamic>(),
+          messageLookup: lookup,
+        );
       }
     } catch (_) {
       // Ignore parsing errors; fall back to linear messages.
@@ -280,7 +290,21 @@ class HiveConversationService {
     Conversation conversation,
     Box<Message> messageBox,
   ) {
-    final thread = _loadThread(conversation.threadJson);
+    // 优先使用内存中的 conversation.messages 构建 lookup
+    // 解决：新消息还未保存到 messageBox 时，messageLookup 返回 null 导致 fallback
+    final memoryLookup = <String, Message>{};
+    for (final msg in conversation.messages) {
+      memoryLookup[msg.id] = msg;
+    }
+
+    Message? combinedLookup(String id) {
+      return memoryLookup[id] ?? messageBox.get(id);
+    }
+
+    final thread = _loadThreadWithLookup(
+      conversation.threadJson,
+      messageLookup: combinedLookup,
+    );
     if (thread != null && thread.nodes.isNotEmpty) {
       return _collectThreadMessages(thread);
     }
@@ -294,6 +318,29 @@ class HiveConversationService {
       return conversation.messages;
     }
     return const <Message>[];
+  }
+
+  ConversationThread? _loadThreadWithLookup(
+    String? raw, {
+    required Message? Function(String) messageLookup,
+  }) {
+    final text = (raw ?? '').trim();
+    if (text.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic>) {
+        return ConversationThread.fromJson(decoded, messageLookup: messageLookup);
+      }
+      if (decoded is Map) {
+        return ConversationThread.fromJson(
+          decoded.cast<String, dynamic>(),
+          messageLookup: messageLookup,
+        );
+      }
+    } catch (_) {
+      // Ignore parsing errors; fall back to linear messages.
+    }
+    return null;
   }
 
   Future<void> _cleanupOrphanMessages(

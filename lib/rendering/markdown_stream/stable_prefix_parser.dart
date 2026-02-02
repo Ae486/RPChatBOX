@@ -30,6 +30,7 @@ class StablePrefixParser {
     String? fenceMarker;
     var inMathBlock = false;
     var thinkDepth = 0;
+    var errorDepth = 0;
 
     final htmlBlockStack = <String>[];
     var tableMode = 0; // 0 none, 1 maybeHeader, 2 inTable
@@ -76,9 +77,15 @@ class StablePrefixParser {
           thinkDepth -= _countOccurrences(line, tag.end);
         }
         if (thinkDepth < 0) thinkDepth = 0;
+
+        // 检测 error 标签
+        errorDepth += _countOccurrences(line, '<error');
+        errorDepth -= _countOccurrences(line, '</error>');
+        if (errorDepth < 0) errorDepth = 0;
       }
 
       final inThink = thinkDepth > 0;
+      final inError = errorDepth > 0;
 
       // 检测 HTML 块
       var inHtmlBlock = false;
@@ -87,7 +94,7 @@ class StablePrefixParser {
         hasUnclosedHtml = _hasUnclosedInlineHtmlTagBracket(line);
 
         final closeName = _leadingHtmlCloseTagName(line);
-        if (closeName != null && !_isThinkingTag(closeName)) {
+        if (closeName != null && !_isSpecialContentTag(closeName)) {
           for (var s = htmlBlockStack.length - 1; s >= 0; s--) {
             if (htmlBlockStack[s] == closeName) {
               htmlBlockStack.removeRange(s, htmlBlockStack.length);
@@ -98,7 +105,7 @@ class StablePrefixParser {
 
         final openName = _leadingHtmlTagName(line);
         if (openName != null &&
-            !_isThinkingTag(openName) &&
+            !_isSpecialContentTag(openName) &&
             !_voidTags.contains(openName) &&
             !_isSelfClosingLeadingTag(line)) {
           htmlBlockStack.add(openName);
@@ -136,6 +143,7 @@ class StablePrefixParser {
       final isInUnstableBlock = inFence ||
           inMathBlock ||
           inThink ||
+          inError ||
           inHtmlBlock ||
           hasUnclosedHtml ||
           tableMode == 1 ||
@@ -293,10 +301,11 @@ class StablePrefixParser {
     'wbr',
   };
 
-  static bool _isThinkingTag(String name) {
+  static bool _isSpecialContentTag(String name) {
     return name == 'think' ||
         name == 'thinking' ||
         name == 'thought' ||
-        name == 'thoughts';
+        name == 'thoughts' ||
+        name == 'error';
   }
 }

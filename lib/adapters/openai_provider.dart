@@ -111,6 +111,7 @@ class OpenAIProvider extends AIProvider {
     // 取消之前的请求（如果有）
     _currentCancelToken?.cancel('新请求开始');
     _currentCancelToken = DioService().createCancelToken();
+    debugPrint('[ROUTE] >>> 直连 LLM API | model=$model | url=${config.actualApiUrl}');
     
     final requestBody = await _buildRequestBody(
       model: model,
@@ -165,6 +166,14 @@ class OpenAIProvider extends AIProvider {
 
         try {
           final parsed = json.decode(data) as Map<String, dynamic>;
+
+          // 检测上游/后端错误响应
+          final errorObj = parsed['error'] as Map<String, dynamic>?;
+          if (errorObj != null) {
+            final errorMsg = errorObj['message'] ?? 'Unknown error';
+            final errorType = errorObj['type'] ?? 'error';
+            throw Exception('[$errorType] $errorMsg');
+          }
 
           final choices = parsed['choices'] as List?;
           if (choices != null && choices.isNotEmpty) {
@@ -267,6 +276,12 @@ class OpenAIProvider extends AIProvider {
             }
           }
         } catch (e) {
+          // 重新抛出检测到的上游错误（格式: [errorType] message）
+          final msg = e.toString();
+          if (msg.startsWith('Exception: [') && msg.contains('] ')) {
+            rethrow;
+          }
+          // 忽略 JSON 解析错误
           continue;
         }
       }

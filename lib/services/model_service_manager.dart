@@ -265,7 +265,7 @@ class ModelServiceManager {
     if (provider == null) {
       throw Exception('Provider not found: $providerId');
     }
-    return ProviderFactory.createProvider(provider);
+    return ProviderFactory.createProviderWithRouting(provider);
   }
 
   /// 获取Model的完整信息（包含Provider信息）

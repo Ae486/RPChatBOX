@@ -43,6 +43,7 @@ import '../services/image_persistence_service.dart';
 import '../services/roleplay/context_compiler/rp_context_compiler.dart';
 import '../services/roleplay/rp_memory_repository.dart';
 import '../utils/chunk_buffer.dart';
+import '../utils/error_formatter.dart';
 import '../utils/token_counter.dart';
 import '../utils/global_toast.dart';
 import '../rendering/markdown_stream/stable_prefix_parser.dart';

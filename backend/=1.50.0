@@ -1,0 +1,8 @@
+Defaulting to user installation because normal site-packages is not writeable
+Looking in indexes: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+Collecting litellm
+  ERROR: HTTP error 403 while getting https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/e6/05/3516cc7386b220d388aa0bd833308c677e94eceb82b2756dd95e06f6a13f/litellm-1.81.6-py3-none-any.whl (from https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/litellm/) (requires-python:<4.0,>=3.9)
+
+[notice] A new release of pip is available: 25.3 -> 26.0
+[notice] To update, run: python.exe -m pip install --upgrade pip
+ERROR: Could not install requirement litellm from https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/e6/05/3516cc7386b220d388aa0bd833308c677e94eceb82b2756dd95e06f6a13f/litellm-1.81.6-py3-none-any.whl because of HTTP error 403 Client Error: Forbidden for url: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/e6/05/3516cc7386b220d388aa0bd833308c677e94eceb82b2756dd95e06f6a13f/litellm-1.81.6-py3-none-any.whl for URL https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/e6/05/3516cc7386b220d388aa0bd833308c677e94eceb82b2756dd95e06f6a13f/litellm-1.81.6-py3-none-any.whl (from https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/litellm/) (requires-python:<4.0,>=3.9)

@@ -26,12 +26,54 @@ import 'palette.dart';
 import 'stable_body.dart';
 
 const String _latexTag = 'latex';
+const String _errorTag = 'owui_error';
 
 final SpanNodeGeneratorWithTag owuiLatexGenerator = SpanNodeGeneratorWithTag(
   tag: _latexTag,
   generator: (e, config, visitor) =>
       _OwuiLatexNode(e.attributes, e.textContent, config),
 );
+
+final SpanNodeGeneratorWithTag owuiErrorGenerator = SpanNodeGeneratorWithTag(
+  tag: _errorTag,
+  generator: (e, config, visitor) =>
+      _OwuiErrorNode(e.attributes, e.textContent, config),
+);
+
+/// 匹配 <error type="..." ...>...</error> 标签
+class OwuiErrorSyntax extends m.InlineSyntax {
+  OwuiErrorSyntax() : super(r'<error\s+[^>]*>[\s\S]*?</error>');
+
+  @override
+  bool onMatch(m.InlineParser parser, Match match) {
+    final matchValue = match.group(0)!;
+
+    // 解析属性
+    final typeMatch = RegExp(r'type="(\w+)"').firstMatch(matchValue);
+    final codeMatch = RegExp(r'code="(\d+)"').firstMatch(matchValue);
+    final briefMatch = RegExp(r'brief="([^"]*)"').firstMatch(matchValue);
+
+    // 提取内容
+    final contentMatch = RegExp(r'>([^<]*)</error>').firstMatch(matchValue);
+    final content = contentMatch?.group(1) ?? '';
+
+    final el = m.Element.text(_errorTag, matchValue);
+    el.attributes['errorType'] = typeMatch?.group(1) ?? 'unknown';
+    el.attributes['errorCode'] = codeMatch?.group(1) ?? '';
+    el.attributes['brief'] = _unescapeXml(briefMatch?.group(1) ?? '');
+    el.attributes['details'] = _unescapeXml(content);
+    parser.addNode(el);
+    return true;
+  }
+
+  static String _unescapeXml(String input) {
+    return input
+        .replaceAll('&quot;', '"')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&');
+  }
+}
 
 class OwuiLatexSyntax extends m.InlineSyntax {
   OwuiLatexSyntax() : super(r'(\$\$[\s\S]+?\$\$)|(\$[^\$\n]+?\$)');
@@ -157,6 +199,181 @@ class _OwuiLatexNode extends SpanNode {
         : latex;
 
     return WidgetSpan(alignment: PlaceholderAlignment.middle, child: child);
+  }
+}
+
+/// Error 标签渲染节点
+class _OwuiErrorNode extends SpanNode {
+  final Map<String, String> attributes;
+  final String textContent;
+  final MarkdownConfig config;
+
+  _OwuiErrorNode(this.attributes, this.textContent, this.config);
+
+  @override
+  InlineSpan build() {
+    final errorType = attributes['errorType'] ?? 'unknown';
+    final errorCodeStr = attributes['errorCode'] ?? '';
+    final errorCode = errorCodeStr.isNotEmpty ? int.tryParse(errorCodeStr) : null;
+    final brief = attributes['brief'] ?? '';
+    final details = attributes['details'] ?? '';
+
+    final child = _OwuiErrorBlock(
+      errorType: errorType,
+      errorCode: errorCode,
+      brief: brief,
+      details: details,
+    );
+
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: child,
+    );
+  }
+}
+
+/// Error 块渲染组件（用于 Markdown 中的静态渲染）
+class _OwuiErrorBlock extends StatefulWidget {
+  final String errorType;
+  final int? errorCode;
+  final String brief;
+  final String details;
+
+  const _OwuiErrorBlock({
+    required this.errorType,
+    required this.errorCode,
+    required this.brief,
+    required this.details,
+  });
+
+  @override
+  State<_OwuiErrorBlock> createState() => _OwuiErrorBlockState();
+}
+
+class _OwuiErrorBlockState extends State<_OwuiErrorBlock> {
+  bool _expanded = false;
+
+  String get _firstLine {
+    if (widget.errorCode != null) {
+      return 'ERROR ${widget.errorCode}';
+    }
+    return switch (widget.errorType) {
+      'upstream' => 'API 错误',
+      'connection' => '连接错误',
+      'timeout' => '超时',
+      'parse' => '解析错误',
+      'backend' => '后端错误',
+      _ => '错误',
+    };
+  }
+
+  String get _secondLine {
+    final brief = widget.brief.trim();
+    if (brief.isEmpty) {
+      final details = widget.details.trim();
+      if (details.length <= 40) return details;
+      return '${details.substring(0, 37)}...';
+    }
+    if (brief.length <= 40) return brief;
+    return '${brief.substring(0, 37)}...';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark
+        ? const Color(0xFF2A1A1A)
+        : const Color(0xFFFEECEC);
+    final borderColor = isDark
+        ? Colors.red.withValues(alpha: 0.4)
+        : Colors.red.withValues(alpha: 0.3);
+    final iconColor = isDark ? Colors.red[300] : Colors.red[600];
+    final textColor = isDark
+        ? const Color(0xFFE5A0A0)
+        : const Color(0xFF991B1B);
+    final detailsColor = isDark
+        ? const Color(0xFFD1D5DB)
+        : const Color(0xFF4B5563);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(OwuiIcons.error, size: 28, color: iconColor),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _firstLine,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _secondLine,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: textColor.withValues(alpha: 0.85),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _expanded ? OwuiIcons.expandLess : OwuiIcons.expandMore,
+                    size: 20,
+                    color: textColor.withValues(alpha: 0.7),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded && widget.details.trim().isNotEmpty) ...[
+            Divider(height: 1, thickness: 1, color: borderColor),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                widget.details,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: detailsColor,
+                  height: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -595,8 +812,8 @@ class OwuiMarkdown extends StatelessWidget {
         ],
       ),
       markdownGenerator: MarkdownGenerator(
-        generators: [owuiLatexGenerator],
-        inlineSyntaxList: [OwuiLatexSyntax()],
+        generators: [owuiLatexGenerator, owuiErrorGenerator],
+        inlineSyntaxList: [OwuiLatexSyntax(), OwuiErrorSyntax()],
       ),
     );
   }
@@ -665,6 +882,23 @@ class OwuiMarkdown extends StatelessWidget {
       streamingThinkBlock: ({required content, required isClosed}) {
         return _StreamingThinkContainer(
           content: content,
+          isClosed: isClosed,
+          isDark: isDark,
+        );
+      },
+      // Error 块流式容器
+      streamingErrorBlock: ({
+        required errorType,
+        required errorCode,
+        required brief,
+        required details,
+        required isClosed,
+      }) {
+        return _StreamingErrorContainer(
+          errorType: errorType,
+          errorCode: errorCode,
+          brief: brief,
+          details: details,
           isClosed: isClosed,
           isDark: isDark,
         );
@@ -819,6 +1053,170 @@ class _StreamingThinkContainer extends StatelessWidget {
                 fontSize: 14,
                 color: textColor,
                 height: 1.5,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 流式 Error 块容器 - 可折叠错误显示
+class _StreamingErrorContainer extends StatefulWidget {
+  final String errorType;
+  final int? errorCode;
+  final String brief;
+  final String details;
+  final bool isClosed;
+  final bool isDark;
+
+  const _StreamingErrorContainer({
+    required this.errorType,
+    required this.errorCode,
+    required this.brief,
+    required this.details,
+    required this.isClosed,
+    required this.isDark,
+  });
+
+  @override
+  State<_StreamingErrorContainer> createState() => _StreamingErrorContainerState();
+}
+
+class _StreamingErrorContainerState extends State<_StreamingErrorContainer> {
+  bool _expanded = false;
+
+  String get _firstLine {
+    if (widget.errorCode != null) {
+      return 'ERROR ${widget.errorCode}';
+    }
+    return switch (widget.errorType) {
+      'upstream' => 'API 错误',
+      'connection' => '连接错误',
+      'timeout' => '超时',
+      'parse' => '解析错误',
+      'backend' => '后端错误',
+      _ => '错误',
+    };
+  }
+
+  String get _secondLine {
+    final brief = widget.brief.trim();
+    if (brief.isEmpty) {
+      // 从 details 提取简略信息
+      final details = widget.details.trim();
+      if (details.length <= 40) return details;
+      return '${details.substring(0, 37)}...';
+    }
+    if (brief.length <= 40) return brief;
+    return '${brief.substring(0, 37)}...';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = widget.isDark
+        ? const Color(0xFF2A1A1A)
+        : const Color(0xFFFEECEC);
+    final borderColor = widget.isDark
+        ? Colors.red.withValues(alpha: 0.4)
+        : Colors.red.withValues(alpha: 0.3);
+    final iconColor = widget.isDark
+        ? Colors.red[300]
+        : Colors.red[600];
+    final textColor = widget.isDark
+        ? const Color(0xFFE5A0A0)
+        : const Color(0xFF991B1B);
+    final detailsColor = widget.isDark
+        ? const Color(0xFFD1D5DB)
+        : const Color(0xFF4B5563);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 头部：图标 + 两行信息 + 展开箭头
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // 左侧图标
+                  Icon(
+                    OwuiIcons.error,
+                    size: 28,
+                    color: iconColor,
+                  ),
+                  const SizedBox(width: 10),
+                  // 中间两行文本
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _firstLine,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _secondLine,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: textColor.withValues(alpha: 0.85),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // 右侧展开箭头
+                  Icon(
+                    _expanded ? OwuiIcons.expandLess : OwuiIcons.expandMore,
+                    size: 20,
+                    color: textColor.withValues(alpha: 0.7),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 展开后的详情
+          if (_expanded && widget.details.trim().isNotEmpty) ...[
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: borderColor,
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                widget.details,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: detailsColor,
+                  height: 1.5,
+                  fontFamily: 'monospace',
+                ),
               ),
             ),
           ],

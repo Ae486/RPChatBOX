@@ -1,0 +1,23 @@
+# FastAPI Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP Client (for upstream LLM API calls)
+httpx>=0.26.0
+
+# LiteLLM - Unified LLM API
+litellm>=1.50.0
+
+# SSE Support
+sse-starlette>=2.0.0
+
+# File handling
+python-multipart>=0.0.6
+aiofiles>=23.2.1
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx  # for TestClient

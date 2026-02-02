@@ -11,6 +11,7 @@ import 'providers/chat_session_provider.dart';
 import 'services/data_migration_service.dart';
 import 'services/hive_conversation_service.dart';
 import 'services/model_service_manager.dart';
+import 'adapters/ai_provider.dart';
 
 // 全局ModelServiceManager实例
 late ModelServiceManager globalModelServiceManager;
@@ -32,6 +33,10 @@ void main() async {
   }
 
   final prefs = await SharedPreferences.getInstance();
+
+  // 恢复 Python 后端开关状态
+  ProviderFactory.pythonBackendEnabled =
+      prefs.getBool('python_backend_enabled') ?? false;
 
   // 执行数据迁移（如果需要）
   final migrationService = DataMigrationService();

@@ -1,8 +1,12 @@
 import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
 import '../models/provider_config.dart';
 import '../models/model_config.dart';
 import 'openai_provider.dart';
 import 'langchain_provider.dart';
+import 'proxy_openai_provider.dart';
 
 /// AI服务提供商抽象接口
 /// 定义所有Provider适配器必须实现的方法
@@ -203,7 +207,10 @@ class ProviderFactory {
   /// 是否使用 LangChain 实现（用于 A/B 测试和回滚）
   static bool useLangChain = false;
 
-  /// 创建 Provider实例
+  /// 全局后端开关（设为 false 时强制所有请求走直连）
+  static bool pythonBackendEnabled = false;
+
+  /// 创建 Provider实例（原有方法，保持不变）
   static AIProvider createProvider(ProviderConfig config) {
     if (useLangChain) {
       // 使用 LangChain.dart 实现
@@ -223,6 +230,24 @@ class ProviderFactory {
       case ProviderType.claude:
         return ClaudeProvider(config);
     }
+  }
+
+  /// 创建支持后端路由的 Provider（新增）
+  ///
+  /// 根据 config.backendMode 选择：
+  /// - direct: 直连 LLM API（同 createProvider）
+  /// - proxy: 走 Python 后端代理
+  /// - auto: 优先代理，失败回退到直连
+  static AIProvider createProviderWithRouting(ProviderConfig config) {
+    // 全局开关关闭时强制直连
+    if (!pythonBackendEnabled) {
+      debugPrint('[ROUTE] 全局开关关闭 → 强制直连模式');
+      return createProvider(config);
+    }
+
+    // 全局开关开启时，强制使用 proxy 模式（忽略 config.backendMode）
+    debugPrint('[ROUTE] 全局开关开启 → 使用 Python 后端代理');
+    return ProxyOpenAIProvider(config);
   }
 }
 

@@ -287,6 +287,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         },
         onError: (error) async {
           if (_isDisposed) return;
+          debugPrint('[ERROR_BUBBLE] onError 收到错误: $error');
           // 错误情况：设置待 finalize 状态，等待渐进式渲染完成
           _pendingFinalize = (
             modelName: modelWithProvider.model.displayName,
@@ -297,6 +298,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         },
       );
     } catch (e) {
+      debugPrint('[ERROR_BUBBLE] catch 捕获错误: $e');
       await _finalizeStreamingMessage(
         modelName: modelWithProvider.model.displayName,
         providerName: modelWithProvider.provider.name,
@@ -771,8 +773,13 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       _streamManager.end(streamId);
     }
 
-    if (error != null && mounted && !_isDisposed) {
-      GlobalToast.error(context, message: '消息发送失败\n${error.toString()}');
+    // 格式化错误为 <error> 标签（不再使用 toast）
+    String? errorTag;
+    if (error != null) {
+      debugPrint('[ERROR_BUBBLE] 收到错误: $error');
+      final errorInfo = ErrorFormatter.parse(error);
+      errorTag = errorInfo.toErrorTag();
+      debugPrint('[ERROR_BUBBLE] 格式化后的 errorTag: $errorTag');
     }
 
     if (placeholder != null && streamId != null) {
@@ -780,9 +787,18 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       final body = data?.content ?? '';
       final thinking = data?.thinkingContent ?? '';
 
-      final finalContent = thinking.trim().isNotEmpty
+      // 组合最终内容：thinking + body + error
+      var finalContent = thinking.trim().isNotEmpty
           ? '<think>$thinking</think>$body'
           : body;
+
+      // 如果有错误，附加到内容末尾
+      if (errorTag != null) {
+        finalContent = finalContent.isEmpty ? errorTag : '$finalContent\n$errorTag';
+      }
+
+      debugPrint('[ERROR_BUBBLE] body="$body", thinking="${thinking.length > 50 ? thinking.substring(0, 50) : thinking}", errorTag=${errorTag != null}');
+      debugPrint('[ERROR_BUBBLE] finalContent.length=${finalContent.length}, isEmpty=${finalContent.trim().isEmpty}');
 
       if (finalContent.trim().isNotEmpty) {
         final outputTokens = TokenCounter.estimateTokens(finalContent);
@@ -799,15 +815,30 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           thinkingDurationSeconds: thinkingDuration > 0 ? thinkingDuration : null,
         );
 
+        debugPrint('[ERROR_BUBBLE] 创建 assistantMessage id=${assistantMessage.id}, content.length=${assistantMessage.content.length}');
+
         final thread = _getThread(rebuildFromMessagesIfMismatch: false);
         final nodeAlreadyInThread = thread.nodes.containsKey(assistantMessage.id);
+
+        debugPrint('[ERROR_BUBBLE] nodeAlreadyInThread=$nodeAlreadyInThread');
 
         if (!nodeAlreadyInThread) {
           widget.conversation.addMessage(assistantMessage);
         }
 
         thread.appendToActiveLeaf(assistantMessage);
+
+        // 验证 upsert 后的消息
+        final updatedNode = thread.nodes[assistantMessage.id];
+        debugPrint('[ERROR_BUBBLE] 更新后 node.message.content.length=${updatedNode?.message.content.length}');
+
         _syncConversationMessagesSnapshotFromThread(thread);
+
+        // 验证 conversation.messages 是否正确更新
+        final lastMsg = widget.conversation.messages.isNotEmpty ? widget.conversation.messages.last : null;
+        debugPrint('[ERROR_BUBBLE] 同步后 conversation.messages.length=${widget.conversation.messages.length}');
+        debugPrint('[ERROR_BUBBLE] lastMsg.id=${lastMsg?.id}, lastMsg.content.length=${lastMsg?.content.length}');
+
         _persistThreadNoSave(thread);
         _schedulePersistThread();
 
