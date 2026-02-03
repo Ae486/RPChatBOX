@@ -181,7 +181,6 @@ class ProxyOpenAIProvider extends AIProvider {
         if (errorObj != null) {
           final errorMsg = errorObj['message'] ?? 'Unknown error';
           final errorType = errorObj['type'] ?? 'error';
-          debugPrint('[ERROR_BUBBLE] 检测到上游错误: type=$errorType, msg=$errorMsg');
           throw Exception('[$errorType] $errorMsg');
         }
 

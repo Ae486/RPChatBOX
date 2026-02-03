@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/conversation.dart';
+import '../models/message.dart';
 import '../models/role_preset.dart';
 import '../models/custom_role.dart';
 import '../models/chat_settings.dart';
@@ -28,6 +29,9 @@ class ChatSessionProvider extends ChangeNotifier {
   ChatSettings get settings => _settings;
   TokenUsage get tokenUsage => _tokenUsage;
   List<CustomRole> get customRoles => _customRoles;
+
+  /// 通过 ID 获取单条消息（用于加载非活动分支消息）
+  Message? getMessageById(String id) => _conversationService.getMessageById(id);
 
   ChatSessionProvider(this._conversationService) {
     _init();

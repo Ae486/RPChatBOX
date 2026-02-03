@@ -69,6 +69,17 @@ class ThreadManager {
   /// Called when conversation needs to be saved.
   final void Function() onConversationUpdated;
 
+  /// Optional: looks up a message by ID from persistent storage.
+  /// Used to resolve messages for non-active branches in threadJson.
+  /// If not provided, falls back to conversation.messages only.
+  /// Can be set/updated after construction.
+  ///
+  /// NOTE(tech-debt): 这是一个穿透链路，用于解决 conversation.messages 只包含
+  /// 活动分支消息的问题。理想情况下应该在 HiveConversationService 加载时一次性
+  /// 填充所有消息到 thread 节点，而不是运行时再查找。
+  /// 详见：docs/debug/thread-message-lookup-debt.md
+  Message? Function(String id)? getMessageById;
+
   ConversationThread? _thread;
   Timer? _persistTimer;
   String? _lastPersistedJson;
@@ -77,6 +88,7 @@ class ThreadManager {
     required this.getConversation,
     required this.isDisposed,
     required this.onConversationUpdated,
+    this.getMessageById,
   });
 
   /// Current thread instance (may be null before first access).
@@ -233,16 +245,26 @@ class ThreadManager {
     }
 
     // Case 5: Parse and validate internal consistency
+    // NOTE(tech-debt): 这里可能是 thread 的二次加载。HiveConversationService.loadConversations()
+    // 已经用 messageBox 加载过一次 thread，但 ThreadManager 会重新从 threadJson 解析。
+    // 两次加载使用不同的 messageLookup，可能导致不一致。
+    // 详见：docs/debug/thread-message-lookup-debt.md
     ConversationThread thread;
     try {
-      // Build message lookup from conversation.messages for compact format
-      final messageMap = <String, Message>{};
+      // Build message lookup: first try memory (conversation.messages),
+      // then fall back to persistent storage (getMessageById) for non-active branches.
+      // NOTE(tech-debt): conversation.messages 只包含活动分支的消息快照，
+      // 非活动分支的消息需要通过 getMessageById 从 messageBox 获取。
+      final memoryMap = <String, Message>{};
       for (final msg in conversation.messages) {
-        messageMap[msg.id] = msg;
+        memoryMap[msg.id] = msg;
+      }
+      Message? combinedLookup(String id) {
+        return memoryMap[id] ?? getMessageById?.call(id);
       }
       thread = ConversationThread.fromJson(
         json,
-        messageLookup: (id) => messageMap[id],
+        messageLookup: combinedLookup,
       );
     } catch (e) {
       debugPrint('[ThreadManager] ConversationThread.fromJson failed: $e');

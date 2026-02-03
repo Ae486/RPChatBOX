@@ -276,29 +276,33 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         onDone: () async {
           if (_isDisposed) return;
           _chunkBuffer?.flush();
-          // 设置待 finalize 状态，等待渐进式渲染完成后再执行
+          // 设置待 finalize 状态，保存快照以避免 active 状态被清空
           _pendingFinalize = (
             modelName: modelWithProvider.model.displayName,
             providerName: modelWithProvider.provider.name,
             error: null,
+            streamId: _activeStreamId,
+            placeholder: _activeAssistantPlaceholder,
+            promptTokens: _activePromptTokensEstimate,
           );
           // 确保 Timer 继续运行以完成剩余渲染
           _scheduleNextRevealTick();
         },
         onError: (error) async {
           if (_isDisposed) return;
-          debugPrint('[ERROR_BUBBLE] onError 收到错误: $error');
-          // 错误情况：设置待 finalize 状态，等待渐进式渲染完成
+          // 错误情况：设置待 finalize 状态，保存快照
           _pendingFinalize = (
             modelName: modelWithProvider.model.displayName,
             providerName: modelWithProvider.provider.name,
             error: error,
+            streamId: _activeStreamId,
+            placeholder: _activeAssistantPlaceholder,
+            promptTokens: _activePromptTokensEstimate,
           );
           _scheduleNextRevealTick();
         },
       );
     } catch (e) {
-      debugPrint('[ERROR_BUBBLE] catch 捕获错误: $e');
       await _finalizeStreamingMessage(
         modelName: modelWithProvider.model.displayName,
         providerName: modelWithProvider.provider.name,
@@ -467,7 +471,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     final streamId = _activeStreamId;
     final oldPlaceholder = _activeAssistantPlaceholder;
     if (streamId == null || oldPlaceholder == null) {
-      // 流已结束或被清理，检查是否需要 finalize
+      // 流已结束或被清理，使用快照进行 finalize
       final pending = _pendingFinalize;
       if (pending != null) {
         _pendingFinalize = null;
@@ -475,6 +479,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           modelName: pending.modelName,
           providerName: pending.providerName,
           error: pending.error,
+          streamIdOverride: pending.streamId,
+          placeholderOverride: pending.placeholder,
+          promptTokensOverride: pending.promptTokens,
         ));
       }
       _stopStableFlowRevealTimer();
@@ -484,7 +491,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     final fullText = _streamManager.getState(streamId).text;
     final fullLen = fullText.length;
     if (fullLen <= 0) {
-      // 无内容，如果有待 finalize 则执行
+      // 无内容，如果有待 finalize 则使用快照执行
       final pending = _pendingFinalize;
       if (pending != null) {
         _pendingFinalize = null;
@@ -493,6 +500,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           modelName: pending.modelName,
           providerName: pending.providerName,
           error: pending.error,
+          streamIdOverride: pending.streamId,
+          placeholderOverride: pending.placeholder,
+          promptTokensOverride: pending.promptTokens,
         ));
         return;
       }
@@ -506,7 +516,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     final backlog = fullLen - displayedLen;
     if (backlog <= 0) {
-      // 已显示完所有内容，检查是否需要 finalize
+      // 已显示完所有内容，使用快照进行 finalize
       final pending = _pendingFinalize;
       if (pending != null) {
         _pendingFinalize = null;
@@ -515,6 +525,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           modelName: pending.modelName,
           providerName: pending.providerName,
           error: pending.error,
+          streamIdOverride: pending.streamId,
+          placeholderOverride: pending.placeholder,
+          promptTokensOverride: pending.promptTokens,
         ));
         return;
       }
@@ -750,10 +763,17 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     required String modelName,
     required String providerName,
     Object? error,
+    // Override 参数：使用快照而非 active 状态
+    String? streamIdOverride,
+    chat.Message? placeholderOverride,
+    int? promptTokensOverride,
   }) async {
     if (_isDisposed) return;
-    final streamId = _activeStreamId;
-    final placeholder = _activeAssistantPlaceholder;
+
+    // 优先使用 override 快照，否则使用当前 active 状态
+    final streamId = streamIdOverride ?? _activeStreamId;
+    final placeholder = placeholderOverride ?? _activeAssistantPlaceholder;
+    final promptTokens = promptTokensOverride ?? _activePromptTokensEstimate;
 
     _stopStableFlowRevealTimer();
 
@@ -761,13 +781,11 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     _streamImagePrefetchTimer = null;
     _streamPrefetchedImageUrls.clear();
 
+    // 无条件清空 active 状态（恢复原逻辑）
     _activeStreamId = null;
     _activeAssistantPlaceholder = null;
     _currentProvider = null;
-
-    final promptTokens = _activePromptTokensEstimate;
     _activePromptTokensEstimate = null;
-
 
     if (streamId != null) {
       _streamManager.end(streamId);
@@ -776,10 +794,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     // 格式化错误为 <error> 标签（不再使用 toast）
     String? errorTag;
     if (error != null) {
-      debugPrint('[ERROR_BUBBLE] 收到错误: $error');
       final errorInfo = ErrorFormatter.parse(error);
       errorTag = errorInfo.toErrorTag();
-      debugPrint('[ERROR_BUBBLE] 格式化后的 errorTag: $errorTag');
     }
 
     if (placeholder != null && streamId != null) {
@@ -797,9 +813,6 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         finalContent = finalContent.isEmpty ? errorTag : '$finalContent\n$errorTag';
       }
 
-      debugPrint('[ERROR_BUBBLE] body="$body", thinking="${thinking.length > 50 ? thinking.substring(0, 50) : thinking}", errorTag=${errorTag != null}');
-      debugPrint('[ERROR_BUBBLE] finalContent.length=${finalContent.length}, isEmpty=${finalContent.trim().isEmpty}');
-
       if (finalContent.trim().isNotEmpty) {
         final outputTokens = TokenCounter.estimateTokens(finalContent);
         final thinkingDuration = data?.thinkingDurationSeconds ?? 0;
@@ -815,30 +828,15 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           thinkingDurationSeconds: thinkingDuration > 0 ? thinkingDuration : null,
         );
 
-        debugPrint('[ERROR_BUBBLE] 创建 assistantMessage id=${assistantMessage.id}, content.length=${assistantMessage.content.length}');
-
         final thread = _getThread(rebuildFromMessagesIfMismatch: false);
         final nodeAlreadyInThread = thread.nodes.containsKey(assistantMessage.id);
-
-        debugPrint('[ERROR_BUBBLE] nodeAlreadyInThread=$nodeAlreadyInThread');
 
         if (!nodeAlreadyInThread) {
           widget.conversation.addMessage(assistantMessage);
         }
 
         thread.appendToActiveLeaf(assistantMessage);
-
-        // 验证 upsert 后的消息
-        final updatedNode = thread.nodes[assistantMessage.id];
-        debugPrint('[ERROR_BUBBLE] 更新后 node.message.content.length=${updatedNode?.message.content.length}');
-
         _syncConversationMessagesSnapshotFromThread(thread);
-
-        // 验证 conversation.messages 是否正确更新
-        final lastMsg = widget.conversation.messages.isNotEmpty ? widget.conversation.messages.last : null;
-        debugPrint('[ERROR_BUBBLE] 同步后 conversation.messages.length=${widget.conversation.messages.length}');
-        debugPrint('[ERROR_BUBBLE] lastMsg.id=${lastMsg?.id}, lastMsg.content.length=${lastMsg?.content.length}');
-
         _persistThreadNoSave(thread);
         _schedulePersistThread();
 

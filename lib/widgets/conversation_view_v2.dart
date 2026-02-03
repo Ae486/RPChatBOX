@@ -38,6 +38,7 @@ import '../models/conversation_thread.dart';
 import '../models/model_config.dart';
 import '../models/message.dart' as app;
 import '../models/provider_config.dart';
+import '../providers/chat_session_provider.dart';
 import '../services/export_service.dart';
 import '../services/image_persistence_service.dart';
 import '../services/roleplay/context_compiler/rp_context_compiler.dart';
@@ -144,7 +145,15 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   bool _stableRevealKickstarted = false;  // FIX-2: 首次 tick 一次性标志
 
   // 待 finalize 状态（流结束后等待渐进式渲染完成）
-  ({String modelName, String providerName, Object? error})? _pendingFinalize;
+  // 保存快照以避免 active 状态被清空导致持久化失败
+  ({
+    String modelName,
+    String providerName,
+    Object? error,
+    String? streamId,
+    chat.Message? placeholder,
+    int? promptTokens,
+  })? _pendingFinalize;
 
   // 图片持久化：将过期的网络图片保存到本地
   String? _imagePersistenceSweptConversationId;
@@ -250,6 +259,19 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     _chatController.dispose();
     _streamManager.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // NOTE(tech-debt): 延迟设置 getMessageById 回调，用于加载非活动分支的消息。
+    // 这是一个穿透链路（Widget → Provider → Service → messageBox），
+    // 理想情况下应该在 Service 层一次性填充所有消息。
+    // 详见：docs/debug/thread-message-lookup-debt.md
+    if (_threadManager.getMessageById == null) {
+      final provider = context.read<ChatSessionProvider>();
+      _threadManager.getMessageById = provider.getMessageById;
+    }
   }
 
   @override

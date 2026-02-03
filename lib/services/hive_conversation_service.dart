@@ -25,7 +25,7 @@ class HiveConversationService {
   Future<void> initialize() async {
     // 初始化 Hive（只需调用一次）
     await Hive.initFlutter();
-    
+
     // 注册适配器
     if (!Hive.isAdapterRegistered(0)) {
       Hive.registerAdapter(ConversationAdapter());
@@ -39,13 +39,18 @@ class HiveConversationService {
     if (!Hive.isAdapterRegistered(3)) {
       Hive.registerAdapter(AttachedFileSnapshotAdapter());
     }
-    
+
     // 打开数据库
     _conversationsBox = await Hive.openBox<Conversation>(_conversationsBoxName);
     _messagesBox = await Hive.openBox<Message>(_messagesBoxName);
     _settingsBox = await Hive.openBox('settings');
   }
-  
+
+  /// 通过 ID 获取单条消息（用于加载非活动分支消息）
+  Message? getMessageById(String id) {
+    return _messagesBox?.get(id);
+  }
+
   /// 保存所有会话
   Future<void> saveConversations(List<Conversation> conversations) async {
     final box = _conversationsBox;
@@ -123,6 +128,9 @@ class HiveConversationService {
     // 返回所有会话，按更新时间排序（只读，不写）
     final conversations = box.values.toList();
     for (final conversation in conversations) {
+      // NOTE(tech-debt): 这里使用 messageBox 加载 thread，是正确的第一次加载。
+      // 但 ThreadManager.getThread() 可能会从 threadJson 二次加载，使用不同的 lookup。
+      // 详见：docs/debug/thread-message-lookup-debt.md
       final thread = _loadThread(
         conversation.threadJson,
         messageBox: messageBox,
@@ -132,6 +140,9 @@ class HiveConversationService {
         final ordered = _sortMessages(allMessages);
         conversation.messageIds = ordered.map((msg) => msg.id).toList();
         conversation.activeLeafId = thread.activeLeafId;
+        // NOTE(tech-debt): conversation.messages 只存储活动分支的消息快照，
+        // 非活动分支的消息只在 messageBox 和 thread.nodes 中。
+        // 这个语义不清晰，容易被误用。详见：docs/debug/thread-message-lookup-debt.md
         conversation.messages
           ..clear()
           ..addAll(thread.buildActiveChain());
