@@ -11,6 +11,7 @@ httpx>=0.26.0
 litellm>=1.50.0
 google-genai>=1.33.0
 markitdown[all]
+langgraph>=1.0.0
 sqlmodel>=0.0.22
 psycopg[binary]>=3.2.0
 langgraph-checkpoint-postgres>=2.0.0
