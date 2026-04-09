@@ -1,6 +1,10 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:provider/provider.dart';
@@ -8,13 +12,18 @@ import 'package:provider/provider.dart';
 import 'chat_ui/owui/owui_tokens.dart';
 import 'pages/chat_page.dart';
 import 'providers/chat_session_provider.dart';
+import 'services/backend_lifecycle_service.dart';
 import 'services/data_migration_service.dart';
 import 'services/hive_conversation_service.dart';
 import 'services/model_service_manager.dart';
+import 'services/mcp_client_service.dart';
 import 'adapters/ai_provider.dart';
 
 // 全局ModelServiceManager实例
 late ModelServiceManager globalModelServiceManager;
+
+// 全局McpClientService实例
+late McpClientService globalMcpClientService;
 
 const _prefsThemeModeKey = 'theme_mode';
 const _prefsUiScaleKey = 'ui_scale';
@@ -23,6 +32,9 @@ const _prefsUiCodeFontFamilyKey = 'ui_code_font_family';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化 Hive（必须在所有服务初始化之前）
+  await Hive.initFlutter();
 
   // 初始化 WebView 平台（Windows/Android）
   if (Platform.isWindows) {
@@ -52,6 +64,18 @@ void main() async {
   globalModelServiceManager = ModelServiceManager(prefs);
   await globalModelServiceManager.initialize();
 
+  // 初始化McpClientService
+  globalMcpClientService = McpClientService();
+  await globalMcpClientService.initialize();
+
+  // 自动连接已启用的 MCP 服务器（非阻塞）
+  unawaited(globalMcpClientService.start());
+
+  // 启动 Python 后端（桌面端 + 移动端）
+  if (!kIsWeb) {
+    _startBackendSilently();
+  }
+
   final themeMode = prefs.getString(_prefsThemeModeKey) ?? 'system';
   final uiScale = prefs.getDouble(_prefsUiScaleKey) ?? 1.0;
   final uiFontFamily = prefs.getString(_prefsUiFontFamilyKey) ?? 'system';
@@ -66,6 +90,20 @@ void main() async {
       initialUiCodeFontFamily: uiCodeFontFamily,
     ),
   );
+}
+
+/// Start backend silently, non-blocking.
+/// Failures are logged but don't prevent app startup.
+void _startBackendSilently() {
+  Future(() async {
+    try {
+      final backend = BackendLifecycleService.instance;
+      await backend.start();
+      debugPrint('Backend started: ${backend.baseUrl}');
+    } catch (e) {
+      debugPrint('Backend startup failed (will use direct mode): $e');
+    }
+  });
 }
 
 class MyApp extends StatefulWidget {
@@ -89,7 +127,7 @@ class MyApp extends StatefulWidget {
       context.findAncestorStateOfType<MyAppState>();
 }
 
-class MyAppState extends State<MyApp> {
+class MyAppState extends State<MyApp> with WidgetsBindingObserver {
   late ThemeMode _themeMode;
   late double _uiScale;
   late String _uiFontFamily;
@@ -98,10 +136,32 @@ class MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _themeMode = _themeModeFromString(widget.initialThemeMode);
     _uiScale = _clampUiScale(widget.initialUiScale);
     _uiFontFamily = widget.initialUiFontFamily;
     _uiCodeFontFamily = widget.initialUiCodeFontFamily;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Stop backend on app dispose
+    if (!kIsWeb) {
+      BackendLifecycleService.instance.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    // Graceful backend shutdown on app exit
+    if (!kIsWeb) {
+      try {
+        await BackendLifecycleService.instance.stop();
+      } catch (_) {}
+    }
+    return AppExitResponse.exit;
   }
 
   ThemeMode _themeModeFromString(String mode) {

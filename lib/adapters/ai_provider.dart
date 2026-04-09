@@ -7,6 +7,7 @@ import '../models/model_config.dart';
 import 'openai_provider.dart';
 import 'langchain_provider.dart';
 import 'proxy_openai_provider.dart';
+import 'hybrid_langchain_provider.dart';
 
 /// AI服务提供商抽象接口
 /// 定义所有Provider适配器必须实现的方法
@@ -23,23 +24,18 @@ abstract class AIProvider {
     // 默认实现：发送简单的测试消息
     try {
       final stopwatch = Stopwatch()..start();
-      
-      final testMessage = ChatMessage(
-        role: 'user',
-        content: 'Hi',
-      );
-      
+
+      final testMessage = ChatMessage(role: 'user', content: 'Hi');
+
       await sendMessage(
         model: modelName,
         messages: [testMessage],
-        parameters: const ModelParameters(
-          temperature: 0.7,
-          maxTokens: 10,
-        ),
+        parameters: const ModelParameters(temperature: 0.7, maxTokens: 10),
+        modelId: null,
       );
-      
+
       stopwatch.stop();
-      
+
       return ProviderTestResult.success(
         responseTimeMs: stopwatch.elapsedMilliseconds,
       );
@@ -57,7 +53,29 @@ abstract class AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   });
+
+  /// 发送聊天消息（结构化事件流）
+  ///
+  /// 默认回退到字符串流，仅产生 `text` 事件。
+  Stream<AIStreamEvent> sendMessageEventStream({
+    required String model,
+    required List<ChatMessage> messages,
+    required ModelParameters parameters,
+    List<AttachedFileData>? files,
+    String? modelId,
+  }) async* {
+    await for (final chunk in sendMessageStream(
+      model: model,
+      messages: messages,
+      parameters: parameters,
+      files: files,
+      modelId: modelId,
+    )) {
+      yield AIStreamEvent.text(chunk, isTypedSemantic: false);
+    }
+  }
 
   /// 发送聊天消息（非流式）
   Future<String> sendMessage({
@@ -65,6 +83,7 @@ abstract class AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   });
 
   /// 获取Provider显示名称
@@ -92,16 +111,122 @@ abstract class AIProvider {
   }
 }
 
+enum AIStreamEventType {
+  text,
+  thinking,
+  toolCall,
+  toolStarted,
+  toolResult,
+  toolError,
+}
+
+class AIStreamEvent {
+  final AIStreamEventType type;
+  final String? text;
+  final List<Map<String, dynamic>>? toolCalls;
+  final String? callId;
+  final String? toolName;
+  final String? result;
+  final String? errorMessage;
+
+  /// `true` 表示该事件来自 typed SSE / 结构化语义流，
+  /// `false` 表示只是旧字符串流包装出来的兼容事件。
+  final bool isTypedSemantic;
+
+  const AIStreamEvent._({
+    required this.type,
+    this.text,
+    this.toolCalls,
+    this.callId,
+    this.toolName,
+    this.result,
+    this.errorMessage,
+    required this.isTypedSemantic,
+  });
+
+  factory AIStreamEvent.text(String text, {required bool isTypedSemantic}) {
+    return AIStreamEvent._(
+      type: AIStreamEventType.text,
+      text: text,
+      isTypedSemantic: isTypedSemantic,
+    );
+  }
+
+  factory AIStreamEvent.thinking(String text) {
+    return AIStreamEvent._(
+      type: AIStreamEventType.thinking,
+      text: text,
+      isTypedSemantic: true,
+    );
+  }
+
+  factory AIStreamEvent.toolCall(List<Map<String, dynamic>> toolCalls) {
+    return AIStreamEvent._(
+      type: AIStreamEventType.toolCall,
+      toolCalls: toolCalls,
+      isTypedSemantic: true,
+    );
+  }
+
+  factory AIStreamEvent.toolStarted({
+    required String callId,
+    String? toolName,
+  }) {
+    return AIStreamEvent._(
+      type: AIStreamEventType.toolStarted,
+      callId: callId,
+      toolName: toolName,
+      isTypedSemantic: true,
+    );
+  }
+
+  factory AIStreamEvent.toolResult({
+    required String callId,
+    String? toolName,
+    required String result,
+  }) {
+    return AIStreamEvent._(
+      type: AIStreamEventType.toolResult,
+      callId: callId,
+      toolName: toolName,
+      result: result,
+      isTypedSemantic: true,
+    );
+  }
+
+  factory AIStreamEvent.toolError({
+    required String callId,
+    String? toolName,
+    required String errorMessage,
+  }) {
+    return AIStreamEvent._(
+      type: AIStreamEventType.toolError,
+      callId: callId,
+      toolName: toolName,
+      errorMessage: errorMessage,
+      isTypedSemantic: true,
+    );
+  }
+}
+
 /// 聊天消息数据类
 class ChatMessage {
-  final String role; // 'system', 'user', 'assistant'
+  final String role; // 'system', 'user', 'assistant', 'tool'
   final String content;
   final List<MessageContent>? multimodalContent;
+
+  /// 工具调用列表（assistant 消息）
+  final List<Map<String, dynamic>>? toolCalls;
+
+  /// 工具调用 ID（tool 消息）
+  final String? toolCallId;
 
   ChatMessage({
     required this.role,
     required this.content,
     this.multimodalContent,
+    this.toolCalls,
+    this.toolCallId,
   });
 
   Map<String, dynamic> toJson() {
@@ -111,10 +236,20 @@ class ChatMessage {
         'content': multimodalContent!.map((c) => c.toJson()).toList(),
       };
     }
-    return {
-      'role': role,
-      'content': content,
-    };
+
+    final json = <String, dynamic>{'role': role, 'content': content};
+
+    // 添加 tool_calls（assistant 消息）
+    if (toolCalls != null && toolCalls!.isNotEmpty) {
+      json['tool_calls'] = toolCalls;
+    }
+
+    // 添加 tool_call_id（tool 消息）
+    if (toolCallId != null) {
+      json['tool_call_id'] = toolCallId;
+    }
+
+    return json;
   }
 }
 
@@ -125,20 +260,14 @@ class MessageContent {
   final ImageUrl? imageUrl;
   final FileData? file;
 
-  MessageContent.text(this.text)
-      : type = 'text',
-        imageUrl = null,
-        file = null;
+  MessageContent.text(this.text) : type = 'text', imageUrl = null, file = null;
 
   MessageContent.image(this.imageUrl)
-      : type = 'image_url',
-        text = null,
-        file = null;
+    : type = 'image_url',
+      text = null,
+      file = null;
 
-  MessageContent.file(this.file)
-      : type = 'file',
-        text = null,
-        imageUrl = null;
+  MessageContent.file(this.file) : type = 'file', text = null, imageUrl = null;
 
   Map<String, dynamic> toJson() {
     switch (type) {
@@ -162,10 +291,7 @@ class ImageUrl {
   ImageUrl({required this.url, this.detail});
 
   Map<String, dynamic> toJson() {
-    return {
-      'url': url,
-      if (detail != null) 'detail': detail,
-    };
+    return {'url': url, if (detail != null) 'detail': detail};
   }
 }
 
@@ -175,18 +301,10 @@ class FileData {
   final String mimeType;
   final String data; // base64编码
 
-  FileData({
-    required this.name,
-    required this.mimeType,
-    required this.data,
-  });
+  FileData({required this.name, required this.mimeType, required this.data});
 
   Map<String, dynamic> toJson() {
-    return {
-      'name': name,
-      'mime_type': mimeType,
-      'data': data,
-    };
+    return {'name': name, 'mime_type': mimeType, 'data': data};
   }
 }
 
@@ -195,23 +313,36 @@ class AttachedFileData {
   final String path;
   final String mimeType;
   final String name;
+  final Uint8List? bytes;
 
   AttachedFileData({
     required this.path,
     required this.mimeType,
     required this.name,
+    this.bytes,
   });
 }
+
 /// Provider工厂
 class ProviderFactory {
   /// 是否使用 LangChain 实现（用于 A/B 测试和回滚）
   static bool useLangChain = false;
+
+  /// 是否使用混合 LangChain 实现（推荐）
+  /// - true: 使用 HybridLangChainProvider（LangChain 消息格式 + 自实现 SSE）
+  /// - false: 使用原有 OpenAIProvider
+  static bool useHybridLangChain = true;
 
   /// 全局后端开关（设为 false 时强制所有请求走直连）
   static bool pythonBackendEnabled = false;
 
   /// 创建 Provider实例（原有方法，保持不变）
   static AIProvider createProvider(ProviderConfig config) {
+    // 优先使用混合实现
+    if (useHybridLangChain) {
+      return HybridLangChainProvider(config);
+    }
+
     if (useLangChain) {
       // 使用 LangChain.dart 实现
       return LangChainProvider.fromConfig(config);
@@ -238,7 +369,15 @@ class ProviderFactory {
   /// - direct: 直连 LLM API（同 createProvider）
   /// - proxy: 走 Python 后端代理
   /// - auto: 优先代理，失败回退到直连
-  static AIProvider createProviderWithRouting(ProviderConfig config) {
+  static AIProvider createProviderWithRouting(
+    ProviderConfig config, {
+    bool forceDirect = false,
+  }) {
+    if (forceDirect) {
+      debugPrint('[ROUTE] 强制直连模式 → 保留当前前端能力边界');
+      return createProvider(config);
+    }
+
     // 全局开关关闭时强制直连
     if (!pythonBackendEnabled) {
       debugPrint('[ROUTE] 全局开关关闭 → 强制直连模式');
@@ -270,6 +409,7 @@ class GeminiProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) {
     throw UnimplementedError();
   }
@@ -280,6 +420,7 @@ class GeminiProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) {
     throw UnimplementedError();
   }
@@ -304,6 +445,7 @@ class DeepSeekProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) {
     throw UnimplementedError();
   }
@@ -314,6 +456,7 @@ class DeepSeekProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) {
     throw UnimplementedError();
   }
@@ -338,6 +481,7 @@ class ClaudeProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) {
     throw UnimplementedError();
   }
@@ -348,6 +492,7 @@ class ClaudeProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) {
     throw UnimplementedError();
   }

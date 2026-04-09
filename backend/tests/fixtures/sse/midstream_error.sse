@@ -1,0 +1,3 @@
+data: {"id":"chatcmpl-error","object":"chat.completion.chunk","created":1734366925,"model":"deepseek-r1","choices":[{"index":0,"delta":{"reasoning_content":"先思考"},"finish_reason":null}]}
+data: {"error":{"message":"boom","type":"api_error"}}
+data: [DONE]

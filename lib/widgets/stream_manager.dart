@@ -1,9 +1,11 @@
-/// INPUT: 流式 chunk/状态事件（start/update/complete/error）+ thinking 标签解析
+/// INPUT: 流式 chunk/状态事件（start/update/complete/error）+ thinking 标签解析 + 工具调用
 /// OUTPUT: StreamManager/StreamData - 供 UI 订阅的流式状态容器
 /// POS: UI 层 / Widgets - V2 流式渲染状态管理（与 flutter_chat_ui TextStreamMessage 协作）
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+
+import '../models/mcp/mcp_tool_call.dart';
 
 /// 流式消息状态
 enum StreamStatus {
@@ -29,6 +31,9 @@ class StreamData {
   DateTime? thinkingStartTime;
   DateTime? thinkingEndTime;
 
+  // 工具调用相关
+  List<ToolCallData> toolCalls;
+
   StreamData({
     required this.streamId,
     this.content = '',
@@ -41,7 +46,8 @@ class StreamData {
     this.currentThinkingEndTag,
     this.thinkingStartTime,
     this.thinkingEndTime,
-  });
+    List<ToolCallData>? toolCalls,
+  }) : toolCalls = toolCalls ?? [];
 
   /// 获取思考时长（秒）
   int get thinkingDurationSeconds {
@@ -52,6 +58,13 @@ class StreamData {
 
   /// 是否正在思考
   bool get isThinking => isThinkingOpen || (thinkingContent.isNotEmpty && thinkingEndTime == null);
+
+  /// 是否有工具调用
+  bool get hasToolCalls => toolCalls.isNotEmpty;
+
+  /// 是否有正在运行的工具调用
+  bool get hasRunningToolCalls =>
+      toolCalls.any((tc) => tc.status == ToolCallStatus.running);
 }
 
 /// 流式消息管理器
@@ -109,6 +122,56 @@ class StreamManager extends ChangeNotifier {
       // 发送增量内容而非全部内容，减少内存分配
       controller.add(chunk);
     }
+    notifyListeners();
+  }
+
+  /// 追加结构化 thinking 增量
+  void appendThinking(String streamId, String chunk) {
+    final data = _streams[streamId];
+    if (data == null || chunk.isEmpty) return;
+
+    if (data.status != StreamStatus.streaming) {
+      return;
+    }
+
+    if (!data.isThinkingOpen) {
+      data.isThinkingOpen = true;
+      data.currentThinkingEndTag = '</think>';
+      data.thinkingEndTime = null;
+      data.thinkingStartTime ??= DateTime.now();
+    }
+
+    data.thinkingContent += chunk;
+    notifyListeners();
+  }
+
+  /// 追加纯正文增量（不解析 thinking 标签）
+  void appendText(String streamId, String chunk) {
+    final data = _streams[streamId];
+    if (data == null || chunk.isEmpty) return;
+
+    if (data.status != StreamStatus.streaming) {
+      return;
+    }
+
+    data.content += chunk;
+
+    final controller = _controllers[streamId];
+    if (controller != null && !controller.isClosed) {
+      controller.add(chunk);
+    }
+    notifyListeners();
+  }
+
+  /// 关闭结构化 thinking 块
+  void closeThinking(String streamId) {
+    final data = _streams[streamId];
+    if (data == null) return;
+    if (!data.isThinkingOpen) return;
+
+    data.isThinkingOpen = false;
+    data.currentThinkingEndTag = null;
+    data.thinkingEndTime = DateTime.now();
     notifyListeners();
   }
 
@@ -284,6 +347,88 @@ class StreamManager extends ChangeNotifier {
       data.content = data.content.substring(0, length);
       notifyListeners();
     }
+  }
+
+  // ===== 工具调用管理 =====
+
+  /// 添加工具调用（状态为 pending）
+  void addToolCall(String streamId, ToolCallData toolCall) {
+    final data = _streams[streamId];
+    if (data == null) return;
+
+    // 检查是否已存在
+    final existingIndex =
+        data.toolCalls.indexWhere((tc) => tc.callId == toolCall.callId);
+    if (existingIndex != -1) {
+      // 更新已有的
+      data.toolCalls[existingIndex] = toolCall;
+    } else {
+      data.toolCalls = [...data.toolCalls, toolCall];
+    }
+    notifyListeners();
+  }
+
+  /// 更新工具调用状态为 running
+  void startToolCall(String streamId, String callId) {
+    final data = _streams[streamId];
+    if (data == null) return;
+
+    final idx = data.toolCalls.indexWhere((tc) => tc.callId == callId);
+    if (idx == -1) return;
+
+    data.toolCalls[idx].status = ToolCallStatus.running;
+    data.toolCalls[idx].startTime = DateTime.now();
+    notifyListeners();
+  }
+
+  /// 完成工具调用（success 或 error）
+  void completeToolCall(
+    String streamId,
+    String callId, {
+    required bool success,
+    String? result,
+    String? errorMessage,
+  }) {
+    final data = _streams[streamId];
+    if (data == null) return;
+
+    final idx = data.toolCalls.indexWhere((tc) => tc.callId == callId);
+    if (idx == -1) return;
+
+    data.toolCalls[idx].status =
+        success ? ToolCallStatus.success : ToolCallStatus.error;
+    data.toolCalls[idx].endTime = DateTime.now();
+    data.toolCalls[idx].result = result;
+    data.toolCalls[idx].errorMessage = errorMessage;
+    notifyListeners();
+  }
+
+  /// 更新工具调用参数
+  void updateToolCallArguments(
+    String streamId,
+    String callId,
+    Map<String, dynamic> arguments,
+  ) {
+    final data = _streams[streamId];
+    if (data == null) return;
+
+    final idx = data.toolCalls.indexWhere((tc) => tc.callId == callId);
+    if (idx == -1) return;
+
+    data.toolCalls[idx].arguments = arguments;
+    notifyListeners();
+  }
+
+  /// 获取流的所有工具调用
+  List<ToolCallData> getToolCalls(String streamId) {
+    return _streams[streamId]?.toolCalls ?? const [];
+  }
+
+  /// 检查是否有正在运行的工具调用
+  bool hasRunningToolCalls(String streamId) {
+    final data = _streams[streamId];
+    if (data == null) return false;
+    return data.toolCalls.any((tc) => tc.status == ToolCallStatus.running);
   }
 
   @override

@@ -145,7 +145,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         // flutter_chat_ui.
         final thread = _getThread(rebuildFromMessagesIfMismatch: false);
         final chain = buildActiveMessageChain(thread);
-        final safeChainForUi = chain.isNotEmpty &&
+        final safeChainForUi =
+            chain.isNotEmpty &&
                 !chain.last.isUser &&
                 chain.last.content.trim().isEmpty
             ? chain.sublist(0, chain.length - 1)
@@ -203,7 +204,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     final thread = _getThread();
     final history = buildActiveMessageChain(thread);
-    final safeHistory = history.isNotEmpty &&
+    final safeHistory =
+        history.isNotEmpty &&
             !history.last.isUser &&
             history.last.content.trim().isEmpty
         ? history.sublist(0, history.length - 1)
@@ -212,19 +214,22 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     final startIndex =
         (contextLength <= 0 ||
-                contextLength == -1 ||
-                safeHistory.length <= contextLength)
-            ? 0
-            : safeHistory.length - contextLength;
+            contextLength == -1 ||
+            safeHistory.length <= contextLength)
+        ? 0
+        : safeHistory.length - contextLength;
 
     // 注入 summary：如果存在已压缩消息的摘要，在 systemPrompt 后注入
     final summary = widget.conversation.summary ?? '';
     final summaryRangeEndId = widget.conversation.summaryRangeEndId;
     if (summary.isNotEmpty && summaryRangeEndId != null) {
-      final summaryEndIndex =
-          safeHistory.indexWhere((msg) => msg.id == summaryRangeEndId);
+      final summaryEndIndex = safeHistory.indexWhere(
+        (msg) => msg.id == summaryRangeEndId,
+      );
       if (summaryEndIndex == -1) {
-        debugPrint('[streaming] summaryRangeEndId=$summaryRangeEndId not found in history, skipping injection');
+        debugPrint(
+          '[streaming] summaryRangeEndId=$summaryRangeEndId not found in history, skipping injection',
+        );
       } else if (summaryEndIndex < startIndex) {
         // 只有当 summaryRangeEndId 在当前窗口之前时才注入（表示有被压缩的消息）
         chatMessages.add(
@@ -248,30 +253,50 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     _activePromptTokensEstimate = _estimatePromptTokens(chatMessages);
 
     try {
-      final provider = globalModelServiceManager.createProviderInstance(
-        modelWithProvider.provider.id,
-      );
-      _currentProvider = provider;
-
       final files = _conversationSettings.attachedFiles
           .map(
             (f) => ai.AttachedFileData(
               path: f.path,
               mimeType: f.mimeType,
               name: f.name,
+              bytes: File(f.path).existsSync()
+                  ? File(f.path).readAsBytesSync()
+                  : null,
             ),
           )
           .toList();
 
+      final provider = globalModelServiceManager.createProviderInstance(
+        modelWithProvider.provider.id,
+      );
+      _currentProvider = provider;
+
+      // MCP 工具集成：如果模型支持工具且有已连接的 MCP 服务器
+      if (provider is HybridLangChainProvider &&
+          globalMcpClientService.hasConnectedServer) {
+        final supportsTools = modelWithProvider.model.hasCapability(
+          ModelCapability.tool,
+        );
+        if (supportsTools) {
+          final mcpAdapter = McpToolAdapter(globalMcpClientService);
+          provider.setMcpAdapter(mcpAdapter, supportsTools: true);
+        }
+      }
+
       await _streamController.startStreaming(
         provider: provider,
         modelName: modelWithProvider.model.modelName,
+        modelId: modelWithProvider.model.id,
         messages: chatMessages,
         parameters: _conversationSettings.parameters,
         files: files.isNotEmpty ? files : null,
         onChunk: (chunk) {
           if (_isDisposed) return;
           _chunkBuffer?.add(chunk);
+        },
+        onEvent: (event) {
+          if (_isDisposed) return;
+          _handleStreamEvent(event);
         },
         onDone: () async {
           if (_isDisposed) return;
@@ -310,7 +335,200 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       );
     }
   }
-@override
+
+  void _handleStreamEvent(ai.AIStreamEvent event) {
+    if (!event.isTypedSemantic) return;
+    _activeStreamUsesTypedEvents = true;
+
+    final streamId = _activeStreamId;
+    if (streamId == null) return;
+
+    switch (event.type) {
+      case ai.AIStreamEventType.thinking:
+        final text = event.text ?? '';
+        if (text.isEmpty) return;
+        _streamManager.appendThinking(streamId, text);
+        _refreshStreamingPlaceholderForState(bumpThinking: true);
+        return;
+      case ai.AIStreamEventType.text:
+        final wasOpen =
+            _streamManager.getData(streamId)?.isThinkingOpen ?? false;
+        _streamManager.closeThinking(streamId);
+        if (wasOpen) {
+          _refreshStreamingPlaceholderForState(bumpThinking: true);
+        }
+        return;
+      case ai.AIStreamEventType.toolCall:
+        final toolCalls = event.toolCalls ?? const <Map<String, dynamic>>[];
+        if (toolCalls.isEmpty) return;
+        _streamManager.closeThinking(streamId);
+        _applyTypedToolCalls(streamId, toolCalls);
+        _refreshStreamingPlaceholderForState(bumpToolCalls: true);
+        return;
+      case ai.AIStreamEventType.toolStarted:
+        final callId = event.callId ?? '';
+        if (callId.isEmpty) return;
+        _streamManager.closeThinking(streamId);
+        _ensureTypedToolCallExists(
+          streamId,
+          callId: callId,
+          toolName: event.toolName,
+        );
+        _streamManager.startToolCall(streamId, callId);
+        _refreshStreamingPlaceholderForState(bumpToolCalls: true);
+        return;
+      case ai.AIStreamEventType.toolResult:
+        final callId = event.callId ?? '';
+        if (callId.isEmpty) return;
+        _streamManager.closeThinking(streamId);
+        _ensureTypedToolCallExists(
+          streamId,
+          callId: callId,
+          toolName: event.toolName,
+        );
+        _streamManager.completeToolCall(
+          streamId,
+          callId,
+          success: true,
+          result: event.result,
+        );
+        _refreshStreamingPlaceholderForState(bumpToolCalls: true);
+        return;
+      case ai.AIStreamEventType.toolError:
+        final callId = event.callId ?? '';
+        if (callId.isEmpty) return;
+        _streamManager.closeThinking(streamId);
+        _ensureTypedToolCallExists(
+          streamId,
+          callId: callId,
+          toolName: event.toolName,
+        );
+        _streamManager.completeToolCall(
+          streamId,
+          callId,
+          success: false,
+          errorMessage: event.errorMessage,
+        );
+        _refreshStreamingPlaceholderForState(bumpToolCalls: true);
+        return;
+    }
+  }
+
+  void _applyTypedToolCalls(
+    String streamId,
+    List<Map<String, dynamic>> toolCalls,
+  ) {
+    for (final toolCall in toolCalls) {
+      final callId = (toolCall['id'] ?? '').toString();
+      final function = toolCall['function'];
+      if (callId.isEmpty || function is! Map<String, dynamic>) {
+        continue;
+      }
+
+      final toolName = (function['name'] ?? '').toString();
+      if (toolName.isEmpty) {
+        continue;
+      }
+
+      Map<String, dynamic>? arguments;
+      final rawArguments = function['arguments'];
+      if (rawArguments is Map<String, dynamic>) {
+        arguments = rawArguments;
+      } else if (rawArguments is String && rawArguments.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(rawArguments);
+          if (decoded is Map<String, dynamic>) {
+            arguments = decoded;
+          }
+        } catch (_) {
+          arguments = {'raw': rawArguments};
+        }
+      }
+
+      _streamManager.addToolCall(
+        streamId,
+        ToolCallData(
+          callId: callId,
+          toolName: toolName,
+          status: ToolCallStatus.pending,
+          arguments: arguments,
+        ),
+      );
+    }
+  }
+
+  void _ensureTypedToolCallExists(
+    String streamId, {
+    required String callId,
+    String? toolName,
+  }) {
+    final existing = _streamManager.getToolCalls(streamId);
+    final found = existing.any((toolCall) => toolCall.callId == callId);
+    if (found) {
+      return;
+    }
+
+    _streamManager.addToolCall(
+      streamId,
+      ToolCallData(
+        callId: callId,
+        toolName: (toolName != null && toolName.isNotEmpty)
+            ? toolName
+            : 'unknown_tool',
+        status: ToolCallStatus.pending,
+      ),
+    );
+  }
+
+  void _refreshStreamingPlaceholderForState({
+    bool bumpThinking = false,
+    bool bumpToolCalls = false,
+  }) {
+    if (_isDisposed) return;
+
+    final streamId = _activeStreamId;
+    final oldPlaceholder = _activeAssistantPlaceholder;
+    if (streamId == null || oldPlaceholder == null) return;
+
+    final oldMeta = oldPlaceholder.metadata ?? const <String, dynamic>{};
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final oldText = oldPlaceholder is chat.TextMessage
+        ? oldPlaceholder.text
+        : '';
+    final newMeta = <String, dynamic>{
+      ...oldMeta,
+      'streaming': true,
+      'streamStateBumpTs': nowMs,
+    };
+
+    if (bumpThinking) {
+      final revRaw = oldMeta['thinkingRev'];
+      final rev = (revRaw is int) ? revRaw : int.tryParse('$revRaw') ?? 0;
+      newMeta['thinkingRev'] = rev + 1;
+      newMeta['thinkingBumpTs'] = nowMs;
+    }
+
+    if (bumpToolCalls) {
+      final revRaw = oldMeta['toolCallsRev'];
+      final rev = (revRaw is int) ? revRaw : int.tryParse('$revRaw') ?? 0;
+      newMeta['toolCallsRev'] = rev + 1;
+      newMeta['toolCallsBumpTs'] = nowMs;
+    }
+
+    final newMsg = chat.TextMessage(
+      id: oldPlaceholder.id,
+      authorId: oldPlaceholder.authorId,
+      createdAt: oldPlaceholder.createdAt,
+      text: oldText,
+      metadata: newMeta,
+    );
+
+    _chatController.updateMessage(oldPlaceholder, newMsg);
+    _activeAssistantPlaceholder = newMsg;
+    _requestAutoFollow(smooth: true);
+  }
+
+  @override
   void _handleStreamFlush(String content) {
     if (_isDisposed) return;
 
@@ -322,18 +540,25 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     final beforeThinkingLen = beforeData?.thinkingContent.length ?? 0;
     final beforeThinkingOpen = beforeData?.isThinkingOpen ?? false;
 
-    _streamManager.append(streamId, content);
+    if (_activeStreamUsesTypedEvents) {
+      _streamManager.appendText(streamId, content);
+    } else {
+      _streamManager.append(streamId, content);
+    }
 
     _scheduleStreamingImagePrefetch(streamId);
 
-    final useStableFlow = MarkstreamV2StreamingFlags.stableFlowReveal(_conversationSettings);
+    final useStableFlow = MarkstreamV2StreamingFlags.stableFlowReveal(
+      _conversationSettings,
+    );
 
     if (useStableFlow) {
       final afterData = _streamManager.getData(streamId);
       final afterThinkingLen = afterData?.thinkingContent.length ?? 0;
       final afterThinkingOpen = afterData?.isThinkingOpen ?? false;
       final thinkingChanged =
-          afterThinkingLen != beforeThinkingLen || afterThinkingOpen != beforeThinkingOpen;
+          afterThinkingLen != beforeThinkingLen ||
+          afterThinkingOpen != beforeThinkingOpen;
 
       // FIX: 移除 content.isEmpty 门控，thinking 变化时始终触发 thinkingBump
       // 根因：<think> 和 </think> 经常在同一 flush 中到达，如果 body 也在同一 chunk，
@@ -347,7 +572,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         if (lastBump == null || (nowMs - lastBump) >= bumpThrottleMs) {
           final revRaw = oldMeta['thinkingRev'];
           final rev = (revRaw is int) ? revRaw : int.tryParse('$revRaw') ?? 0;
-          final oldText = (oldPlaceholder is chat.TextMessage) ? oldPlaceholder.text : '';
+          final oldText = (oldPlaceholder is chat.TextMessage)
+              ? oldPlaceholder.text
+              : '';
 
           final newMsg = chat.TextMessage(
             id: oldPlaceholder.id,
@@ -412,7 +639,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     _stableRevealTicking = false;
     _stableRevealDisplayedLen = 0;
-    _stableRevealKickstarted = false;  // FIX-2 改进：使用一次性标志
+    _stableRevealKickstarted = false; // FIX-2 改进：使用一次性标志
+    _activeStreamUsesTypedEvents = false;
     _pendingFinalize = null;
   }
 
@@ -423,7 +651,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       if (_activeStreamId != streamId) return;
 
       final fullText = _streamManager.getState(streamId).text;
-      for (final url in ImagePersistenceService.extractNetworkImageUrlsFromMarkdown(fullText)) {
+      for (final url
+          in ImagePersistenceService.extractNetworkImageUrlsFromMarkdown(
+            fullText,
+          )) {
         if (_streamPrefetchedImageUrls.add(url)) {
           unawaited(ImagePersistenceService().persistNetworkImage(url));
         }
@@ -439,14 +670,13 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
   /// 调度下一次 reveal tick（使用单次 Timer，每次读取最新的 tickMs）
   void _scheduleNextRevealTick() {
     if (_isDisposed || _stableRevealTimer != null) return;
-    final tickMs = MarkstreamV2StreamingFlags.revealTickMs(_conversationSettings);
-    _stableRevealTimer = Timer(
-      Duration(milliseconds: tickMs),
-      () {
-        _stableRevealTimer = null;
-        _stableFlowRevealTick();
-      },
+    final tickMs = MarkstreamV2StreamingFlags.revealTickMs(
+      _conversationSettings,
     );
+    _stableRevealTimer = Timer(Duration(milliseconds: tickMs), () {
+      _stableRevealTimer = null;
+      _stableFlowRevealTick();
+    });
   }
 
   void _stopStableFlowRevealTimer() {
@@ -475,14 +705,16 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       final pending = _pendingFinalize;
       if (pending != null) {
         _pendingFinalize = null;
-        unawaited(_finalizeStreamingMessage(
-          modelName: pending.modelName,
-          providerName: pending.providerName,
-          error: pending.error,
-          streamIdOverride: pending.streamId,
-          placeholderOverride: pending.placeholder,
-          promptTokensOverride: pending.promptTokens,
-        ));
+        unawaited(
+          _finalizeStreamingMessage(
+            modelName: pending.modelName,
+            providerName: pending.providerName,
+            error: pending.error,
+            streamIdOverride: pending.streamId,
+            placeholderOverride: pending.placeholder,
+            promptTokensOverride: pending.promptTokens,
+          ),
+        );
       }
       _stopStableFlowRevealTimer();
       return;
@@ -496,14 +728,16 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       if (pending != null) {
         _pendingFinalize = null;
         _stopStableFlowRevealTimer();
-        unawaited(_finalizeStreamingMessage(
-          modelName: pending.modelName,
-          providerName: pending.providerName,
-          error: pending.error,
-          streamIdOverride: pending.streamId,
-          placeholderOverride: pending.placeholder,
-          promptTokensOverride: pending.promptTokens,
-        ));
+        unawaited(
+          _finalizeStreamingMessage(
+            modelName: pending.modelName,
+            providerName: pending.providerName,
+            error: pending.error,
+            streamIdOverride: pending.streamId,
+            placeholderOverride: pending.placeholder,
+            promptTokensOverride: pending.promptTokens,
+          ),
+        );
         return;
       }
       _scheduleNextRevealTick();
@@ -521,26 +755,31 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       if (pending != null) {
         _pendingFinalize = null;
         _stopStableFlowRevealTimer();
-        unawaited(_finalizeStreamingMessage(
-          modelName: pending.modelName,
-          providerName: pending.providerName,
-          error: pending.error,
-          streamIdOverride: pending.streamId,
-          placeholderOverride: pending.placeholder,
-          promptTokensOverride: pending.promptTokens,
-        ));
+        unawaited(
+          _finalizeStreamingMessage(
+            modelName: pending.modelName,
+            providerName: pending.providerName,
+            error: pending.error,
+            streamIdOverride: pending.streamId,
+            placeholderOverride: pending.placeholder,
+            promptTokensOverride: pending.promptTokens,
+          ),
+        );
         return;
       }
       _scheduleNextRevealTick();
       return;
     }
 
-    final maxCharsPerTick =
-        MarkstreamV2StreamingFlags.revealMaxCharsPerTick(_conversationSettings);
-    final minBufferChars =
-        MarkstreamV2StreamingFlags.revealMinBufferChars(_conversationSettings);
-    final maxLagChars =
-        MarkstreamV2StreamingFlags.revealMaxLagChars(_conversationSettings);
+    final maxCharsPerTick = MarkstreamV2StreamingFlags.revealMaxCharsPerTick(
+      _conversationSettings,
+    );
+    final minBufferChars = MarkstreamV2StreamingFlags.revealMinBufferChars(
+      _conversationSettings,
+    );
+    final maxLagChars = MarkstreamV2StreamingFlags.revealMaxLagChars(
+      _conversationSettings,
+    );
 
     final needCatchUpNow = maxLagChars > 0 && backlog > maxLagChars;
     var desiredMin = displayedLen;
@@ -589,9 +828,16 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       _stableRevealDisplayedLen = safeEnd;
 
       // 调试日志：显示实际输出的字符数（仅在 MS_STREAM_METRICS 启用时）
-      if (const bool.fromEnvironment('MS_STREAM_METRICS', defaultValue: false)) {
-        final tickMs = MarkstreamV2StreamingFlags.revealTickMs(_conversationSettings);
-        debugPrint('[tick] +$actualChars chars (max=$maxCharsPerTick, tick=${tickMs}ms, displayed=$safeEnd/$fullLen)');
+      if (const bool.fromEnvironment(
+        'MS_STREAM_METRICS',
+        defaultValue: false,
+      )) {
+        final tickMs = MarkstreamV2StreamingFlags.revealTickMs(
+          _conversationSettings,
+        );
+        debugPrint(
+          '[tick] +$actualChars chars (max=$maxCharsPerTick, tick=${tickMs}ms, displayed=$safeEnd/$fullLen)',
+        );
       }
 
       final newText = fullText.substring(0, safeEnd);
@@ -616,12 +862,11 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     }
   }
 
-
   int _clampStableRevealEnd(
     String text,
     int desiredEnd, {
     required int floor,
-    bool bypassStableCheck = false,  // FIX-4: 流结束时绕过稳定性检查
+    bool bypassStableCheck = false, // FIX-4: 流结束时绕过稳定性检查
   }) {
     var end = desiredEnd;
     if (end > text.length) end = text.length;
@@ -651,7 +896,12 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     end = _stripPartialRun(text, end, floor: floor, charCode: 0x7E); // ~
 
     // Prevent leaking half of a "$"/"$$" across chunk boundaries.
-    final dollarRun = _countTrailingRun(text, end, floor: floor, charCode: 0x24);
+    final dollarRun = _countTrailingRun(
+      text,
+      end,
+      floor: floor,
+      charCode: 0x24,
+    );
     if (dollarRun == 1) {
       end -= 1;
       if (end <= floor) return floor;
@@ -680,7 +930,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     if (maybeSensitive) {
       final parts = const StablePrefixParser().split(text.substring(0, end));
       if (parts.tail.isNotEmpty) {
-        final tailHasLeadingFence = RegExp(r'^\s*(```|~~~)').hasMatch(parts.tail);
+        final tailHasLeadingFence = RegExp(
+          r'^\s*(```|~~~)',
+        ).hasMatch(parts.tail);
         if (!tailHasLeadingFence) {
           final stableLen = parts.stable.length;
           if (stableLen <= floor) return floor;
@@ -692,11 +944,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     return end;
   }
 
-  int _stripDanglingHtmlTagStart(
-    String text,
-    int end, {
-    required int floor,
-  }) {
+  int _stripDanglingHtmlTagStart(String text, int end, {required int floor}) {
     final windowStart = (end - 256) > floor ? (end - 256) : floor;
     var searchFrom = end - 1;
     while (true) {
@@ -722,9 +970,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     }
   }
 
-
   bool _isAsciiLetter(int codeUnit) {
-    return (codeUnit >= 65 && codeUnit <= 90) || (codeUnit >= 97 && codeUnit <= 122);
+    return (codeUnit >= 65 && codeUnit <= 90) ||
+        (codeUnit >= 97 && codeUnit <= 122);
   }
 
   String _formatSummaryForPrompt(String summaryJson) {
@@ -794,7 +1042,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     // 格式化错误为 <error> 标签（不再使用 toast）
     String? errorTag;
     if (error != null) {
-      final errorInfo = ErrorFormatter.parse(error);
+      final errorInfo = error is ErrorInfo
+          ? error
+          : ErrorFormatter.parse(error);
       errorTag = errorInfo.toErrorTag();
     }
 
@@ -803,17 +1053,13 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       final body = data?.content ?? '';
       final thinking = data?.thinkingContent ?? '';
 
-      // 组合最终内容：thinking + body + error
-      var finalContent = thinking.trim().isNotEmpty
-          ? '<think>$thinking</think>$body'
-          : body;
+      final finalContent = buildStreamingFinalContent(
+        thinking: thinking,
+        body: body,
+        errorTag: errorTag,
+      );
 
-      // 如果有错误，附加到内容末尾
-      if (errorTag != null) {
-        finalContent = finalContent.isEmpty ? errorTag : '$finalContent\n$errorTag';
-      }
-
-      if (finalContent.trim().isNotEmpty) {
+      if (shouldPersistFinalizedStreamingMessage(finalContent)) {
         final outputTokens = TokenCounter.estimateTokens(finalContent);
         final thinkingDuration = data?.thinkingDurationSeconds ?? 0;
         final assistantMessage = app.Message(
@@ -825,11 +1071,15 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           outputTokens: outputTokens,
           modelName: modelName,
           providerName: providerName,
-          thinkingDurationSeconds: thinkingDuration > 0 ? thinkingDuration : null,
+          thinkingDurationSeconds: thinkingDuration > 0
+              ? thinkingDuration
+              : null,
         );
 
         final thread = _getThread(rebuildFromMessagesIfMismatch: false);
-        final nodeAlreadyInThread = thread.nodes.containsKey(assistantMessage.id);
+        final nodeAlreadyInThread = thread.nodes.containsKey(
+          assistantMessage.id,
+        );
 
         if (!nodeAlreadyInThread) {
           widget.conversation.addMessage(assistantMessage);
@@ -861,8 +1111,8 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         // 将过期的网络图片 URL 替换为持久化的本地文件 URI
         unawaited(_persistMarkdownImagesForMessageId(assistantMessage.id));
       } else {
-        // No content (e.g. request failed before any chunk or user stopped immediately).
-        // Remove the placeholder to avoid a stuck "未落盘" item.
+        // 只有在既没有正文/思考，也没有错误块时才移除占位消息。
+        // 手动截断会附加 <error> 块，从而保留 header 并显示提示。
         try {
           await _chatController.removeMessage(placeholder, animated: false);
         } catch (_) {
@@ -877,10 +1127,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       }
       _streamManager.removeStream(streamId);
     }
-// 成功/失败都清空附件并恢复附件栏
+    // 成功/失败都清空附件并恢复附件栏
     _conversationSettings = _conversationSettings.clearFiles();
     globalModelServiceManager.updateConversationSettings(_conversationSettings);
-
 
     if (!mounted || _isDisposed) return;
     setState(() {
@@ -888,6 +1137,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       _attachmentBarVisible = true;
     });
   }
+
   @override
   Future<void> _stopStreaming() async {
     if (_isDisposed) return;
@@ -941,9 +1191,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     await _finalizeStreamingMessage(
       modelName: modelName,
       providerName: providerName,
+      error: ErrorFormatter.requestAborted(),
     );
   }
-
 
   @override
   bool _isProbablyNetworkUrl(String source) {
@@ -992,10 +1242,11 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     );
 
     if (result.hasP0Overflow) {
-      debugPrint('[streaming] Roleplay context P0 overflow - some required content dropped');
+      debugPrint(
+        '[streaming] Roleplay context P0 overflow - some required content dropped',
+      );
     }
 
     return result.renderedText;
   }
-
 }

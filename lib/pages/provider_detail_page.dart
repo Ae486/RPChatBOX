@@ -1,6 +1,6 @@
-/// INPUT: ProviderConfig? + ModelServiceManager
-/// OUTPUT: ProviderDetailPage - Provider 详情（API 配置 + 模型列表/编辑/添加）
-/// POS: UI 层 / Pages - Provider 详情页
+// INPUT: ProviderConfig? + ModelServiceManager
+// OUTPUT: ProviderDetailPage - Provider 详情（API 配置 + 模型列表/编辑/添加）
+// POS: UI 层 / Pages - Provider 详情页
 
 import 'package:flutter/material.dart';
 
@@ -12,6 +12,7 @@ import '../chat_ui/owui/components/owui_snack_bar.dart';
 import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../data/model_capability_presets.dart';
+import '../adapters/ai_provider.dart';
 import '../models/model_config.dart';
 import '../models/provider_config.dart';
 import '../services/model_service_manager.dart';
@@ -55,7 +56,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   void initState() {
     super.initState();
     final provider = widget.provider;
-    
+
     _nameController = TextEditingController(text: provider?.name ?? '');
     _apiUrlController = TextEditingController(text: provider?.apiUrl ?? '');
     _apiKeyController = TextEditingController(text: provider?.apiKey ?? '');
@@ -64,6 +65,33 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
     if (provider != null) {
       _models = widget.serviceManager.getModelsByProvider(provider.id);
+      _refreshBackendProviderStateIfNeeded(provider.id);
+    }
+  }
+
+  Future<void> _refreshBackendProviderStateIfNeeded(String providerId) async {
+    if (!ProviderFactory.pythonBackendEnabled) return;
+
+    try {
+      await widget.serviceManager.refreshBackendMirrors(sync: false);
+      if (!mounted) return;
+      final refreshedProvider = widget.serviceManager.getProvider(providerId);
+      setState(() {
+        if (refreshedProvider != null) {
+          _nameController.text = refreshedProvider.name;
+          _apiUrlController.text = refreshedProvider.apiUrl;
+          if (refreshedProvider.apiKey.isNotEmpty) {
+            _apiKeyController.text = refreshedProvider.apiKey;
+          }
+          _selectedType = refreshedProvider.type;
+          _isEnabled = refreshedProvider.isEnabled;
+        }
+        _models = widget.serviceManager.getModelsByProvider(providerId);
+      });
+    } catch (e) {
+      if (mounted) {
+        debugPrint('[ProviderDetailPage] backend mirror refresh failed: $e');
+      }
     }
   }
 
@@ -79,14 +107,25 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     if (!_formKey.currentState!.validate()) return;
 
     final provider = widget.provider;
-    final newProvider = ProviderConfig(
-      id: provider?.id ?? widget.serviceManager.generateId(),
-      name: _nameController.text.trim(),
-      type: _selectedType,
-      apiUrl: _apiUrlController.text.trim(),
-      apiKey: _apiKeyController.text.trim(),
-      isEnabled: _isEnabled,
-    );
+    final enteredApiKey = _apiKeyController.text.trim();
+    final newProvider =
+        (provider ??
+                ProviderConfig(
+                  id: widget.serviceManager.generateId(),
+                  name: '',
+                  type: _selectedType,
+                  apiUrl: '',
+                  apiKey: '',
+                ))
+            .copyWith(
+              name: _nameController.text.trim(),
+              type: _selectedType,
+              apiUrl: _apiUrlController.text.trim(),
+              apiKey: enteredApiKey.isNotEmpty
+                  ? enteredApiKey
+                  : (provider?.apiKey ?? ''),
+              isEnabled: _isEnabled,
+            );
 
     if (provider == null) {
       await widget.serviceManager.addProvider(newProvider);
@@ -138,20 +177,34 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     setState(() {
       _testingModelId = model.id;
     });
-    
+
     // 🔧 使用全局提示框
     GlobalToast.showLoading(context, '正在测试 ${model.displayName}...');
 
     try {
-      // 创建临时Provider配置用于测试
-      final tempProvider = ProviderConfig(
-        id: 'temp',
-        name: _nameController.text.trim(),
-        type: _selectedType,
-        apiUrl: _apiUrlController.text.trim(),
-        apiKey: _apiKeyController.text.trim(),
-        isEnabled: true,
-      );
+      final savedProvider = widget.provider != null
+          ? widget.serviceManager.getProvider(widget.provider!.id)
+          : null;
+      final tempProvider =
+          (savedProvider ??
+                  widget.provider ??
+                  ProviderConfig(
+                    id: 'temp',
+                    name: '',
+                    type: _selectedType,
+                    apiUrl: '',
+                    apiKey: '',
+                  ))
+              .copyWith(
+                id: savedProvider?.id ?? widget.provider?.id ?? 'temp',
+                name: _nameController.text.trim(),
+                type: _selectedType,
+                apiUrl: _apiUrlController.text.trim(),
+                apiKey: _apiKeyController.text.trim().isNotEmpty
+                    ? _apiKeyController.text.trim()
+                    : (savedProvider?.apiKey ?? widget.provider?.apiKey ?? ''),
+                isEnabled: true,
+              );
 
       // 🔧 修复：使用所选模型进行测试，而不是只检测 Provider 连接
       final result = await widget.serviceManager.testProviderWithModel(
@@ -162,15 +215,9 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       if (mounted) {
         // 🔧 使用全局提示框
         if (result.success) {
-          GlobalToast.showSuccess(
-            context,
-            '响应时间: ${result.responseTimeMs}ms',
-          );
+          GlobalToast.showSuccess(context, '响应时间: ${result.responseTimeMs}ms');
         } else {
-          GlobalToast.showError(
-            context,
-            '❌ 测试失败\n${result.errorMessage}',
-          );
+          GlobalToast.showError(context, '❌ 测试失败\n${result.errorMessage}');
         }
 
         // 3秒后自动退出测试模式
@@ -208,14 +255,20 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
     if (result != null && result.isNotEmpty) {
       // 🆕 支持批量添加：用逗号分隔的模型ID列表
-      final modelIds = result.split(',').map((id) => id.trim()).where((id) => id.isNotEmpty).toList();
-      
+      final modelIds = result
+          .split(',')
+          .map((id) => id.trim())
+          .where((id) => id.isNotEmpty)
+          .toList();
+
       if (modelIds.isEmpty) return;
-      
+
       for (final modelId in modelIds) {
         // 🆕 使用预设能力数据库自动识别模型能力
-        final presetCapabilities = ModelCapabilityPresets.getCapabilities(modelId);
-        
+        final presetCapabilities = ModelCapabilityPresets.getCapabilities(
+          modelId,
+        );
+
         final newModel = ModelConfig(
           id: widget.serviceManager.generateId(),
           providerId: provider.id,
@@ -226,7 +279,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
         await widget.serviceManager.addModel(newModel);
       }
-      
+
       if (!mounted) return;
       setState(() {
         _models = widget.serviceManager.getModelsByProvider(provider.id);
@@ -247,17 +300,17 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ModelEditPage(
-          model: model,
-          serviceManager: widget.serviceManager,
-        ),
+        builder: (context) =>
+            ModelEditPage(model: model, serviceManager: widget.serviceManager),
       ),
     );
 
     // 如果有更新，刷新模型列表
     if (result != null && mounted) {
       setState(() {
-        _models = widget.serviceManager.getModelsByProvider(widget.provider!.id);
+        _models = widget.serviceManager.getModelsByProvider(
+          widget.provider!.id,
+        );
       });
     }
   }
@@ -289,7 +342,9 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     if (confirmed == true) {
       await widget.serviceManager.deleteModel(model.id);
       setState(() {
-        _models = widget.serviceManager.getModelsByProvider(widget.provider!.id);
+        _models = widget.serviceManager.getModelsByProvider(
+          widget.provider!.id,
+        );
       });
       if (mounted) {
         GlobalToast.showSuccess(context, '已删除模型: ${model.displayName}');
@@ -308,10 +363,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       appBar: OwuiAppBar(
         title: Text(isNewProvider ? '添加服务' : '编辑服务'),
         actions: [
-          TextButton(
-            onPressed: _save,
-            child: const Text('保存'),
-          ),
+          TextButton(onPressed: _save, child: const Text('保存')),
           SizedBox(width: spacing.sm),
         ],
       ),
@@ -362,9 +414,13 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                             return '请输入API地址';
                           }
                           // 🔧 移除#和/后验证
-                          final cleanValue = value.trim().replaceAll(RegExp(r'[#/]+$'), '');
+                          final cleanValue = value.trim().replaceAll(
+                            RegExp(r'[#/]+$'),
+                            '',
+                          );
                           final uri = Uri.tryParse(cleanValue);
-                          if (cleanValue.isNotEmpty && (uri == null || !uri.isAbsolute)) {
+                          if (cleanValue.isNotEmpty &&
+                              (uri == null || !uri.isAbsolute)) {
                             return 'API地址格式不正确';
                           }
                           return null;
@@ -396,7 +452,8 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                               Expanded(
                                 child: Text(
                                   _apiUrlPreview,
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
                                         fontWeight: FontWeight.w500,
                                         color: colors.textPrimary,
                                       ),
@@ -416,6 +473,11 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                     decoration: InputDecoration(
                       labelText: 'API 密钥',
                       hintText: 'sk-...',
+                      helperText:
+                          ProviderFactory.pythonBackendEnabled &&
+                              widget.provider != null
+                          ? '留空则保留 backend 中已保存的密钥'
+                          : null,
                       // 🆕 添加显示/隐藏按钮
                       suffixIcon: IconButton(
                         icon: Icon(
@@ -434,7 +496,11 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                     ),
                     obscureText: !_isApiKeyVisible, // 🔧 根据状态切换
                     validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
+                      final allowsBlankForBackendEdit =
+                          ProviderFactory.pythonBackendEnabled &&
+                          widget.provider != null;
+                      if ((value == null || value.trim().isEmpty) &&
+                          !allowsBlankForBackendEdit) {
                         return '请输入API密钥';
                       }
                       return null;
@@ -512,20 +578,18 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
           children: [
             Text(
               title,
-              style: (theme.textTheme.titleMedium ?? const TextStyle()).copyWith(
-                color: colors.textPrimary,
-                fontWeight: FontWeight.w600,
-              ),
+              style: (theme.textTheme.titleMedium ?? const TextStyle())
+                  .copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
             ),
             const Spacer(),
             if (trailing != null) trailing,
           ],
         ),
         SizedBox(height: spacing.md),
-        OwuiCard(
-          padding: EdgeInsets.all(spacing.lg),
-          child: child,
-        ),
+        OwuiCard(padding: EdgeInsets.all(spacing.lg), child: child),
       ],
     );
   }
@@ -544,8 +608,9 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
           Expanded(
             child: Text(
               message,
-              style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
-                  .copyWith(color: colors.textSecondary),
+              style:
+                  (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
+                      .copyWith(color: colors.textSecondary),
             ),
           ),
         ],
@@ -625,7 +690,9 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       margin: EdgeInsets.only(bottom: spacing.md),
       isSelected: isTestingThis,
       child: InkWell(
-        onTap: _isTestingMode && !isTestingThis ? () => _testModel(model) : null,
+        onTap: _isTestingMode && !isTestingThis
+            ? () => _testModel(model)
+            : null,
         borderRadius: BorderRadius.circular(radius),
         child: Padding(
           padding: EdgeInsets.all(spacing.lg),
@@ -638,12 +705,13 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                   children: [
                     Text(
                       model.displayName,
-                      style: (Theme.of(context).textTheme.titleSmall ??
-                              const TextStyle())
-                          .copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: colors.textPrimary,
-                      ),
+                      style:
+                          (Theme.of(context).textTheme.titleSmall ??
+                                  const TextStyle())
+                              .copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: colors.textPrimary,
+                              ),
                     ),
                     SizedBox(height: spacing.sm),
                     Wrap(
@@ -652,42 +720,46 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                       children: model.capabilities
                           .where((cap) => cap != ModelCapability.text)
                           .map((cap) {
-                        return Tooltip(
-                          message: cap.displayName,
-                          child: Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: spacing.sm,
-                              vertical: spacing.xs,
-                            ),
-                            decoration: BoxDecoration(
-                              color: cap.color.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(
-                                context.owuiRadius.rLg / 2,
-                              ),
-                              border: Border.all(
-                                color: cap.color.withValues(alpha: 0.3),
-                                width: 0.5,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(cap.icon, size: 14, color: cap.color),
-                                SizedBox(width: spacing.xs),
-                                Text(
-                                  cap.displayName,
-                                  style: (Theme.of(context).textTheme.bodySmall ??
-                                          const TextStyle())
-                                      .copyWith(
-                                    color: cap.color,
-                                    fontWeight: FontWeight.w500,
+                            return Tooltip(
+                              message: cap.displayName,
+                              child: Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: spacing.sm,
+                                  vertical: spacing.xs,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: cap.color.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(
+                                    context.owuiRadius.rLg / 2,
+                                  ),
+                                  border: Border.all(
+                                    color: cap.color.withValues(alpha: 0.3),
+                                    width: 0.5,
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }).toList(),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(cap.icon, size: 14, color: cap.color),
+                                    SizedBox(width: spacing.xs),
+                                    Text(
+                                      cap.displayName,
+                                      style:
+                                          (Theme.of(
+                                                    context,
+                                                  ).textTheme.bodySmall ??
+                                                  const TextStyle())
+                                              .copyWith(
+                                                color: cap.color,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          })
+                          .toList(),
                     ),
                   ],
                 ),
@@ -735,11 +807,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                     borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
                     border: Border.all(color: colors.borderSubtle),
                   ),
-                  child: Icon(
-                    OwuiIcons.send,
-                    color: scheme.primary,
-                    size: 20,
-                  ),
+                  child: Icon(OwuiIcons.send, color: scheme.primary, size: 20),
                 ),
             ],
           ),

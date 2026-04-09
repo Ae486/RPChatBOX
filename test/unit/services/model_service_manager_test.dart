@@ -1,9 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:chatboxapp/services/model_service_manager.dart';
 import 'package:chatboxapp/models/provider_config.dart';
 import 'package:chatboxapp/models/model_config.dart';
 import 'package:chatboxapp/models/conversation_settings.dart';
+import 'package:chatboxapp/adapters/ai_provider.dart';
+import 'package:chatboxapp/services/dio_service.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 /// ModelServiceManager 单元测试
 ///
@@ -13,8 +19,12 @@ void main() {
 
   group('ModelServiceManager', () {
     late ModelServiceManager manager;
+    late bool originalPythonBackendEnabled;
 
     setUp(() async {
+      originalPythonBackendEnabled = ProviderFactory.pythonBackendEnabled;
+      ProviderFactory.pythonBackendEnabled = false;
+
       // 每个测试前重置 SharedPreferences
       SharedPreferences.setMockInitialValues({
         'config_version': 2, // 跳过迁移
@@ -22,6 +32,10 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       manager = ModelServiceManager(prefs);
       await manager.initialize();
+    });
+
+    tearDown(() {
+      ProviderFactory.pythonBackendEnabled = originalPythonBackendEnabled;
     });
 
     // ============ 初始化测试 ============
@@ -72,7 +86,10 @@ void main() {
         // Assert
         expect(manager.getProviders().length, equals(1));
         expect(manager.getProvider('test-provider'), isNotNull);
-        expect(manager.getProvider('test-provider')!.name, equals('Test Provider'));
+        expect(
+          manager.getProvider('test-provider')!.name,
+          equals('Test Provider'),
+        );
       });
 
       test('should update provider', () async {
@@ -91,7 +108,10 @@ void main() {
         await manager.updateProvider(updatedProvider);
 
         // Assert
-        expect(manager.getProvider('test-provider')!.name, equals('Updated Name'));
+        expect(
+          manager.getProvider('test-provider')!.name,
+          equals('Updated Name'),
+        );
       });
 
       test('should delete provider and its models', () async {
@@ -226,7 +246,10 @@ void main() {
         await manager.updateModel(updatedModel);
 
         // Assert
-        expect(manager.getModel('test-model')!.displayName, equals('Updated Name'));
+        expect(
+          manager.getModel('test-model')!.displayName,
+          equals('Updated Name'),
+        );
       });
 
       test('should delete model', () async {
@@ -257,18 +280,22 @@ void main() {
         );
         await manager.addProvider(anotherProvider);
 
-        await manager.addModel(ModelConfig(
-          id: 'model-1',
-          providerId: 'test-provider',
-          modelName: 'gpt-4',
-          displayName: 'GPT-4',
-        ));
-        await manager.addModel(ModelConfig(
-          id: 'model-2',
-          providerId: 'another-provider',
-          modelName: 'gemini-pro',
-          displayName: 'Gemini Pro',
-        ));
+        await manager.addModel(
+          ModelConfig(
+            id: 'model-1',
+            providerId: 'test-provider',
+            modelName: 'gpt-4',
+            displayName: 'GPT-4',
+          ),
+        );
+        await manager.addModel(
+          ModelConfig(
+            id: 'model-2',
+            providerId: 'another-provider',
+            modelName: 'gemini-pro',
+            displayName: 'Gemini Pro',
+          ),
+        );
 
         // Act
         final testProviderModels = manager.getModelsByProvider('test-provider');
@@ -280,20 +307,24 @@ void main() {
 
       test('should get enabled models only', () async {
         // Arrange
-        await manager.addModel(ModelConfig(
-          id: 'enabled',
-          providerId: 'test-provider',
-          modelName: 'gpt-4',
-          displayName: 'Enabled',
-          isEnabled: true,
-        ));
-        await manager.addModel(ModelConfig(
-          id: 'disabled',
-          providerId: 'test-provider',
-          modelName: 'gpt-3.5',
-          displayName: 'Disabled',
-          isEnabled: false,
-        ));
+        await manager.addModel(
+          ModelConfig(
+            id: 'enabled',
+            providerId: 'test-provider',
+            modelName: 'gpt-4',
+            displayName: 'Enabled',
+            isEnabled: true,
+          ),
+        );
+        await manager.addModel(
+          ModelConfig(
+            id: 'disabled',
+            providerId: 'test-provider',
+            modelName: 'gpt-3.5',
+            displayName: 'Disabled',
+            isEnabled: false,
+          ),
+        );
 
         // Act
         final enabledModels = manager.getEnabledModels();
@@ -412,8 +443,14 @@ void main() {
         await manager.addModel(model);
 
         // Assert
-        expect(manager.isValidProviderModelPair('test-provider', 'test-model'), isTrue);
-        expect(manager.isValidProviderModelPair('other-provider', 'test-model'), isFalse);
+        expect(
+          manager.isValidProviderModelPair('test-provider', 'test-model'),
+          isTrue,
+        );
+        expect(
+          manager.isValidProviderModelPair('other-provider', 'test-model'),
+          isFalse,
+        );
       });
 
       test('should get default provider and model', () async {
@@ -485,6 +522,559 @@ void main() {
         expect(manager.getProviders(), isEmpty);
         expect(manager.getModels(), isEmpty);
       });
+
+      test(
+        'testProvider uses routed proxy path when backend switch is on',
+        () async {
+          ProviderFactory.pythonBackendEnabled = true;
+
+          final captureAdapter = _ManagerCaptureHttpClientAdapter();
+          final dio = DioService().controlPlaneDio;
+          final originalAdapter = dio.httpClientAdapter;
+          dio.httpClientAdapter = captureAdapter;
+          addTearDown(() => dio.httpClientAdapter = originalAdapter);
+
+          final provider = ProviderConfig(
+            id: 'provider-1',
+            name: 'Proxy Provider',
+            type: ProviderType.openai,
+            apiUrl: 'https://api.example.com/v1/chat/completions',
+            apiKey: 'sk-test',
+            proxyApiUrl: 'https://proxy.example.test',
+          );
+
+          final result = await manager.testProvider(provider);
+
+          expect(result.success, isTrue);
+          expect(captureAdapter.requestCount('/models'), 1);
+        },
+      );
+
+      test(
+        'testProviderWithModel uses routed proxy path when backend switch is on',
+        () async {
+          ProviderFactory.pythonBackendEnabled = true;
+
+          final controlAdapter = _ManagerCaptureHttpClientAdapter();
+          final dataAdapter = _ManagerCaptureHttpClientAdapter();
+          final controlDio = DioService().controlPlaneDio;
+          final dataDio = DioService().dataPlaneDio;
+          final originalControlAdapter = controlDio.httpClientAdapter;
+          final originalDataAdapter = dataDio.httpClientAdapter;
+          controlDio.httpClientAdapter = controlAdapter;
+          dataDio.httpClientAdapter = dataAdapter;
+          addTearDown(() {
+            controlDio.httpClientAdapter = originalControlAdapter;
+            dataDio.httpClientAdapter = originalDataAdapter;
+          });
+
+          final provider = ProviderConfig(
+            id: 'provider-1',
+            name: 'Proxy Provider',
+            type: ProviderType.openai,
+            apiUrl: 'https://api.example.com/v1/chat/completions',
+            apiKey: 'sk-test',
+            proxyApiUrl: 'https://proxy.example.test',
+          );
+
+          final result = await manager.testProviderWithModel(
+            provider,
+            'gpt-4o-mini',
+          );
+
+          expect(result.success, isTrue);
+          expect(controlAdapter.requestCount('/api/providers/provider-1'), 1);
+          expect(dataAdapter.requestCount('/v1/chat/completions'), 1);
+        },
+      );
+
+      test(
+        'refreshProviderMirrorsFromBackend updates local mirror and imports backend providers while preserving local secret when available',
+        () async {
+          ProviderFactory.pythonBackendEnabled = true;
+
+          final captureAdapter = _BackendMirrorHttpClientAdapter();
+          final dio = DioService().controlPlaneDio;
+          final originalAdapter = dio.httpClientAdapter;
+          dio.httpClientAdapter = captureAdapter;
+          addTearDown(() => dio.httpClientAdapter = originalAdapter);
+
+          final provider = ProviderConfig(
+            id: 'provider-1',
+            name: 'Local Name',
+            type: ProviderType.openai,
+            apiUrl: 'https://local.example.com',
+            apiKey: 'local-secret',
+            isEnabled: false,
+            description: 'local',
+            proxyApiUrl: 'https://proxy.example.test',
+            proxyHeaders: {'Authorization': 'Bearer proxy-token'},
+          );
+
+          await manager.addProvider(provider);
+          await manager.addProvider(
+            ProviderConfig(
+              id: 'provider-3',
+              name: 'Local Only',
+              type: ProviderType.openai,
+              apiUrl: 'https://local-only.example.com',
+              apiKey: 'local-only-secret',
+            ),
+          );
+          await manager.updateConversationSettings(
+            ConversationSettings(
+              conversationId: 'conv-provider-refresh',
+              selectedProviderId: 'provider-3',
+            ),
+          );
+          await manager.refreshProviderMirrorsFromBackend();
+
+          final refreshed = manager.getProvider('provider-1');
+          final imported = manager.getProvider('provider-2');
+          final removed = manager.getProvider('provider-3');
+          final refreshedSettings = manager.getConversationSettings(
+            'conv-provider-refresh',
+          );
+
+          expect(refreshed, isNotNull);
+          expect(refreshed!.name, 'Backend Name');
+          expect(
+            refreshed.apiUrl,
+            'https://backend.example.com/v1/chat/completions',
+          );
+          expect(refreshed.isEnabled, isTrue);
+          expect(refreshed.description, 'backend');
+          expect(refreshed.apiKey, 'local-secret');
+          expect(imported, isNotNull);
+          expect(imported!.name, 'Backend Only');
+          expect(imported.apiKey, isEmpty);
+          expect(imported.proxyApiUrl, 'https://proxy.example.test');
+          expect(imported.proxyHeaders, {
+            'Authorization': 'Bearer proxy-token',
+          });
+          expect(removed, isNull);
+          expect(refreshedSettings.selectedProviderId, isNull);
+          expect(manager.getProviders().length, 2);
+        },
+      );
+
+      test(
+        'syncModelsToBackend pushes local models into backend registry',
+        () async {
+          ProviderFactory.pythonBackendEnabled = true;
+
+          final captureAdapter = _BackendModelMirrorHttpClientAdapter();
+          final dio = DioService().controlPlaneDio;
+          final originalAdapter = dio.httpClientAdapter;
+          dio.httpClientAdapter = captureAdapter;
+          addTearDown(() => dio.httpClientAdapter = originalAdapter);
+
+          final provider = ProviderConfig(
+            id: 'provider-1',
+            name: 'Proxy Provider',
+            type: ProviderType.openai,
+            apiUrl: 'https://api.example.com/v1/chat/completions',
+            apiKey: 'sk-test',
+            proxyApiUrl: 'https://proxy.example.test',
+          );
+          await manager.addProvider(provider);
+
+          final model = ModelConfig(
+            id: 'model-1',
+            providerId: 'provider-1',
+            modelName: 'gpt-4o-mini',
+            displayName: 'GPT-4o Mini',
+            capabilities: {ModelCapability.text, ModelCapability.tool},
+          );
+          await manager.addModel(model);
+          await manager.syncModelsToBackend();
+
+          expect(
+            captureAdapter.requestCount(
+              '/api/providers/provider-1/models/model-1',
+            ),
+            2,
+          );
+        },
+      );
+
+      test(
+        'refreshModelMirrorsFromBackend updates local model mirror and imports backend-only models for known provider',
+        () async {
+          ProviderFactory.pythonBackendEnabled = true;
+
+          final captureAdapter = _BackendModelMirrorHttpClientAdapter();
+          final dio = DioService().controlPlaneDio;
+          final originalAdapter = dio.httpClientAdapter;
+          dio.httpClientAdapter = captureAdapter;
+          addTearDown(() => dio.httpClientAdapter = originalAdapter);
+
+          final provider = ProviderConfig(
+            id: 'provider-1',
+            name: 'Local Provider',
+            type: ProviderType.openai,
+            apiUrl: 'https://api.example.com/v1/chat/completions',
+            apiKey: 'local-secret',
+            proxyApiUrl: 'https://proxy.example.test',
+          );
+          await manager.addProvider(provider);
+          await manager.addModel(
+            ModelConfig(
+              id: 'model-1',
+              providerId: 'provider-1',
+              modelName: 'gpt-4o-mini',
+              displayName: 'Local Name',
+              isEnabled: false,
+            ),
+          );
+          await manager.addModel(
+            ModelConfig(
+              id: 'model-3',
+              providerId: 'provider-1',
+              modelName: 'local-only-model',
+              displayName: 'Local Only Model',
+            ),
+          );
+          await manager.updateConversationSettings(
+            ConversationSettings(
+              conversationId: 'conv-model-refresh',
+              selectedProviderId: 'provider-1',
+              selectedModelId: 'model-3',
+            ),
+          );
+
+          await manager.refreshModelMirrorsFromBackend();
+
+          final refreshed = manager.getModel('model-1');
+          final imported = manager.getModel('model-2');
+          final removed = manager.getModel('model-3');
+          final refreshedSettings = manager.getConversationSettings(
+            'conv-model-refresh',
+          );
+
+          expect(refreshed, isNotNull);
+          expect(refreshed!.displayName, 'Backend GPT-4o Mini');
+          expect(refreshed.isEnabled, isTrue);
+          expect(refreshed.description, 'backend model');
+
+          expect(imported, isNotNull);
+          expect(imported!.providerId, 'provider-1');
+          expect(imported.modelName, 'gpt-4.1-mini');
+          expect(imported.displayName, 'Backend GPT-4.1 Mini');
+          expect(removed, isNull);
+          expect(refreshedSettings.selectedProviderId, isNull);
+          expect(refreshedSettings.selectedModelId, isNull);
+        },
+      );
     });
   });
+}
+
+class _ManagerCaptureHttpClientAdapter implements HttpClientAdapter {
+  final List<_ManagerCapturedRequest> _requests = [];
+
+  int requestCount(String path) {
+    return _requests.where((request) => request.path == path).length;
+  }
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final rawData = options.data;
+    final decoded = rawData is Map
+        ? Map<String, dynamic>.from(rawData)
+        : <String, dynamic>{};
+    _requests.add(_ManagerCapturedRequest(options.uri.path, decoded));
+
+    if (options.uri.path == '/models') {
+      return ResponseBody.fromString(
+        jsonEncode({
+          'object': 'list',
+          'data': [
+            {'id': 'proxy-health-check', 'object': 'model'},
+          ],
+        }),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    if (options.uri.path == '/api/providers/provider-1') {
+      return ResponseBody.fromString(
+        jsonEncode(_managerProviderSummary(decoded)),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    if (options.uri.path == '/v1/chat/completions') {
+      return ResponseBody.fromString(
+        jsonEncode({
+          'id': 'chatcmpl-test',
+          'object': 'chat.completion',
+          'created': 123,
+          'model': decoded['model'] ?? 'gpt-4o-mini',
+          'choices': [
+            {
+              'index': 0,
+              'message': {'role': 'assistant', 'content': 'ok'},
+              'finish_reason': 'stop',
+            },
+          ],
+        }),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    return ResponseBody.fromString(
+      jsonEncode({}),
+      HttpStatus.ok,
+      headers: {
+        Headers.contentTypeHeader: ['application/json'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _ManagerCapturedRequest {
+  final String path;
+  final Map<String, dynamic> json;
+
+  _ManagerCapturedRequest(this.path, this.json);
+}
+
+Map<String, dynamic> _managerProviderSummary(Map<String, dynamic> decoded) {
+  return {
+    'id': decoded['id'] ?? 'provider-1',
+    'name': decoded['name'] ?? 'Proxy Provider',
+    'type': decoded['type'] ?? 'openai',
+    'api_url':
+        decoded['api_url'] ?? 'https://api.example.com/v1/chat/completions',
+    'is_enabled': decoded['is_enabled'] ?? true,
+    'created_at': decoded['created_at'] ?? '2026-04-08T00:00:00.000Z',
+    'updated_at': decoded['updated_at'] ?? '2026-04-08T00:00:00.000Z',
+    'custom_headers': decoded['custom_headers'] ?? <String, dynamic>{},
+    'description': decoded['description'],
+  };
+}
+
+Map<String, dynamic> _managerModelSummary(Map<String, dynamic> decoded) {
+  return {
+    'id': decoded['id'] ?? 'model-1',
+    'provider_id': decoded['provider_id'] ?? 'provider-1',
+    'model_name': decoded['model_name'] ?? 'gpt-4o-mini',
+    'display_name': decoded['display_name'] ?? 'GPT-4o Mini',
+    'capabilities': decoded['capabilities'] ?? ['text'],
+    'default_params':
+        decoded['default_params'] ??
+        {
+          'temperature': 0.7,
+          'max_tokens': 2048,
+          'top_p': 1.0,
+          'frequency_penalty': 0.0,
+          'presence_penalty': 0.0,
+          'stream_output': true,
+        },
+    'is_enabled': decoded['is_enabled'] ?? true,
+    'description': decoded['description'],
+    'created_at': decoded['created_at'] ?? '2026-04-08T00:00:00.000Z',
+    'updated_at': decoded['updated_at'] ?? '2026-04-08T00:00:00.000Z',
+  };
+}
+
+class _BackendMirrorHttpClientAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final rawData = options.data;
+    final decoded = rawData is Map
+        ? Map<String, dynamic>.from(rawData)
+        : <String, dynamic>{};
+
+    if (options.uri.path == '/api/providers/provider-1') {
+      return ResponseBody.fromString(
+        jsonEncode(_managerProviderSummary(decoded)),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    if (options.uri.path == '/api/providers/provider-3') {
+      return ResponseBody.fromString(
+        jsonEncode({
+          ..._managerProviderSummary(decoded),
+          'id': 'provider-3',
+          'name': decoded['name'] ?? 'Local Only',
+          'api_url':
+              decoded['api_url'] ??
+              'https://local-only.example.com/v1/chat/completions',
+        }),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    if (options.uri.path == '/api/providers') {
+      return ResponseBody.fromString(
+        jsonEncode({
+          'object': 'list',
+          'data': [
+            {
+              'id': 'provider-1',
+              'name': 'Backend Name',
+              'type': 'openai',
+              'api_url': 'https://backend.example.com/v1/chat/completions',
+              'is_enabled': true,
+              'created_at': '2026-04-07T12:00:00.000Z',
+              'updated_at': '2026-04-07T12:01:00.000Z',
+              'custom_headers': {'X-Backend': '1'},
+              'description': 'backend',
+            },
+            {
+              'id': 'provider-2',
+              'name': 'Backend Only',
+              'type': 'openai',
+              'api_url': 'https://ignored.example.com/v1/chat/completions',
+              'is_enabled': true,
+              'custom_headers': {},
+            },
+          ],
+        }),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    return ResponseBody.fromString(
+      jsonEncode({}),
+      HttpStatus.ok,
+      headers: {
+        Headers.contentTypeHeader: ['application/json'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _BackendModelMirrorHttpClientAdapter implements HttpClientAdapter {
+  final List<_ManagerCapturedRequest> _requests = [];
+
+  int requestCount(String path) {
+    return _requests.where((request) => request.path == path).length;
+  }
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final rawData = options.data;
+    final decoded = rawData is Map
+        ? Map<String, dynamic>.from(rawData)
+        : <String, dynamic>{};
+    _requests.add(_ManagerCapturedRequest(options.uri.path, decoded));
+
+    if (options.uri.path == '/api/providers/provider-1') {
+      return ResponseBody.fromString(
+        jsonEncode(_managerProviderSummary(decoded)),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    if (options.uri.path == '/api/providers/provider-1/models') {
+      return ResponseBody.fromString(
+        jsonEncode({
+          'object': 'list',
+          'data': [
+            {
+              'id': 'model-1',
+              'provider_id': 'provider-1',
+              'model_name': 'gpt-4o-mini',
+              'display_name': 'Backend GPT-4o Mini',
+              'capabilities': ['text', 'tool'],
+              'default_params': {
+                'temperature': 0.7,
+                'max_tokens': 2048,
+                'top_p': 1.0,
+                'frequency_penalty': 0.0,
+                'presence_penalty': 0.0,
+                'stream_output': true,
+              },
+              'is_enabled': true,
+              'description': 'backend model',
+            },
+            {
+              'id': 'model-2',
+              'provider_id': 'provider-1',
+              'model_name': 'gpt-4.1-mini',
+              'display_name': 'Backend GPT-4.1 Mini',
+              'capabilities': ['text'],
+              'default_params': {
+                'temperature': 0.8,
+                'max_tokens': 4096,
+                'top_p': 1.0,
+                'frequency_penalty': 0.0,
+                'presence_penalty': 0.0,
+                'stream_output': true,
+              },
+              'is_enabled': true,
+            },
+          ],
+        }),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    if (options.uri.path.startsWith('/api/providers/provider-1/models/')) {
+      return ResponseBody.fromString(
+        jsonEncode(_managerModelSummary(decoded)),
+        HttpStatus.ok,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+
+    return ResponseBody.fromString(
+      jsonEncode({}),
+      HttpStatus.ok,
+      headers: {
+        Headers.contentTypeHeader: ['application/json'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

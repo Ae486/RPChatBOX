@@ -1,4 +1,5 @@
 """LiteLLM-based LLM service."""
+import hashlib
 import json
 import logging
 from typing import AsyncIterator
@@ -7,6 +8,8 @@ import litellm
 
 from config import get_settings
 from models.chat import ChatCompletionRequest, ProviderConfig
+from services.request_normalization import get_request_normalization_service
+from services.stream_normalization import StreamNormalizationService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,7 @@ class LiteLLMService:
 
     def __init__(self):
         self.settings = get_settings()
+        self._routers: dict[str, litellm.Router] = {}
         litellm.telemetry = False
         litellm.drop_params = True
         if self.settings.debug:
@@ -61,21 +65,19 @@ class LiteLLMService:
 
         return base_url.rstrip("/") or None
 
-    def _build_completion_kwargs(self, request: ChatCompletionRequest) -> dict:
-        """Build kwargs for litellm.acompletion()."""
+    def _build_common_request_kwargs(
+        self,
+        request: ChatCompletionRequest,
+        *,
+        model: str,
+    ) -> dict:
+        """Build provider-agnostic request kwargs from a normalized request."""
         provider = request.provider
-
         kwargs = {
-            "model": self._get_litellm_model(provider, request.model),
+            "model": model,
             "messages": [msg.model_dump(exclude_none=True) for msg in request.messages],
             "stream": request.stream,
-            "api_key": provider.api_key,
-            "timeout": self.settings.llm_request_timeout,
         }
-
-        api_base = self._get_api_base(provider)
-        if api_base:
-            kwargs["api_base"] = api_base
 
         if request.temperature is not None:
             kwargs["temperature"] = request.temperature
@@ -93,8 +95,26 @@ class LiteLLMService:
         if request.extra_body:
             kwargs["extra_body"] = request.extra_body
 
-        if request.include_reasoning is not None:
+        if request.include_reasoning is not None and provider.type != "gemini":
             kwargs["include_reasoning"] = request.include_reasoning
+
+        return kwargs
+
+    def _build_completion_kwargs_from_normalized(
+        self, request: ChatCompletionRequest
+    ) -> dict:
+        """Build kwargs for litellm.acompletion() from a normalized request."""
+        provider = request.provider
+        kwargs = self._build_common_request_kwargs(
+            request,
+            model=self._get_litellm_model(provider, request.model),
+        )
+        kwargs["api_key"] = provider.api_key
+        kwargs["timeout"] = self.settings.llm_request_timeout
+
+        api_base = self._get_api_base(provider)
+        if api_base:
+            kwargs["api_base"] = api_base
 
         if provider.custom_headers:
             kwargs["extra_headers"] = provider.custom_headers
@@ -105,15 +125,162 @@ class LiteLLMService:
         )
         return kwargs
 
+    def _build_completion_kwargs(self, request: ChatCompletionRequest) -> dict:
+        """Build kwargs for litellm.acompletion()."""
+        normalized_request = get_request_normalization_service().normalize(request)
+        return self._build_completion_kwargs_from_normalized(normalized_request)
+
+    def _build_router_request_kwargs_from_normalized(
+        self, request: ChatCompletionRequest
+    ) -> dict:
+        """Build kwargs for Router.acompletion() from a normalized request."""
+        kwargs = self._build_common_request_kwargs(request, model=request.model)
+        logger.info(
+            "LiteLLM Router request: model=%s, stream=%s",
+            kwargs.get("model"),
+            kwargs.get("stream"),
+        )
+        return kwargs
+
+    def _build_router_model_list(
+        self, request: ChatCompletionRequest
+    ) -> list[dict[str, object]]:
+        """Build a single-deployment Router config for the current request."""
+        provider = request.provider
+        stream_timeout = self._get_effective_stream_timeout(request)
+        litellm_params: dict[str, object] = {
+            "model": self._get_litellm_model(provider, request.model),
+            "api_key": provider.api_key,
+            "timeout": self.settings.llm_request_timeout,
+        }
+
+        api_base = self._get_api_base(provider)
+        if api_base:
+            litellm_params["api_base"] = api_base
+        if provider.custom_headers:
+            litellm_params["extra_headers"] = provider.custom_headers
+        if stream_timeout > 0:
+            litellm_params["stream_timeout"] = stream_timeout
+
+        return [
+            {
+                "model_name": request.model,
+                "litellm_params": litellm_params,
+            }
+        ]
+
+    def _router_cache_key(self, request: ChatCompletionRequest) -> str:
+        """Build a stable cache key for Router instances."""
+        provider = request.provider
+        raw_key = json.dumps(
+            {
+                "model": request.model,
+                "provider_type": provider.type,
+                "api_url": provider.api_url,
+                "api_key": provider.api_key,
+                "custom_headers": provider.custom_headers,
+                "backend_mode": provider.backend_mode,
+                "fallback_timeout_ms": provider.fallback_timeout_ms,
+                "circuit_breaker": (
+                    provider.circuit_breaker.model_dump(exclude_none=True)
+                    if provider.circuit_breaker is not None
+                    else None
+                ),
+                "effective_stream_timeout": self._get_effective_stream_timeout(request),
+                "effective_allowed_fails": self._get_effective_allowed_fails(request),
+                "effective_cooldown_time": self._get_effective_cooldown_time(request),
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+    def _get_router(self, request: ChatCompletionRequest) -> litellm.Router | None:
+        """Return a cached LiteLLM Router for the current provider/model."""
+        if not self.settings.use_litellm_router or not hasattr(litellm, "Router"):
+            return None
+
+        cache_key = self._router_cache_key(request)
+        router = self._routers.get(cache_key)
+        if router is not None:
+            return router
+
+        router_kwargs: dict[str, object] = {
+            "model_list": self._build_router_model_list(request),
+            "num_retries": self.settings.llm_num_retries,
+            "timeout": self.settings.llm_request_timeout,
+            "stream_timeout": (
+                self._get_effective_stream_timeout(request)
+                if self._get_effective_stream_timeout(request) > 0
+                else None
+            ),
+            "set_verbose": self.settings.debug,
+        }
+        allowed_fails = self._get_effective_allowed_fails(request)
+        cooldown_time = self._get_effective_cooldown_time(request)
+        if allowed_fails > 0:
+            router_kwargs["allowed_fails"] = allowed_fails
+        if cooldown_time > 0:
+            router_kwargs["cooldown_time"] = cooldown_time
+
+        router = litellm.Router(**router_kwargs)
+        self._routers[cache_key] = router
+        return router
+
+    def _get_effective_stream_timeout(self, request: ChatCompletionRequest) -> float:
+        """Resolve the first-chunk timeout for this request."""
+        provider = request.provider
+        if (
+            provider
+            and provider.backend_mode == "auto"
+            and provider.fallback_timeout_ms is not None
+            and provider.fallback_timeout_ms > 0
+        ):
+            return provider.fallback_timeout_ms / 1000.0
+        return self.settings.llm_stream_timeout
+
+    def _get_effective_allowed_fails(self, request: ChatCompletionRequest) -> int:
+        """Resolve Router allowed_fails for this request."""
+        provider = request.provider
+        if (
+            provider
+            and provider.backend_mode == "auto"
+            and provider.circuit_breaker is not None
+            and provider.circuit_breaker.failure_threshold is not None
+            and provider.circuit_breaker.failure_threshold > 0
+        ):
+            return provider.circuit_breaker.failure_threshold
+        return self.settings.llm_allowed_fails
+
+    def _get_effective_cooldown_time(self, request: ChatCompletionRequest) -> float:
+        """Resolve Router cooldown_time (seconds) for this request."""
+        provider = request.provider
+        if (
+            provider
+            and provider.backend_mode == "auto"
+            and provider.circuit_breaker is not None
+            and provider.circuit_breaker.open_ms is not None
+            and provider.circuit_breaker.open_ms > 0
+        ):
+            return provider.circuit_breaker.open_ms / 1000.0
+        return self.settings.llm_cooldown_time
+
     async def chat_completion(self, request: ChatCompletionRequest) -> dict:
         """Handle non-streaming chat completion."""
         if not request.provider:
             raise ValueError("Provider configuration is required")
 
-        kwargs = self._build_completion_kwargs(request)
-        kwargs["stream"] = False
-
-        response = await litellm.acompletion(**kwargs)
+        normalized_request = get_request_normalization_service().normalize(request)
+        router = self._get_router(normalized_request)
+        if router is not None:
+            kwargs = self._build_router_request_kwargs_from_normalized(
+                normalized_request
+            )
+            kwargs["stream"] = False
+            response = await router.acompletion(**kwargs)
+        else:
+            kwargs = self._build_completion_kwargs_from_normalized(normalized_request)
+            kwargs["stream"] = False
+            response = await litellm.acompletion(**kwargs)
         return response.model_dump()
 
     async def chat_completion_stream(
@@ -123,22 +290,62 @@ class LiteLLMService:
         if not request.provider:
             raise ValueError("Provider configuration is required")
 
-        kwargs = self._build_completion_kwargs(request)
-        kwargs["stream"] = True
+        normalized_request = get_request_normalization_service().normalize(request)
+        router = self._get_router(normalized_request)
+        if router is not None:
+            kwargs = self._build_router_request_kwargs_from_normalized(
+                normalized_request
+            )
+            kwargs["stream"] = True
+        else:
+            kwargs = self._build_completion_kwargs_from_normalized(normalized_request)
+            kwargs["stream"] = True
+        stream_normalizer = StreamNormalizationService(
+            model=normalized_request.model,
+            provider_type=normalized_request.provider.type,
+        )
+        typed_mode = normalized_request.stream_event_mode == "typed"
 
         try:
-            response = await litellm.acompletion(**kwargs)
+            if router is not None:
+                response = await router.acompletion(**kwargs)
+            else:
+                response = await litellm.acompletion(**kwargs)
 
             async for chunk in response:
                 chunk_dict = chunk.model_dump()
-                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                events = stream_normalizer.extract_events(chunk_dict)
+                if typed_mode:
+                    for payload in stream_normalizer.emit_typed_payloads(events):
+                        yield f"data: {json.dumps(payload)}\n\n"
+                else:
+                    for normalized_chunk in stream_normalizer.emit_compatible_chunks(
+                        events,
+                        template=chunk_dict,
+                    ):
+                        yield f"data: {json.dumps(normalized_chunk)}\n\n"
 
-            yield "data: [DONE]\n\n"
+            if typed_mode:
+                yield f"data: {json.dumps(stream_normalizer.build_done_payload())}\n\n"
+            else:
+                for normalized_chunk in stream_normalizer.flush():
+                    yield f"data: {json.dumps(normalized_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
 
         except Exception as e:
-            error_data = {"error": {"message": str(e), "type": type(e).__name__}}
-            yield f"data: {json.dumps(error_data)}\n\n"
-            yield "data: [DONE]\n\n"
+            if typed_mode:
+                error_payload = {
+                    "type": "error",
+                    "error": {"message": str(e), "type": type(e).__name__},
+                }
+                yield f"data: {json.dumps(error_payload)}\n\n"
+                yield f"data: {json.dumps(stream_normalizer.build_done_payload())}\n\n"
+            else:
+                for normalized_chunk in stream_normalizer.flush():
+                    yield f"data: {json.dumps(normalized_chunk)}\n\n"
+                error_data = {"error": {"message": str(e), "type": type(e).__name__}}
+                yield f"data: {json.dumps(error_data)}\n\n"
+                yield "data: [DONE]\n\n"
 
 
 def get_http_status_for_exception(exc: Exception) -> tuple[int, str]:

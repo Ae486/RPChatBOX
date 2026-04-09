@@ -254,3 +254,12 @@ $RECYCLE.BIN/
 # 忽略整个 research 文件夹
 docs/research/
 .ace-tool/
+
+# Python Backend build artifacts
+backend/dist/
+backend/build/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.spec
+assets/backend/app.zip

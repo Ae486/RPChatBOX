@@ -1,6 +1,8 @@
 import 'model_config.dart';
 import 'attached_file.dart';
 
+const Object _conversationSettingsUnset = Object();
+
 /// 对话级配置
 /// 每个对话可以有独立的模型选择和参数配置
 class ConversationSettings {
@@ -30,10 +32,10 @@ class ConversationSettings {
     this.contextLength = 10,
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : parameters = parameters ?? const ModelParameters(),
-        attachedFiles = attachedFiles ?? [],
-        createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
+  }) : parameters = parameters ?? const ModelParameters(),
+       attachedFiles = attachedFiles ?? [],
+       createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? DateTime.now();
 
   /// 从JSON创建实例
   factory ConversationSettings.fromJson(Map<String, dynamic> json) {
@@ -44,17 +46,23 @@ class ConversationSettings {
       parameters: json['parameters'] != null
           ? ModelParameters.fromJson(json['parameters'] as Map<String, dynamic>)
           : const ModelParameters(),
-      attachedFiles: (json['attachedFiles'] as List<dynamic>?)
+      attachedFiles:
+          (json['attachedFiles'] as List<dynamic>?)
               ?.map((e) => AttachedFile.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
       enableVision: json['enableVision'] as bool? ?? false,
       enableTools: json['enableTools'] as bool? ?? false,
       enableNetwork: json['enableNetwork'] as bool? ?? false,
-      enableExperimentalStreamingMarkdown: json['enableExperimentalStreamingMarkdown'] as bool? ?? false,
+      enableExperimentalStreamingMarkdown:
+          json['enableExperimentalStreamingMarkdown'] as bool? ?? false,
       contextLength: json['contextLength'] as int? ?? 10,
-      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt'] as String) : null,
-      updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt'] as String) : null,
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'] as String)
+          : null,
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'] as String)
+          : null,
     );
   }
 
@@ -69,7 +77,8 @@ class ConversationSettings {
       'enableVision': enableVision,
       'enableTools': enableTools,
       'enableNetwork': enableNetwork,
-      'enableExperimentalStreamingMarkdown': enableExperimentalStreamingMarkdown,
+      'enableExperimentalStreamingMarkdown':
+          enableExperimentalStreamingMarkdown,
       'contextLength': contextLength,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -79,8 +88,8 @@ class ConversationSettings {
   /// 复制并修改部分字段
   ConversationSettings copyWith({
     String? conversationId,
-    String? selectedProviderId,
-    String? selectedModelId,
+    Object? selectedProviderId = _conversationSettingsUnset,
+    Object? selectedModelId = _conversationSettingsUnset,
     ModelParameters? parameters,
     List<AttachedFile>? attachedFiles,
     bool? enableVision,
@@ -93,14 +102,21 @@ class ConversationSettings {
   }) {
     return ConversationSettings(
       conversationId: conversationId ?? this.conversationId,
-      selectedProviderId: selectedProviderId ?? this.selectedProviderId,
-      selectedModelId: selectedModelId ?? this.selectedModelId,
+      selectedProviderId:
+          identical(selectedProviderId, _conversationSettingsUnset)
+          ? this.selectedProviderId
+          : selectedProviderId as String?,
+      selectedModelId: identical(selectedModelId, _conversationSettingsUnset)
+          ? this.selectedModelId
+          : selectedModelId as String?,
       parameters: parameters ?? this.parameters,
       attachedFiles: attachedFiles ?? this.attachedFiles,
       enableVision: enableVision ?? this.enableVision,
       enableTools: enableTools ?? this.enableTools,
       enableNetwork: enableNetwork ?? this.enableNetwork,
-      enableExperimentalStreamingMarkdown: enableExperimentalStreamingMarkdown ?? this.enableExperimentalStreamingMarkdown,
+      enableExperimentalStreamingMarkdown:
+          enableExperimentalStreamingMarkdown ??
+          this.enableExperimentalStreamingMarkdown,
       contextLength: contextLength ?? this.contextLength,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
@@ -109,9 +125,7 @@ class ConversationSettings {
 
   /// 添加附件
   ConversationSettings addFile(AttachedFile file) {
-    return copyWith(
-      attachedFiles: [...attachedFiles, file],
-    );
+    return copyWith(attachedFiles: [...attachedFiles, file]);
   }
 
   /// 移除附件
@@ -130,13 +144,16 @@ class ConversationSettings {
   bool get hasAttachedFiles => attachedFiles.isNotEmpty;
 
   /// 图片附件数量
-  int get imageFileCount => attachedFiles.where((f) => f.type == FileType.image).length;
+  int get imageFileCount =>
+      attachedFiles.where((f) => f.type == FileType.image).length;
 
   /// 文档附件数量
-  int get documentFileCount => attachedFiles.where((f) => f.type == FileType.document).length;
+  int get documentFileCount =>
+      attachedFiles.where((f) => f.type == FileType.document).length;
 
   /// 代码附件数量
-  int get codeFileCount => attachedFiles.where((f) => f.type == FileType.code).length;
+  int get codeFileCount =>
+      attachedFiles.where((f) => f.type == FileType.code).length;
 
   /// 验证配置有效性
   String? validate() {
@@ -169,7 +186,8 @@ class ConversationSettings {
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is ConversationSettings && other.conversationId == conversationId;
+    return other is ConversationSettings &&
+        other.conversationId == conversationId;
   }
 
   @override
@@ -199,41 +217,25 @@ class ConversationPreset {
     ConversationPreset(
       name: '平衡模式',
       description: '适合日常对话，平衡创造性和准确性',
-      parameters: ModelParameters(
-        temperature: 0.7,
-        maxTokens: 2048,
-        topP: 1.0,
-      ),
+      parameters: ModelParameters(temperature: 0.7, maxTokens: 2048, topP: 1.0),
       contextLength: 10,
     ),
     ConversationPreset(
       name: '精确模式',
       description: '适合代码生成、数学计算等需要精确性的任务',
-      parameters: ModelParameters(
-        temperature: 0.2,
-        maxTokens: 4096,
-        topP: 0.9,
-      ),
+      parameters: ModelParameters(temperature: 0.2, maxTokens: 4096, topP: 0.9),
       contextLength: 15,
     ),
     ConversationPreset(
       name: '创造模式',
       description: '适合创意写作、头脑风暴等需要想象力的任务',
-      parameters: ModelParameters(
-        temperature: 1.2,
-        maxTokens: 3072,
-        topP: 1.0,
-      ),
+      parameters: ModelParameters(temperature: 1.2, maxTokens: 3072, topP: 1.0),
       contextLength: 8,
     ),
     ConversationPreset(
       name: '长文本模式',
       description: '适合长篇内容生成',
-      parameters: ModelParameters(
-        temperature: 0.8,
-        maxTokens: 8192,
-        topP: 1.0,
-      ),
+      parameters: ModelParameters(temperature: 0.8, maxTokens: 8192, topP: 1.0),
       contextLength: 5,
     ),
   ];

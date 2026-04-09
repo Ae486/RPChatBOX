@@ -19,6 +19,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../adapters/ai_provider.dart' as ai;
 import '../adapters/chat_message_adapter.dart';
+import '../adapters/hybrid_langchain_provider.dart';
+import '../adapters/mcp_tool_adapter.dart';
 import '../chat_ui/owui/assistant_message.dart';
 import '../chat_ui/owui/chat_theme.dart';
 import '../chat_ui/owui/owui_icons.dart';
@@ -29,13 +31,14 @@ import '../chat_ui/owui/palette.dart';
 
 import '../controllers/stream_output_controller.dart';
 import '../controllers/thread_manager.dart';
-import '../main.dart' show globalModelServiceManager;
+import '../main.dart' show globalModelServiceManager, globalMcpClientService;
 import '../models/attached_file.dart';
 import '../models/chat_settings.dart';
 import '../models/conversation.dart';
 import '../models/conversation_settings.dart';
 import '../models/conversation_thread.dart';
 import '../models/model_config.dart';
+import '../models/mcp/mcp_tool_call.dart';
 import '../models/message.dart' as app;
 import '../models/provider_config.dart';
 import '../providers/chat_session_provider.dart';
@@ -45,6 +48,7 @@ import '../services/roleplay/context_compiler/rp_context_compiler.dart';
 import '../services/roleplay/rp_memory_repository.dart';
 import '../utils/chunk_buffer.dart';
 import '../utils/error_formatter.dart';
+import '../utils/streaming_message_content.dart';
 import '../utils/token_counter.dart';
 import '../utils/global_toast.dart';
 import '../rendering/markdown_stream/stable_prefix_parser.dart';
@@ -134,6 +138,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
   // 调试面板状态
   bool _showTuningPanel = false;
+  bool _activeStreamUsesTypedEvents = false;
 
   // Composer height excluding bottom safe area (used for overlay positioning).
   double _composerHeight = 0.0;

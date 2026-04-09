@@ -13,6 +13,7 @@ import 'package:flutter_chat_ui/flutter_chat_ui.dart' show IsTypingIndicator;
 import 'package:provider/provider.dart';
 
 import '../../models/conversation_settings.dart';
+import '../../models/mcp/mcp_tool_call.dart';
 import '../../widgets/conversation_view_v2.dart';
 import '../../widgets/stream_manager.dart';
 import 'chat_theme.dart';
@@ -20,6 +21,7 @@ import 'markdown.dart';
 import 'owui_icons.dart';
 import 'owui_tokens_ext.dart';
 import 'palette.dart';
+import 'tool_call_bubble.dart';
 
 /// 生成的图片数据
 class GeneratedImage {
@@ -72,6 +74,8 @@ class OwuiAssistantMessage extends StatelessWidget {
   final StreamData? streamData;
   /// 生成的图片列表
   final List<GeneratedImage> images;
+  /// 工具调用列表
+  final List<ToolCallData> toolCalls;
 
   const OwuiAssistantMessage({
     super.key,
@@ -83,6 +87,7 @@ class OwuiAssistantMessage extends StatelessWidget {
     required this.providerName,
     required this.streamData,
     this.images = const [],
+    this.toolCalls = const [],
   });
 
   @override
@@ -154,6 +159,20 @@ class OwuiAssistantMessage extends StatelessWidget {
             isCompleted: thinkingCompleted,
             thinkingStartTime: streamData?.thinkingStartTime,
             thinkingEndTime: streamData?.thinkingEndTime,
+            uiScale: uiScale,
+          ),
+        ),
+      );
+    }
+
+    // 工具调用气泡
+    for (final tc in toolCalls) {
+      children.add(
+        Padding(
+          padding: EdgeInsets.only(bottom: 8 * uiScale),
+          child: OwuiToolCallBubble(
+            key: ValueKey('${messageId}_tool_${tc.callId}'),
+            toolCall: tc,
             uiScale: uiScale,
           ),
         ),

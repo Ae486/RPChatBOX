@@ -1,0 +1,4 @@
+data: {"id":"chatcmpl-openai","object":"chat.completion.chunk","created":1734366925,"model":"deepseek-r1","choices":[{"index":0,"delta":{"reasoning_content":"先分析"},"finish_reason":null}]}
+data: {"id":"chatcmpl-openai","object":"chat.completion.chunk","created":1734366925,"model":"deepseek-r1","choices":[{"index":0,"delta":{"reasoning":"再推理"},"finish_reason":null}]}
+data: {"id":"chatcmpl-openai","object":"chat.completion.chunk","created":1734366925,"model":"deepseek-r1","choices":[{"index":0,"delta":{"content":"最终回答"},"finish_reason":null}]}
+data: [DONE]

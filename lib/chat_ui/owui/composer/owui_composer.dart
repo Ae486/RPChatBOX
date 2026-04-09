@@ -12,6 +12,7 @@ import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../../design_system/design_tokens.dart';
+import '../../../adapters/ai_provider.dart';
 import '../../../models/attached_file.dart';
 import '../../../models/conversation_settings.dart';
 import '../../../models/model_config.dart';
@@ -216,7 +217,19 @@ class _OwuiComposerState extends State<OwuiComposer> {
     );
   }
 
-  void _showModelSelector() {
+  Future<void> _showModelSelector() async {
+    if (ProviderFactory.pythonBackendEnabled) {
+      try {
+        await widget.serviceManager.refreshBackendMirrors(sync: false);
+      } catch (e) {
+        if (mounted) {
+          debugPrint('[OwuiComposer] backend mirror refresh failed: $e');
+        }
+      }
+    }
+
+    if (!mounted) return;
+
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -320,65 +333,74 @@ class _OwuiComposerState extends State<OwuiComposer> {
                 ChatBoxTokens.spacing.sm,
               ),
               child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (hasFiles) _buildAttachedFilesPreview(uiScale),
-                // NOTE: 使用 Container 替代 AnimatedContainer 以优化键盘动画性能
-                // 原始代码（如需回退）:
-                // AnimatedContainer(
-                //   duration: const Duration(milliseconds: 140),
-                Container(
-                  decoration: BoxDecoration(
-                    color: fieldSurface,
-                    borderRadius: BorderRadius.circular(16 * uiScale),
-                    border: Border.all(color: barBorderColor),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (hasFiles) _buildAttachedFilesPreview(uiScale),
+                  // NOTE: 使用 Container 替代 AnimatedContainer 以优化键盘动画性能
+                  // 原始代码（如需回退）:
+                  // AnimatedContainer(
+                  //   duration: const Duration(milliseconds: 140),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: fieldSurface,
+                      borderRadius: BorderRadius.circular(16 * uiScale),
+                      border: Border.all(color: barBorderColor),
+                    ),
+                    padding: EdgeInsets.fromLTRB(
+                      12 * uiScale,
+                      12 * uiScale,
+                      12 * uiScale,
+                      10 * uiScale,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildInputField(uiScale),
+                        SizedBox(height: 10 * uiScale),
+                        Row(
+                          children: [
+                            _buildActionButton(
+                              tooltip: '上传文件',
+                              icon: OwuiIcons.addCircle,
+                              onPressed: _pickFiles,
+                              uiScale: uiScale,
+                            ),
+                            SizedBox(width: 6 * uiScale),
+                            _buildActionButton(
+                              tooltip: '联网',
+                              icon: OwuiIcons.language,
+                              isActive:
+                                  widget.conversationSettings.enableNetwork,
+                              onPressed: _toggleNetwork,
+                              uiScale: uiScale,
+                            ),
+                            SizedBox(width: 6 * uiScale),
+                            _buildActionButton(
+                              tooltip: '对话配置',
+                              icon: OwuiIcons.tune,
+                              onPressed: _showConfigDialog,
+                              uiScale: uiScale,
+                            ),
+                            const Spacer(),
+                            _buildModelPill(
+                              currentModel: currentModel,
+                              uiScale: uiScale,
+                            ),
+                            SizedBox(width: 10 * uiScale),
+                            ValueListenableBuilder<bool>(
+                              valueListenable: _hasTextNotifier,
+                              builder: (context, _, __) {
+                                return _buildSendButton(uiScale);
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                  padding: EdgeInsets.fromLTRB(12 * uiScale, 12 * uiScale, 12 * uiScale, 10 * uiScale),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildInputField(uiScale),
-                      SizedBox(height: 10 * uiScale),
-                      Row(
-                        children: [
-                          _buildActionButton(
-                            tooltip: '上传文件',
-                            icon: OwuiIcons.addCircle,
-                            onPressed: _pickFiles,
-                            uiScale: uiScale,
-                          ),
-                          SizedBox(width: 6 * uiScale),
-                          _buildActionButton(
-                            tooltip: '联网',
-                            icon: OwuiIcons.language,
-                            isActive: widget.conversationSettings.enableNetwork,
-                            onPressed: _toggleNetwork,
-                            uiScale: uiScale,
-                          ),
-                          SizedBox(width: 6 * uiScale),
-                          _buildActionButton(
-                            tooltip: '对话配置',
-                            icon: OwuiIcons.tune,
-                            onPressed: _showConfigDialog,
-                            uiScale: uiScale,
-                          ),
-                          const Spacer(),
-                          _buildModelPill(currentModel: currentModel, uiScale: uiScale),
-                          SizedBox(width: 10 * uiScale),
-                          ValueListenableBuilder<bool>(
-                            valueListenable: _hasTextNotifier,
-                            builder: (context, _, __) {
-                              return _buildSendButton(uiScale);
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           ),
         ),
       ),
@@ -440,7 +462,10 @@ class _OwuiComposerState extends State<OwuiComposer> {
       child: IconButton(
         icon: Icon(icon),
         onPressed: onPressed,
-        constraints: BoxConstraints.tightFor(width: 40 * uiScale, height: 40 * uiScale),
+        constraints: BoxConstraints.tightFor(
+          width: 40 * uiScale,
+          height: 40 * uiScale,
+        ),
         padding: EdgeInsets.zero,
         iconSize: 22 * uiScale,
         color: baseColor,
@@ -454,7 +479,10 @@ class _OwuiComposerState extends State<OwuiComposer> {
     final textColor = OwuiPalette.textPrimary(context);
 
     return ConstrainedBox(
-      constraints: BoxConstraints(minHeight: 44 * uiScale, maxHeight: 44 * 3 * uiScale),
+      constraints: BoxConstraints(
+        minHeight: 44 * uiScale,
+        maxHeight: 44 * 3 * uiScale,
+      ),
       child: TextField(
         controller: widget.textController,
         focusNode: _focusNode,
@@ -474,7 +502,11 @@ class _OwuiComposerState extends State<OwuiComposer> {
           hintText: '输入消息...',
           hintStyle: TextStyle(color: hintColor, fontSize: 15 * uiScale),
         ),
-        style: TextStyle(fontSize: 15 * uiScale, height: 1.45, color: textColor),
+        style: TextStyle(
+          fontSize: 15 * uiScale,
+          height: 1.45,
+          color: textColor,
+        ),
       ),
     );
   }
@@ -494,7 +526,10 @@ class _OwuiComposerState extends State<OwuiComposer> {
       borderRadius: BorderRadius.circular(999),
       child: Container(
         constraints: BoxConstraints(maxWidth: 170 * uiScale),
-        padding: EdgeInsets.symmetric(horizontal: 10 * uiScale, vertical: 8 * uiScale),
+        padding: EdgeInsets.symmetric(
+          horizontal: 10 * uiScale,
+          vertical: 8 * uiScale,
+        ),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(999),
@@ -542,7 +577,10 @@ class _OwuiComposerState extends State<OwuiComposer> {
     }
 
     return ConstrainedBox(
-      constraints: BoxConstraints.tightFor(width: 40 * uiScale, height: 40 * uiScale),
+      constraints: BoxConstraints.tightFor(
+        width: 40 * uiScale,
+        height: 40 * uiScale,
+      ),
       child: Material(
         color: bgColor,
         shape: CircleBorder(side: BorderSide(color: border)),

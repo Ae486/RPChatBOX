@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
+import '../adapters/ai_provider.dart';
 import '../chat_ui/owui/components/owui_app_bar.dart';
 import '../chat_ui/owui/components/owui_scaffold.dart';
 import '../chat_ui/owui/components/owui_snack_bar.dart';
@@ -21,10 +22,7 @@ import 'provider_detail_page.dart';
 class ModelServicesPage extends StatefulWidget {
   final ModelServiceManager serviceManager;
 
-  const ModelServicesPage({
-    super.key,
-    required this.serviceManager,
-  });
+  const ModelServicesPage({super.key, required this.serviceManager});
 
   @override
   State<ModelServicesPage> createState() => _ModelServicesPageState();
@@ -46,12 +44,17 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     setState(() => _isLoading = true);
 
     try {
+      if (ProviderFactory.pythonBackendEnabled) {
+        await widget.serviceManager.refreshBackendMirrors(sync: false);
+      }
+
       final providers = widget.serviceManager.getProviders();
       final models = <String, List<ModelConfig>>{};
 
       for (final provider in providers) {
-        models[provider.id] =
-            widget.serviceManager.getModelsByProvider(provider.id);
+        models[provider.id] = widget.serviceManager.getModelsByProvider(
+          provider.id,
+        );
       }
 
       setState(() {
@@ -71,9 +74,8 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     final result = await Navigator.push<ProviderConfig>(
       context,
       MaterialPageRoute(
-        builder: (context) => ProviderDetailPage(
-          serviceManager: widget.serviceManager,
-        ),
+        builder: (context) =>
+            ProviderDetailPage(serviceManager: widget.serviceManager),
       ),
     );
 
@@ -183,10 +185,7 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
           elevation: 8,
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(context.owuiRadius.rXl),
-          child: Opacity(
-            opacity: 0.9,
-            child: child,
-          ),
+          child: Opacity(opacity: 0.9, child: child),
         );
       },
     );
@@ -223,16 +222,15 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
             Text(
               '暂无AI服务',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: context.owuiColors.textSecondary,
-                  ),
+                color: context.owuiColors.textSecondary,
+              ),
             ),
             SizedBox(height: context.owuiSpacing.sm),
             Text(
               '点击下方“添加”按钮创建第一个服务',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color:
-                        context.owuiColors.textSecondary.withValues(alpha: 0.85),
-                  ),
+                color: context.owuiColors.textSecondary.withValues(alpha: 0.85),
+              ),
             ),
           ],
         ),
@@ -312,21 +310,29 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: _toggleManagementMode, // 🆕 点击切换管理模式
-                icon: Icon(_isManagementMode ? OwuiIcons.close : OwuiIcons.settings),
+                icon: Icon(
+                  _isManagementMode ? OwuiIcons.close : OwuiIcons.settings,
+                ),
                 label: Text(_isManagementMode ? '退出' : '管理'),
                 style: OutlinedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: context.owuiSpacing.md),
+                  padding: EdgeInsets.symmetric(
+                    vertical: context.owuiSpacing.md,
+                  ),
                 ),
               ),
             ),
             SizedBox(width: context.owuiSpacing.md),
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: _isManagementMode ? null : _showAddProviderDialog, // 🆕 管理模式下禁用
+                onPressed: _isManagementMode
+                    ? null
+                    : _showAddProviderDialog, // 🆕 管理模式下禁用
                 icon: const Icon(OwuiIcons.add),
                 label: const Text('添加'),
                 style: ElevatedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: context.owuiSpacing.md),
+                  padding: EdgeInsets.symmetric(
+                    vertical: context.owuiSpacing.md,
+                  ),
                 ),
               ),
             ),

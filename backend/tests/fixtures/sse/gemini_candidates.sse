@@ -1,0 +1,3 @@
+data: {"id":"chatcmpl-gemini","model":"gemini-2.5-flash","candidates":[{"content":{"parts":[{"text":"隐藏思考"},{"text":"第一段正文"}]}}]}
+data: {"id":"chatcmpl-gemini","model":"gemini-2.5-flash","candidates":[{"content":{"parts":[{"text":"第二段正文"}]}}]}
+data: [DONE]

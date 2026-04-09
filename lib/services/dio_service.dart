@@ -8,60 +8,110 @@ class DioService {
   static final DioService _instance = DioService._internal();
   factory DioService() => _instance;
 
-  late final Dio dio;
+  late final Dio dataPlaneDio;
+  late final Dio controlPlaneDio;
+
+  /// Backward-compatible alias.
+  /// Prefer using `dataPlaneDio` / `controlPlaneDio` explicitly in new code.
+  Dio get dio => dataPlaneDio;
 
   DioService._internal() {
-    dio = Dio(BaseOptions(
+    dataPlaneDio = _createDio(
+      plane: 'data',
       connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(seconds: 120),
       sendTimeout: const Duration(seconds: 60),
-      validateStatus: (status) {
-        // 接受所有状态码，让业务层处理
-        return status != null;
-      },
-    ));
+    );
+    controlPlaneDio = _createDio(
+      plane: 'control',
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 30),
+      sendTimeout: const Duration(seconds: 30),
+    );
+  }
 
-    // 添加拦截器
-    dio.interceptors.add(_createInterceptor());
+  Dio _createDio({
+    required String plane,
+    required Duration connectTimeout,
+    required Duration receiveTimeout,
+    required Duration sendTimeout,
+  }) {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: connectTimeout,
+        receiveTimeout: receiveTimeout,
+        sendTimeout: sendTimeout,
+        validateStatus: (status) {
+          // 接受所有状态码，让业务层处理
+          return status != null;
+        },
+      ),
+    );
+
+    dio.interceptors.add(_createInterceptor(plane));
+    return dio;
   }
 
   /// 创建拦截器
-  Interceptor _createInterceptor() {
+  Interceptor _createInterceptor(String plane) {
     return InterceptorsWrapper(
       onRequest: (options, handler) {
+        options.extra['start_time'] = DateTime.now();
+        options.extra['plane'] ??= plane;
+
         // 请求前统一处理
         if (kDebugMode) {
-          debugPrint('\n╔═══════════════════════════════════════════════════════════════');
-          debugPrint('║ 🚀 [DIO] 请求: ${options.method} ${options.uri}');
+          debugPrint(
+            '\n╔═══════════════════════════════════════════════════════════════',
+          );
+          debugPrint(
+            '║ 🚀 [DIO:${options.extra['plane']}] 请求: ${options.method} ${options.uri}',
+          );
           debugPrint('║ 📤 Headers: ${options.headers}');
           if (options.data != null && options.data.toString().length < 1000) {
             debugPrint('║ 📦 Data: ${options.data}');
           }
-          debugPrint('╚═══════════════════════════════════════════════════════════════\n');
+          debugPrint(
+            '╚═══════════════════════════════════════════════════════════════\n',
+          );
         }
         handler.next(options);
       },
       onResponse: (response, handler) {
         // 响应后统一处理
         if (kDebugMode) {
-          debugPrint('\n╔═══════════════════════════════════════════════════════════════');
-          debugPrint('║ ✅ [DIO] 响应: ${response.statusCode} ${response.requestOptions.uri}');
-          debugPrint('║ ⏱️  耗时: ${response.requestOptions.extra['start_time'] != null ? DateTime.now().difference(response.requestOptions.extra['start_time']).inMilliseconds : '?'}ms');
-          debugPrint('╚═══════════════════════════════════════════════════════════════\n');
+          debugPrint(
+            '\n╔═══════════════════════════════════════════════════════════════',
+          );
+          debugPrint(
+            '║ ✅ [DIO:${response.requestOptions.extra['plane'] ?? plane}] 响应: ${response.statusCode} ${response.requestOptions.uri}',
+          );
+          debugPrint(
+            '║ ⏱️  耗时: ${response.requestOptions.extra['start_time'] != null ? DateTime.now().difference(response.requestOptions.extra['start_time']).inMilliseconds : '?'}ms',
+          );
+          debugPrint(
+            '╚═══════════════════════════════════════════════════════════════\n',
+          );
         }
         handler.next(response);
       },
       onError: (error, handler) {
         // 错误统一处理
         if (kDebugMode) {
-          debugPrint('\n╔═══════════════════════════════════════════════════════════════');
-          debugPrint('║ ❌ [DIO] 错误: ${error.requestOptions.uri}');
+          debugPrint(
+            '\n╔═══════════════════════════════════════════════════════════════',
+          );
+          debugPrint(
+            '║ ❌ [DIO:${error.requestOptions.extra['plane'] ?? plane}] 错误: ${error.requestOptions.uri}',
+          );
           debugPrint('║ 类型: ${error.type}');
           debugPrint('║ 消息: ${error.message}');
           if (error.response != null) {
             debugPrint('║ 状态码: ${error.response?.statusCode}');
           }
-          debugPrint('╚═══════════════════════════════════════════════════════════════\n');
+          debugPrint(
+            '╚═══════════════════════════════════════════════════════════════\n',
+          );
         }
 
         // 可以在这里统一处理常见错误

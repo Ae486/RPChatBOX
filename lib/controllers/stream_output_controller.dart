@@ -5,7 +5,7 @@ import '../models/model_config.dart';
 /// 流式输出控制器
 /// 负责管理AI响应的流式输出、中断和状态控制
 class StreamOutputController {
-  StreamSubscription<String>? _currentSubscription;
+  StreamSubscription<AIStreamEvent>? _currentSubscription;
   StreamController<String>? _outputController;
   bool _isStreaming = false;
   bool _isCancelled = false;
@@ -37,7 +37,9 @@ class StreamOutputController {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
     required void Function(String chunk) onChunk,
+    void Function(AIStreamEvent event)? onEvent,
     required void Function() onDone,
     required void Function(dynamic error) onError,
   }) async {
@@ -54,21 +56,27 @@ class StreamOutputController {
 
     try {
       // 获取AI响应流
-      final responseStream = provider.sendMessageStream(
+      final responseStream = provider.sendMessageEventStream(
         model: modelName,
         messages: messages,
         parameters: parameters,
         files: files,
+        modelId: modelId,
       );
 
       // 监听流
       _currentSubscription = responseStream.listen(
-        (chunk) {
+        (event) {
           if (_isCancelled) return;
 
-          _accumulatedContent += chunk;
-          _outputController?.add(chunk);
-          onChunk(chunk);
+          onEvent?.call(event);
+
+          if (event.type == AIStreamEventType.text && event.text != null) {
+            final chunk = event.text!;
+            _accumulatedContent += chunk;
+            _outputController?.add(chunk);
+            onChunk(chunk);
+          }
         },
         onError: (error) {
           _isStreaming = false;
@@ -133,11 +141,11 @@ class StreamOutputController {
 
 /// 流式输出状态
 enum StreamState {
-  idle,       // 空闲
-  streaming,  // 流式输出中
-  paused,     // 已暂停
-  stopped,    // 已停止
-  error,      // 错误
+  idle, // 空闲
+  streaming, // 流式输出中
+  paused, // 已暂停
+  stopped, // 已停止
+  error, // 错误
 }
 
 /// 增强版流式输出控制器
@@ -189,7 +197,9 @@ class EnhancedStreamController extends StreamOutputController {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
     required void Function(String chunk) onChunk,
+    void Function(AIStreamEvent event)? onEvent,
     required void Function() onDone,
     required void Function(dynamic error) onError,
   }) async {
@@ -205,10 +215,12 @@ class EnhancedStreamController extends StreamOutputController {
       messages: messages,
       parameters: parameters,
       files: files,
+      modelId: modelId,
       onChunk: (chunk) {
         _chunkCount++;
         onChunk(chunk);
       },
+      onEvent: onEvent,
       onDone: () {
         _endTime = DateTime.now();
         _setState(StreamState.idle);

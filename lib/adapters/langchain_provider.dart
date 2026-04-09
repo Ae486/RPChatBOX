@@ -17,16 +17,14 @@ import '../models/model_config.dart';
 /// 实现 AIProvider 接口，内部使用 LangChain ChatModel。
 /// 支持 OpenAI, Google (Gemini), Anthropic 等多种 Provider。
 class LangChainProvider extends app.AIProvider {
-  LangChainProvider._(
-    super.config,
-    this._chatModelFactory,
-  );
+  LangChainProvider._(super.config, this._chatModelFactory);
 
   /// 创建 ChatModel 的工厂函数
   final BaseChatModel Function({
     required String model,
     required ModelParameters parameters,
-  }) _chatModelFactory;
+  })
+  _chatModelFactory;
 
   /// 从配置创建 Provider
   factory LangChainProvider.fromConfig(ProviderConfig config) {
@@ -124,7 +122,10 @@ class LangChainProvider extends app.AIProvider {
       const suffixes = ['/chat/completions', '/completions', '/messages'];
       for (final suffix in suffixes) {
         if (normalized.endsWith(suffix)) {
-          normalized = normalized.substring(0, normalized.length - suffix.length);
+          normalized = normalized.substring(
+            0,
+            normalized.length - suffix.length,
+          );
           changed = true;
           break;
         }
@@ -218,6 +219,7 @@ class LangChainProvider extends app.AIProvider {
     required List<app.ChatMessage> messages,
     required ModelParameters parameters,
     List<app.AttachedFileData>? files,
+    String? modelId,
   }) async* {
     try {
       // 创建 ChatModel
@@ -251,6 +253,7 @@ class LangChainProvider extends app.AIProvider {
     required List<app.ChatMessage> messages,
     required ModelParameters parameters,
     List<app.AttachedFileData>? files,
+    String? modelId,
   }) async {
     try {
       // 创建 ChatModel

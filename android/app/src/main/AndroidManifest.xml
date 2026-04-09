@@ -5,6 +5,7 @@
 
     <application
         android:usesCleartextTraffic="true"
+        android:extractNativeLibs="true"
         android:label="chatboxapp"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">

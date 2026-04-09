@@ -6,9 +6,10 @@
 import 'dart:async' as _i4;
 
 import 'package:chatboxapp/models/conversation.dart' as _i2;
+import 'package:chatboxapp/models/message.dart' as _i5;
 import 'package:chatboxapp/services/hive_conversation_service.dart' as _i3;
 import 'package:mockito/mockito.dart' as _i1;
-import 'package:shared_preferences/src/shared_preferences_legacy.dart' as _i5;
+import 'package:shared_preferences/src/shared_preferences_legacy.dart' as _i6;
 
 // ignore_for_file: type=lint
 // ignore_for_file: avoid_redundant_argument_values
@@ -51,6 +52,13 @@ class MockHiveConversationService extends _i1.Mock
         returnValue: _i4.Future<void>.value(),
         returnValueForMissingStub: _i4.Future<void>.value(),
       ) as _i4.Future<void>);
+
+  @override
+  _i5.Message? getMessageById(String? id) =>
+      (super.noSuchMethod(Invocation.method(
+        #getMessageById,
+        [id],
+      )) as _i5.Message?);
 
   @override
   _i4.Future<void> saveConversations(List<_i2.Conversation>? conversations) =>
@@ -185,7 +193,7 @@ class MockHiveConversationService extends _i1.Mock
 /// A class which mocks [SharedPreferences].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockSharedPreferences extends _i1.Mock implements _i5.SharedPreferences {
+class MockSharedPreferences extends _i1.Mock implements _i6.SharedPreferences {
   MockSharedPreferences() {
     _i1.throwOnMissingStub(this);
   }

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Memory Maintenance Rule (Persistent)
+
+- During development, always update `H:/chatboxapp/.codex/MEMORY.md` with the latest investigation results, implementation decisions, risks, and progress for traceability.
+
 ## Project Overview
 
 ChatBoxApp is a cross-platform Flutter LLM client application with Python backend proxy, supporting multiple AI providers (OpenAI, Google, Anthropic) with advanced features like streaming output, Markdown rendering, Mermaid diagrams, and roleplay capabilities.

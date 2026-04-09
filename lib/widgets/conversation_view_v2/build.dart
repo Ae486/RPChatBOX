@@ -75,6 +75,9 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                   .whereType<GeneratedImage>()
                   .toList() ?? <GeneratedImage>[];
 
+              // 获取工具调用数据
+              final toolCalls = data?.toolCalls ?? const [];
+
               final body = GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
@@ -97,6 +100,7 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                       providerName: providerName,
                       streamData: data,
                       images: images,
+                      toolCalls: toolCalls,
                     ),
                     _buildTokenFooter(message, isSentByMe: false),
                   ],

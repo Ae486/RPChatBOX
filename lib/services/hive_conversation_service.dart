@@ -23,9 +23,6 @@ class HiveConversationService {
   
   /// 初始化 Hive 数据库
   Future<void> initialize() async {
-    // 初始化 Hive（只需调用一次）
-    await Hive.initFlutter();
-
     // 注册适配器
     if (!Hive.isAdapterRegistered(0)) {
       Hive.registerAdapter(ConversationAdapter());

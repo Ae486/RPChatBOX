@@ -16,9 +16,9 @@ import 'ai_provider.dart';
 /// 支持OpenAI官方API和兼容格式的第三方服务
 class OpenAIProvider extends AIProvider {
   // Dio 实例和取消令牌
-  final _dio = DioService().dio;
+  final _dio = DioService().dataPlaneDio;
   CancelToken? _currentCancelToken;
-  
+
   OpenAIProvider(super.config);
 
   @override
@@ -34,7 +34,9 @@ class OpenAIProvider extends AIProvider {
     try {
       final stopwatch = Stopwatch()..start();
       // 🔧 使用actualApiUrl获取实际API地址
-      final baseUrl = config.actualApiUrl.replaceAll('/chat/completions', '').replaceAll('/messages', '');
+      final baseUrl = config.actualApiUrl
+          .replaceAll('/chat/completions', '')
+          .replaceAll('/messages', '');
 
       // 使用 dio 发送请求
       final response = await _dio.get(
@@ -78,14 +80,14 @@ class OpenAIProvider extends AIProvider {
   Future<List<String>> listAvailableModels() async {
     try {
       // 🔧 使用actualApiUrl获取实际API地址
-      final baseUrl = config.actualApiUrl.replaceAll('/chat/completions', '').replaceAll('/messages', '');
-      
+      final baseUrl = config.actualApiUrl
+          .replaceAll('/chat/completions', '')
+          .replaceAll('/messages', '');
+
       // 使用 dio 发送请求
       final response = await _dio.get(
         '$baseUrl/models',
-        options: Options(
-          headers: buildHeaders(),
-        ),
+        options: Options(headers: buildHeaders()),
       );
 
       if (response.statusCode == 200) {
@@ -107,12 +109,15 @@ class OpenAIProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) async* {
     // 取消之前的请求（如果有）
     _currentCancelToken?.cancel('新请求开始');
     _currentCancelToken = DioService().createCancelToken();
-    debugPrint('[ROUTE] >>> 直连 LLM API | model=$model | url=${config.actualApiUrl}');
-    
+    debugPrint(
+      '[ROUTE] >>> 直连 LLM API | model=$model | url=${config.actualApiUrl}',
+    );
+
     final requestBody = await _buildRequestBody(
       model: model,
       messages: messages,
@@ -120,7 +125,7 @@ class OpenAIProvider extends AIProvider {
       stream: true,
       files: files,
     );
-    
+
     // 🐛 调试输出：请求详情
     _debugPrintRequest(config.actualApiUrl, requestBody);
 
@@ -155,10 +160,11 @@ class OpenAIProvider extends AIProvider {
       bool geminiReasoningOpen = false;
       bool geminiEmittedBody = false;
       bool reasoningOpen = false;
-      await for (var chunk in responseStream
-          .cast<List<int>>()
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
+      await for (var chunk
+          in responseStream
+              .cast<List<int>>()
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
         final line = chunk.trim();
         if (line.isEmpty) continue;
         final data = line.startsWith('data: ') ? line.substring(6) : line;
@@ -182,7 +188,12 @@ class OpenAIProvider extends AIProvider {
 
             if (delta != null) {
               // 1) 识别 reasoning_content 等思考字段
-              for (final key in const ['reasoning', 'reasoning_content', 'internal_thoughts', 'thinking']) {
+              for (final key in const [
+                'reasoning',
+                'reasoning_content',
+                'internal_thoughts',
+                'thinking',
+              ]) {
                 final v = delta[key];
                 if (v == null) continue;
 
@@ -200,20 +211,35 @@ class OpenAIProvider extends AIProvider {
               final contentField = delta['content'];
               if (contentField is String) {
                 if (contentField.isNotEmpty) {
-                  if (reasoningOpen) { yield '</think>'; reasoningOpen = false; }
+                  if (reasoningOpen) {
+                    yield '</think>';
+                    reasoningOpen = false;
+                  }
                   yield contentField;
                 }
               } else if (contentField is List) {
-                if (reasoningOpen && contentField.isNotEmpty) { yield '</think>'; reasoningOpen = false; }
+                if (reasoningOpen && contentField.isNotEmpty) {
+                  yield '</think>';
+                  reasoningOpen = false;
+                }
                 for (final part in contentField) {
                   if (part is Map<String, dynamic>) {
-                    final pText = (part['text'] ?? part['content'] ?? '').toString();
+                    final pText = (part['text'] ?? part['content'] ?? '')
+                        .toString();
                     if (pText.isEmpty) continue;
-                    if (_isReasoningType((part['type'] ?? part['role'] ?? '').toString())) {
-                      if (!reasoningOpen) { yield '<think>'; reasoningOpen = true; }
+                    if (_isReasoningType(
+                      (part['type'] ?? part['role'] ?? '').toString(),
+                    )) {
+                      if (!reasoningOpen) {
+                        yield '<think>';
+                        reasoningOpen = true;
+                      }
                       yield pText;
                     } else {
-                      if (reasoningOpen) { yield '</think>'; reasoningOpen = false; }
+                      if (reasoningOpen) {
+                        yield '</think>';
+                        reasoningOpen = false;
+                      }
                       yield pText;
                     }
                   } else if (part is String && part.isNotEmpty) {
@@ -235,25 +261,39 @@ class OpenAIProvider extends AIProvider {
                 for (var i = 0; i < parts.length; i++) {
                   final part = parts[i];
                   if (part is! Map<String, dynamic>) continue;
-                  final pText = (part['text'] ?? part['content'] ?? '').toString();
+                  final pText = (part['text'] ?? part['content'] ?? '')
+                      .toString();
                   if (pText.isEmpty) continue;
 
                   if (isGemini) {
                     if (!geminiEmittedBody && i == 0) {
-                      if (!geminiReasoningOpen) { yield '<think>'; geminiReasoningOpen = true; }
+                      if (!geminiReasoningOpen) {
+                        yield '<think>';
+                        geminiReasoningOpen = true;
+                      }
                       yield pText;
                     } else {
-                      if (geminiReasoningOpen) { yield '</think>'; geminiReasoningOpen = false; }
+                      if (geminiReasoningOpen) {
+                        yield '</think>';
+                        geminiReasoningOpen = false;
+                      }
                       geminiEmittedBody = true;
                       yield pText;
                     }
                   } else {
-                    final pType = (part['type'] ?? part['role'] ?? '').toString();
+                    final pType = (part['type'] ?? part['role'] ?? '')
+                        .toString();
                     if (_isReasoningType(pType)) {
-                      if (!reasoningOpen) { yield '<think>'; reasoningOpen = true; }
+                      if (!reasoningOpen) {
+                        yield '<think>';
+                        reasoningOpen = true;
+                      }
                       yield pText;
                     } else {
-                      if (reasoningOpen) { yield '</think>'; reasoningOpen = false; }
+                      if (reasoningOpen) {
+                        yield '</think>';
+                        reasoningOpen = false;
+                      }
                       yield pText;
                     }
                   }
@@ -261,16 +301,30 @@ class OpenAIProvider extends AIProvider {
               } else {
                 final cText = (content['text'] ?? '').toString();
                 if (cText.isNotEmpty) {
-                  if (reasoningOpen) { yield '</think>'; reasoningOpen = false; }
-                  if (isGemini && geminiReasoningOpen) { yield '</think>'; geminiReasoningOpen = false; geminiEmittedBody = true; }
+                  if (reasoningOpen) {
+                    yield '</think>';
+                    reasoningOpen = false;
+                  }
+                  if (isGemini && geminiReasoningOpen) {
+                    yield '</think>';
+                    geminiReasoningOpen = false;
+                    geminiEmittedBody = true;
+                  }
                   yield cText;
                 }
               }
             } else {
               final cText = (cand0['text'] ?? '').toString();
               if (cText.isNotEmpty) {
-                if (reasoningOpen) { yield '</think>'; reasoningOpen = false; }
-                if (isGemini && geminiReasoningOpen) { yield '</think>'; geminiReasoningOpen = false; geminiEmittedBody = true; }
+                if (reasoningOpen) {
+                  yield '</think>';
+                  reasoningOpen = false;
+                }
+                if (isGemini && geminiReasoningOpen) {
+                  yield '</think>';
+                  geminiReasoningOpen = false;
+                  geminiEmittedBody = true;
+                }
                 yield cText;
               }
             }
@@ -307,6 +361,7 @@ class OpenAIProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) async {
     final requestBody = await _buildRequestBody(
       model: model,
@@ -315,7 +370,7 @@ class OpenAIProvider extends AIProvider {
       stream: false,
       files: files,
     );
-    
+
     // 🐛 调试输出：请求详情
     _debugPrintRequest(config.actualApiUrl, requestBody);
 
@@ -324,9 +379,7 @@ class OpenAIProvider extends AIProvider {
       final response = await _dio.post(
         config.actualApiUrl,
         data: requestBody,
-        options: Options(
-          headers: buildHeaders(),
-        ),
+        options: Options(headers: buildHeaders()),
       );
 
       if (response.statusCode == 200) {
@@ -396,9 +449,7 @@ class OpenAIProvider extends AIProvider {
     if (modelLower.contains('gemini')) {
       body['extra_body'] = {
         'google': {
-          'thinking_config': {
-            'include_thoughts': true,
-          },
+          'thinking_config': {'include_thoughts': true},
         },
       };
     }
@@ -410,8 +461,18 @@ class OpenAIProvider extends AIProvider {
         _addIfNotDefault(body, 'temperature', parameters.temperature, 1.0);
         _addIfNotNull(body, 'max_tokens', parameters.maxTokens);
         _addIfNotDefault(body, 'top_p', parameters.topP, 1.0);
-        _addIfNotDefault(body, 'frequency_penalty', parameters.frequencyPenalty, 0.0);
-        _addIfNotDefault(body, 'presence_penalty', parameters.presencePenalty, 0.0);
+        _addIfNotDefault(
+          body,
+          'frequency_penalty',
+          parameters.frequencyPenalty,
+          0.0,
+        );
+        _addIfNotDefault(
+          body,
+          'presence_penalty',
+          parameters.presencePenalty,
+          0.0,
+        );
         break;
 
       case ProviderType.deepseek:
@@ -439,7 +500,12 @@ class OpenAIProvider extends AIProvider {
   }
 
   /// 添加非默认值的参数
-  void _addIfNotDefault(Map<String, dynamic> body, String key, double value, double defaultValue) {
+  void _addIfNotDefault(
+    Map<String, dynamic> body,
+    String key,
+    double value,
+    double defaultValue,
+  ) {
     if (value != defaultValue) {
       body[key] = value;
     }
@@ -460,9 +526,10 @@ class OpenAIProvider extends AIProvider {
     final converted = messages.map((msg) => msg.toJson()).toList();
 
     // 🆕 过滤空system消息（很多API不接受空的system消息）
-    converted.removeWhere((msg) => 
-      msg['role'] == 'system' && 
-      (msg['content'] == null || (msg['content'] as String).trim().isEmpty)
+    converted.removeWhere(
+      (msg) =>
+          msg['role'] == 'system' &&
+          (msg['content'] == null || (msg['content'] as String).trim().isEmpty),
     );
 
     // 如果有附件且最后一条是用户消息，添加多模态内容
@@ -485,11 +552,12 @@ class OpenAIProvider extends AIProvider {
             final imageData = _readFileAsBase64(file.path);
             imageContents.add({
               'type': 'image_url',
-              'image_url': {
-                'url': 'data:${file.mimeType};base64,$imageData',
-              },
+              'image_url': {'url': 'data:${file.mimeType};base64,$imageData'},
             });
-          } else if (FileContentService.isTextProcessable(file.mimeType, extension)) {
+          } else if (FileContentService.isTextProcessable(
+            file.mimeType,
+            extension,
+          )) {
             // 处理文本文件
             try {
               final textContent = await FileContentService.extractTextContent(
@@ -497,7 +565,11 @@ class OpenAIProvider extends AIProvider {
                 file.mimeType,
               );
               documentContents.add(
-                FileContentService.generateFilePrompt(fileName, file.mimeType, textContent)
+                FileContentService.generateFilePrompt(
+                  fileName,
+                  file.mimeType,
+                  textContent,
+                ),
               );
             } catch (e) {
               documentContents.add('// 文件 $fileName 处理失败: ${e.toString()}');
@@ -513,13 +585,11 @@ class OpenAIProvider extends AIProvider {
 
         // 如果有文档内容，添加到文本前面
         if (documentContents.isNotEmpty) {
-          textContent = '${documentContents.join('\n\n')}\n\n---\n\n$textContent';
+          textContent =
+              '${documentContents.join('\n\n')}\n\n---\n\n$textContent';
         }
 
-        content.add({
-          'type': 'text',
-          'text': textContent,
-        });
+        content.add({'type': 'text', 'text': textContent});
 
         // 添加图片内容
         content.addAll(imageContents);
@@ -546,17 +616,27 @@ class OpenAIProvider extends AIProvider {
   void _debugPrintRequest(String url, Map<String, dynamic> requestBody) {
     // 仅在调试模式启用详细日志
     if (!kDebugMode) return;
-    
-    debugPrint('\n╔═══════════════════════════════════════════════════════════════');
+
+    debugPrint(
+      '\n╔═══════════════════════════════════════════════════════════════',
+    );
     debugPrint('║ 🐛 API 请求调试信息');
-    debugPrint('╠═══════════════════════════════════════════════════════════════');
+    debugPrint(
+      '╠═══════════════════════════════════════════════════════════════',
+    );
     debugPrint('║ 📍 API 地址: $url');
-    debugPrint('║ 🏢 Provider: ${config.name} (${config.type.toString().split('.').last})');
-    debugPrint('║ 🔑 API Key: ${config.apiKey.substring(0, math.min(10, config.apiKey.length))}...****');
-    debugPrint('╠═══════════════════════════════════════════════════════════════');
+    debugPrint(
+      '║ 🏢 Provider: ${config.name} (${config.type.toString().split('.').last})',
+    );
+    debugPrint(
+      '║ 🔑 API Key: ${config.apiKey.substring(0, math.min(10, config.apiKey.length))}...****',
+    );
+    debugPrint(
+      '╠═══════════════════════════════════════════════════════════════',
+    );
     debugPrint('║ 📤 完整请求体:');
     debugPrint('║');
-    
+
     // 格式化输出JSON（截断过长的messages）
     final displayBody = Map<String, dynamic>.from(requestBody);
     if (displayBody.containsKey('messages')) {
@@ -572,14 +652,16 @@ class OpenAIProvider extends AIProvider {
         displayBody['messages'] = summary;
       }
     }
-    
+
     final prettyJson = const JsonEncoder.withIndent('  ').convert(displayBody);
     for (var line in prettyJson.split('\n')) {
       debugPrint('║   $line');
     }
-    
+
     debugPrint('║');
-    debugPrint('╠══════════════════════════════════════════════════════════════╗');
+    debugPrint(
+      '╠══════════════════════════════════════════════════════════════╗',
+    );
     debugPrint('║ 📊 参数摘要:');
     debugPrint('║   • 模型: ${requestBody['model']}');
     debugPrint('║   • 流式模式: ${requestBody['stream']}');
@@ -593,7 +675,9 @@ class OpenAIProvider extends AIProvider {
       debugPrint('║   • Top P: ${requestBody['top_p']}');
     }
     if (requestBody.containsKey('frequency_penalty')) {
-      debugPrint('║   • Frequency Penalty: ${requestBody['frequency_penalty']}');
+      debugPrint(
+        '║   • Frequency Penalty: ${requestBody['frequency_penalty']}',
+      );
     }
     if (requestBody.containsKey('presence_penalty')) {
       debugPrint('║   • Presence Penalty: ${requestBody['presence_penalty']}');
@@ -602,16 +686,22 @@ class OpenAIProvider extends AIProvider {
     if (messages != null) {
       debugPrint('║   • 消息数: ${messages.length}');
     }
-    debugPrint('╚══════════════════════════════════════════════════════════════╗\n');
+    debugPrint(
+      '╚══════════════════════════════════════════════════════════════╗\n',
+    );
   }
-  
+
   /// 🐛 调试方法：打印错误信息
   void _debugPrintError(ApiError error) {
     if (!kDebugMode) return;
-    
-    debugPrint('\n╔══════════════════════════════════════════════════════════════╗');
+
+    debugPrint(
+      '\n╔══════════════════════════════════════════════════════════════╗',
+    );
     debugPrint('║ ${error.title}');
-    debugPrint('╠══════════════════════════════════════════════════════════════╗');
+    debugPrint(
+      '╠══════════════════════════════════════════════════════════════╗',
+    );
     debugPrint('║ 🔴 状态码: ${error.statusCode}');
     debugPrint('║ 📝 消息: ${error.message}');
     if (error.errorCode != null) {
@@ -625,25 +715,34 @@ class OpenAIProvider extends AIProvider {
     if (error.isRetryable) {
       debugPrint('║ ✇️ 建议延迟: ${error.retryDelayMs}ms');
     }
-    debugPrint('╚══════════════════════════════════════════════════════════════╗\n');
+    debugPrint(
+      '╚══════════════════════════════════════════════════════════════╗\n',
+    );
   }
 
   /// 判断类型是否为思考/推理类型
   static bool _isReasoningType(String type) {
     final lower = type.toLowerCase();
-    return lower.contains('reason') || lower.contains('think') || lower.contains('thought');
+    return lower.contains('reason') ||
+        lower.contains('think') ||
+        lower.contains('thought');
   }
 
   /// 从不同格式中提取文本
   static String? _extractText(dynamic v) {
     if (v is String) return v;
-    if (v is Map<String, dynamic>) return (v['content'] ?? v['text']) as String?;
+    if (v is Map<String, dynamic>)
+      return (v['content'] ?? v['text']) as String?;
     if (v is List) {
-      return v.map((e) {
-        if (e is String) return e;
-        if (e is Map<String, dynamic>) return (e['content'] ?? e['text'] ?? '').toString();
-        return '';
-      }).where((s) => s.isNotEmpty).join('');
+      return v
+          .map((e) {
+            if (e is String) return e;
+            if (e is Map<String, dynamic>)
+              return (e['content'] ?? e['text'] ?? '').toString();
+            return '';
+          })
+          .where((s) => s.isNotEmpty)
+          .join('');
     }
     return null;
   }

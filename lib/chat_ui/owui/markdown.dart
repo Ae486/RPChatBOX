@@ -494,8 +494,27 @@ class OwuiMarkdown extends StatelessWidget {
 
   static const StablePrefixParser _stablePrefixParser = StablePrefixParser();
 
+  @visibleForTesting
+  static String debugStripInternalThinkBlocks(String source) {
+    var sanitized = source;
+
+    for (final tagName in const ['thinking', 'think', 'thought', 'thoughts']) {
+      sanitized = sanitized.replaceAll(
+        RegExp('<$tagName>[\\s\\S]*?</$tagName>', dotAll: true),
+        '',
+      );
+      sanitized = sanitized.replaceAll('<$tagName>', '');
+      sanitized = sanitized.replaceAll('</$tagName>', '');
+    }
+
+    return sanitized;
+  }
+
+  String _stripInternalThinkBlocks(String source) =>
+      debugStripInternalThinkBlocks(source);
+
   ({String stable, String tail}) _splitStableMarkdown(String source) =>
-      _stablePrefixParser.split(source);
+      _stablePrefixParser.split(_stripInternalThinkBlocks(source));
 
   /// `markdown_widget`'s code block node expects a `<code class="language-...">`
   /// attribute for some code blocks. Indented code blocks (4-space blocks)
@@ -641,7 +660,9 @@ class OwuiMarkdown extends StatelessWidget {
   }
 
   Widget _buildMarkdownWidget(BuildContext context, String raw) {
-    final safeText = _preprocessMarkdownForMarkdownWidget(raw);
+    final safeText = _preprocessMarkdownForMarkdownWidget(
+      _stripInternalThinkBlocks(raw),
+    );
     final config = isDark
         ? MarkdownConfig.darkConfig
         : MarkdownConfig.defaultConfig;
@@ -820,6 +841,8 @@ class OwuiMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final sanitizedText = _stripInternalThinkBlocks(text);
+
     // 获取 UI 缩放系数
     final uiScale = context.owui.uiScale;
     final textColor = isDark ? const Color(0xFFE5E7EB) : const Color(0xFF111827);
@@ -831,14 +854,14 @@ class OwuiMarkdown extends StatelessWidget {
       color: textColor,
     );
 
-    final parts = _splitStableMarkdown(text);
+    final parts = _splitStableMarkdown(sanitizedText);
     final needsStableRenderer = isStreaming || parts.tail.isNotEmpty;
     if (!needsStableRenderer) {
-      return _buildMarkdownWidget(context, text);
+      return _buildMarkdownWidget(context, sanitizedText);
     }
 
     return OwuiStableBody(
-      text: text,
+      text: sanitizedText,
       splitStableMarkdown: _splitStableMarkdown,
       stableCacheKey: stableCacheKey,
       markdown: (markdownText) => _buildMarkdownWidget(context, markdownText),

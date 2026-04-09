@@ -19,8 +19,9 @@ import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../pages/display_settings_page.dart';
 import '../pages/model_services_page.dart';
+import '../pages/mcp_servers_page.dart';
 import '../pages/keyboard_test_page.dart';
-import '../main.dart' show globalModelServiceManager;
+import '../main.dart' show globalModelServiceManager, globalMcpClientService;
 import '../services/image_persistence_service.dart';
 
 /// 设置页面
@@ -68,10 +69,12 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _checkBackendHealth() async {
     setState(() => _isCheckingBackend = true);
     try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 3),
-        receiveTimeout: const Duration(seconds: 3),
-      ));
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 3),
+          receiveTimeout: const Duration(seconds: 3),
+        ),
+      );
       final response = await dio.get('http://localhost:8765/api/health');
       if (response.statusCode == 200 && mounted) {
         final data = response.data as Map<String, dynamic>;
@@ -88,14 +91,24 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  void _toggleBackend(bool value) {
+  Future<void> _toggleBackend(bool value) async {
     setState(() {
       _backendEnabled = value;
       ProviderFactory.pythonBackendEnabled = value;
     });
-    _saveBackendEnabled(value);
+    await _saveBackendEnabled(value);
     if (value) {
-      _checkBackendHealth();
+      await _checkBackendHealth();
+      try {
+        await globalModelServiceManager.refreshBackendMirrors();
+      } catch (e) {
+        if (mounted) {
+          OwuiSnackBars.warning(
+            context,
+            message: 'Provider/Model 同步到 backend 失败: ${e.toString()}',
+          );
+        }
+      }
     } else {
       setState(() => _backendStatus = '');
     }
@@ -201,6 +214,26 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           SizedBox(height: context.owuiSpacing.lg),
 
+          // MCP 服务器管理入口
+          OwuiCard(
+            child: ListTile(
+              leading: const Icon(OwuiIcons.tools, size: 32),
+              title: const Text('MCP 服务器'),
+              subtitle: const Text('管理工具服务器与扩展功能'),
+              trailing: const Icon(OwuiIcons.chevronRight),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        McpServersPage(mcpService: globalMcpClientService),
+                  ),
+                );
+              },
+            ),
+          ),
+          SizedBox(height: context.owuiSpacing.lg),
+
           // Python 后端路由
           OwuiCard(
             child: Column(
@@ -217,12 +250,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   subtitle: Text(
                     _backendEnabled
                         ? (_backendStatus.isNotEmpty
-                            ? '已启用 ($_backendStatus)'
-                            : '已启用')
+                              ? '已启用 ($_backendStatus)'
+                              : '已启用')
                         : '直连 LLM API',
                   ),
                   value: _backendEnabled,
-                  onChanged: _toggleBackend,
+                  onChanged: (value) {
+                    _toggleBackend(value);
+                  },
                 ),
                 if (_backendEnabled) ...[
                   const Divider(height: 1),

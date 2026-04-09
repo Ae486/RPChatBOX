@@ -16,6 +16,8 @@ from models.chat import (
     Delta,
     Usage,
 )
+from services.request_normalization import get_request_normalization_service
+from services.stream_normalization import StreamNormalizationService
 
 
 class LLMProxyService:
@@ -63,6 +65,7 @@ class LLMProxyService:
 
     def _build_request_body(self, request: ChatCompletionRequest) -> dict:
         """Build request body for upstream API."""
+        request = get_request_normalization_service().normalize(request)
         body = {
             "model": request.model,
             "messages": [msg.model_dump(exclude_none=True) for msg in request.messages],
@@ -87,7 +90,7 @@ class LLMProxyService:
         if request.include_reasoning is not None:
             body["include_reasoning"] = request.include_reasoning
         if request.extra_body:
-            body.update(request.extra_body)
+            body["extra_body"] = request.extra_body
 
         return body
 
@@ -137,10 +140,16 @@ class LLMProxyService:
         if not request.provider:
             raise ValueError("Provider configuration is required")
 
+        normalized_request = get_request_normalization_service().normalize(request)
         url = self._get_upstream_url(request.provider)
         headers = self._build_headers(request.provider)
-        body = self._build_request_body(request)
+        body = self._build_request_body(normalized_request)
         body["stream"] = True
+        stream_normalizer = StreamNormalizationService(
+            model=normalized_request.model,
+            provider_type=normalized_request.provider.type,
+        )
+        typed_mode = normalized_request.stream_event_mode == "typed"
 
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(
@@ -163,13 +172,27 @@ class LLMProxyService:
                         data_str = line[6:]  # Remove "data: " prefix
 
                         if data_str.strip() == "[DONE]":
-                            yield "data: [DONE]\n\n"
+                            if typed_mode:
+                                yield f"data: {json.dumps(stream_normalizer.build_done_payload())}\n\n"
+                            else:
+                                for normalized_chunk in stream_normalizer.flush():
+                                    yield f"data: {json.dumps(normalized_chunk)}\n\n"
+                                yield "data: [DONE]\n\n"
                             break
 
                         # Parse and re-emit to ensure format consistency
                         try:
                             data = json.loads(data_str)
-                            yield f"data: {json.dumps(data)}\n\n"
+                            events = stream_normalizer.extract_events(data)
+                            if typed_mode:
+                                for payload in stream_normalizer.emit_typed_payloads(events):
+                                    yield f"data: {json.dumps(payload)}\n\n"
+                            else:
+                                for normalized_chunk in stream_normalizer.emit_compatible_chunks(
+                                    events,
+                                    template=data,
+                                ):
+                                    yield f"data: {json.dumps(normalized_chunk)}\n\n"
                         except json.JSONDecodeError:
                             # Pass through as-is if not valid JSON
                             yield f"data: {data_str}\n\n"

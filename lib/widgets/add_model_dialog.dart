@@ -59,7 +59,9 @@ class _AddModelDialogState extends State<AddModelDialog> {
     });
 
     try {
-      final aiProvider = ProviderFactory.createProvider(widget.provider);
+      final aiProvider = ProviderFactory.createProviderWithRouting(
+        widget.provider,
+      );
       final models = await aiProvider.listAvailableModels();
       
       setState(() {

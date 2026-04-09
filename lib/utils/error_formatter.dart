@@ -59,8 +59,21 @@ class ErrorInfo {
 
 /// 错误格式化器
 class ErrorFormatter {
+  static const String requestAbortedMessage = 'Request was aborted';
+
+  /// 手动截断请求时使用的统一错误信息。
+  static ErrorInfo requestAborted() => const ErrorInfo(
+    type: ErrorType.unknown,
+    brief: requestAbortedMessage,
+    details: requestAbortedMessage,
+  );
+
   /// 从异常解析错误信息
   static ErrorInfo parse(dynamic error) {
+    if (error is ErrorInfo) {
+      return error;
+    }
+
     final errorStr = error.toString();
 
     // 尝试提取 HTTP 状态码

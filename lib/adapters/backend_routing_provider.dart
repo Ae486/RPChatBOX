@@ -45,7 +45,9 @@ class BackendRoutingProvider extends AIProvider {
       return directProvider.testConnection();
     }
 
-    return ProviderTestResult.failure('Proxy unavailable and fallback disabled');
+    return ProviderTestResult.failure(
+      'Proxy unavailable and fallback disabled',
+    );
   }
 
   @override
@@ -77,6 +79,7 @@ class BackendRoutingProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) async* {
     // Check circuit breaker state
     if (circuitBreaker.shouldFallback && fallbackEnabled) {
@@ -87,6 +90,7 @@ class BackendRoutingProvider extends AIProvider {
         messages: messages,
         parameters: parameters,
         files: files,
+        modelId: modelId,
       );
       return;
     }
@@ -104,6 +108,7 @@ class BackendRoutingProvider extends AIProvider {
               messages: messages,
               parameters: parameters,
               files: files,
+              modelId: modelId,
             );
             return;
           }
@@ -118,6 +123,7 @@ class BackendRoutingProvider extends AIProvider {
         messages: messages,
         parameters: parameters,
         files: files,
+        modelId: modelId,
       )) {
         hasEmittedChunk = true;
         circuitBreaker.recordSuccess();
@@ -127,7 +133,8 @@ class BackendRoutingProvider extends AIProvider {
       circuitBreaker.recordFailure();
 
       // Check if we should fallback
-      if (FallbackPolicy.shouldFallback(e, hasEmittedChunk) && fallbackEnabled) {
+      if (FallbackPolicy.shouldFallback(e, hasEmittedChunk) &&
+          fallbackEnabled) {
         debugPrint('[ROUTE] Auto 模式 → 代理失败($e)，回退直连');
         // Fallback to direct connection
         yield* directProvider.sendMessageStream(
@@ -135,6 +142,7 @@ class BackendRoutingProvider extends AIProvider {
           messages: messages,
           parameters: parameters,
           files: files,
+          modelId: modelId,
         );
       } else {
         // Can't fallback, rethrow the error
@@ -149,6 +157,7 @@ class BackendRoutingProvider extends AIProvider {
     required List<ChatMessage> messages,
     required ModelParameters parameters,
     List<AttachedFileData>? files,
+    String? modelId,
   }) async {
     // Check circuit breaker state
     if (circuitBreaker.shouldFallback && fallbackEnabled) {
@@ -157,6 +166,7 @@ class BackendRoutingProvider extends AIProvider {
         messages: messages,
         parameters: parameters,
         files: files,
+        modelId: modelId,
       );
     }
 
@@ -170,6 +180,7 @@ class BackendRoutingProvider extends AIProvider {
               messages: messages,
               parameters: parameters,
               files: files,
+              modelId: modelId,
             );
           }
         }
@@ -181,6 +192,7 @@ class BackendRoutingProvider extends AIProvider {
         messages: messages,
         parameters: parameters,
         files: files,
+        modelId: modelId,
       );
 
       circuitBreaker.recordSuccess();
@@ -195,6 +207,7 @@ class BackendRoutingProvider extends AIProvider {
           messages: messages,
           parameters: parameters,
           files: files,
+          modelId: modelId,
         );
       }
 

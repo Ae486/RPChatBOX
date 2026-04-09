@@ -32,6 +32,18 @@ class ApiUrlHelper {
     
     // 规则3：正常补全
     final suffix = _getApiSuffix(type);
+    if (suffix.isEmpty) return trimmed;
+
+    final endpointPath = _getApiPathWithoutVersion(type);
+    if (trimmed.endsWith(suffix) || trimmed.endsWith(endpointPath)) {
+      return trimmed;
+    }
+
+    final versionPrefix = _getApiVersionPrefix(type);
+    if (versionPrefix.isNotEmpty && trimmed.endsWith(versionPrefix)) {
+      return trimmed + endpointPath;
+    }
+
     return trimmed + suffix;
   }
   
@@ -55,6 +67,27 @@ class ApiUrlHelper {
         return '/v1/chat/completions';
       case ProviderType.claude:
         return '/v1/messages';
+      case ProviderType.gemini:
+      case ProviderType.deepseek:
+        return '';
+    }
+  }
+
+  /// 获取不含版本号的 endpoint path
+  static String _getApiPathWithoutVersion(ProviderType type) {
+    final path = _getApiPath(type);
+    if (path.startsWith('/v1/')) {
+      return path.substring(3);
+    }
+    return path;
+  }
+
+  /// 获取版本前缀
+  static String _getApiVersionPrefix(ProviderType type) {
+    switch (type) {
+      case ProviderType.openai:
+      case ProviderType.claude:
+        return '/v1';
       case ProviderType.gemini:
       case ProviderType.deepseek:
         return '';
