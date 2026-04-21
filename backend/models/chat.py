@@ -74,6 +74,11 @@ class ChatCompletionRequest(BaseModel):
     presence_penalty: float | None = None
     stop: str | list[str] | None = None
 
+    # Tool / function calling
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    enable_tools: bool | None = None
+
     # Extended parameters for specific providers
     include_reasoning: bool | None = None
     extra_body: dict[str, Any] | None = None

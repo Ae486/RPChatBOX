@@ -351,6 +351,33 @@ def test_emit_typed_payloads_from_mixed_events():
     ]
 
 
+def test_extract_usage_event_and_emit_typed_payload():
+    service = StreamNormalizationService(model="gpt-4o", provider_type="openai")
+    chunk = {
+        "id": "chatcmpl-usage",
+        "model": "gpt-4o",
+        "choices": [{"delta": {}}],
+        "usage": {
+            "prompt_tokens": 123,
+            "completion_tokens": 45,
+            "total_tokens": 168,
+        },
+    }
+
+    events = service.extract_events(chunk)
+    assert [event.kind for event in events] == ["usage"]
+
+    payloads = service.emit_typed_payloads(events)
+    assert payloads == [
+        {
+            "type": "usage",
+            "prompt_tokens": 123,
+            "completion_tokens": 45,
+            "total_tokens": 168,
+        }
+    ]
+
+
 def test_emit_typed_payloads_from_error_event():
     service = StreamNormalizationService(model="gpt-4o", provider_type="openai")
     payloads = service.emit_typed_payloads(

@@ -33,6 +33,32 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       });
     }
 
+    var messageFiles = _conversationSettings.attachedFiles.toList(
+      growable: false,
+    );
+    if (ai.ProviderFactory.pythonBackendEnabled && messageFiles.isNotEmpty) {
+      try {
+        final uploaded = await _backendConversationService.uploadAttachments(
+          conversationId: widget.conversation.id,
+          files: messageFiles,
+        );
+        messageFiles = uploaded.map((item) => item.toAttachedFile()).toList();
+        _conversationSettings = _conversationSettings.copyWith(
+          attachedFiles: messageFiles,
+        );
+        await globalModelServiceManager.updateConversationSettings(
+          _conversationSettings,
+        );
+      } catch (e) {
+        if (!mounted || _isDisposed) return;
+        setState(() {
+          _attachmentBarVisible = true;
+        });
+        GlobalToast.error(context, message: '附件上传失败\n$e');
+        return;
+      }
+    }
+
     final userInputTokens = TokenCounter.estimateTokens(text);
     final userMsg = app.Message(
       id: _newMessageId(),
@@ -40,27 +66,38 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       isUser: true,
       timestamp: DateTime.now(),
       inputTokens: userInputTokens,
-      attachedFiles: _conversationSettings.attachedFiles
+      attachedFiles: messageFiles
           .map((f) => AttachedFileSnapshot.fromAttachedFile(f))
           .toList(),
     );
 
-    widget.conversation.addMessage(userMsg);
-
-    final thread = _getThread();
-    thread.appendToActiveLeaf(userMsg);
-    _syncConversationMessagesSnapshotFromThread(thread);
-    _persistThreadNoSave(thread);
-    _schedulePersistThread();
-
-    widget.onConversationUpdated();
     _messageController.clear();
 
-    try {
-      await _chatController.insertMessage(
-        _toFlutterChatMessage(userMsg),
-        animated: true,
+    if (ai.ProviderFactory.pythonBackendEnabled) {
+      final snapshot = await _backendConversationSourceService.appendMessages(
+        conversationId: widget.conversation.id,
+        messages: [userMsg],
       );
+      _applyBackendSourceSnapshot(snapshot, autoFollow: true);
+    } else {
+      widget.conversation.addMessage(userMsg);
+
+      final thread = _getThread();
+      thread.appendToActiveLeaf(userMsg);
+      _syncConversationMessagesSnapshotFromThread(thread);
+      _persistThreadNoSave(thread);
+      _schedulePersistThread();
+
+      widget.onConversationUpdated();
+    }
+
+    try {
+      if (!ai.ProviderFactory.pythonBackendEnabled) {
+        await _chatController.insertMessage(
+          _toFlutterChatMessage(userMsg),
+          animated: true,
+        );
+      }
     } catch (_) {
       // Best-effort: keep UI consistent if chat controller rejects insertion.
       _syncConversationToChatController();
@@ -69,6 +106,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
 
     await _startAssistantResponse(
       modelWithProvider: modelWithProvider,
+      parentUserMessageId: ai.ProviderFactory.pythonBackendEnabled
+          ? userMsg.id
+          : null,
       animateInsert: true,
     );
   }
@@ -111,14 +151,20 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       },
     );
 
+    if (ai.ProviderFactory.pythonBackendEnabled) {
+      _backendConversationLoadEpoch++;
+    }
+
     _activeAssistantPlaceholder = placeholder;
     _activeStreamId = assistantId;
+    _activeAssistantParentUserId = parentUserMessageId;
     _streamManager.createStream(_activeStreamId!);
 
     _resetStableFlowRevealForNewStream();
 
     try {
-      if (parentUserMessageId != null) {
+      if (!ai.ProviderFactory.pythonBackendEnabled &&
+          parentUserMessageId != null) {
         final thread = _getThread(rebuildFromMessagesIfMismatch: false);
         final appPlaceholder = app.Message(
           id: assistantId,
@@ -138,13 +184,14 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       }
 
       if (useAtomicSetMessages) {
-        // Route A (regenerate/resend): atomically replace the full list after the
-        // thread has been updated to select the new assistant version, then
-        // append a header-only streaming placeholder. This avoids transient
-        // duplicate/ghost bubbles caused by mixing set/insert/update in
-        // flutter_chat_ui.
+        // Route A (regenerate/resend): atomically replace the current visible
+        // chain, then append the one active streaming assistant placeholder.
+        // Backend mode keeps the pending branch as UI-only state until finalize
+        // persists the formal assistant node into the source tree.
         final thread = _getThread(rebuildFromMessagesIfMismatch: false);
-        final chain = buildActiveMessageChain(thread);
+        final chain = ai.ProviderFactory.pythonBackendEnabled
+            ? widget.conversation.messages
+            : buildActiveMessageChain(thread);
         final safeChainForUi =
             chain.isNotEmpty &&
                 !chain.last.isUser &&
@@ -164,6 +211,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     } catch (e) {
       _activeStreamId = null;
       _activeAssistantPlaceholder = null;
+      _activeAssistantParentUserId = null;
       _currentProvider = null;
       _activePromptTokensEstimate = null;
       _streamManager.end(assistantId);
@@ -203,45 +251,27 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     }
 
     final thread = _getThread();
-    final history = buildActiveMessageChain(thread);
-    final safeHistory =
-        history.isNotEmpty &&
-            !history.last.isUser &&
-            history.last.content.trim().isEmpty
-        ? history.sublist(0, history.length - 1)
-        : history;
-    final contextLength = _conversationSettings.contextLength;
+    final history = ai.ProviderFactory.pythonBackendEnabled
+        ? widget.conversation.messages
+        : buildActiveMessageChain(thread);
+    final contextWindow = _conversationContextService.buildContextWindow(
+      conversation: widget.conversation,
+      settings: _conversationSettings,
+      historyOverride: history,
+    );
 
-    final startIndex =
-        (contextLength <= 0 ||
-            contextLength == -1 ||
-            safeHistory.length <= contextLength)
-        ? 0
-        : safeHistory.length - contextLength;
-
-    // 注入 summary：如果存在已压缩消息的摘要，在 systemPrompt 后注入
-    final summary = widget.conversation.summary ?? '';
-    final summaryRangeEndId = widget.conversation.summaryRangeEndId;
-    if (summary.isNotEmpty && summaryRangeEndId != null) {
-      final summaryEndIndex = safeHistory.indexWhere(
-        (msg) => msg.id == summaryRangeEndId,
-      );
-      if (summaryEndIndex == -1) {
-        debugPrint(
-          '[streaming] summaryRangeEndId=$summaryRangeEndId not found in history, skipping injection',
-        );
-      } else if (summaryEndIndex < startIndex) {
-        // 只有当 summaryRangeEndId 在当前窗口之前时才注入（表示有被压缩的消息）
-        chatMessages.add(
-          ai.ChatMessage(
-            role: 'system',
-            content: _formatSummaryForPrompt(summary),
+    if (contextWindow.summaryApplied) {
+      chatMessages.add(
+        ai.ChatMessage(
+          role: 'system',
+          content: ConversationContextService.formatSummaryForPrompt(
+            contextWindow.summary,
           ),
-        );
-      }
+        ),
+      );
     }
 
-    for (final msg in safeHistory.skip(startIndex)) {
+    for (final msg in contextWindow.windowMessages) {
       chatMessages.add(
         ai.ChatMessage(
           role: msg.isUser ? 'user' : 'assistant',
@@ -271,8 +301,13 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       );
       _currentProvider = provider;
 
+      if (provider is ProxyOpenAIProvider) {
+        provider.setBackendToolLoopEnabled(_conversationSettings.enableTools);
+      }
+
       // MCP 工具集成：如果模型支持工具且有已连接的 MCP 服务器
       if (provider is HybridLangChainProvider &&
+          _conversationSettings.enableTools &&
           globalMcpClientService.hasConnectedServer) {
         final supportsTools = modelWithProvider.model.hasCapability(
           ModelCapability.tool,
@@ -308,7 +343,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
             error: null,
             streamId: _activeStreamId,
             placeholder: _activeAssistantPlaceholder,
+            parentUserId: _activeAssistantParentUserId,
             promptTokens: _activePromptTokensEstimate,
+            usage: _activeStreamUsage,
           );
           // 确保 Timer 继续运行以完成剩余渲染
           _scheduleNextRevealTick();
@@ -322,7 +359,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
             error: error,
             streamId: _activeStreamId,
             placeholder: _activeAssistantPlaceholder,
+            parentUserId: _activeAssistantParentUserId,
             promptTokens: _activePromptTokensEstimate,
+            usage: _activeStreamUsage,
           );
           _scheduleNextRevealTick();
         },
@@ -410,6 +449,24 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
           errorMessage: event.errorMessage,
         );
         _refreshStreamingPlaceholderForState(bumpToolCalls: true);
+        return;
+      case ai.AIStreamEventType.usage:
+        final promptTokens = event.promptTokens ?? 0;
+        final completionTokens = event.completionTokens ?? 0;
+        final totalTokens = event.totalTokens ?? 0;
+        final current = _activeStreamUsage;
+        _activeStreamUsage =
+            (current ??
+                    const _StreamUsageSnapshot(
+                      promptTokens: 0,
+                      completionTokens: 0,
+                      totalTokens: 0,
+                    ))
+                .add(
+                  promptTokens: promptTokens,
+                  completionTokens: completionTokens,
+                  totalTokens: totalTokens,
+                );
         return;
     }
   }
@@ -641,6 +698,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     _stableRevealDisplayedLen = 0;
     _stableRevealKickstarted = false; // FIX-2 改进：使用一次性标志
     _activeStreamUsesTypedEvents = false;
+    _activeStreamUsage = null;
     _pendingFinalize = null;
   }
 
@@ -712,7 +770,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
             error: pending.error,
             streamIdOverride: pending.streamId,
             placeholderOverride: pending.placeholder,
+            parentUserIdOverride: pending.parentUserId,
             promptTokensOverride: pending.promptTokens,
+            usageOverride: pending.usage,
           ),
         );
       }
@@ -735,7 +795,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
             error: pending.error,
             streamIdOverride: pending.streamId,
             placeholderOverride: pending.placeholder,
+            parentUserIdOverride: pending.parentUserId,
             promptTokensOverride: pending.promptTokens,
+            usageOverride: pending.usage,
           ),
         );
         return;
@@ -762,7 +824,9 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
             error: pending.error,
             streamIdOverride: pending.streamId,
             placeholderOverride: pending.placeholder,
+            parentUserIdOverride: pending.parentUserId,
             promptTokensOverride: pending.promptTokens,
+            usageOverride: pending.usage,
           ),
         );
         return;
@@ -975,10 +1039,6 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
         (codeUnit >= 97 && codeUnit <= 122);
   }
 
-  String _formatSummaryForPrompt(String summaryJson) {
-    return '[Previous conversation summary]\n$summaryJson';
-  }
-
   int _stripPartialRun(
     String text,
     int end, {
@@ -1014,14 +1074,18 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     // Override 参数：使用快照而非 active 状态
     String? streamIdOverride,
     chat.Message? placeholderOverride,
+    String? parentUserIdOverride,
     int? promptTokensOverride,
+    _StreamUsageSnapshot? usageOverride,
   }) async {
     if (_isDisposed) return;
 
     // 优先使用 override 快照，否则使用当前 active 状态
     final streamId = streamIdOverride ?? _activeStreamId;
     final placeholder = placeholderOverride ?? _activeAssistantPlaceholder;
+    final parentUserId = parentUserIdOverride ?? _activeAssistantParentUserId;
     final promptTokens = promptTokensOverride ?? _activePromptTokensEstimate;
+    final usage = usageOverride ?? _activeStreamUsage;
 
     _stopStableFlowRevealTimer();
 
@@ -1032,8 +1096,10 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
     // 无条件清空 active 状态（恢复原逻辑）
     _activeStreamId = null;
     _activeAssistantPlaceholder = null;
+    _activeAssistantParentUserId = null;
     _currentProvider = null;
     _activePromptTokensEstimate = null;
+    _activeStreamUsage = null;
 
     if (streamId != null) {
       _streamManager.end(streamId);
@@ -1060,56 +1126,97 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       );
 
       if (shouldPersistFinalizedStreamingMessage(finalContent)) {
-        final outputTokens = TokenCounter.estimateTokens(finalContent);
+        final inputTokens = usage?.promptTokens ?? promptTokens;
+        final outputTokens =
+            usage?.completionTokens ??
+            TokenCounter.estimateTokens(finalContent);
         final thinkingDuration = data?.thinkingDurationSeconds ?? 0;
+        final toolCallRecords = (data?.toolCalls ?? const <ToolCallData>[])
+            .map(
+              (toolCall) => McpToolCallRecord.fromToolCallData(
+                toolCall,
+                messageId: placeholder.id,
+              ),
+            )
+            .toList(growable: false);
         final assistantMessage = app.Message(
           id: placeholder.id,
           content: finalContent,
           isUser: false,
           timestamp: DateTime.now(),
-          inputTokens: promptTokens,
+          inputTokens: inputTokens,
           outputTokens: outputTokens,
           modelName: modelName,
           providerName: providerName,
           thinkingDurationSeconds: thinkingDuration > 0
               ? thinkingDuration
               : null,
+          toolCallRecords: toolCallRecords.isEmpty ? null : toolCallRecords,
         );
 
-        final thread = _getThread(rebuildFromMessagesIfMismatch: false);
-        final nodeAlreadyInThread = thread.nodes.containsKey(
-          assistantMessage.id,
-        );
+        if (ai.ProviderFactory.pythonBackendEnabled) {
+          try {
+            final converted = _toFlutterChatMessage(assistantMessage);
+            try {
+              await _chatController.updateMessage(placeholder, converted);
+            } catch (_) {
+              // ignore: backend snapshot sync below is the source of truth
+            }
+            final snapshot = await _backendConversationSourceService
+                .appendMessages(
+                  conversationId: widget.conversation.id,
+                  baseMessageId: parentUserId,
+                  messages: [assistantMessage],
+                );
+            final mergedSnapshot = _snapshotWithLocalMessage(
+              snapshot,
+              assistantMessage,
+            );
+            _applyBackendSourceSnapshot(mergedSnapshot, autoFollow: false);
+            widget.onConversationUpdated();
+            widget.onTokenUsageUpdated(widget.conversation);
+            _requestAutoFollow(smooth: true);
+            unawaited(_persistMarkdownImagesForMessageId(assistantMessage.id));
+          } catch (e) {
+            debugPrint('[streaming] backend finalize persistence failed: $e');
+            _syncConversationToChatController();
+          }
+        } else {
+          final thread = _getThread(rebuildFromMessagesIfMismatch: false);
+          final nodeAlreadyInThread = thread.nodes.containsKey(
+            assistantMessage.id,
+          );
 
-        if (!nodeAlreadyInThread) {
-          widget.conversation.addMessage(assistantMessage);
+          if (!nodeAlreadyInThread) {
+            widget.conversation.addMessage(assistantMessage);
+          }
+
+          thread.appendToActiveLeaf(assistantMessage);
+          _syncConversationMessagesSnapshotFromThread(thread);
+          _persistThreadNoSave(thread);
+          _schedulePersistThread();
+
+          widget.onConversationUpdated();
+          widget.onTokenUsageUpdated(widget.conversation);
+
+          final converted = _toFlutterChatMessage(assistantMessage);
+          // NOTE: `flutter_chat_ui` may not reliably repaint when a message's
+          // runtime type changes (e.g. streaming `TextMessage` -> finalized
+          // `CustomMessage` for <think> content). To prevent "duplicate/ghost"
+          // messages that disappear after restart, always re-sync from the
+          // persisted conversation after finalize.
+          try {
+            await _chatController.updateMessage(placeholder, converted);
+          } catch (_) {
+            // ignore: full sync below is the source of truth
+          }
+          // FIX-5: 不强制跳转底部，尊重用户的滚动位置
+          _syncConversationToChatController(autoFollow: false);
+          _requestAutoFollow(smooth: true);
+
+          // 将过期的网络图片 URL 替换为持久化的本地文件 URI
+          unawaited(_persistMarkdownImagesForMessageId(assistantMessage.id));
         }
-
-        thread.appendToActiveLeaf(assistantMessage);
-        _syncConversationMessagesSnapshotFromThread(thread);
-        _persistThreadNoSave(thread);
-        _schedulePersistThread();
-
-        widget.onConversationUpdated();
-        widget.onTokenUsageUpdated(widget.conversation);
-
-        final converted = _toFlutterChatMessage(assistantMessage);
-        // NOTE: `flutter_chat_ui` may not reliably repaint when a message's
-        // runtime type changes (e.g. streaming `TextMessage` -> finalized
-        // `CustomMessage` for <think> content). To prevent "duplicate/ghost"
-        // messages that disappear after restart, always re-sync from the
-        // persisted conversation after finalize.
-        try {
-          await _chatController.updateMessage(placeholder, converted);
-        } catch (_) {
-          // ignore: full sync below is the source of truth
-        }
-        // FIX-5: 不强制跳转底部，尊重用户的滚动位置
-        _syncConversationToChatController(autoFollow: false);
-        _requestAutoFollow(smooth: true);
-
-        // 将过期的网络图片 URL 替换为持久化的本地文件 URI
-        unawaited(_persistMarkdownImagesForMessageId(assistantMessage.id));
       } else {
         // 只有在既没有正文/思考，也没有错误块时才移除占位消息。
         // 手动截断会附加 <error> 块，从而保留 header 并显示提示。

@@ -237,6 +237,72 @@ class TestBuildCompletionKwargs:
         assert kwargs["messages"][0]["content"][0]["type"] == "text"
         assert "Alpha content" in kwargs["messages"][0]["content"][0]["text"]
 
+    def test_tools_and_tool_choice_forwarded_to_kwargs(
+        self, service, openai_provider
+    ):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the web",
+                    "parameters": {"type": "object", "properties": {"q": {"type": "string"}}},
+                },
+            }
+        ]
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role="user", content="Search tokyo")],
+            provider=openai_provider,
+            tools=tools,
+            tool_choice="auto",
+        )
+        kwargs = service._build_completion_kwargs(req)
+        assert kwargs["tools"] == tools
+        assert kwargs["tool_choice"] == "auto"
+
+    def test_tools_omitted_when_none(self, service, openai_provider):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role="user", content="Hi")],
+            provider=openai_provider,
+        )
+        kwargs = service._build_completion_kwargs(req)
+        assert "tools" not in kwargs
+        assert "tool_choice" not in kwargs
+
+
+class _BrokenDelta:
+    def __init__(self):
+        self.content = "hello"
+
+
+class _BrokenChoice:
+    def __init__(self):
+        self.delta = _BrokenDelta()
+        self.finish_reason = None
+
+
+class _BrokenChunk:
+    def __init__(self):
+        self.id = "chunk-1"
+        self.model = "gemini-2.5-flash"
+        self.choices = [_BrokenChoice()]
+
+    def model_dump(self, **kwargs):
+        raise RuntimeError("broken serializer")
+
+
+class TestStreamChunkCoercion:
+    def test_coerce_stream_chunk_falls_back_to_attribute_extraction(self, service):
+        chunk = _BrokenChunk()
+
+        chunk_dict = service._coerce_stream_chunk(chunk)
+
+        assert chunk_dict["id"] == "chunk-1"
+        assert chunk_dict["model"] == "gemini-2.5-flash"
+        assert chunk_dict["choices"][0]["delta"]["content"] == "hello"
+
 
 class TestRouterConfig:
     def test_build_router_model_list(self, service, sample_request):
@@ -303,6 +369,17 @@ class TestRouterConfig:
         router_kwargs = mock_router_cls.call_args.kwargs
         assert router_kwargs["allowed_fails"] == 4
         assert router_kwargs["cooldown_time"] == 45.0
+
+    @patch("services.litellm_service.litellm.Router")
+    def test_streaming_router_is_not_cached(
+        self, mock_router_cls, service, sample_request
+    ):
+        sample_request.stream = True
+
+        service._get_router(sample_request, allow_cached=False)
+        service._get_router(sample_request, allow_cached=False)
+
+        assert mock_router_cls.call_count == 2
 
 
 class TestChatCompletion:
@@ -476,6 +553,48 @@ class TestChatCompletionStream:
 
     @pytest.mark.asyncio
     @patch("services.litellm_service.litellm.Router")
+    async def test_stream_error_invalidates_cached_router(self, mock_router_cls, service, sample_request):
+        class _ClosableStream:
+            def __init__(self):
+                self.closed = False
+                self._emitted = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self._emitted:
+                    self._emitted = True
+                    yield_chunk = MagicMock()
+                    yield_chunk.model_dump.return_value = {
+                        "choices": [{"delta": {"content": "Hi"}}]
+                    }
+                    return yield_chunk
+                raise litellm.APIConnectionError(
+                    message="Connection lost", llm_provider="openai", model="gpt-4o"
+                )
+
+            async def aclose(self):
+                self.closed = True
+
+        stream = _ClosableStream()
+        mock_router = MagicMock()
+        mock_router.acompletion = AsyncMock(return_value=stream)
+        mock_router_cls.return_value = mock_router
+        sample_request.stream = True
+
+        service._routers[service._router_cache_key(sample_request)] = mock_router
+
+        chunks = []
+        async for chunk in service.chat_completion_stream(sample_request):
+            chunks.append(chunk)
+
+        assert '"error"' in chunks[1]
+        assert service._router_cache_key(sample_request) not in service._routers
+        assert stream.closed is True
+
+    @pytest.mark.asyncio
+    @patch("services.litellm_service.litellm.Router")
     async def test_streaming_typed_mode_emits_typed_payloads(
         self, mock_router_cls, service, sample_request
     ):
@@ -510,6 +629,48 @@ class TestChatCompletionStream:
 
         assert 'data: {"type": "thinking_delta", "delta": "\\u5148\\u5206\\u6790"}\n\n' in chunks
         assert 'data: {"type": "text_delta", "delta": "\\u6700\\u7ec8\\u7b54\\u6848"}\n\n' in chunks
+        assert chunks[-1] == 'data: {"type": "done"}\n\n'
+
+    @pytest.mark.asyncio
+    @patch("services.litellm_service.litellm.Router")
+    async def test_streaming_typed_mode_emits_usage_payload(
+        self, mock_router_cls, service, sample_request
+    ):
+        chunk1 = MagicMock()
+        chunk1.model_dump.return_value = {
+            "id": "chatcmpl-test",
+            "model": "gpt-4o-mini",
+            "choices": [{"delta": {"content": "最终答案"}}],
+        }
+        chunk2 = MagicMock()
+        chunk2.model_dump.return_value = {
+            "id": "chatcmpl-test",
+            "model": "gpt-4o-mini",
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 42,
+                "completion_tokens": 11,
+                "total_tokens": 53,
+            },
+        }
+
+        async def mock_aiter():
+            yield chunk1
+            yield chunk2
+
+        mock_router = MagicMock()
+        mock_router.acompletion = AsyncMock(return_value=mock_aiter())
+        mock_router_cls.return_value = mock_router
+        sample_request.stream = True
+        sample_request.stream_event_mode = "typed"
+        sample_request.model = "gpt-4o-mini"
+        sample_request.provider.type = "openai"
+
+        chunks = []
+        async for chunk in service.chat_completion_stream(sample_request):
+            chunks.append(chunk)
+
+        assert 'data: {"type": "usage", "prompt_tokens": 42, "completion_tokens": 11, "total_tokens": 53}\n\n' in chunks
         assert chunks[-1] == 'data: {"type": "done"}\n\n'
 
 

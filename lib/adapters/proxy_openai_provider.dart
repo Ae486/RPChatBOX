@@ -19,8 +19,13 @@ class ProxyOpenAIProvider extends AIProvider {
   static final Map<String, String> _providerRegistrySyncVersions = {};
   static bool _preferTypedStreamEvents = true;
   CancelToken? _currentCancelToken;
+  bool _backendToolLoopEnabled = false;
 
   ProxyOpenAIProvider(super.config);
+
+  void setBackendToolLoopEnabled(bool enabled) {
+    _backendToolLoopEnabled = enabled;
+  }
 
   String get _proxyBaseUrl => config.proxyApiUrl ?? defaultProxyUrl;
 
@@ -89,6 +94,7 @@ class ProxyOpenAIProvider extends AIProvider {
       'provider_id': config.id,
       'include_reasoning': true, // 启用 reasoning 输出
       if (stream && _preferTypedStreamEvents) 'stream_event_mode': 'typed',
+      if (_backendToolLoopEnabled) 'enable_tools': true,
       if (files != null && files.isNotEmpty) 'files': _buildFilesPayload(files),
     };
 
@@ -100,8 +106,7 @@ class ProxyOpenAIProvider extends AIProvider {
     body['presence_penalty'] = parameters.presencePenalty;
 
     // Gemini 模型特殊处理
-    final modelLower = model.toLowerCase();
-    if (modelLower.contains('gemini')) {
+    if (config.type == ProviderType.gemini) {
       body['extra_body'] = {
         'google': {
           'thinking_config': {'include_thoughts': true},
@@ -266,6 +271,15 @@ class ProxyOpenAIProvider extends AIProvider {
         responseType: ResponseType.stream,
       ),
     );
+
+    final statusCode = response.statusCode ?? 0;
+    if (statusCode < 200 || statusCode >= 300) {
+      final errorBody = await response.data!.stream
+          .cast<List<int>>()
+          .transform(utf8.decoder)
+          .join();
+      throw Exception('Backend returned HTTP $statusCode: $errorBody');
+    }
 
     final responseStream = response.data!.stream;
     await for (final chunk
@@ -539,6 +553,21 @@ class ProxyStreamChunkParser {
               callId: callId,
               toolName: parsed['tool_name']?.toString(),
               errorMessage: parsed['error']?.toString() ?? 'Unknown tool error',
+            ),
+          ],
+        );
+      case 'usage':
+        final promptTokens = (parsed['prompt_tokens'] as num?)?.toInt() ?? 0;
+        final completionTokens =
+            (parsed['completion_tokens'] as num?)?.toInt() ?? 0;
+        final totalTokens = (parsed['total_tokens'] as num?)?.toInt() ?? 0;
+        return _TypedPayloadParseResult(
+          legacyChunks: const [],
+          events: [
+            AIStreamEvent.usage(
+              promptTokens: promptTokens,
+              completionTokens: completionTokens,
+              totalTokens: totalTokens,
             ),
           ],
         );

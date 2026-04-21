@@ -1,8 +1,10 @@
 """ChatBoxApp Python Backend - FastAPI Entry Point."""
+import asyncio
 import logging
 import os
 import sys
 import traceback
+from contextlib import suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +14,7 @@ from api import api_router
 from config import get_settings
 from services.database import create_db_and_tables
 from services.langgraph_checkpoint_store import ensure_langgraph_checkpoint_schema
+from services.mcp_manager import get_mcp_manager
 
 
 def _configure_application_logging() -> None:
@@ -59,6 +62,21 @@ def create_app() -> FastAPI:
         settings.ensure_dirs()
         create_db_and_tables()
         ensure_langgraph_checkpoint_schema()
+        app.state.mcp_connect_task = asyncio.create_task(
+            get_mcp_manager().connect_enabled_servers()
+        )
+        logging.getLogger(__name__).info(
+            "[MCP] scheduled background auto-connect for enabled servers"
+        )
+
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        mcp_connect_task = getattr(app.state, "mcp_connect_task", None)
+        if mcp_connect_task is not None and not mcp_connect_task.done():
+            mcp_connect_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await mcp_connect_task
+        await get_mcp_manager().disconnect_all()
 
     @app.post("/api/shutdown")
     async def shutdown():

@@ -1,0 +1,28 @@
+{
+  "main": {
+    "conversation_id": "f2627ed5-55ff-4228-b842-96c493675152",
+    "selected_checkpoint_id": "116a43c1-a990-4d6f-aca0-b40c9d302d7f",
+    "expected_ids": [
+      "user-1",
+      "assistant-2"
+    ],
+    "expected_contents": [
+      "Tell me a story about a dog.",
+      "Once upon a time, there was a brave cat."
+    ]
+  },
+  "promote": {
+    "conversation_id": "e4d7f7a9-ef2c-43d1-ba33-5e0eb8ce72bd",
+    "selected_checkpoint_id": "aacc2e26-2342-4f33-a761-6f001e3636d8",
+    "expected_ids": [
+      "u1",
+      "u2",
+      "a2"
+    ],
+    "expected_contents": [
+      "hello",
+      "followup",
+      "tail"
+    ]
+  }
+}

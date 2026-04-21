@@ -100,12 +100,9 @@ class BackendProviderRegistryService {
       'description': provider.description,
     };
 
-    // Keep Phase 2 compatibility: only persist explicit non-default routing
-    // hints so Phase 3 registry sync does not silently change main-chain
-    // execution semantics.
-    if (provider.backendMode != BackendMode.direct) {
-      payload['backend_mode'] = provider.backendMode.name;
-    }
+    // Always persist explicit routing mode so the backend does not
+    // fall back to implicit "auto" for entries without backend_mode.
+    payload['backend_mode'] = provider.backendMode.name;
 
     if (provider.backendMode == BackendMode.auto) {
       payload['fallback_enabled'] = provider.fallbackEnabled;

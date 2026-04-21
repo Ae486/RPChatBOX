@@ -26,6 +26,7 @@ class ConversationSourceMessage(BaseModel):
     provider_name: str | None = None
     attached_files: list[dict[str, Any]] = Field(default_factory=list)
     thinking_duration_seconds: int | None = None
+    tool_call_records: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ConversationSourceSummary(BaseModel):
@@ -52,10 +53,36 @@ class ConversationSourceCheckpointSummary(BaseModel):
     last_message_preview: str | None = None
 
 
+class ConversationSourceCheckpointDetail(ConversationSourceCheckpointSummary):
+    """Checkpoint detail including the checkpoint-visible message chain."""
+
+    messages: list[ConversationSourceMessage] = Field(default_factory=list)
+
+
+class ConversationSourceThreadNode(BaseModel):
+    """Backend-owned persisted message-tree node."""
+
+    id: str
+    parent_id: str | None = None
+    message: ConversationSourceMessage
+    children: list[str] = Field(default_factory=list)
+
+
+class ConversationSourceThread(BaseModel):
+    """Backend-owned conversation source tree."""
+
+    conversation_id: UUID
+    nodes: dict[str, ConversationSourceThreadNode] = Field(default_factory=dict)
+    root_id: str = ""
+    selected_child: dict[str, str] = Field(default_factory=dict)
+    active_leaf_id: str = ""
+
+
 class ConversationSourceWriteRequest(BaseModel):
     """Append/fork source-thread messages from an optional base checkpoint."""
 
     base_checkpoint_id: str | None = None
+    base_message_id: str | None = None
     messages: list[ConversationSourceMessage] = Field(min_length=1)
     select_after_write: bool = True
     touch_last_activity: bool = True
@@ -75,3 +102,13 @@ class ConversationSourceSelectionRequest(BaseModel):
     """Switch the selected source-thread checkpoint for a conversation."""
 
     checkpoint_id: str | None = None
+    message_id: str | None = None
+
+
+class ConversationSourceProjection(BaseModel):
+    """Frontend-oriented projection payload for rebuilding local branch UI state."""
+
+    current: ConversationSourceSummary
+    checkpoints: list[ConversationSourceCheckpointDetail] = Field(default_factory=list)
+    thread: ConversationSourceThread
+    checkpoint_by_message_id: dict[str, str] = Field(default_factory=dict)

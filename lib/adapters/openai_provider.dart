@@ -445,8 +445,7 @@ class OpenAIProvider extends AIProvider {
     };
 
     // 🆕 Gemini 模型特殊处理：添加 thinking_config
-    final modelLower = model.toLowerCase();
-    if (modelLower.contains('gemini')) {
+    if (config.type == ProviderType.gemini) {
       body['extra_body'] = {
         'google': {
           'thinking_config': {'include_thoughts': true},

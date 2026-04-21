@@ -51,6 +51,10 @@ class StreamNormalizationService:
         if isinstance(candidates, list) and candidates:
             events.extend(self._extract_candidate_events(candidates))
 
+        usage_event = self._extract_usage_event(chunk)
+        if usage_event is not None:
+            events.append(usage_event)
+
         return events or [StreamEvent.raw(chunk)]
 
     def emit_compatible_chunks(
@@ -163,6 +167,17 @@ class StreamNormalizationService:
                     )
                 continue
 
+            if event.kind == "usage":
+                payloads.append(
+                    {
+                        "type": "usage",
+                        "prompt_tokens": event.prompt_tokens or 0,
+                        "completion_tokens": event.completion_tokens or 0,
+                        "total_tokens": event.total_tokens or 0,
+                    }
+                )
+                continue
+
             if event.kind == "error":
                 error_payload = (
                     event.raw_chunk.get("error")
@@ -237,6 +252,48 @@ class StreamNormalizationService:
             events.append(StreamEvent.tool_call(self._wrap_function_call(function_call)))
 
         return events
+
+    def _extract_usage_event(self, chunk: dict[str, Any]) -> StreamEvent | None:
+        usage = chunk.get("usage")
+        if isinstance(usage, dict):
+            prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or 0)
+            total_tokens = int(
+                usage.get("total_tokens")
+                or (prompt_tokens + completion_tokens)
+            )
+            return StreamEvent.usage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            )
+
+        usage = chunk.get("usage_metadata") or chunk.get("usageMetadata")
+        if isinstance(usage, dict):
+            prompt_tokens = int(
+                usage.get("prompt_token_count")
+                or usage.get("promptTokenCount")
+                or 0
+            )
+            completion_tokens = int(
+                usage.get("candidates_token_count")
+                or usage.get("candidatesTokenCount")
+                or usage.get("completion_token_count")
+                or usage.get("completionTokenCount")
+                or 0
+            )
+            total_tokens = int(
+                usage.get("total_token_count")
+                or usage.get("totalTokenCount")
+                or (prompt_tokens + completion_tokens)
+            )
+            return StreamEvent.usage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            )
+
+        return None
 
     # ------------------------------------------------------------------
     # Gemini native candidates extraction (google-genai SDK)

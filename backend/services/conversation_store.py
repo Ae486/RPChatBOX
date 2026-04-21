@@ -1,4 +1,5 @@
 """Conversation/session storage service backed by SQLModel."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,10 +9,15 @@ from sqlalchemy import case, desc
 from sqlmodel import Session, select
 
 from models.conversation_store import (
+    ConversationAttachmentRecord,
     ConversationCreateRequest,
+    ConversationCompactSummaryPayload,
+    ConversationCompactSummaryRecord,
     ConversationRecord,
+    ConversationSourceGraphRecord,
     ConversationSettingsPayload,
     ConversationSettingsRecord,
+    ConversationSourceVisibilityRecord,
     ConversationUpdateRequest,
 )
 
@@ -151,6 +157,140 @@ class ConversationStoreService:
         self._session.commit()
         return True
 
+    def get_source_visibility(
+        self,
+        conversation_id: UUID,
+    ) -> ConversationSourceVisibilityRecord | None:
+        return self._session.get(ConversationSourceVisibilityRecord, conversation_id)
+
+    def get_compact_summary(
+        self,
+        conversation_id: UUID,
+    ) -> ConversationCompactSummaryRecord | None:
+        return self._session.get(ConversationCompactSummaryRecord, conversation_id)
+
+    def get_source_graph(
+        self,
+        conversation_id: UUID,
+    ) -> ConversationSourceGraphRecord | None:
+        return self._session.get(ConversationSourceGraphRecord, conversation_id)
+
+    def upsert_source_graph(
+        self,
+        conversation_id: UUID,
+        *,
+        namespace: str,
+        thread_state: dict,
+        checkpoint_by_message_id: dict[str, str],
+        current_message_id: str | None,
+    ) -> ConversationSourceGraphRecord | None:
+        conversation = self.get_conversation(conversation_id)
+        if conversation is None:
+            return None
+
+        record = self.get_source_graph(conversation_id)
+        now = _utcnow()
+        if record is None:
+            record = ConversationSourceGraphRecord(
+                conversation_id=conversation_id,
+                created_at=now,
+            )
+
+        record.namespace = namespace
+        record.thread_state = dict(thread_state)
+        record.checkpoint_by_message_id = dict(checkpoint_by_message_id)
+        record.current_message_id = current_message_id
+        record.updated_at = now
+        self._session.add(record)
+        self._session.commit()
+        self._session.refresh(record)
+        return record
+
+    def delete_source_graph(self, conversation_id: UUID) -> bool:
+        record = self.get_source_graph(conversation_id)
+        if record is None:
+            return False
+        self._session.delete(record)
+        self._session.commit()
+        return True
+
+    def get_hidden_source_message_ids(self, conversation_id: UUID) -> list[str]:
+        record = self.get_source_visibility(conversation_id)
+        if record is None:
+            return []
+        return list(record.hidden_message_ids or [])
+
+    def set_hidden_source_message_ids(
+        self,
+        conversation_id: UUID,
+        hidden_message_ids: list[str],
+    ) -> ConversationSourceVisibilityRecord | None:
+        conversation = self.get_conversation(conversation_id)
+        if conversation is None:
+            return None
+
+        record = self.get_source_visibility(conversation_id)
+        now = _utcnow()
+        if record is None:
+            record = ConversationSourceVisibilityRecord(
+                conversation_id=conversation_id,
+                created_at=now,
+            )
+
+        record.hidden_message_ids = list(hidden_message_ids)
+        record.updated_at = now
+        self._session.add(record)
+        self._session.commit()
+        self._session.refresh(record)
+        return record
+
+    def upsert_compact_summary(
+        self,
+        conversation_id: UUID,
+        payload: ConversationCompactSummaryPayload,
+    ) -> ConversationCompactSummaryRecord | None:
+        conversation = self.get_conversation(conversation_id)
+        if conversation is None:
+            return None
+
+        now = _utcnow()
+        record = self.get_compact_summary(conversation_id)
+        if record is None:
+            record = ConversationCompactSummaryRecord(
+                conversation_id=conversation_id,
+                created_at=now,
+            )
+
+        record.summary = payload.summary
+        record.range_start_message_id = payload.range_start_message_id
+        record.range_end_message_id = payload.range_end_message_id
+        record.updated_at = now
+
+        conversation.updated_at = now
+        if payload.touch_last_activity:
+            conversation.last_activity_at = now
+
+        self._session.add(record)
+        self._session.add(conversation)
+        self._session.commit()
+        self._session.refresh(record)
+        return record
+
+    def clear_compact_summary(self, conversation_id: UUID) -> bool:
+        conversation = self.get_conversation(conversation_id)
+        if conversation is None:
+            return False
+
+        record = self.get_compact_summary(conversation_id)
+        if record is None:
+            return True
+
+        conversation.updated_at = _utcnow()
+        self._session.add(conversation)
+        self._session.delete(record)
+        self._session.commit()
+        return True
+
     def get_or_create_settings(
         self,
         conversation_id: UUID,
@@ -211,3 +351,56 @@ class ConversationStoreService:
         self._session.commit()
         self._session.refresh(settings)
         return settings
+
+    def list_attachments(
+        self,
+        conversation_id: UUID,
+    ) -> list[ConversationAttachmentRecord]:
+        statement = (
+            select(ConversationAttachmentRecord)
+            .where(ConversationAttachmentRecord.conversation_id == conversation_id)
+            .order_by(ConversationAttachmentRecord.created_at)
+        )
+        return list(self._session.exec(statement).all())
+
+    def get_attachment(self, attachment_id: str) -> ConversationAttachmentRecord | None:
+        return self._session.get(ConversationAttachmentRecord, attachment_id)
+
+    def upsert_attachment(
+        self,
+        *,
+        attachment_id: str,
+        conversation_id: UUID,
+        storage_key: str,
+        local_path: str,
+        original_name: str,
+        mime_type: str,
+        size_bytes: int,
+        kind: str,
+        metadata_payload: dict,
+    ) -> ConversationAttachmentRecord | None:
+        conversation = self.get_conversation(conversation_id)
+        if conversation is None:
+            return None
+
+        record = self.get_attachment(attachment_id)
+        if record is None:
+            record = ConversationAttachmentRecord(
+                id=attachment_id,
+                conversation_id=conversation_id,
+                created_at=_utcnow(),
+            )
+
+        record.conversation_id = conversation_id
+        record.storage_key = storage_key
+        record.local_path = local_path
+        record.original_name = original_name
+        record.mime_type = mime_type
+        record.size_bytes = size_bytes
+        record.kind = kind
+        record.metadata_json = dict(metadata_payload)
+
+        self._session.add(record)
+        self._session.commit()
+        self._session.refresh(record)
+        return record

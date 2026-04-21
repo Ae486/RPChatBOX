@@ -4,7 +4,32 @@
 
 part of '../conversation_view_v2.dart';
 
-mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
+mixin _ConversationViewV2BuildMixin
+    on _ConversationViewV2StateBase, _ConversationViewV2CompactMixin {
+  List<ToolCallData> _toolCallsForMessage(
+    chat.Message message,
+    StreamData? streamData,
+  ) {
+    if (streamData != null && streamData.toolCalls.isNotEmpty) {
+      return streamData.toolCalls;
+    }
+
+    final metadata = message.metadata ?? const <String, dynamic>{};
+    final rawRecords = metadata['toolCallRecords'] as List?;
+    if (rawRecords == null || rawRecords.isEmpty) {
+      return const <ToolCallData>[];
+    }
+
+    return rawRecords
+        .whereType<Map>()
+        .map(
+          (item) => ToolCallData.fromRecord(
+            McpToolCallRecord.fromJson(Map<String, dynamic>.from(item)),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -20,242 +45,282 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
         theme: chatTheme,
         backgroundColor: colors.pageBg,
         builders: chat.Builders(
-        // 注：键盘滚动延迟来自 KeyboardMixin 的 100ms debounce，非此处动画时长
-        // 使用框架默认的 250ms 滚动动画
-        chatAnimatedListBuilder: (context, itemBuilder) {
-          return ChatAnimatedList(
-            itemBuilder: itemBuilder,
-          );
-        },
-        chatMessageBuilder: (
-          context,
-          message,
-          index,
-          animation,
-          child, {
-          isRemoved,
-          required isSentByMe,
-          groupStatus,
-        }) {
-          final messageWidget = chat_ui.ChatMessage(
-            message: message,
-            index: index,
-            animation: animation,
-            isRemoved: isRemoved,
-            groupStatus: groupStatus,
-            child: child,
-          );
-          return _wrapHighlighted(messageId: message.id, child: messageWidget);
-        },
-        textMessageBuilder:
-            (context, message, index, {required isSentByMe, groupStatus}) {
-              if (isSentByMe) {
+          // 注：键盘滚动延迟来自 KeyboardMixin 的 100ms debounce，非此处动画时长
+          // 使用框架默认的 250ms 滚动动画
+          chatAnimatedListBuilder: (context, itemBuilder) {
+            return ChatAnimatedList(itemBuilder: itemBuilder);
+          },
+          chatMessageBuilder:
+              (
+                context,
+                message,
+                index,
+                animation,
+                child, {
+                isRemoved,
+                required isSentByMe,
+                groupStatus,
+              }) {
+                final messageWidget = chat_ui.ChatMessage(
+                  message: message,
+                  index: index,
+                  animation: animation,
+                  isRemoved: isRemoved,
+                  groupStatus: groupStatus,
+                  child: child,
+                );
+                return _wrapHighlighted(
+                  messageId: message.id,
+                  child: messageWidget,
+                );
+              },
+          textMessageBuilder:
+              (context, message, index, {required isSentByMe, groupStatus}) {
+                if (isSentByMe) {
+                  return _wrapExportSelectable(
+                    message: message,
+                    child: _buildUserBubble(message: message),
+                  );
+                }
+
+                final metadata = message.metadata ?? const <String, dynamic>{};
+                final streaming = metadata['streaming'] == true;
+                final modelName = metadata['modelName'] as String?;
+                final providerName = metadata['providerName'] as String?;
+                final data = _streamManager.hasStream(message.id)
+                    ? _streamManager.getData(message.id)
+                    : null;
+
+                // 解析图片数据
+                final imagesRaw = metadata['images'] as List?;
+                final images =
+                    imagesRaw
+                        ?.map(
+                          (e) => e is Map<String, dynamic>
+                              ? GeneratedImage.fromJson(e)
+                              : e is String
+                              ? GeneratedImage(source: e)
+                              : null,
+                        )
+                        .whereType<GeneratedImage>()
+                        .toList() ??
+                    <GeneratedImage>[];
+
+                // 获取工具调用数据
+                final toolCalls = _toolCallsForMessage(message, data);
+
+                final body = GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
+                  onDoubleTap: _isExportMode
+                      ? null
+                      : () => _showMessageActionsSheet(message),
+                  onSecondaryTap: _isExportMode
+                      ? null
+                      : () => _showMessageActionsSheet(message),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OwuiAssistantMessage(
+                        messageId: message.id,
+                        createdAt: message.createdAt ?? DateTime.now(),
+                        bodyMarkdown: message.text,
+                        isStreaming: streaming,
+                        modelName: modelName,
+                        providerName: providerName,
+                        streamData: data,
+                        images: images,
+                        toolCalls: toolCalls,
+                      ),
+                      _buildTokenFooter(message, isSentByMe: false),
+                    ],
+                  ),
+                );
+
+                return _wrapExportSelectable(message: message, child: body);
+              },
+          customMessageBuilder:
+              (context, message, index, {required isSentByMe, groupStatus}) {
+                final metadata = message.metadata ?? const <String, dynamic>{};
+                if (metadata['type'] != 'thinking_message') {
+                  return const SizedBox.shrink();
+                }
+
+                final thinking = (metadata['thinking'] as String?) ?? '';
+                final body = (metadata['body'] as String?) ?? '';
+                final modelName = metadata['modelName'] as String?;
+                final providerName = metadata['providerName'] as String?;
+
+                // FIX: 尝试从 StreamManager 获取真实的 thinking 时间数据
+                // 优先级：StreamManager > 内存缓存 > 持久化字段 > createdAt 回退
+                final realStreamData = _streamManager.getData(message.id);
+                final cachedDuration = _thinkingDurationCache[message.id];
+                final persistedDuration =
+                    metadata['thinkingDurationSeconds'] as int?;
+
+                DateTime? thinkingStartTime;
+                DateTime? thinkingEndTime;
+
+                if (realStreamData?.thinkingStartTime != null) {
+                  // StreamManager 中有真实数据（流式进行中）
+                  thinkingStartTime = realStreamData!.thinkingStartTime;
+                  thinkingEndTime = realStreamData.thinkingEndTime;
+                } else if (cachedDuration != null &&
+                    cachedDuration > 0 &&
+                    thinking.isNotEmpty) {
+                  // 内存缓存（刚 finalize）
+                  thinkingEndTime = message.createdAt;
+                  thinkingStartTime = message.createdAt?.subtract(
+                    Duration(seconds: cachedDuration),
+                  );
+                } else if (persistedDuration != null &&
+                    persistedDuration > 0 &&
+                    thinking.isNotEmpty) {
+                  // 持久化字段（历史消息）
+                  thinkingEndTime = message.createdAt;
+                  thinkingStartTime = message.createdAt?.subtract(
+                    Duration(seconds: persistedDuration),
+                  );
+                } else if (thinking.isNotEmpty) {
+                  // 兜底回退（旧数据无时长记录）
+                  thinkingStartTime = message.createdAt;
+                  thinkingEndTime = message.createdAt;
+                }
+
+                // 解析图片数据
+                final imagesRaw = metadata['images'] as List?;
+                final images =
+                    imagesRaw
+                        ?.map(
+                          (e) => e is Map<String, dynamic>
+                              ? GeneratedImage.fromJson(e)
+                              : e is String
+                              ? GeneratedImage(source: e)
+                              : null,
+                        )
+                        .whereType<GeneratedImage>()
+                        .toList() ??
+                    <GeneratedImage>[];
+
+                final toolCalls = _toolCallsForMessage(message, realStreamData);
+
+                final bodyWidget = GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
+                  onDoubleTap: _isExportMode
+                      ? null
+                      : () => _showMessageActionsSheet(message),
+                  onSecondaryTap: _isExportMode
+                      ? null
+                      : () => _showMessageActionsSheet(message),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OwuiAssistantMessage(
+                        messageId: message.id,
+                        createdAt: message.createdAt ?? DateTime.now(),
+                        bodyMarkdown: body,
+                        isStreaming: false,
+                        modelName: modelName,
+                        providerName: providerName,
+                        streamData: StreamData(
+                          streamId: message.id,
+                          status: StreamStatus.completed,
+                          startTime: message.createdAt,
+                          content: body,
+                          thinkingContent: thinking,
+                          isThinkingOpen: false,
+                          thinkingStartTime: thinkingStartTime,
+                          thinkingEndTime: thinkingEndTime,
+                        ),
+                        images: images,
+                        toolCalls: toolCalls,
+                      ),
+                      _buildTokenFooter(message, isSentByMe: false),
+                    ],
+                  ),
+                );
+
                 return _wrapExportSelectable(
                   message: message,
-                  child: _buildUserBubble(message: message),
+                  child: bodyWidget,
                 );
-              }
+              },
+          imageMessageBuilder:
+              (context, message, index, {required isSentByMe, groupStatus}) {
+                final source = message.source;
+                Widget errorBuilder(
+                  BuildContext context,
+                  Object error,
+                  StackTrace? stackTrace,
+                ) {
+                  return Container(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    child: const Center(child: Icon(OwuiIcons.brokenImage)),
+                  );
+                }
 
-              final metadata = message.metadata ?? const <String, dynamic>{};
-              final streaming = metadata['streaming'] == true;
-              final modelName = metadata['modelName'] as String?;
-              final providerName = metadata['providerName'] as String?;
-              final data = _streamManager.hasStream(message.id)
-                  ? _streamManager.getData(message.id)
-                  : null;
-
-              // 解析图片数据
-              final imagesRaw = metadata['images'] as List?;
-              final images = imagesRaw
-                  ?.map((e) => e is Map<String, dynamic>
-                      ? GeneratedImage.fromJson(e)
-                      : e is String
-                          ? GeneratedImage(source: e)
-                          : null)
-                  .whereType<GeneratedImage>()
-                  .toList() ?? <GeneratedImage>[];
-
-              // 获取工具调用数据
-              final toolCalls = data?.toolCalls ?? const [];
-
-              final body = GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
-                onDoubleTap: _isExportMode
-                    ? null
-                    : () => _showMessageActionsSheet(message),
-                onSecondaryTap: _isExportMode
-                    ? null
-                    : () => _showMessageActionsSheet(message),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OwuiAssistantMessage(
-                      messageId: message.id,
-                      createdAt: message.createdAt ?? DateTime.now(),
-                      bodyMarkdown: message.text,
-                      isStreaming: streaming,
-                      modelName: modelName,
-                      providerName: providerName,
-                      streamData: data,
-                      images: images,
-                      toolCalls: toolCalls,
-                    ),
-                    _buildTokenFooter(message, isSentByMe: false),
-                  ],
-                ),
-              );
-
-              return _wrapExportSelectable(message: message, child: body);
-            },
-        customMessageBuilder:
-            (context, message, index, {required isSentByMe, groupStatus}) {
-              final metadata = message.metadata ?? const <String, dynamic>{};
-              if (metadata['type'] != 'thinking_message') {
-                return const SizedBox.shrink();
-              }
-
-              final thinking = (metadata['thinking'] as String?) ?? '';
-              final body = (metadata['body'] as String?) ?? '';
-              final modelName = metadata['modelName'] as String?;
-              final providerName = metadata['providerName'] as String?;
-
-              // FIX: 尝试从 StreamManager 获取真实的 thinking 时间数据
-              // 优先级：StreamManager > 内存缓存 > 持久化字段 > createdAt 回退
-              final realStreamData = _streamManager.getData(message.id);
-              final cachedDuration = _thinkingDurationCache[message.id];
-              final persistedDuration = metadata['thinkingDurationSeconds'] as int?;
-
-              DateTime? thinkingStartTime;
-              DateTime? thinkingEndTime;
-
-              if (realStreamData?.thinkingStartTime != null) {
-                // StreamManager 中有真实数据（流式进行中）
-                thinkingStartTime = realStreamData!.thinkingStartTime;
-                thinkingEndTime = realStreamData.thinkingEndTime;
-              } else if (cachedDuration != null && cachedDuration > 0 && thinking.isNotEmpty) {
-                // 内存缓存（刚 finalize）
-                thinkingEndTime = message.createdAt;
-                thinkingStartTime = message.createdAt?.subtract(Duration(seconds: cachedDuration));
-              } else if (persistedDuration != null && persistedDuration > 0 && thinking.isNotEmpty) {
-                // 持久化字段（历史消息）
-                thinkingEndTime = message.createdAt;
-                thinkingStartTime = message.createdAt?.subtract(Duration(seconds: persistedDuration));
-              } else if (thinking.isNotEmpty) {
-                // 兜底回退（旧数据无时长记录）
-                thinkingStartTime = message.createdAt;
-                thinkingEndTime = message.createdAt;
-              }
-
-              // 解析图片数据
-              final imagesRaw = metadata['images'] as List?;
-              final images = imagesRaw
-                  ?.map((e) => e is Map<String, dynamic>
-                      ? GeneratedImage.fromJson(e)
-                      : e is String
-                          ? GeneratedImage(source: e)
-                          : null)
-                  .whereType<GeneratedImage>()
-                  .toList() ?? <GeneratedImage>[];
-
-              final bodyWidget = GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
-                onDoubleTap: _isExportMode
-                    ? null
-                    : () => _showMessageActionsSheet(message),
-                onSecondaryTap: _isExportMode
-                    ? null
-                    : () => _showMessageActionsSheet(message),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OwuiAssistantMessage(
-                      messageId: message.id,
-                      createdAt: message.createdAt ?? DateTime.now(),
-                      bodyMarkdown: body,
-                      isStreaming: false,
-                      modelName: modelName,
-                      providerName: providerName,
-                      streamData: StreamData(
-                        streamId: message.id,
-                        status: StreamStatus.completed,
-                        startTime: message.createdAt,
-                        content: body,
-                        thinkingContent: thinking,
-                        isThinkingOpen: false,
-                        thinkingStartTime: thinkingStartTime,
-                        thinkingEndTime: thinkingEndTime,
+                if (!_isProbablyNetworkUrl(source)) {
+                  final filePath = _toFilePathIfNeeded(source);
+                  final file = File(filePath);
+                  if (!file.existsSync()) {
+                    return _wrapExportSelectable(
+                      message: message,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 240,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.black.withValues(alpha: 0.08),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(OwuiIcons.brokenImage, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '图片文件不存在',
+                                    style: TextStyle(
+                                      color: OwuiPalette.textSecondary(context),
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          _buildTokenFooter(message, isSentByMe: isSentByMe),
+                        ],
                       ),
-                      images: images,
-                    ),
-                    _buildTokenFooter(message, isSentByMe: false),
-                  ],
-                ),
-              );
-
-              return _wrapExportSelectable(message: message, child: bodyWidget);
-            },
-        imageMessageBuilder:
-            (context, message, index, {required isSentByMe, groupStatus}) {
-              final source = message.source;
-              Widget errorBuilder(
-                BuildContext context,
-                Object error,
-                StackTrace? stackTrace,
-              ) {
-                return Container(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  child: const Center(child: Icon(OwuiIcons.brokenImage)),
-                );
-              }
-
-              if (!_isProbablyNetworkUrl(source)) {
-                final filePath = _toFilePathIfNeeded(source);
-                final file = File(filePath);
-                if (!file.existsSync()) {
+                    );
+                  }
                   return _wrapExportSelectable(
                     message: message,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 240,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.black.withValues(alpha: 0.08),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                OwuiIcons.brokenImage,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  '图片文件不存在',
-                                  style: TextStyle(
-                                    color: OwuiPalette.textSecondary(context),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                        FlyerChatImageMessage(
+                          message: message,
+                          index: index,
+                          customImageProvider: FileImage(file),
+                          errorBuilder: errorBuilder,
                         ),
                         _buildTokenFooter(message, isSentByMe: isSentByMe),
                       ],
                     ),
                   );
                 }
+
                 return _wrapExportSelectable(
                   message: message,
                   child: Column(
@@ -265,95 +330,83 @@ mixin _ConversationViewV2BuildMixin on _ConversationViewV2StateBase {
                       FlyerChatImageMessage(
                         message: message,
                         index: index,
-                        customImageProvider: FileImage(file),
                         errorBuilder: errorBuilder,
                       ),
                       _buildTokenFooter(message, isSentByMe: isSentByMe),
                     ],
                   ),
                 );
-              }
+              },
+          fileMessageBuilder:
+              (context, message, index, {required isSentByMe, groupStatus}) {
+                final body = GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
+                  onDoubleTap: _isExportMode
+                      ? null
+                      : () => _showMessageActionsSheet(message),
+                  onSecondaryTap: _isExportMode
+                      ? null
+                      : () => _showMessageActionsSheet(message),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FlyerChatFileMessage(message: message, index: index),
+                      _buildTokenFooter(message, isSentByMe: false),
+                    ],
+                  ),
+                );
 
-              return _wrapExportSelectable(
-                message: message,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FlyerChatImageMessage(
-                      message: message,
-                      index: index,
-                      errorBuilder: errorBuilder,
-                    ),
-                    _buildTokenFooter(message, isSentByMe: isSentByMe),
-                  ],
-                ),
-              );
-            },
-        fileMessageBuilder:
-            (context, message, index, {required isSentByMe, groupStatus}) {
-              final body = GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                // 使用双击触发菜单，与用户消息一致，避免与选择文本冲突
-                onDoubleTap: _isExportMode
-                    ? null
-                    : () => _showMessageActionsSheet(message),
-                onSecondaryTap: _isExportMode
-                    ? null
-                    : () => _showMessageActionsSheet(message),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FlyerChatFileMessage(message: message, index: index),
-                    _buildTokenFooter(message, isSentByMe: false),
-                  ],
-                ),
-              );
-
-              return _wrapExportSelectable(message: message, child: body);
-            },
-        scrollToBottomBuilder: (context, animation, onPressed) {
-          // 使用 Demo 同源的 “auto-follow + 浮动按钮” 方案，关闭 flutter_chat_ui 内置按钮以避免重复。
-          return const SizedBox.shrink();
-        },
-        composerBuilder: (context) {
-          // 使用 OwuiComposer（OpenWebUI 风格 + 可扩展动作栏）
-          if (_isExportMode) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted || _isDisposed) return;
-              context.read<ComposerHeightNotifier>().setHeight(0);
-            });
+                return _wrapExportSelectable(message: message, child: body);
+              },
+          scrollToBottomBuilder: (context, animation, onPressed) {
+            // 使用 Demo 同源的 “auto-follow + 浮动按钮” 方案，关闭 flutter_chat_ui 内置按钮以避免重复。
             return const SizedBox.shrink();
-          }
-
-          return OwuiComposer(
-            textController: _messageController,
-            isStreaming: _isLoading || _streamController.isStreaming,
-            onSend: _sendMessage,
-            onStop: _stopStreaming,
-            serviceManager: globalModelServiceManager,
-            conversationSettings: _conversationSettings,
-            attachmentBarVisible: _attachmentBarVisible,
-            onHeightChanged: _handleComposerHeightChanged,
-            onSettingsChanged: (settings) {
-              setState(() {
-                _conversationSettings = settings;
+          },
+          composerBuilder: (context) {
+            // 使用 OwuiComposer（OpenWebUI 风格 + 可扩展动作栏）
+            if (_isExportMode) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted || _isDisposed) return;
+                context.read<ComposerHeightNotifier>().setHeight(0);
               });
-              globalModelServiceManager.updateConversationSettings(settings);
-            },
+              return const SizedBox.shrink();
+            }
+
+            return OwuiComposer(
+              textController: _messageController,
+              isStreaming: _isLoading || _streamController.isStreaming,
+              isCompacting: _isCompacting,
+              onSend: _sendMessage,
+              onStop: _stopStreaming,
+              onCompact: _runCompact,
+              serviceManager: globalModelServiceManager,
+              conversationSettings: _conversationSettings,
+              attachmentBarVisible: _attachmentBarVisible,
+              compactLabel: _compactButtonLabel(),
+              compactTooltip: _compactButtonTooltip(),
+              compactEnabled: _canRunCompact(_buildCurrentContextWindow()),
+              contextTokenSummaryBuilder: _contextTokenSummaryForLength,
+              onHeightChanged: _handleComposerHeightChanged,
+              onSettingsChanged: (settings) {
+                setState(() {
+                  _conversationSettings = settings;
+                });
+                globalModelServiceManager.updateConversationSettings(settings);
+              },
+            );
+          },
+        ),
+        onMessageSend: (_) async {
+          // composerBuilder 已接管发送逻辑，这里留空避免重复触发
+        },
+        resolveUser: (userId) async {
+          return chat.User(
+            id: userId,
+            name: userId == _v2CurrentUserId ? '用户' : 'AI助手',
           );
         },
-      ),
-      onMessageSend: (_) async {
-        // composerBuilder 已接管发送逻辑，这里留空避免重复触发
-      },
-      resolveUser: (userId) async {
-        return chat.User(
-          id: userId,
-          name: userId == _v2CurrentUserId ? '用户' : 'AI助手',
-        );
-      },
       ),
     );
 

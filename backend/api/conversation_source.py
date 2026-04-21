@@ -1,4 +1,5 @@
 """Conversation source-thread endpoints backed by LangGraph checkpoints."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -72,6 +73,17 @@ async def get_conversation_source(
     return source.model_dump(mode="json")
 
 
+@router.get("/api/conversations/{conversation_id}/source/projection")
+async def get_conversation_source_projection(
+    conversation_id: UUID,
+    service: ConversationSourceService = Depends(_service),
+):
+    projection = service.get_projection(conversation_id)
+    if projection is None:
+        raise _conversation_not_found(conversation_id)
+    return projection.model_dump(mode="json")
+
+
 @router.get("/api/conversations/{conversation_id}/source/history")
 async def list_conversation_source_history(
     conversation_id: UUID,
@@ -119,6 +131,21 @@ async def patch_conversation_source_message(
     return source.model_dump(mode="json")
 
 
+@router.delete("/api/conversations/{conversation_id}/source/messages/{message_id}")
+async def delete_conversation_source_message(
+    conversation_id: UUID,
+    message_id: str,
+    service: ConversationSourceService = Depends(_service),
+):
+    try:
+        source = service.delete_message(conversation_id, message_id)
+    except ConversationSourceMessageNotFoundError:
+        raise _message_not_found(message_id)
+    if source is None:
+        raise _conversation_not_found(conversation_id)
+    return source.model_dump(mode="json")
+
+
 @router.put("/api/conversations/{conversation_id}/source/selection")
 async def select_conversation_source_checkpoint(
     conversation_id: UUID,
@@ -129,6 +156,19 @@ async def select_conversation_source_checkpoint(
         source = service.select_checkpoint(conversation_id, payload)
     except ConversationSourceCheckpointNotFoundError:
         raise _checkpoint_not_found(payload.checkpoint_id or "")
+    except ConversationSourceMessageNotFoundError:
+        raise _message_not_found(payload.message_id or "")
+    if source is None:
+        raise _conversation_not_found(conversation_id)
+    return source.model_dump(mode="json")
+
+
+@router.delete("/api/conversations/{conversation_id}/source")
+async def clear_conversation_source(
+    conversation_id: UUID,
+    service: ConversationSourceService = Depends(_service),
+):
+    source = service.clear_source(conversation_id)
     if source is None:
         raise _conversation_not_found(conversation_id)
     return source.model_dump(mode="json")

@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../adapters/ai_provider.dart';
 import '../chat_ui/owui/owui_icons.dart';
 import '../design_system/design_tokens.dart';
 import '../models/mcp/mcp_server_config.dart';
@@ -37,6 +38,7 @@ class _McpServerConfigDialogState extends State<McpServerConfigDialog> {
 
   bool get _isEditMode => widget.config != null;
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+  bool get _backendOwned => ProviderFactory.pythonBackendEnabled;
 
   @override
   void initState() {
@@ -203,10 +205,11 @@ class _McpServerConfigDialogState extends State<McpServerConfigDialog> {
                         value: McpTransportType.http,
                         child: Text('HTTP (SSE)'),
                       ),
-                      const DropdownMenuItem(
-                        value: McpTransportType.websocket,
-                        child: Text('WebSocket'),
-                      ),
+                      if (!_backendOwned)
+                        const DropdownMenuItem(
+                          value: McpTransportType.websocket,
+                          child: Text('WebSocket'),
+                        ),
                       // 移动端不支持 stdio
                       if (!_isMobile)
                         const DropdownMenuItem(

@@ -24,13 +24,10 @@ extension _OpenAIProviderRequest on OpenAIProvider {
     };
 
     // Gemini 模型特殊处理：添加 thinking_config
-    final modelLower = model.toLowerCase();
-    if (modelLower.contains('gemini')) {
+    if (config.type == ProviderType.gemini) {
       body['extra_body'] = {
         'google': {
-          'thinking_config': {
-            'include_thoughts': true,
-          },
+          'thinking_config': {'include_thoughts': true},
         },
       };
     }
@@ -42,8 +39,18 @@ extension _OpenAIProviderRequest on OpenAIProvider {
         _addIfNotDefault(body, 'temperature', parameters.temperature, 1.0);
         _addIfNotNull(body, 'max_tokens', parameters.maxTokens);
         _addIfNotDefault(body, 'top_p', parameters.topP, 1.0);
-        _addIfNotDefault(body, 'frequency_penalty', parameters.frequencyPenalty, 0.0);
-        _addIfNotDefault(body, 'presence_penalty', parameters.presencePenalty, 0.0);
+        _addIfNotDefault(
+          body,
+          'frequency_penalty',
+          parameters.frequencyPenalty,
+          0.0,
+        );
+        _addIfNotDefault(
+          body,
+          'presence_penalty',
+          parameters.presencePenalty,
+          0.0,
+        );
         break;
 
       case ProviderType.deepseek:
@@ -71,7 +78,12 @@ extension _OpenAIProviderRequest on OpenAIProvider {
   }
 
   /// 添加非默认值的参数
-  void _addIfNotDefault(Map<String, dynamic> body, String key, double value, double defaultValue) {
+  void _addIfNotDefault(
+    Map<String, dynamic> body,
+    String key,
+    double value,
+    double defaultValue,
+  ) {
     if (value != defaultValue) {
       body[key] = value;
     }
@@ -92,9 +104,10 @@ extension _OpenAIProviderRequest on OpenAIProvider {
     final converted = messages.map((msg) => msg.toJson()).toList();
 
     // 过滤空system消息（很多API不接受空的system消息）
-    converted.removeWhere((msg) =>
-      msg['role'] == 'system' &&
-      (msg['content'] == null || (msg['content'] as String).trim().isEmpty)
+    converted.removeWhere(
+      (msg) =>
+          msg['role'] == 'system' &&
+          (msg['content'] == null || (msg['content'] as String).trim().isEmpty),
     );
 
     // 如果有附件且最后一条是用户消息，添加多模态内容
@@ -117,11 +130,12 @@ extension _OpenAIProviderRequest on OpenAIProvider {
             final imageData = readFileAsBase64(file.path);
             imageContents.add({
               'type': 'image_url',
-              'image_url': {
-                'url': 'data:${file.mimeType};base64,$imageData',
-              },
+              'image_url': {'url': 'data:${file.mimeType};base64,$imageData'},
             });
-          } else if (FileContentService.isTextProcessable(file.mimeType, extension)) {
+          } else if (FileContentService.isTextProcessable(
+            file.mimeType,
+            extension,
+          )) {
             // 处理文本文件
             try {
               final textContent = await FileContentService.extractTextContent(
@@ -129,7 +143,11 @@ extension _OpenAIProviderRequest on OpenAIProvider {
                 file.mimeType,
               );
               documentContents.add(
-                FileContentService.generateFilePrompt(fileName, file.mimeType, textContent)
+                FileContentService.generateFilePrompt(
+                  fileName,
+                  file.mimeType,
+                  textContent,
+                ),
               );
             } catch (e) {
               documentContents.add('// 文件 $fileName 处理失败: ${e.toString()}');
@@ -145,13 +163,11 @@ extension _OpenAIProviderRequest on OpenAIProvider {
 
         // 如果有文档内容，添加到文本前面
         if (documentContents.isNotEmpty) {
-          textContent = '${documentContents.join('\n\n')}\n\n---\n\n$textContent';
+          textContent =
+              '${documentContents.join('\n\n')}\n\n---\n\n$textContent';
         }
 
-        content.add({
-          'type': 'text',
-          'text': textContent,
-        });
+        content.add({'type': 'text', 'text': textContent});
 
         // 添加图片内容
         content.addAll(imageContents);

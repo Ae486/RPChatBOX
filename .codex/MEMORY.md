@@ -1,6 +1,6 @@
 # ChatBoxApp Memory
 
-Last Updated: 2026-04-08 (compressed canonical memory)
+Last Updated: 2026-04-18 (4 main adjudication items resolved: workspace_state Option A, pgvector, worker-internal dirty check, single-session writer; only 2 documentation/coding items remain as 🔴)
 Maintainer: Codex Agent
 
 ## Purpose
@@ -124,6 +124,22 @@ Maintainer: Codex Agent
   - `backend/services/conversation_store.py` provides backend CRUD for conversation metadata/settings
   - `backend/api/conversations.py` exposes conversation/settings CRUD endpoints
   - backend startup now initializes SQLModel tables and LangGraph PostgreSQL checkpoint schema when PostgreSQL is configured
+- implemented: backend source-thread APIs now use LangGraph checkpoints instead of reproducing Flutter tree persistence.
+  - `backend/services/conversation_source.py` uses a minimal LangGraph state graph with official checkpointers
+  - PostgreSQL mode uses `PostgresSaver`
+  - local/test fallback uses official `SqliteSaver`
+  - `backend/api/conversation_source.py` exposes:
+    - current visible source snapshot
+    - checkpoint history
+    - append/fork writes from an optional base checkpoint
+    - in-place message patch (`save` semantics foundation)
+    - checkpoint selection
+- integrated: Flutter backend mode now begins using backend conversation/source services instead of local conversation storage as truth.
+  - `ChatSessionProvider` now loads/creates/renames/deletes/clears conversations via backend services when backend mode is enabled
+  - current selected conversation id remains frontend-local UI state
+  - `ConversationViewV2` now bootstraps conversation settings and source projection from backend
+  - backend mode send/finalize/edit/delete/regenerate flows now call backend source APIs
+  - backend mode branch switching now selects backend checkpoints and reloads projection
 - implemented: backend provider registry now preserves the existing stored `api_key` when an update sends a blank key for an existing provider.
   - this allows Flutter to keep a blank local mirror for backend-held secrets without clobbering the backend secret on edit
 - integrated: provider detail editing now preserves existing routing/proxy fields and supports backend-secret-preserving edits for existing providers.
@@ -138,7 +154,7 @@ Maintainer: Codex Agent
 - not integrated: Flutter provider instantiation still uses the global backend switch; provider-level routing is not yet the frontend-side source of truth.
 - not integrated: backend does not yet own full conversation/session storage.
 - not integrated: backend now owns conversation metadata/settings foundation, but Flutter conversation/session read-write flow has not yet cut over to it.
-- not integrated: source message tree / visible-chain read models are not yet backed by LangGraph checkpoints in the production flow.
+- not integrated: Flutter cutover is in progress, but still relies on a frontend-side projection layer rebuilt from backend checkpoint history rather than a backend-native visible-chain/branch read model.
 - not integrated: backend does not yet own full MCP runtime/tool execution loop.
 - not integrated: backend does not yet provide the redesigned RP runtime.
 - not integrated: current typed-stream work is foundation work, not the final tool/MCP/RP runtime.
@@ -152,12 +168,171 @@ Maintainer: Codex Agent
 - confirmed: future RP work should start from backend-side design, not from preserving current Flutter internals.
 - confirmed: future MCP/tool/skill work should prefer Python ecosystem frameworks and server-side policy enforcement.
 - implication: when evaluating old Flutter subsystems, preserve user-visible behavior only when it is still product-relevant; do not preserve internal structure by default.
-- confirmed: intended RP architecture is layered-agent orchestration on the backend:
-  - top-layer model decides which specialized sub-agents to activate
-  - specialized sub-agents perform focused work such as body generation, memory compression, foreshadow evaluation/recall, inventory/item management
-  - user-facing primary foreground result is body output
-  - non-body maintenance work should run asynchronously in the background
-  - backend should expose corresponding state/read models so Flutter can offer dedicated UI entry points such as memory management and item management
+- confirmed: current RP redesign direction is backend-first and split into two distinct phases:
+  - `pre-story`: a real `SetupAgent` runs only during setup and is responsible for guided discovery/import/config/foundation/review/readiness work
+  - `active story`: runtime remains `Coordinator + workers + WritingAssistant`, not an agent loop
+- confirmed: `SetupAgent` is the only component currently intended to be a true agent in the Claude Code sense.
+  - it should use mode-specific skills, a governed setup-only tool pool, and an internal structured-output runtime
+  - it should write only to setup-scope workspace objects such as `StoryConfigDraft`, `WritingContractDraft`, `FoundationDraft`, imported assets, and open questions
+- confirmed: `WritingContractDraft` is a writing-layer contract, not a universal prompt container for all workers.
+- confirmed: the current default schema planning decisions for `SetupAgent` setup state are:
+  - `SetupWorkspace` is a single aggregate root with internal block states
+  - `FoundationDraft` uses unified `entries[]` with domain discrimination rather than per-domain buckets
+  - `OpenQuestion` carries explicit `blocking | non_blocking` severity
+  - `readiness_status` is a continuously maintained workspace object rather than a one-off check snapshot
+  - `ImportedAssetRaw` tracks raw reference, parse result, and mapped targets together
+  - `WritingContractDraft` should be structured-first with supplemental notes
+  - block review lifecycle must persist candidate patch, review feedback, revision reasons, and accepted revision
+- implemented: a production-grade SetupAgent development spec now exists at:
+  - `docs/research/rp-redesign/agent/development-spec/setup-agent-development-spec.md`
+  - it currently integrates upstream RP redesign conclusions, longform-first MVP scope, tool/prompt/skill/schema design, structured output rules, and a first-pass framework recommendation
+- implemented: the split engineering doc set for SetupAgent has started:
+  - `docs/research/rp-redesign/agent/development-spec/00a-setup-agent-semantic-alignment.md`
+  - `docs/research/rp-redesign/agent/development-spec/01-setup-agent-scope-and-requirements.md`
+  - `docs/research/rp-redesign/agent/development-spec/02-setup-agent-system-architecture.md`
+  - these are backend-first and explicitly treat Flutter-side RP runtime as deprecated implementation history, not target architecture
+- implemented: the next two split engineering docs now exist:
+  - `docs/research/rp-redesign/agent/development-spec/03-setup-workspace-and-state-machine.md`
+  - `docs/research/rp-redesign/agent/development-spec/04-worker-catalog-and-story-binding-spec.md`
+  - these formalize `SetupWorkspace`, block lifecycle, patch families, and backend-owned worker catalog/binding contracts for longform MVP
+- implemented: tool and prompt/skill engineering docs now also exist:
+  - `docs/research/rp-redesign/agent/development-spec/05-tool-contract-spec.md`
+  - `docs/research/rp-redesign/agent/development-spec/06-prompt-and-skill-spec.md`
+  - they formalize logical setup tool contracts and explicitly distinguish backend runtime setup skills from development-time Codex skills (`prompt-engineering-patterns`, `skill-creator`)
+- implemented: a dedicated SetupAgent framework selection document now exists at:
+  - `docs/research/rp-redesign/agent/development-spec/setup-agent-framework-selection.md`
+  - it compares pure-custom, PydanticAI-hybrid, LangGraph-first, and LangChain-agent-first approaches and records PostgreSQL compatibility guidance
+- confirmed: SetupAgent/RP backend design should align with the existing backend conversation foundations rather than inventing parallel semantics.
+  - reuse current backend API style from `conversations` / `conversation_source` / `chat`
+  - do not bypass the current LiteLLM-backed execution path
+  - if pre-story transcript/source history is later persisted, prefer reusing source-thread / checkpoint semantics instead of inventing a separate setup-message-tree protocol
+- confirmed (2026-04-18, supersedes older demotion note): `LongformBlueprintDraft` IS a canonical setup draft object, not a demoted derived summary.
+  - an earlier record had demoted it to `LongformSetupSummary`; that position is superseded
+  - authoritative sources: `DSL/05-setup-private-contract-layer.md §3` lists `longform_blueprint_draft` in SetupWorkspace minimum set; `setup-agent-development-spec.md §3.2.3` lists it as the minimum product of longform step 3; `setup-agent-development-spec.md §10` includes it in object catalog
+  - it holds longform blueprint (premise / central_conflict / protagonist_arc / cast_plan / chapter_strategy / section_strategy / ending_direction), not narrative facts
+- confirmed: `OpenQuestion` has been narrowed semantically:
+  - it represents semantic decision points requiring explicit user clarification
+  - it should not be used as the catch-all representation of missing required form fields
+- confirmed: several worker/profile abstractions were previously overdesigned for MVP and should not be treated as frozen:
+  - `behavior_profile`
+  - `generation_profile`
+  - `length_policy`
+  - `revision_policy`
+  - current MVP should prefer minimal worker binding fields and defer these abstractions unless real runtime need emerges
+- implemented: semantic drift correction is in progress across the split SetupAgent engineering docs.
+  - `pre-story` and `runtime` are now explicitly separated
+  - `review` is being treated as user-led rather than agent-led
+  - optional longform summary language is replacing earlier blueprint-as-truth wording
+- confirmed: current framework recommendation for `SetupAgent` MVP is hybrid rather than pure-custom or LangGraph-led:
+  - `FastAPI` service boundary
+  - `LiteLLM` model gateway / routing layer
+  - `Pydantic v2` as schema truth
+  - `PydanticAI` for single-agent tool/output/deps scaffolding
+  - custom `SetupRuntimeController` for stage machine, tool subset routing, apply/review/revision control
+  - `LangGraph` reserved for later durable long-running workflows rather than first-cut SetupAgent core
+- confirmed: existing Flutter RP runtime pieces remain useful as behavior/reference material only:
+  - local Hive repository
+  - context compiler
+  - worker isolate / agent executor / JSON repair pipeline
+  - they are not the target architecture for the redesign
+- implemented: external memory-system research for RP redesign now exists under:
+  - `docs/research/rp-redesign/memory-research/01-letta-memory-research.md`
+  - `docs/research/rp-redesign/memory-research/02-reme-memory-research.md`
+  - `docs/research/rp-redesign/memory-research/03-mem0-memory-research.md`
+- confirmed: the current backend RP memory direction should combine:
+  - `Letta` for memory hierarchy, pinned blocks, prompt compilation, shared/isolated memory attachment, background memory maintenance, and git-backed memory repo/projection history
+  - `ReMe` for visible memory projection, compaction artifacts, working-vs-durable separation, and hybrid recall over human-readable assets
+  - `Mem0` for unified memory service APIs, hard-scoped filters, audit/history discipline, hybrid ranking, and normalized memory tools
+- confirmed: none of the reference projects replace the need for a project-specific narrative truth layer.
+  - current RP redesign still needs custom structured state for canon, timeline, relations, foreshadow, and branch-aware governance
+- not integrated: the redesigned backend RP stack is still design-only at this stage.
+  - no backend `rp` module or `/api/rp` routes are mounted yet
+  - no `SetupAgent`, `SetupWorkspace`, or activation flow implementation exists in backend code yet
+- confirmed (2026-04-17): summary attribution rule (corrects earlier `new-architecture-overview.md` §5.1.6 looseness):
+  - `Structured Narrative State` does NOT directly store summary; it only stores authoritative structured truth (timeline / relations / goals / foreshadow tracker / character knowledge / inventory / branch state)
+  - "current" derived summary -> `Core Memory` (scene summary, active goals/threads, character quick facts, branch continuity, writing contract slice)
+  - "past" historical summary/transcript/原文 -> `Recall Memory` (closed chapter/section summaries, scene transcripts, long-history, resolved foreshadow)
+  - derivation timing: maintenance chain refreshes `Core Memory` after each turn; scene/chapter close transcribes snapshot into `Recall Memory`
+- confirmed (2026-04-17): `Retrieval Broker` is the ONLY query surface for memory reads.
+  - supports two query kinds: `structured` (exact ref / summary read, thin passthrough to memory store) and `search` (recall/archival semantic search)
+  - `memory.get_state` / `get_summary` / `search_recall` / `search_archival` service layer MUST go through broker, not two parallel physical paths
+  - `MemoryCRUDTool/02-*` / `MemoryCRUDTool/03-*` / `MemoryCRUDTool/04-*` have been revised (2026-04-17) to align:
+    - 02 §3.2 reworded, §4.2 adds delegation note, §4.5 new `retrieval_broker.py` section, §6 preface adds unified constraint
+    - 03 §3 file layout adds `retrieval_broker.py`, §5.5 `MemoryOsService` now takes broker dep, §5.11 new broker skeleton, §11 dev order bumped to 11 steps with broker before memory_os_service
+    - 04 §7 Phase 2 tasks/deliverables/acceptance updated to make broker a prerequisite and horizontal concerns (scope/filter/provenance/trace) broker-owned
+- confirmed (2026-04-17): post-write maintenance latency control for MVP:
+  - domain-dirty trigger (specialists for unchanged domains skip)
+  - sync/async split (sync: summary refresh; async: version/provenance/heavy review/long-distance continuity)
+  - specialist parallel fan-out within one turn
+  - graded review policy: `notify_apply | review_required | silent`
+- confirmed (2026-04-17): proposal policy matrix must be dimensioned as `(mode, domain, operation_kind)`, not a global switch.
+  - MVP longform defaults: foundation.world/character + `upsert/remove` = `review_required`; foreshadow_tracker.* = `review_required`; relations.* add/remove = `review_required`; scene.current patch / character.voice_seed patch / timeline append / inventory patch = `notify_apply`
+  - MVP user-facing knob: only coarse "conservative / balanced / silent" preset; fine-grained matrix editor is full-design scope
+- confirmed (2026-04-17): memory inspection + rollback UI is MVP requirement (without it, silent/notify_apply policies are unsafe).
+  - MVP: read-only memory list by domain, revert-to-previous-version, text-form provenance display
+  - full design: graphical version timeline, arbitrary-version rollback, batch revert, graphical provenance
+- confirmed (2026-04-17): setup committed-content slicing strategy for MVP:
+  - commit pipeline generates tiered summary (`tier_0` gist ~50 chars / `tier_1` paragraph ~500 chars / `tier_2` chaptered ~2000 chars) alongside full content
+  - commit UI supports up to 5 user spotlights persisted in `AcceptedCommit`
+  - `SetupContextBuilder` default injects `tier_1 + spotlights`; degrades to `tier_0 + spotlights` when over budget
+  - full design only: agent on-demand fetch tool, topic-tagged sections, draft-aware dynamic slice, auto slice learning
+- confirmed (2026-04-17): `ModeProfile` scope has been tightened (per `docs/research/rp-redesign/agent/development-spec/mode-profile-current-design-notes.md`):
+  - does NOT change the 8-layer skeleton or Memory OS layer definitions
+  - acts primarily on worker layer, especially `Orchestrator Worker`
+  - four-block structure: `orchestrator_policy` / `specialist_policy` / `packet_policy` / `writer_policy`
+  - unified memory update cadence: aligned to each completed `WritingWorker` round
+  - only user-accepted writer output enters regression (prevents rewrite draft pollution)
+  - style/tone belongs to `WritingContract`; output posture belongs to `ModeProfile.writer_policy`
+- confirmed (2026-04-17): `PostWriteMaintenancePolicy` is an **independent** story-scope object, NOT part of `ModeProfile`.
+  - three-dim key `(mode, domain, operation_kind)` with three policy values `notify_apply | review_required | silent`
+  - `operation_kind` covers full CRUD: `upsert_record` / `patch_fields` / `remove_record` / `append_event` / `add_relation` / `remove_relation` / `set_status`
+  - MVP longform default table frozen; roleplay/trpg slots reserved
+  - user-facing exposure at MVP: coarse preset (conservative / balanced / silent) only
+  - spec at `docs/research/rp-redesign/agent/development-spec/post-write-maintenance-policy.md`
+- confirmed (2026-04-17): `Retrieval Broker` is execution-only; worker decides query intent.
+  - broker does NOT decide "whether to retrieve / what semantic / what scope filter" — worker does
+  - broker handles routing, structured/search dispatch, rerank, horizontal concerns
+- confirmed (2026-04-17): writer input contract tightened.
+  - `WritingWorker` minimum input: user prompt + `Core Memory` slice + `WritingContract` slice + worker-digested hints/constraints
+  - `WritingPacketBuilder` does NOT see raw retrieval hits; raw hits are digested by specialist workers first, builder only receives digests
+  - builder is a lightweight deterministic assembly layer, no LLM
+- confirmed (2026-04-17): post-write maintenance chain trigger (longform MVP):
+  - writer output → **user review → user clicks "confirm"** → regression triggered
+  - rewrites during review do NOT trigger regression; only accepted writer output enters regression
+- confirmed (2026-04-17): specialist worker strategy is "shared skeleton + mode overlay".
+  - common workers (`CharacterContinuityWorker` / `NarrativeStateWorker` / `SynopsisWorker` / `ContinuityReviewWorker`) share code but receive mode-specific overlay via `ModeProfile.specialist_policy`
+  - mode-specialized workers (e.g. `BlueprintProgressWorker` / `InteractionReactionWorker` / `RuleAdjudicationWorker`) only when mechanism difference is too large to bridge via overlay
+- pending Codex review (2026-04-17): framework readiness assessment for SetupAgent longform MVP at:
+  - `docs/research/rp-redesign/agent/cooperation/framework-readiness-assessment-for-setup-agent-longform-mvp.md`
+  - identifies Phase A (immediately buildable), Phase B (4 missing docs blocking setup MVP), Phase C (6 missing docs blocking active runtime MVP)
+  - flags 6 potential internal inconsistencies for Codex adjudication (workspace_state vs step_state, LongformBlueprintDraft status, proposal lifecycle common abstraction, retrieval broker cross-cutting landing, ModeProfile selection timing, memory CRUD exposure to SetupAgent in prestory)
+  - flags 5 risk/decision points (vector DB selection, dirty-domain detection algorithm, writer persona session management, spotlight LLM assistance, backend module naming)
+- resolved (2026-04-18): Codex recheck `docs/research/rp-redesign/agent/cooperation/codex-2026-04-17-claude-doc-recheck.md` identified 4 legacy-drift problems in `new-architecture-overview.md` §4 (setup sections predate DSL/05). All 4 fixed:
+  - §4.2.1 `StoryConfigDraft` no longer lists `mode`; explicit note that `mode` is `SetupWorkspace` identity field (not patchable)
+  - §4.2 `SetupWorkspace` object list expanded to include `StepAssetBinding` / `CommitProposal` / `AcceptedCommit` / `PendingUserEditDelta`; explicit pointer to DSL/05 §3 for full 19-field schema
+  - §4.2.8 `ReadinessStatus` rewritten to be step-level only; explicit that activation is computed by controller, no `story_readiness` object
+  - §4.3 import→ingestion flow rewritten to follow four-state semantics: Upload → Staged Asset → parse/extract → Candidate Draft → User Review/Commit → Async Retrieval Ingestion Job → Archival Knowledge
+  - `MemoryCRUDTool/02` and `post-write-maintenance-policy.md` deemed stable by Codex recheck, no changes needed
+- confirmed (2026-04-18): unified memory tool family applies to Memory OS regardless of caller (inspired by Mem0 openclaw/tools pattern "same tool family, different exposed subsets per caller").
+  - **Principle**: project 中凡是对 `Memory OS` 的读、查、写都走同一套 memory tool family 和 retrieval 路径; `SetupAgent` vs runtime 的区别不是换工具族，而是各自暴露不同子集
+  - **Data surface boundary**: Memory OS (Core / Structured Narrative State / Recall / Archival / Runtime Workspace) 走统一 memory CRUD; Setup 私有生命周期对象 (`SetupWorkspace` / `StepAssetBinding` / `CommitProposal` / `AcceptedCommit` / `ReadinessStatus` / `user_edit_delta`) 走 setup 私有 `setup.*` contract
+  - **SetupAgent 在 prestory 的实际工具集**:
+    - 允许只读子集：`memory.get_state` / `get_summary` / `search_recall` / `search_archival` / `list_versions` / `read_provenance`（主要用于 ingestion 完成后搜 Archival Knowledge）
+    - 禁止 mutation：不可调 `proposal.submit` 或任何 `memory.*` 写操作
+    - SetupWorkspace 相关操作走私有 `setup.*` contract
+  - **MemoryCRUDTool/00 §12 已于 2026-04-18 订正**：调用方矩阵 setup_agent 行重写；顶部补核心原则说明与数据面边界
+- resolved (2026-04-18): assessment doc downgrades following Codex recheck feedback (`codex-2026-04-17-claude-doc-recheck.md` identified over-escalation):
+  - §4.5 ModeProfile prestory timing → ✅ (not a conflict, just layered wording: `mode` selection early in prestory vs `ModeProfile` fields filled at step 5; timing doesn't matter as long as frozen before activation)
+  - §4.6 Memory CRUD visibility for SetupAgent → ✅ (resolved via unified-tool-family principle above; not a design question, just a documentation fix)
+  - §4.2 LongformBlueprintDraft status → ✅ (already resolved)
+  - assessment doc §4 now adds classification principle (🟢 documentation wording / 🟡 documentation cleanup / 🔴 actual adjudication needed); only 3 items remain as 🔴 waiting Codex: §4.1 workspace_state vs step_state, §4.3 proposal lifecycle common abstraction, §4.4 retrieval broker cross-cutting schema alignment
+- resolved (2026-04-18): all 4 main adjudication items closed by user:
+  - **workspace_state field**: Option A — keep as top-level explicit field on `SetupWorkspace`. Enum: `drafting | ready_to_activate | activated | activation_failed | archived`. Orthogonal to `step_states[]` (workspace lifecycle vs per-step progress). DSL/05 §3 needs to add this field (B-DOC-1 task).
+  - **vector store stack**: PostgreSQL + pgvector (single-stack with existing PostgreSQL + LangGraph). Embedding via LiteLLM proxy (default `text-embedding-3-small` or `text-embedding-004`, configurable through ProviderConfig). Hybrid search = pgvector + tsvector + metadata filter + additive scoring (Mem0-style). Index: HNSW.
+  - **dirty detection (corrected understanding)**: NOT scheduler-driven triage. Worker-internal self-check pattern: builder reserves stable slots per worker, each worker self-checks domain authoritative state version on each turn — version unchanged means reuse last summary (no LLM call), version changed means LLM-refresh and write back to slot. Scheduler does no triage; writer never knows which slots refreshed. MVP: run all `required_workers[]` each turn, version-check inside worker. Overview §5.7.1 已订正.
+  - **writer persona session**: single LLM session per chapter + system prompt switch. No independent session per persona (作家 vs 编辑). Chapter-internal sticky context (prior prose + worker slot summaries) accumulates and benefits from KV cache. Memory OS handles cross-chapter / background hallucination. Only switch session at chapter close. Future fallback (when chapter exceeds 20k+ tokens and inference slows): "in-chapter sliding window + Memory OS tail summary" — not MVP scope.
+  - assessment doc §4.1 / §5.1 / §5.2 / §5.3 / §5.5 all marked ✅ (2026-04-18); §5.4 spotlights LLM assistance deferred to MVP+1
+  - **Real remaining 🔴 items**: only 2 left in assessment doc §4 (§4.3 proposal lifecycle abstraction — coding decision; §4.4 retrieval broker cross-cutting schema alignment — documentation work). Both can be deferred to implementation phase.
 
 ## Current Risks
 - resolved: attachment handling now supports remote upload via base64 `data` field in addition to local file path. `AttachedFile.data` carries base64-encoded content; `path` is optional fallback for co-located desktop backend. Flutter reads file bytes and encodes base64 before sending to backend.
@@ -166,6 +341,9 @@ Maintainer: Codex Agent
 - risk: current frontend request isolation is weak.
   - baseline split is now implemented, but this is only first-layer isolation
   - future agent/runtime stages may still need stronger separation across foreground chat, background agent tasks, and control-plane reads/writes
+- risk: current conversation branch UI is reconstructed on the Flutter side from backend checkpoint history as a transitional compatibility layer.
+  - this preserves current UI behavior during cutover
+  - but it is not the desired final architecture; backend-native branch/read models should replace it
 
 ## Verification Baseline
 - implemented: backend has targeted tests around chat API, routing, stream normalization, provider registry, and model registry.
@@ -176,8 +354,15 @@ Maintainer: Codex Agent
 - next: continue backend takeover of runtime truth and execution semantics; do not drift back into Flutter-side runtime logic.
 - next: provider/model current-scope single-source is in place; continue tightening the remaining runtime boundaries beyond this slice.
 - next: build LangGraph-backed source-thread persistence and backend visible-chain read models on top of the new conversation metadata foundation.
+- next: start Flutter cutover from local Hive/thread ownership to backend conversation metadata + source-thread APIs while preserving current UI behavior.
+- next: replace the current frontend checkpoint-history projection helper with a backend-native source read model once branch metadata contracts are stable.
 - next: keep frontend rendering behavior stable while moving semantics/control into backend.
 - next: design Python-first replacements for MCP/tool/skill and RP instead of extending current Flutter subsystems.
+- next: freeze backend RP memory contracts around `Memory OS + Retrieval Broker + Writing Runtime + Maintenance Workers` rather than expanding worker catalog first.
+- next: treat reference-project conclusions as design guidance:
+  - Letta-derived hierarchy for `core / recall / archival / shared / isolated`
+  - ReMe-derived visibility/projection layer for summaries, logs, and compaction artifacts
+  - Mem0-derived service/tool contracts for scoped read/write/search/history operations
 - confirmed: future conversation/source tree should follow LangGraph branching/checkpoint semantics rather than preserving the current Flutter tree implementation as the target architecture.
 - confirmed: regenerate and branch navigation should follow LangGraph-style branch semantics.
 - confirmed: current Flutter-specific tree rewiring behaviors are not target architecture by default.
@@ -190,8 +375,9 @@ Maintainer: Codex Agent
   - LangGraph checkpoints should own source-tree / branch / checkpoint history
 - implemented: current backend migration foundation already follows that split direction without reproducing Flutter's tree/snapshot duplication.
   - SQLModel/PostgreSQL-side foundation currently owns conversation metadata and generation-affecting settings
-  - LangGraph PostgreSQL checkpoint schema is initialized when PostgreSQL is configured
-  - source-tree checkpoint read/write integration is still pending
+  - LangGraph checkpoint persistence is initialized through official PostgreSQL/SQLite checkpointers
+  - backend source-thread checkpoint read/write APIs now exist
+  - Flutter cutover to those APIs is still pending
 - confirmed: current Flutter conversation persistence has redundant truth layers:
   - `threadJson`
   - `activeLeafId`

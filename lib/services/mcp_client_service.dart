@@ -6,7 +6,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:mcp_dart/mcp_dart.dart';
 
+import '../adapters/ai_provider.dart';
 import '../models/mcp/mcp_server_config.dart';
+import 'backend_mcp_service.dart';
 import 'mcp_config_service.dart';
 
 /// MCP 工具信息（包含 server 信息）
@@ -44,7 +46,7 @@ class McpException implements Exception {
 
 /// MCP 客户端服务
 class McpClientService extends ChangeNotifier {
-  /// 客户端实例映射
+  /// 仅 direct 模式使用的本地客户端实例映射
   final Map<String, McpClient> _clients = {};
 
   /// 服务器配置映射
@@ -54,7 +56,7 @@ class McpClientService extends ChangeNotifier {
   final Map<String, McpConnectionStatus> _statuses = {};
 
   /// 工具缓存映射
-  final Map<String, List<Tool>> _toolsCache = {};
+  final Map<String, List<McpToolInfo>> _toolsCache = {};
 
   /// 主服务器 ID
   String? _primaryServerId;
@@ -65,8 +67,11 @@ class McpClientService extends ChangeNotifier {
   /// 是否自动重连
   final bool autoReconnect;
 
-  /// 持久化服务
+  /// 本地持久化服务（仅 direct 模式使用；backend 模式只作为迁移来源）
   final McpConfigService _configService = McpConfigService();
+
+  /// 后端 MCP 控制面服务
+  final BackendMcpService _backendService = BackendMcpService();
 
   /// 是否已初始化
   bool _initialized = false;
@@ -76,22 +81,152 @@ class McpClientService extends ChangeNotifier {
     this.autoReconnect = true,
   });
 
-  /// 初始化：从持久化存储加载配置
+  bool get _useBackend => ProviderFactory.pythonBackendEnabled;
+
+  /// 初始化：加载当前模式的配置与状态
   Future<void> initialize() async {
     if (_initialized) return;
 
     await _configService.initialize();
+    await _loadCurrentModeState();
+    _initialized = true;
+    notifyListeners();
+  }
+
+  Future<void> reload() async {
+    if (!_initialized) {
+      await initialize();
+      return;
+    }
+
+    await _closeLocalClients();
+    _resetState();
+    await _loadCurrentModeState();
+    notifyListeners();
+  }
+
+  Future<void> _loadCurrentModeState() async {
+    if (_useBackend) {
+      try {
+        await _loadFromBackend();
+      } catch (e) {
+        debugPrint('[MCP] Backend bootstrap failed: $e');
+      }
+      return;
+    }
+
+    _loadFromLocal();
+  }
+
+  void _resetState() {
+    _configs.clear();
+    _statuses.clear();
+    _toolsCache.clear();
+    _primaryServerId = null;
+  }
+
+  void _loadFromLocal() {
     final configs = _configService.getAllConfigs();
     for (final config in configs) {
       _configs[config.id] = config;
       _statuses[config.id] = McpConnectionStatus.disconnected;
-      if (_primaryServerId == null) {
-        _primaryServerId = config.id;
+    }
+    _ensurePrimaryServer();
+    debugPrint('[MCP] Loaded ${configs.length} local server configs');
+  }
+
+  Future<void> _loadFromBackend() async {
+    var servers = await _backendService.listServers();
+    final imported = await _importMissingLocalConfigsToBackend(
+      existingServerIds: servers.map((server) => server.id).toSet(),
+    );
+    if (imported) {
+      servers = await _backendService.listServers();
+    }
+
+    final tools = await _backendService.listAllTools();
+    final toolsByServer = <String, List<McpToolInfo>>{};
+    for (final tool in tools) {
+      toolsByServer.putIfAbsent(tool.serverId, () => <McpToolInfo>[]).add(
+        McpToolInfo(
+          serverId: tool.serverId,
+          serverName: tool.serverName,
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+        ),
+      );
+    }
+
+    for (final server in servers) {
+      _configs[server.id] = server.toFrontendConfig();
+      _statuses[server.id] = server.toFrontendStatus();
+      _toolsCache[server.id] = List<McpToolInfo>.unmodifiable(
+        toolsByServer[server.id] ?? const <McpToolInfo>[],
+      );
+    }
+
+    _ensurePrimaryServer();
+    debugPrint('[MCP] Loaded ${servers.length} backend server configs');
+  }
+
+  Future<bool> _importMissingLocalConfigsToBackend({
+    required Set<String> existingServerIds,
+  }) async {
+    final localConfigs = _configService.getAllConfigs();
+    var imported = false;
+
+    for (final config in localConfigs) {
+      if (existingServerIds.contains(config.id)) {
+        continue;
+      }
+      if (config.transport == McpTransportType.websocket) {
+        debugPrint(
+          '[MCP] Skip backend import for ${config.id}: WebSocket transport unsupported on backend',
+        );
+        continue;
+      }
+      try {
+        await _backendService.upsertServer(config);
+        imported = true;
+      } catch (e) {
+        debugPrint('[MCP] Failed to import local config ${config.id}: $e');
       }
     }
-    _initialized = true;
-    debugPrint('[MCP] Loaded ${configs.length} server configs from storage');
-    notifyListeners();
+
+    return imported;
+  }
+
+  void _ensurePrimaryServer() {
+    if (_primaryServerId != null && _configs.containsKey(_primaryServerId)) {
+      return;
+    }
+    _primaryServerId = _configs.keys.isNotEmpty ? _configs.keys.first : null;
+  }
+
+  Future<void> _closeLocalClients() async {
+    for (final entry in _clients.entries.toList()) {
+      try {
+        await entry.value.close();
+      } catch (e) {
+        debugPrint('[MCP] Error closing local client ${entry.key}: $e');
+      }
+    }
+    _clients.clear();
+  }
+
+  McpToolInfo _mapLocalToolInfo(
+    String serverId,
+    McpServerConfig? config,
+    Tool tool,
+  ) {
+    return McpToolInfo(
+      serverId: serverId,
+      serverName: config?.name ?? serverId,
+      name: tool.name,
+      description: tool.description ?? '',
+      inputSchema: tool.inputSchema.toJson(),
+    );
   }
 
   // ===== 状态查询 =====
@@ -122,36 +257,43 @@ class McpClientService extends ChangeNotifier {
 
   /// 添加服务器配置
   Future<void> addServer(McpServerConfig config) async {
-    _configs[config.id] = config;
+    if (_useBackend) {
+      final stored = await _backendService.upsertServer(config);
+      _configs[stored.id] = stored.toFrontendConfig();
+      _statuses[stored.id] = stored.toFrontendStatus();
+      _toolsCache[stored.id] = const <McpToolInfo>[];
+      _ensurePrimaryServer();
+      notifyListeners();
+      return;
+    }
 
-    // 如果是第一个服务器，设为主服务器
+    _configs[config.id] = config;
     if (_primaryServerId == null) {
       _primaryServerId = config.id;
     }
-
     _statuses[config.id] = McpConnectionStatus.disconnected;
-
-    // 持久化
     await _configService.saveConfig(config);
-
     notifyListeners();
   }
 
   /// 移除服务器
   Future<void> removeServer(String serverId) async {
+    if (_useBackend) {
+      await _backendService.deleteServer(serverId);
+      _configs.remove(serverId);
+      _statuses.remove(serverId);
+      _toolsCache.remove(serverId);
+      _ensurePrimaryServer();
+      notifyListeners();
+      return;
+    }
+
     await disconnect(serverId);
     _configs.remove(serverId);
     _statuses.remove(serverId);
     _toolsCache.remove(serverId);
-
-    // 如果移除的是主服务器，选择另一个
-    if (_primaryServerId == serverId) {
-      _primaryServerId = _configs.keys.isNotEmpty ? _configs.keys.first : null;
-    }
-
-    // 持久化
+    _ensurePrimaryServer();
     await _configService.deleteConfig(serverId);
-
     notifyListeners();
   }
 
@@ -165,11 +307,20 @@ class McpClientService extends ChangeNotifier {
 
   /// 更新服务器配置
   Future<void> updateServer(McpServerConfig config) async {
+    if (_useBackend) {
+      final stored = await _backendService.upsertServer(config);
+      _configs[stored.id] = stored.toFrontendConfig();
+      _statuses[stored.id] = stored.toFrontendStatus();
+      if (!stored.connected) {
+        _toolsCache[stored.id] = const <McpToolInfo>[];
+      }
+      _ensurePrimaryServer();
+      notifyListeners();
+      return;
+    }
+
     _configs[config.id] = config;
-
-    // 持久化
     await _configService.updateConfig(config);
-
     notifyListeners();
   }
 
@@ -189,6 +340,23 @@ class McpClientService extends ChangeNotifier {
     _statuses[serverId] = McpConnectionStatus.connecting;
     notifyListeners();
 
+    if (_useBackend) {
+      try {
+        await _backendService.connectServer(serverId);
+        final server = await _backendService.getServer(serverId);
+        _configs[serverId] = server.toFrontendConfig();
+        _statuses[serverId] = server.toFrontendStatus();
+        await refreshTools(serverId);
+        debugPrint('[MCP] Connected to backend server: $serverId');
+        notifyListeners();
+      } catch (e) {
+        _statuses[serverId] = McpConnectionStatus.failed;
+        notifyListeners();
+        throw McpException('Failed to connect: $e');
+      }
+      return;
+    }
+
     try {
       final client = McpClient(
         Implementation(name: 'ChatBoxApp', version: '1.0.0'),
@@ -200,13 +368,10 @@ class McpClientService extends ChangeNotifier {
       _clients[serverId] = client;
       _statuses[serverId] = McpConnectionStatus.connected;
 
-      // 刷新工具列表
       await refreshTools(serverId);
-
-      // 更新最后连接时间
       _configs[serverId] = config.copyWith(lastConnectedAt: DateTime.now());
 
-      debugPrint('[MCP] Connected to server: $serverId');
+      debugPrint('[MCP] Connected to local server: $serverId');
       notifyListeners();
     } catch (e) {
       _statuses[serverId] = McpConnectionStatus.failed;
@@ -217,6 +382,16 @@ class McpClientService extends ChangeNotifier {
 
   /// 断开服务器连接
   Future<void> disconnect(String serverId) async {
+    if (_useBackend) {
+      await _backendService.disconnectServer(serverId);
+      final server = await _backendService.getServer(serverId);
+      _configs[serverId] = server.toFrontendConfig();
+      _statuses[serverId] = server.toFrontendStatus();
+      _toolsCache[serverId] = const <McpToolInfo>[];
+      notifyListeners();
+      return;
+    }
+
     final client = _clients[serverId];
     if (client != null) {
       try {
@@ -228,7 +403,7 @@ class McpClientService extends ChangeNotifier {
     }
 
     _statuses[serverId] = McpConnectionStatus.disconnected;
-    _toolsCache.remove(serverId);
+    _toolsCache[serverId] = const <McpToolInfo>[];
     notifyListeners();
   }
 
@@ -243,7 +418,6 @@ class McpClientService extends ChangeNotifier {
 
   /// 创建传输层
   Transport _createTransport(McpServerConfig config) {
-    // 移动端检查
     if ((Platform.isAndroid || Platform.isIOS) &&
         config.transport == McpTransportType.stdio) {
       throw McpException(
@@ -297,6 +471,31 @@ class McpClientService extends ChangeNotifier {
 
   /// 刷新服务器工具列表
   Future<void> refreshTools(String serverId) async {
+    if (_useBackend) {
+      if (_statuses[serverId] != McpConnectionStatus.connected) {
+        _toolsCache[serverId] = const <McpToolInfo>[];
+        notifyListeners();
+        return;
+      }
+
+      final tools = await _backendService.listServerTools(serverId);
+      _toolsCache[serverId] = List<McpToolInfo>.unmodifiable(
+        tools
+            .map(
+              (tool) => McpToolInfo(
+                serverId: tool.serverId,
+                serverName: tool.serverName,
+                name: tool.name,
+                description: tool.description,
+                inputSchema: tool.inputSchema,
+              ),
+            )
+            .toList(),
+      );
+      notifyListeners();
+      return;
+    }
+
     final client = _clients[serverId];
     if (client == null) {
       throw McpException('Server not connected: $serverId');
@@ -304,29 +503,25 @@ class McpClientService extends ChangeNotifier {
 
     try {
       final result = await client.listTools();
-      _toolsCache[serverId] = result.tools;
+      final config = _configs[serverId];
+      _toolsCache[serverId] = List<McpToolInfo>.unmodifiable(
+        result.tools
+            .map((tool) => _mapLocalToolInfo(serverId, config, tool))
+            .toList(),
+      );
       debugPrint('[MCP] Loaded ${result.tools.length} tools from $serverId');
       notifyListeners();
     } catch (e) {
       debugPrint('[MCP] Failed to list tools: $e');
-      _toolsCache[serverId] = [];
+      _toolsCache[serverId] = const <McpToolInfo>[];
     }
   }
 
   /// 获取指定服务器的工具
   List<McpToolInfo> getServerTools(String serverId) {
-    final config = _configs[serverId];
-    final tools = _toolsCache[serverId] ?? [];
-
-    return tools.map((tool) {
-      return McpToolInfo(
-        serverId: serverId,
-        serverName: config?.name ?? serverId,
-        name: tool.name,
-        description: tool.description ?? '',
-        inputSchema: tool.inputSchema.toJson(),
-      );
-    }).toList();
+    return List<McpToolInfo>.unmodifiable(
+      _toolsCache[serverId] ?? const <McpToolInfo>[],
+    );
   }
 
   /// 获取所有可用工具
@@ -335,7 +530,7 @@ class McpClientService extends ChangeNotifier {
 
     for (final serverId in _configs.keys) {
       if (_statuses[serverId] == McpConnectionStatus.connected) {
-        tools.addAll(getServerTools(serverId));
+        tools.addAll(_toolsCache[serverId] ?? const <McpToolInfo>[]);
       }
     }
 
@@ -356,6 +551,13 @@ class McpClientService extends ChangeNotifier {
     required String toolName,
     required Map<String, dynamic> arguments,
   }) async {
+    if (_useBackend) {
+      return callToolByQualifiedName(
+        qualifiedName: '${serverId}__$toolName',
+        arguments: arguments,
+      );
+    }
+
     final client = _clients[serverId];
     if (client == null) {
       return ToolCallResult(
@@ -404,7 +606,26 @@ class McpClientService extends ChangeNotifier {
     required String qualifiedName,
     required Map<String, dynamic> arguments,
   }) async {
-    // 解析 serverId__toolName 格式
+    if (_useBackend) {
+      try {
+        final result = await _backendService.callToolByQualifiedName(
+          qualifiedName: qualifiedName,
+          arguments: arguments,
+        );
+        return ToolCallResult(
+          isSuccess: result.success,
+          content: result.content,
+          errorCode: result.errorCode,
+        );
+      } catch (e) {
+        return ToolCallResult(
+          isSuccess: false,
+          content: 'Tool execution failed: $e',
+          errorCode: 'EXECUTION_ERROR',
+        );
+      }
+    }
+
     final parts = qualifiedName.split('__');
     String serverId;
     String toolName;
@@ -413,7 +634,6 @@ class McpClientService extends ChangeNotifier {
       serverId = parts[0];
       toolName = parts.sublist(1).join('__');
     } else {
-      // 单服务器模式，使用主服务器
       serverId = _primaryServerId ?? '';
       toolName = qualifiedName;
     }
@@ -455,29 +675,70 @@ class McpClientService extends ChangeNotifier {
 
   // ===== 生命周期 =====
 
-  /// 启动服务（连接所有已启用的服务器）
+  /// 启动服务
   Future<void> start() async {
-    for (final config in _configs.values) {
-      if (config.enabled) {
-        try {
-          await connect(config.id);
-        } catch (e) {
-          debugPrint('[MCP] Failed to connect to ${config.id}: $e');
+    if (!_initialized) {
+      await initialize();
+    }
+
+    if (_useBackend) {
+      try {
+        _resetState();
+        await _loadFromBackend();
+        final enabledDisconnected = _configs.entries
+            .where(
+              (entry) =>
+                  entry.value.enabled &&
+                  _statuses[entry.key] != McpConnectionStatus.connected,
+            )
+            .map((entry) => entry.key)
+            .toList();
+        for (final serverId in enabledDisconnected) {
+          try {
+            await _backendService.connectServer(serverId);
+          } catch (e) {
+            debugPrint('[MCP] Failed to auto-connect backend server $serverId: $e');
+          }
         }
+        if (enabledDisconnected.isNotEmpty) {
+          _resetState();
+          await _loadFromBackend();
+        }
+        notifyListeners();
+      } catch (e) {
+        debugPrint('[MCP] Failed to refresh backend MCP state: $e');
+      }
+      return;
+    }
+
+    for (final config in _configs.values) {
+      if (!config.enabled) {
+        continue;
+      }
+      try {
+        await connect(config.id);
+      } catch (e) {
+        debugPrint('[MCP] Failed to connect to ${config.id}: $e');
       }
     }
   }
 
-  /// 停止服务（断开所有连接）
+  /// 停止服务（仅 direct 模式关闭本地连接）
   Future<void> stop() async {
-    for (final serverId in _clients.keys.toList()) {
-      await disconnect(serverId);
+    if (_useBackend) {
+      return;
     }
+    await _closeLocalClients();
+    for (final serverId in _configs.keys) {
+      _statuses[serverId] = McpConnectionStatus.disconnected;
+      _toolsCache[serverId] = const <McpToolInfo>[];
+    }
+    notifyListeners();
   }
 
   @override
   void dispose() {
-    stop();
+    unawaited(stop());
     super.dispose();
   }
 }

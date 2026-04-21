@@ -1,6 +1,6 @@
-﻿/// INPUT: Conversation metadata + threadJson/message snapshots
-/// OUTPUT: Hive persistence for conversations + messages
-/// POS: Services / Storage / Hive
+// INPUT: Conversation metadata + threadJson/message snapshots
+// OUTPUT: Hive persistence for conversations + messages
+// POS: Services / Storage / Hive
 import 'dart:convert';
 
 import 'package:hive_flutter/hive_flutter.dart';
@@ -8,19 +8,20 @@ import '../models/conversation.dart';
 import '../models/conversation_thread.dart';
 import '../models/message.dart';
 import '../models/attached_file.dart';
+import '../models/mcp/mcp_tool_call.dart';
 
 /// Hive 实现的会话管理服务
-/// 
+///
 /// 保持与 ConversationService 相同的接口，实现无缝迁移
 class HiveConversationService {
   static const String _conversationsBoxName = 'conversations';
   static const String _messagesBoxName = 'messages';
   static const String _currentConversationKey = 'current_conversation_id';
-  
+
   Box<Conversation>? _conversationsBox;
   Box<Message>? _messagesBox;
   Box? _settingsBox;
-  
+
   /// 初始化 Hive 数据库
   Future<void> initialize() async {
     // 注册适配器
@@ -35,6 +36,9 @@ class HiveConversationService {
     }
     if (!Hive.isAdapterRegistered(3)) {
       Hive.registerAdapter(AttachedFileSnapshotAdapter());
+    }
+    if (!Hive.isAdapterRegistered(61)) {
+      Hive.registerAdapter(McpToolCallRecordAdapter());
     }
 
     // 打开数据库
@@ -60,7 +64,10 @@ class HiveConversationService {
     final keepIds = <String>{};
 
     for (final conversation in conversations) {
-      final extracted = _extractMessagesForConversation(conversation, messageBox);
+      final extracted = _extractMessagesForConversation(
+        conversation,
+        messageBox,
+      );
       if (extracted.isNotEmpty) {
         final ordered = _sortMessages(extracted);
         final ids = ordered.map((msg) => msg.id).toList();
@@ -104,7 +111,7 @@ class HiveConversationService {
       await box.put(conversation.id, persisted);
     }
   }
-  
+
   /// 加载所有会话
   Future<List<Conversation>> loadConversations() async {
     final box = _conversationsBox;
@@ -112,7 +119,7 @@ class HiveConversationService {
     if (box == null || messageBox == null) {
       throw Exception('Hive not initialized');
     }
-    
+
     if (box.isEmpty) {
       // 创建默认会话
       final defaultConversation = Conversation(
@@ -121,7 +128,7 @@ class HiveConversationService {
       );
       return [defaultConversation];
     }
-    
+
     // 返回所有会话，按更新时间排序（只读，不写）
     final conversations = box.values.toList();
     for (final conversation in conversations) {
@@ -158,31 +165,32 @@ class HiveConversationService {
 
       // 兼容旧数据：如果有内嵌 messages 但无 messageIds，同步 messageIds
       if (conversation.messages.isNotEmpty) {
-        conversation.messageIds =
-            conversation.messages.map((msg) => msg.id).toList();
+        conversation.messageIds = conversation.messages
+            .map((msg) => msg.id)
+            .toList();
       }
     }
 
     conversations.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return conversations;
   }
-  
+
   /// 保存当前会话 ID
   Future<void> saveCurrentConversationId(String id) async {
     final box = _settingsBox;
     if (box == null) throw Exception('Hive not initialized');
-    
+
     await box.put(_currentConversationKey, id);
   }
-  
+
   /// 加载当前会话 ID
   Future<String?> loadCurrentConversationId() async {
     final box = _settingsBox;
     if (box == null) throw Exception('Hive not initialized');
-    
+
     return box.get(_currentConversationKey) as String?;
   }
-  
+
   /// 创建新会话
   Conversation createConversation({
     String? title,
@@ -198,7 +206,7 @@ class HiveConversationService {
       roleType: roleType,
     );
   }
-  
+
   /// 删除会话
   Future<void> deleteConversation(
     List<Conversation> conversations,
@@ -207,7 +215,7 @@ class HiveConversationService {
     conversations.removeWhere((conv) => conv.id == conversationId);
     await saveConversations(conversations);
   }
-  
+
   /// 更新会话标题
   Future<void> updateConversationTitle(
     List<Conversation> conversations,
@@ -218,22 +226,22 @@ class HiveConversationService {
     conv.title = newTitle;
     await saveConversations(conversations);
   }
-  
+
   /// 清空所有会话
   Future<void> clearAllConversations() async {
     final conversationsBox = _conversationsBox;
     final settingsBox = _settingsBox;
     final messageBox = _messagesBox;
-    
+
     if (conversationsBox == null || settingsBox == null || messageBox == null) {
       throw Exception('Hive not initialized');
     }
-    
+
     await conversationsBox.clear();
     await messageBox.clear();
     await settingsBox.delete(_currentConversationKey);
   }
-  
+
   /// 关闭数据库
   Future<void> close() async {
     await _conversationsBox?.close();
@@ -267,7 +275,9 @@ class HiveConversationService {
 
   List<Message> _collectThreadMessages(ConversationThread thread) {
     if (thread.nodes.isEmpty) return const <Message>[];
-    return thread.nodes.values.map((node) => node.message).toList(growable: false);
+    return thread.nodes.values
+        .map((node) => node.message)
+        .toList(growable: false);
   }
 
   List<Message> _loadMessagesByIds(Box<Message> box, List<String> ids) {
@@ -337,7 +347,10 @@ class HiveConversationService {
     try {
       final decoded = jsonDecode(text);
       if (decoded is Map<String, dynamic>) {
-        return ConversationThread.fromJson(decoded, messageLookup: messageLookup);
+        return ConversationThread.fromJson(
+          decoded,
+          messageLookup: messageLookup,
+        );
       }
       if (decoded is Map) {
         return ConversationThread.fromJson(

@@ -12,6 +12,7 @@ StreamEventKind = Literal[
     "tool_started",
     "tool_result",
     "tool_error",
+    "usage",
     "error",
     "raw",
 ]
@@ -28,6 +29,9 @@ class StreamEvent:
     tool_name: str | None = None
     tool_output: str | None = None
     tool_error_message: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
     raw_chunk: dict[str, Any] | None = None
 
     @classmethod
@@ -79,6 +83,21 @@ class StreamEvent:
             tool_call_id=call_id,
             tool_name=tool_name,
             tool_error_message=error_message,
+        )
+
+    @classmethod
+    def usage(
+        cls,
+        *,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+    ) -> "StreamEvent":
+        return cls(
+            kind="usage",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
 
     @classmethod

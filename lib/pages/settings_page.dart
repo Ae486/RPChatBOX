@@ -18,6 +18,8 @@ import '../chat_ui/owui/components/owui_snack_bar.dart';
 import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../pages/display_settings_page.dart';
+import '../pages/longform_story_page.dart';
+import '../pages/prestory_setup_page.dart';
 import '../pages/model_services_page.dart';
 import '../pages/mcp_servers_page.dart';
 import '../pages/keyboard_test_page.dart';
@@ -101,15 +103,19 @@ class _SettingsPageState extends State<SettingsPage> {
       await _checkBackendHealth();
       try {
         await globalModelServiceManager.refreshBackendMirrors();
+        await globalMcpClientService.reload();
+        await globalMcpClientService.start();
       } catch (e) {
         if (mounted) {
           OwuiSnackBars.warning(
             context,
-            message: 'Provider/Model 同步到 backend 失败: ${e.toString()}',
+            message: 'Backend 同步失败: ${e.toString()}',
           );
         }
       }
     } else {
+      await globalMcpClientService.reload();
+      await globalMcpClientService.start();
       setState(() => _backendStatus = '');
     }
   }
@@ -227,6 +233,42 @@ class _SettingsPageState extends State<SettingsPage> {
                   MaterialPageRoute(
                     builder: (context) =>
                         McpServersPage(mcpService: globalMcpClientService),
+                  ),
+                );
+              },
+            ),
+          ),
+          SizedBox(height: context.owuiSpacing.lg),
+
+          OwuiCard(
+            child: ListTile(
+              leading: const Icon(Icons.auto_awesome, size: 32),
+              title: const Text('Prestory Setup'),
+              subtitle: const Text('SetupAgent MVP、review/commit 与 activation check'),
+              trailing: const Icon(OwuiIcons.chevronRight),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const PrestorySetupPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+          SizedBox(height: context.owuiSpacing.lg),
+
+          OwuiCard(
+            child: ListTile(
+              leading: const Icon(Icons.menu_book_outlined, size: 32),
+              title: const Text('Longform Stories'),
+              subtitle: const Text('Active story session 列表与双栏 story shell'),
+              trailing: const Icon(OwuiIcons.chevronRight),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const LongformStoryPage(),
                   ),
                 );
               },

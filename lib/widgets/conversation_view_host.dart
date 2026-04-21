@@ -46,6 +46,10 @@ class ConversationViewHostState extends State<ConversationViewHost>
     _v2Key.currentState?.showTuningPanel();
   }
 
+  Future<void> refreshFromBackend() async {
+    await _v2Key.currentState?.refreshFromBackend();
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);

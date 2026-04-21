@@ -118,6 +118,7 @@ enum AIStreamEventType {
   toolStarted,
   toolResult,
   toolError,
+  usage,
 }
 
 class AIStreamEvent {
@@ -128,6 +129,9 @@ class AIStreamEvent {
   final String? toolName;
   final String? result;
   final String? errorMessage;
+  final int? promptTokens;
+  final int? completionTokens;
+  final int? totalTokens;
 
   /// `true` 表示该事件来自 typed SSE / 结构化语义流，
   /// `false` 表示只是旧字符串流包装出来的兼容事件。
@@ -141,6 +145,9 @@ class AIStreamEvent {
     this.toolName,
     this.result,
     this.errorMessage,
+    this.promptTokens,
+    this.completionTokens,
+    this.totalTokens,
     required this.isTypedSemantic,
   });
 
@@ -204,6 +211,20 @@ class AIStreamEvent {
       callId: callId,
       toolName: toolName,
       errorMessage: errorMessage,
+      isTypedSemantic: true,
+    );
+  }
+
+  factory AIStreamEvent.usage({
+    required int promptTokens,
+    required int completionTokens,
+    required int totalTokens,
+  }) {
+    return AIStreamEvent._(
+      type: AIStreamEventType.usage,
+      promptTokens: promptTokens,
+      completionTokens: completionTokens,
+      totalTokens: totalTokens,
       isTypedSemantic: true,
     );
   }

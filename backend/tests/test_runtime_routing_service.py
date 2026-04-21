@@ -80,6 +80,173 @@ class TestBackendFallbackPolicy:
 
 class TestRuntimeRoutingService:
     @pytest.mark.asyncio
+    async def test_stream_tool_runtime_requires_enable_tools_flag(
+        self,
+        sample_request,
+        monkeypatch,
+    ):
+        sample_request.stream = True
+        sample_request.stream_event_mode = "typed"
+        sample_request.enable_tools = False
+
+        async def primary_stream():
+            yield 'data: {"choices":[{"delta":{"content":"Hello from primary"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        primary_service = MagicMock()
+        primary_service.chat_completion_stream = MagicMock(return_value=primary_stream())
+        fallback_service = MagicMock()
+        fallback_service.chat_completion_stream = MagicMock()
+
+        fake_mcp = MagicMock()
+        fake_mcp.has_tools.return_value = True
+        monkeypatch.setattr(
+            "services.runtime_routing_service.get_mcp_manager",
+            lambda: fake_mcp,
+        )
+
+        service = RuntimeRoutingService(
+            primary_service=primary_service,
+            fallback_service=fallback_service,
+            settings=MagicMock(llm_enable_httpx_fallback=True),
+        )
+
+        chunks = []
+        async for chunk in service.chat_completion_stream(sample_request):
+            chunks.append(chunk)
+
+        assert chunks == [
+            'data: {"choices":[{"delta":{"content":"Hello from primary"}}]}\n\n',
+            "data: [DONE]\n\n",
+        ]
+        primary_service.chat_completion_stream.assert_called_once_with(sample_request)
+        fallback_service.chat_completion_stream.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stream_tool_runtime_uses_litellm_even_when_provider_direct(
+        self,
+        sample_request,
+        monkeypatch,
+    ):
+        sample_request.stream = True
+        sample_request.stream_event_mode = "typed"
+        sample_request.enable_tools = True
+        sample_request.provider.backend_mode = "direct"
+
+        async def primary_stream():
+            yield 'data: {"choices":[{"delta":{"content":"Hello from primary"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        async def passthrough_tool_runtime(self, request, *, llm_service):
+            async for chunk in llm_service.chat_completion_stream(request):
+                yield chunk
+
+        primary_service = MagicMock()
+        primary_service.chat_completion_stream = MagicMock(return_value=primary_stream())
+        fallback_service = MagicMock()
+        fallback_service.chat_completion_stream = MagicMock()
+
+        fake_mcp = MagicMock()
+        fake_mcp.has_tools.return_value = True
+        monkeypatch.setattr(
+            "services.runtime_routing_service.get_mcp_manager",
+            lambda: fake_mcp,
+        )
+        monkeypatch.setattr(
+            "services.runtime_routing_service.ToolRuntimeService.chat_completion_stream",
+            passthrough_tool_runtime,
+        )
+
+        service = RuntimeRoutingService(
+            primary_service=primary_service,
+            fallback_service=fallback_service,
+            settings=MagicMock(llm_enable_httpx_fallback=True),
+        )
+
+        chunks = []
+        async for chunk in service.chat_completion_stream(sample_request):
+            chunks.append(chunk)
+
+        assert chunks == [
+            'data: {"choices":[{"delta":{"content":"Hello from primary"}}]}\n\n',
+            "data: [DONE]\n\n",
+        ]
+        primary_service.chat_completion_stream.assert_called_once_with(sample_request)
+        fallback_service.chat_completion_stream.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_stream_tool_runtime_requires_enable_tools_flag(
+        self,
+        sample_request,
+        monkeypatch,
+    ):
+        sample_request.enable_tools = False
+
+        primary_service = MagicMock()
+        primary_service.chat_completion = AsyncMock(return_value={"id": "primary-ok"})
+        fallback_service = MagicMock()
+        fallback_service.chat_completion = AsyncMock()
+
+        fake_mcp = MagicMock()
+        fake_mcp.has_tools.return_value = True
+        monkeypatch.setattr(
+            "services.runtime_routing_service.get_mcp_manager",
+            lambda: fake_mcp,
+        )
+
+        service = RuntimeRoutingService(
+            primary_service=primary_service,
+            fallback_service=fallback_service,
+            settings=MagicMock(llm_enable_httpx_fallback=True),
+        )
+
+        result = await service.chat_completion(sample_request)
+
+        assert result == {"id": "primary-ok"}
+        primary_service.chat_completion.assert_awaited_once_with(sample_request)
+        fallback_service.chat_completion.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_stream_tool_runtime_uses_litellm_even_when_provider_direct(
+        self,
+        sample_request,
+        monkeypatch,
+    ):
+        sample_request.enable_tools = True
+        sample_request.provider.backend_mode = "direct"
+
+        async def passthrough_tool_runtime(self, request, *, llm_service):
+            return await llm_service.chat_completion(request)
+
+        primary_service = MagicMock()
+        primary_service.chat_completion = AsyncMock(return_value={"id": "litellm-tool"})
+        fallback_service = MagicMock()
+        fallback_service.chat_completion = AsyncMock()
+
+        fake_mcp = MagicMock()
+        fake_mcp.has_tools.return_value = True
+        monkeypatch.setattr(
+            "services.runtime_routing_service.get_mcp_manager",
+            lambda: fake_mcp,
+        )
+        monkeypatch.setattr(
+            "services.runtime_routing_service.ToolRuntimeService.chat_completion",
+            passthrough_tool_runtime,
+        )
+
+        service = RuntimeRoutingService(
+            primary_service=primary_service,
+            fallback_service=fallback_service,
+            settings=MagicMock(llm_enable_httpx_fallback=True),
+        )
+
+        result = await service.chat_completion(sample_request)
+
+        assert result == {"id": "litellm-tool"}
+        primary_service.chat_completion.assert_awaited_once_with(sample_request)
+        fallback_service.chat_completion.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_non_streaming_falls_back_to_httpx_on_safe_litellm_error(
         self, sample_request
     ):

@@ -35,8 +35,12 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       // Preserve selection on mobile (long-press), use double-tap for actions.
-      onDoubleTap: _isExportMode ? null : () => _showMessageActionsSheet(message),
-      onSecondaryTap: _isExportMode ? null : () => _showMessageActionsSheet(message),
+      onDoubleTap: _isExportMode
+          ? null
+          : () => _showMessageActionsSheet(message),
+      onSecondaryTap: _isExportMode
+          ? null
+          : () => _showMessageActionsSheet(message),
       child: Align(
         alignment: Alignment.centerRight,
         child: Column(
@@ -63,14 +67,24 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
     );
   }
 
-  Widget _buildAssistantVariantSwitcher(chat.TextMessage message, double uiScale) {
+  Widget _buildAssistantVariantSwitcher(
+    chat.TextMessage message,
+    double uiScale,
+  ) {
     if (_isExportMode) return const SizedBox.shrink();
 
     final thread = _getThread(rebuildFromMessagesIfMismatch: false);
     final variants = _assistantVariantIdsForUser(message.id, thread);
     if (variants.length <= 1) return const SizedBox.shrink();
 
-    final selected = thread.selectedChild[message.id];
+    final pendingVariantId =
+        ai.ProviderFactory.pythonBackendEnabled &&
+            _activeAssistantParentUserId == message.id &&
+            _activeStreamId != null &&
+            variants.contains(_activeStreamId)
+        ? _activeStreamId
+        : null;
+    final selected = pendingVariantId ?? thread.selectedChild[message.id];
     var index = selected == null ? -1 : variants.indexOf(selected);
     if (index < 0) index = variants.length - 1;
 
@@ -88,7 +102,9 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
 
     Widget navButton(IconData icon, int delta) {
       return InkWell(
-        onTap: disabled ? null : () => _switchAssistantVariant(message.id, delta),
+        onTap: disabled
+            ? null
+            : () => _switchAssistantVariant(message.id, delta),
         customBorder: const CircleBorder(),
         child: Padding(
           padding: EdgeInsets.all(4 * uiScale),
@@ -112,7 +128,10 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
             border: Border.all(color: border),
           ),
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 6 * uiScale, vertical: 2 * uiScale),
+            padding: EdgeInsets.symmetric(
+              horizontal: 6 * uiScale,
+              vertical: 2 * uiScale,
+            ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -138,7 +157,10 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
     );
   }
 
-  Widget _buildAttachmentsPreview(List<AttachedFileSnapshot> files, double uiScale) {
+  Widget _buildAttachmentsPreview(
+    List<AttachedFileSnapshot> files,
+    double uiScale,
+  ) {
     // 分离图片和非图片文件
     final imageFiles = files.where((f) => f.isImage).toList();
     final otherFiles = files.where((f) => !f.isImage).toList();
@@ -153,7 +175,9 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
             child: Wrap(
               spacing: 8 * uiScale,
               runSpacing: 8 * uiScale,
-              children: imageFiles.map((f) => _buildImageThumbnail(f, uiScale)).toList(),
+              children: imageFiles
+                  .map((f) => _buildImageThumbnail(f, uiScale))
+                  .toList(),
             ),
           ),
         // 其他文件列表
@@ -267,9 +291,18 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(OwuiIcons.brokenImage, size: 48, color: OwuiPalette.textSecondary(ctx)),
+                        Icon(
+                          OwuiIcons.brokenImage,
+                          size: 48,
+                          color: OwuiPalette.textSecondary(ctx),
+                        ),
                         const SizedBox(height: 8),
-                        Text('无法加载图片', style: TextStyle(color: OwuiPalette.textSecondary(ctx))),
+                        Text(
+                          '无法加载图片',
+                          style: TextStyle(
+                            color: OwuiPalette.textSecondary(ctx),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -288,7 +321,11 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Icon(OwuiIcons.close, color: Colors.white, size: 20),
+                  child: const Icon(
+                    OwuiIcons.close,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
               ),
             ),

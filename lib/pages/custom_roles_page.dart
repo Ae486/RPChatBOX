@@ -12,8 +12,11 @@ import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../models/conversation.dart';
 import '../models/custom_role.dart';
+import '../services/backend_conversation_service.dart';
+import '../services/backend_custom_role_service.dart';
 import '../services/custom_role_service.dart';
 import '../services/hive_conversation_service.dart';
+import '../adapters/ai_provider.dart' as ai;
 
 /// 自定义角色管理页面
 class CustomRolesPage extends StatefulWidget {
@@ -25,6 +28,8 @@ class CustomRolesPage extends StatefulWidget {
 
 class _CustomRolesPageState extends State<CustomRolesPage> {
   final _service = CustomRoleService();
+  final _backendRoleService = BackendCustomRoleService();
+  final _backendConversationService = BackendConversationService();
   late final HiveConversationService _conversationService;
   List<CustomRole> _customRoles = [];
   bool _isInitialized = false;
@@ -35,18 +40,20 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     _conversationService = HiveConversationService();
     _initialize();
   }
-  
+
   @override
   void dispose() {
     // 确保清理资源
     super.dispose();
   }
-  
+
   /// 初始化 Hive 和加载角色
   Future<void> _initialize() async {
     try {
-      await _conversationService.initialize();
-      _isInitialized = true;
+      if (!ai.ProviderFactory.pythonBackendEnabled) {
+        await _conversationService.initialize();
+        _isInitialized = true;
+      }
       await _loadRoles();
     } catch (e) {
       debugPrint('⚠️ 初始化失败: $e');
@@ -56,9 +63,13 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     }
   }
 
-
   Future<void> _loadRoles() async {
-    final roles = await _service.loadCustomRoles();
+    final roles = ai.ProviderFactory.pythonBackendEnabled
+        ? await _backendRoleService.listRoles()
+        : await _service.loadCustomRoles();
+    if (ai.ProviderFactory.pythonBackendEnabled) {
+      await _service.saveCustomRoles(roles);
+    }
     if (!mounted) return;
     setState(() {
       _customRoles = roles;
@@ -68,7 +79,9 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
   /// 创建或编辑角色
   Future<void> _showRoleDialog({CustomRole? editRole}) async {
     final nameController = TextEditingController(text: editRole?.name ?? '');
-    final descController = TextEditingController(text: editRole?.description ?? '');
+    final descController = TextEditingController(
+      text: editRole?.description ?? '',
+    );
     final promptController = TextEditingController(
       text: editRole?.systemPrompt ?? '',
     );
@@ -204,9 +217,17 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
       );
 
       if (editRole == null) {
-        await _service.addCustomRole(role);
+        if (ai.ProviderFactory.pythonBackendEnabled) {
+          await _backendRoleService.createRole(role);
+        } else {
+          await _service.addCustomRole(role);
+        }
       } else {
-        await _service.updateCustomRole(role);
+        if (ai.ProviderFactory.pythonBackendEnabled) {
+          await _backendRoleService.updateRole(role);
+        } else {
+          await _service.updateCustomRole(role);
+        }
       }
 
       await _loadRoles();
@@ -214,13 +235,44 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
   }
 
   /// 显示 Emoji 选择器
-  Future<String?> _showEmojiPicker(BuildContext context, String currentIcon) async {
+  Future<String?> _showEmojiPicker(
+    BuildContext context,
+    String currentIcon,
+  ) async {
     // 常用 Emoji 列表
     final emojis = [
-      '🤖', '✨', '💡', '🎯', '🚀', '📚', '🎨', '💻',
-      '🔧', '⚡', '🌟', '🎓', '📝', '🔍', '💼', '🎭',
-      '🏆', '🎪', '🎬', '🎮', '🎵', '🎸', '🎹', '🎺',
-      '🧑‍💻', '🧑‍🔬', '🧑‍🏫', '🧑‍⚕️', '🧑‍🎨', '🧑‍✈️', '🧑‍🚀', '🧑‍🔧',
+      '🤖',
+      '✨',
+      '💡',
+      '🎯',
+      '🚀',
+      '📚',
+      '🎨',
+      '💻',
+      '🔧',
+      '⚡',
+      '🌟',
+      '🎓',
+      '📝',
+      '🔍',
+      '💼',
+      '🎭',
+      '🏆',
+      '🎪',
+      '🎬',
+      '🎮',
+      '🎵',
+      '🎸',
+      '🎹',
+      '🎺',
+      '🧑‍💻',
+      '🧑‍🔬',
+      '🧑‍🏫',
+      '🧑‍⚕️',
+      '🧑‍🎨',
+      '🧑‍✈️',
+      '🧑‍🚀',
+      '🧑‍🔧',
     ];
 
     return await showDialog<String>(
@@ -248,8 +300,9 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
                 final emoji = emojis[index];
                 final isSelected = emoji == currentIcon;
 
-                final borderColor =
-                    isSelected ? scheme.primary : colors.borderSubtle;
+                final borderColor = isSelected
+                    ? scheme.primary
+                    : colors.borderSubtle;
                 final bgColor = isSelected
                     ? scheme.primary.withValues(alpha: 0.08)
                     : colors.surface2;
@@ -295,26 +348,39 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
   Future<void> _deleteRole(CustomRole role) async {
     // 显示确认对话框前显示loading
     if (!mounted) return;
-    
+
     // 查找关联的对话
     List<Conversation> allConversations = [];
     List<Conversation> relatedConversations = [];
-    
-    if (!_isInitialized) {
+
+    if (ai.ProviderFactory.pythonBackendEnabled) {
+      try {
+        final backendConversations = await _backendConversationService
+            .listConversations(roleId: role.id);
+        relatedConversations = backendConversations
+            .where((conv) => conv.roleType == 'custom')
+            .map((conv) => conv.toConversation())
+            .toList();
+      } catch (e) {
+        debugPrint('⚠️ 查找后端关联对话失败: $e');
+      }
+    } else if (!_isInitialized) {
       debugPrint('⚠️ Hive 未初始化，无法查找关联对话');
     } else {
       try {
         allConversations = await _conversationService.loadConversations();
         relatedConversations = allConversations
-            .where((conv) => conv.roleId == role.id && conv.roleType == 'custom')
+            .where(
+              (conv) => conv.roleId == role.id && conv.roleType == 'custom',
+            )
             .toList();
       } catch (e) {
         debugPrint('⚠️ 查找关联对话失败: $e');
       }
     }
-    
+
     if (!mounted) return;
-    
+
     // 构建确认对话框内容
     final hasRelatedConversations = relatedConversations.isNotEmpty;
     final conversationCount = relatedConversations.length;
@@ -356,9 +422,7 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
                           SizedBox(width: spacing.sm),
                           Text(
                             '关联对话警告',
-                            style: Theme.of(dialogContext)
-                                .textTheme
-                                .titleSmall
+                            style: Theme.of(dialogContext).textTheme.titleSmall
                                 ?.copyWith(fontWeight: FontWeight.w600),
                           ),
                         ],
@@ -366,9 +430,8 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
                       SizedBox(height: spacing.sm),
                       Text(
                         '此角色有 $conversationCount 个关联对话，删除后这些对话也会被删除！',
-                        style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
-                              color: colors.textSecondary,
-                            ),
+                        style: Theme.of(dialogContext).textTheme.bodySmall
+                            ?.copyWith(color: colors.textSecondary),
                       ),
                     ],
                   ),
@@ -391,11 +454,17 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
     );
 
     if (confirmed == true) {
-
       if (hasRelatedConversations) {
         try {
           for (final conv in relatedConversations) {
-            await _conversationService.deleteConversation(allConversations, conv.id);
+            if (ai.ProviderFactory.pythonBackendEnabled) {
+              await _backendConversationService.deleteConversation(conv.id);
+            } else {
+              await _conversationService.deleteConversation(
+                allConversations,
+                conv.id,
+              );
+            }
           }
           debugPrint('✅ 已删除 $conversationCount 个关联对话');
         } catch (e) {
@@ -408,7 +477,11 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
       }
 
       // 删除角色
-      await _service.deleteCustomRole(role.id);
+      if (ai.ProviderFactory.pythonBackendEnabled) {
+        await _backendRoleService.deleteRole(role.id);
+      } else {
+        await _service.deleteCustomRole(role.id);
+      }
       await _loadRoles();
 
       // 显示成功提示
@@ -436,7 +509,10 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
               itemBuilder: (context, index) {
                 final role = _customRoles[index];
                 return ListTile(
-                  leading: Text(role.icon, style: const TextStyle(fontSize: 32)),
+                  leading: Text(
+                    role.icon,
+                    style: const TextStyle(fontSize: 32),
+                  ),
                   title: Text(role.name),
                   subtitle: Text(role.description),
                   trailing: Row(
@@ -478,10 +554,9 @@ class _CustomRolesPageState extends State<CustomRolesPage> {
           SizedBox(height: spacing.lg),
           Text(
             '还没有自定义角色',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(color: colors.textSecondary),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: colors.textSecondary),
           ),
           SizedBox(height: spacing.sm),
           TextButton.icon(

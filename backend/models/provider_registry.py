@@ -32,17 +32,15 @@ class ProviderRegistryEntry(BaseModel):
         fallback_timeout_ms = self.fallback_timeout_ms
         circuit_breaker = self.circuit_breaker
 
-        # Phase 3 first cut initially persisted Flutter's default routing config
-        # (`direct` + fallback enabled + 5000ms + no circuit breaker), which
-        # unintentionally changed the backend's legacy "implicit auto" behavior.
-        # Treat that exact default bundle as "no explicit routing hints".
+        # Legacy compatibility: strip the default Flutter fallback bundle
+        # but preserve the explicit backend_mode.
         if (
             backend_mode == "direct"
             and fallback_enabled is True
             and fallback_timeout_ms == 5000
             and circuit_breaker is None
         ):
-            backend_mode = None
+            backend_mode = "direct"
             fallback_enabled = None
             fallback_timeout_ms = None
 

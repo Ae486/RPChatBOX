@@ -88,7 +88,7 @@ def test_put_provider_preserves_existing_api_key_when_blank(client):
     assert entry.name == "Updated OpenAI"
 
 
-def test_registry_default_direct_bundle_is_normalized_to_implicit_auto(client):
+def test_registry_default_direct_bundle_preserves_explicit_direct(client):
     response = client.put(
         "/api/providers/provider-1",
         json={
@@ -112,6 +112,6 @@ def test_registry_default_direct_bundle_is_normalized_to_implicit_auto(client):
     entry = get_provider_registry_service().get_entry("provider-1")
     runtime_provider = entry.to_runtime_provider()
 
-    assert runtime_provider.backend_mode is None
+    assert runtime_provider.backend_mode == "direct"
     assert runtime_provider.fallback_enabled is None
     assert runtime_provider.fallback_timeout_ms is None

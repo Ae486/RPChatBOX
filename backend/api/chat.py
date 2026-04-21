@@ -179,6 +179,7 @@ async def _stream_with_disconnect_guard(
     model: str,
     service_name: str,
     poll_interval: float = 0.1,
+    idle_timeout: float | None = None,
 ) -> AsyncIterator[str]:
     """Close the upstream stream promptly when the downstream client disconnects."""
     iterator = stream.__aiter__()
@@ -189,12 +190,22 @@ async def _stream_with_disconnect_guard(
     chunk_count = 0
     first_chunk_logged = False
     next_chunk_task: asyncio.Task[str] | None = None
+    idle_timeout_task: asyncio.Task[None] | None = None
+    effective_idle_timeout = (
+        idle_timeout if idle_timeout is not None else settings.llm_stream_idle_timeout
+    )
 
     try:
         while True:
             next_chunk_task = asyncio.create_task(anext(iterator))
+            wait_tasks: set[asyncio.Task[Any]] = {next_chunk_task, disconnect_task}
+            if first_chunk_logged and effective_idle_timeout > 0:
+                idle_timeout_task = asyncio.create_task(
+                    asyncio.sleep(effective_idle_timeout)
+                )
+                wait_tasks.add(idle_timeout_task)
             done, _ = await asyncio.wait(
-                {next_chunk_task, disconnect_task},
+                wait_tasks,
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
@@ -213,6 +224,32 @@ async def _stream_with_disconnect_guard(
                     (time.perf_counter() - started_at) * 1000,
                 )
                 next_chunk_task = None
+                break
+
+            if idle_timeout_task is not None and idle_timeout_task in done:
+                if not next_chunk_task.done():
+                    next_chunk_task.cancel()
+                with suppress(asyncio.CancelledError, StopAsyncIteration):
+                    await next_chunk_task
+                logger.error(
+                    "[OBS] stream_idle_timeout request_id=%s provider=%s model=%s service=%s chunk_count=%s idle_timeout_s=%.1f duration_ms=%.1f",
+                    request_id,
+                    provider_type,
+                    model,
+                    service_name,
+                    chunk_count,
+                    effective_idle_timeout,
+                    (time.perf_counter() - started_at) * 1000,
+                )
+                yield _build_stream_error_sse(
+                    code="stream_idle_timeout",
+                    message=(
+                        "Upstream stream stalled after first chunk for "
+                        f"{effective_idle_timeout:.1f}s"
+                    ),
+                )
+                next_chunk_task = None
+                idle_timeout_task = None
                 break
 
             try:
@@ -241,6 +278,11 @@ async def _stream_with_disconnect_guard(
                 raise
 
             next_chunk_task = None
+            if idle_timeout_task is not None:
+                idle_timeout_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await idle_timeout_task
+                idle_timeout_task = None
             chunk_count += 1
             if not first_chunk_logged:
                 first_chunk_logged = True
@@ -270,6 +312,11 @@ async def _stream_with_disconnect_guard(
             with suppress(asyncio.CancelledError, StopAsyncIteration):
                 await next_chunk_task
 
+        if idle_timeout_task is not None and not idle_timeout_task.done():
+            idle_timeout_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await idle_timeout_task
+
         disconnect_task.cancel()
         with suppress(asyncio.CancelledError):
             await disconnect_task
@@ -278,6 +325,17 @@ async def _stream_with_disconnect_guard(
         if callable(aclose):
             with suppress(asyncio.CancelledError, RuntimeError):
                 await aclose()
+
+
+def _build_stream_error_sse(*, code: str, message: str) -> str:
+    payload = {
+        "error": {
+            "message": message,
+            "type": code,
+            "code": code,
+        }
+    }
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.post("/v1/chat/completions")

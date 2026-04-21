@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:chatboxapp/adapters/ai_provider.dart';
 import 'package:chatboxapp/adapters/hybrid_langchain_provider.dart';
+import 'package:chatboxapp/adapters/openai_provider.dart';
 import 'package:chatboxapp/adapters/proxy_openai_provider.dart';
 import 'package:chatboxapp/models/backend_mode.dart';
 import 'package:chatboxapp/models/circuit_breaker_config.dart';
@@ -175,6 +176,40 @@ void main() {
     );
 
     test(
+      'ProxyOpenAIProvider forwards enable_tools when backend tool loop is enabled for the current conversation',
+      () async {
+        final captureAdapter = _CaptureHttpClientAdapter();
+        final dataDio = DioService().dataPlaneDio;
+        final controlDio = DioService().controlPlaneDio;
+        final originalDataAdapter = dataDio.httpClientAdapter;
+        final originalControlAdapter = controlDio.httpClientAdapter;
+        dataDio.httpClientAdapter = captureAdapter;
+        controlDio.httpClientAdapter = captureAdapter;
+        addTearDown(() {
+          dataDio.httpClientAdapter = originalDataAdapter;
+          controlDio.httpClientAdapter = originalControlAdapter;
+        });
+
+        final provider = ProxyOpenAIProvider(
+          _buildProviderConfig(
+            apiUrl: 'https://api.example.com/v1/chat/completions#',
+            proxyApiUrl: 'https://proxy.example.test',
+          ),
+        );
+        provider.setBackendToolLoopEnabled(true);
+
+        await provider.sendMessage(
+          model: 'gpt-4o-mini',
+          messages: [ChatMessage(role: 'user', content: 'hello')],
+          parameters: const ModelParameters(streamOutput: false),
+        );
+
+        final body = captureAdapter.singleRequest('/v1/chat/completions').json;
+        expect(body['enable_tools'], isTrue);
+      },
+    );
+
+    test(
       'ProxyOpenAIProvider syncs backend registry and sends provider reference plus files metadata',
       () async {
         final captureAdapter = _CaptureHttpClientAdapter();
@@ -241,6 +276,7 @@ void main() {
         expect(body['include_reasoning'], isTrue);
         expect(body['provider_id'], 'provider-1');
         expect(body.containsKey('provider'), isFalse);
+        expect(body.containsKey('enable_tools'), isFalse);
         expect(body['messages'], [
           {'role': 'system', 'content': ''},
           {'role': 'user', 'content': 'hello'},
@@ -270,9 +306,42 @@ void main() {
         expect(registryBody['updated_at'], isA<String>());
         expect(registryBody['custom_headers'], <String, dynamic>{});
         expect(registryBody['description'], isNull);
-        expect(registryBody.containsKey('backend_mode'), isFalse);
+        expect(registryBody['backend_mode'], 'direct');
         expect(registryBody.containsKey('fallback_enabled'), isFalse);
         expect(registryBody.containsKey('fallback_timeout_ms'), isFalse);
+      },
+    );
+
+    test(
+      'ProxyOpenAIProvider does not inject Gemini native extra_body for OpenAI-compatible Gemini models',
+      () async {
+        final captureAdapter = _CaptureHttpClientAdapter();
+        final dataDio = DioService().dataPlaneDio;
+        final controlDio = DioService().controlPlaneDio;
+        final originalDataAdapter = dataDio.httpClientAdapter;
+        final originalControlAdapter = controlDio.httpClientAdapter;
+        dataDio.httpClientAdapter = captureAdapter;
+        controlDio.httpClientAdapter = captureAdapter;
+        addTearDown(() {
+          dataDio.httpClientAdapter = originalDataAdapter;
+          controlDio.httpClientAdapter = originalControlAdapter;
+        });
+
+        final provider = ProxyOpenAIProvider(
+          _buildProviderConfig(
+            apiUrl: 'https://api.example.com/v1/chat/completions#',
+            proxyApiUrl: 'https://proxy.example.test',
+          ),
+        );
+
+        await provider.sendMessage(
+          model: 'gemini-2.5-flash',
+          messages: [ChatMessage(role: 'user', content: 'hello')],
+          parameters: const ModelParameters(streamOutput: false),
+        );
+
+        final body = captureAdapter.singleRequest('/v1/chat/completions').json;
+        expect(body.containsKey('extra_body'), isFalse);
       },
     );
 
@@ -414,6 +483,54 @@ void main() {
           dataAdapter.singleRequest('/v1/chat/completions').json['model_id'],
           'model-1',
         );
+      },
+    );
+
+    test(
+      'HybridLangChainProvider does not inject Gemini native extra_body for OpenAI-compatible Gemini models',
+      () async {
+        final captureAdapter = _CaptureHttpClientAdapter();
+        final dio = DioService().dataPlaneDio;
+        final originalAdapter = dio.httpClientAdapter;
+        dio.httpClientAdapter = captureAdapter;
+        addTearDown(() => dio.httpClientAdapter = originalAdapter);
+
+        final provider = HybridLangChainProvider(
+          _buildProviderConfig(apiUrl: 'https://direct.example.test/capture#'),
+        );
+
+        await provider.sendMessage(
+          model: 'gemini-2.5-flash',
+          messages: [ChatMessage(role: 'user', content: 'hello')],
+          parameters: const ModelParameters(streamOutput: false),
+        );
+
+        final body = captureAdapter.singleRequest('/capture').json;
+        expect(body.containsKey('extra_body'), isFalse);
+      },
+    );
+
+    test(
+      'OpenAIProvider does not inject Gemini native extra_body for OpenAI-compatible Gemini models',
+      () async {
+        final captureAdapter = _CaptureHttpClientAdapter();
+        final dio = DioService().dataPlaneDio;
+        final originalAdapter = dio.httpClientAdapter;
+        dio.httpClientAdapter = captureAdapter;
+        addTearDown(() => dio.httpClientAdapter = originalAdapter);
+
+        final provider = OpenAIProvider(
+          _buildProviderConfig(apiUrl: 'https://direct.example.test/capture#'),
+        );
+
+        await provider.sendMessage(
+          model: 'gemini-2.5-flash',
+          messages: [ChatMessage(role: 'user', content: 'hello')],
+          parameters: const ModelParameters(streamOutput: false),
+        );
+
+        final body = captureAdapter.singleRequest('/capture').json;
+        expect(body.containsKey('extra_body'), isFalse);
       },
     );
   });

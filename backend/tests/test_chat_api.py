@@ -1,11 +1,13 @@
 """Contract tests for chat API endpoints."""
 import asyncio
+import json
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from api.chat import _stream_with_disconnect_guard
+from services.runtime_routing_service import RuntimeRoutingService
 
 
 def _provider_payload():
@@ -269,6 +271,213 @@ def test_chat_completions_typed_stream_contract(client):
     assert "data: [DONE]" not in body
 
 
+def test_chat_completions_non_stream_tool_runtime_contract(client):
+    class ToolLoopPrimaryService:
+        def __init__(self):
+            self.non_stream_rounds = 0
+
+        async def chat_completion(self, chat_request):
+            self.non_stream_rounds += 1
+            if self.non_stream_rounds == 1:
+                return {
+                    "id": "chatcmpl-tool-1",
+                    "object": "chat.completion",
+                    "created": 123,
+                    "model": chat_request.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "srv__search",
+                                            "arguments": "{\"q\":\"hello\"}",
+                                        },
+                                    }
+                                ],
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+            return {
+                "id": "chatcmpl-tool-2",
+                "object": "chat.completion",
+                "created": 124,
+                "model": chat_request.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Hi from MCP tool loop"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 6,
+                    "total_tokens": 18,
+                },
+            }
+
+        async def chat_completion_stream(self, chat_request):
+            if False:
+                yield chat_request
+
+    primary_service = ToolLoopPrimaryService()
+    fallback_service = MagicMock()
+    runtime_service = RuntimeRoutingService(
+        primary_service=primary_service,
+        fallback_service=fallback_service,
+        settings=MagicMock(
+            llm_enable_httpx_fallback=True,
+            llm_enable_gemini_native=False,
+        ),
+    )
+
+    fake_mcp = MagicMock()
+    fake_mcp.has_tools.return_value = True
+    fake_mcp.call_tool_by_qualified_name = AsyncMock(
+        return_value={
+            "success": True,
+            "content": "search-result",
+            "error_code": None,
+        }
+    )
+
+    with patch("services.runtime_routing_service.get_mcp_manager", lambda: fake_mcp):
+        with patch("api.chat._get_llm_service", return_value=runtime_service):
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    **_chat_payload(stream=False),
+                    "enable_tools": True,
+                },
+            )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["choices"][0]["message"]["content"] == "Hi from MCP tool loop"
+    assert data["usage"] == {
+        "prompt_tokens": 22,
+        "completion_tokens": 10,
+        "total_tokens": 32,
+    }
+    assert primary_service.non_stream_rounds == 2
+    fake_mcp.call_tool_by_qualified_name.assert_awaited_once_with(
+        qualified_name="srv__search",
+        arguments={"q": "hello"},
+    )
+
+
+def test_chat_completions_typed_stream_tool_runtime_contract(client):
+    class ToolLoopPrimaryService:
+        def __init__(self):
+            self.stream_rounds = 0
+
+        async def chat_completion(self, chat_request):
+            raise AssertionError("non-stream path should not be used")
+
+        async def chat_completion_stream(self, chat_request):
+            self.stream_rounds += 1
+            if self.stream_rounds == 1:
+                yield (
+                    'data: {"type":"tool_call","tool_calls":[{"id":"call_1","function":'
+                    '{"name":"srv__search","arguments":"{\\"q\\":\\"hello\\"}"}}]}\n\n'
+                )
+                yield 'data: {"type":"done"}\n\n'
+                return
+
+            yield 'data: {"type":"text_delta","delta":"Hi from MCP tool loop"}\n\n'
+            yield (
+                'data: {"type":"usage","prompt_tokens":22,"completion_tokens":10,'
+                '"total_tokens":32}\n\n'
+            )
+            yield 'data: {"type":"done"}\n\n'
+
+    primary_service = ToolLoopPrimaryService()
+    fallback_service = MagicMock()
+    runtime_service = RuntimeRoutingService(
+        primary_service=primary_service,
+        fallback_service=fallback_service,
+        settings=MagicMock(
+            llm_enable_httpx_fallback=True,
+            llm_enable_gemini_native=False,
+        ),
+    )
+
+    fake_mcp = MagicMock()
+    fake_mcp.has_tools.return_value = True
+    fake_mcp.call_tool_by_qualified_name = AsyncMock(
+        return_value={
+            "success": True,
+            "content": "search-result",
+            "error_code": None,
+        }
+    )
+
+    payload = {
+        **_chat_payload(stream=True),
+        "enable_tools": True,
+        "stream_event_mode": "typed",
+    }
+
+    with patch("services.runtime_routing_service.get_mcp_manager", lambda: fake_mcp):
+        with patch("api.chat._get_llm_service", return_value=runtime_service):
+            with client.stream("POST", "/v1/chat/completions", json=payload) as response:
+                body = "".join(chunk.decode("utf-8") for chunk in response.iter_raw())
+
+    payloads = [
+        json.loads(line[6:])
+        for line in body.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+
+    assert response.status_code == 200
+    assert any(payload.get("type") == "tool_call" for payload in payloads)
+    assert any(
+        payload.get("type") == "tool_started"
+        and payload.get("call_id") == "call_1"
+        and payload.get("tool_name") == "srv__search"
+        for payload in payloads
+    )
+    assert any(
+        payload.get("type") == "tool_result"
+        and payload.get("call_id") == "call_1"
+        and payload.get("tool_name") == "srv__search"
+        and payload.get("result") == "search-result"
+        for payload in payloads
+    )
+    assert any(
+        payload.get("type") == "text_delta"
+        and payload.get("delta") == "Hi from MCP tool loop"
+        for payload in payloads
+    )
+    assert any(
+        payload.get("type") == "usage"
+        and payload.get("prompt_tokens") == 22
+        and payload.get("completion_tokens") == 10
+        and payload.get("total_tokens") == 32
+        for payload in payloads
+    )
+    assert payloads[-1] == {"type": "done"}
+    assert primary_service.stream_rounds == 2
+    fake_mcp.call_tool_by_qualified_name.assert_awaited_once_with(
+        qualified_name="srv__search",
+        arguments={"q": "hello"},
+    )
+
+
 class _DisconnectingRequest:
     def __init__(self):
         self.disconnected = False
@@ -350,6 +559,65 @@ async def test_stream_disconnect_guard_closes_upstream_before_first_chunk(caplog
     assert (
         "stream_cancelled request_id=req-test-pre-first-chunk-stop" in caplog.text
     )
+
+
+@pytest.mark.asyncio
+async def test_stream_idle_timeout_emits_error_and_closes_upstream(caplog):
+    caplog.set_level(logging.INFO, logger="api.chat")
+    request = _DisconnectingRequest()
+    state = {"closed": False}
+
+    async def upstream_stream():
+        try:
+            yield 'data: {"choices":[{"delta":{"content":"first"}}]}\n\n'
+            await asyncio.sleep(0.05)
+            yield 'data: {"choices":[{"delta":{"content":"late"}}]}\n\n'
+        finally:
+            state["closed"] = True
+
+    chunks: list[str] = []
+    async for chunk in _stream_with_disconnect_guard(
+        request,
+        upstream_stream(),
+        request_id="req-test-idle-timeout",
+        provider_type="openai",
+        model="gpt-4o-mini",
+        service_name="StubLLMService",
+        poll_interval=0.001,
+        idle_timeout=0.01,
+    ):
+        chunks.append(chunk)
+
+    assert chunks[0] == 'data: {"choices":[{"delta":{"content":"first"}}]}\n\n'
+    assert '"type": "stream_idle_timeout"' in chunks[1]
+    assert state["closed"] is True
+    assert "stream_idle_timeout request_id=req-test-idle-timeout" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_stream_idle_timeout_does_not_fire_before_first_chunk(caplog):
+    caplog.set_level(logging.INFO, logger="api.chat")
+    request = _DisconnectingRequest()
+
+    async def upstream_stream():
+        await asyncio.sleep(0.02)
+        yield 'data: {"choices":[{"delta":{"content":"first"}}]}\n\n'
+
+    chunks: list[str] = []
+    async for chunk in _stream_with_disconnect_guard(
+        request,
+        upstream_stream(),
+        request_id="req-test-idle-timeout-pre-first",
+        provider_type="openai",
+        model="gpt-4o-mini",
+        service_name="StubLLMService",
+        poll_interval=0.001,
+        idle_timeout=0.005,
+    ):
+        chunks.append(chunk)
+
+    assert chunks == ['data: {"choices":[{"delta":{"content":"first"}}]}\n\n']
+    assert "stream_idle_timeout request_id=req-test-idle-timeout-pre-first" not in caplog.text
 
 
 def test_post_models_without_provider_returns_health_sentinel(client):

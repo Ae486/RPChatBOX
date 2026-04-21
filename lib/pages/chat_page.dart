@@ -107,6 +107,7 @@ class _ChatPageState extends State<ChatPage> {
     final provider = context.read<ChatSessionProvider>();
     final conversation = provider.currentConversation;
     if (conversation == null) return;
+    final currentKey = _getCurrentKey(conversation.id);
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -128,6 +129,7 @@ class _ChatPageState extends State<ChatPage> {
 
     if (confirmed == true && mounted) {
       await provider.clearCurrentMessages();
+      await currentKey?.currentState?.refreshFromBackend();
     }
   }
 

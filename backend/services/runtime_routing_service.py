@@ -16,6 +16,10 @@ from services.litellm_service import (
     get_http_status_for_exception,
     get_litellm_service,
 )
+from services.mcp_manager import get_mcp_manager
+from services.model_capability_service import supports_function_calling
+from services.model_registry import get_model_registry_service
+from services.tool_runtime_service import ToolRuntimeService
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,25 @@ class BackendFallbackPolicy:
         return int(match.group(1)) in cls._FALLBACK_STATUS_CODES
 
 
+class _ToolRuntimeLLMServiceAdapter:
+    """Route tool-loop LLM rounds through the unified LiteLLM execution path."""
+
+    def __init__(self, primary_service: LiteLLMService) -> None:
+        self._primary_service = primary_service
+
+    async def chat_completion(
+        self,
+        request: ChatCompletionRequest,
+    ):
+        return await self._primary_service.chat_completion(request)
+
+    def chat_completion_stream(
+        self,
+        request: ChatCompletionRequest,
+    ) -> AsyncIterator[str]:
+        return self._primary_service.chat_completion_stream(request)
+
+
 class RuntimeRoutingService:
     """Route requests through LiteLLM first, then fallback to httpx when safe."""
 
@@ -85,6 +108,23 @@ class RuntimeRoutingService:
         return bool(getattr(self.settings, "llm_enable_httpx_fallback", True))
 
     async def chat_completion(self, request: ChatCompletionRequest):
+        if self._should_use_tool_runtime_non_stream(request):
+            route_mode = self._get_route_mode(request)
+            logger.info(
+                "[ROUTE] backend_execution_mode=tool_runtime stream=false route_mode=%s provider=%s model=%s execution_service=litellm",
+                route_mode,
+                request.provider.type if request.provider else "unknown",
+                request.model,
+            )
+            tool_service = ToolRuntimeService(mcp_manager=get_mcp_manager())
+            return await tool_service.chat_completion(
+                request,
+                llm_service=_ToolRuntimeLLMServiceAdapter(self.primary_service),
+            )
+
+        return await self._chat_completion_without_tool_runtime(request)
+
+    async def _chat_completion_without_tool_runtime(self, request: ChatCompletionRequest):
         route_mode = self._get_route_mode(request)
         if route_mode == "direct":
             logger.info(
@@ -140,6 +180,31 @@ class RuntimeRoutingService:
         self,
         request: ChatCompletionRequest,
     ) -> AsyncIterator[str]:
+        if self._should_use_tool_runtime_stream(request):
+            route_mode = self._get_route_mode(request)
+            logger.info(
+                "[ROUTE] backend_execution_mode=tool_runtime stream=true route_mode=%s provider=%s model=%s execution_service=litellm",
+                route_mode,
+                request.provider.type if request.provider else "unknown",
+                request.model,
+            )
+            tool_service = ToolRuntimeService(mcp_manager=get_mcp_manager())
+            async for chunk in tool_service.chat_completion_stream(
+                request,
+                llm_service=_ToolRuntimeLLMServiceAdapter(self.primary_service),
+            ):
+                yield chunk
+            return
+
+        async for chunk in self._chat_completion_stream_without_tool_runtime(request):
+            yield chunk
+
+    async def _chat_completion_stream_without_tool_runtime(
+        self,
+        request: ChatCompletionRequest,
+    ) -> AsyncIterator[str]:
+        """Route one LLM streaming round without invoking the tool loop."""
+
         route_mode = self._get_route_mode(request)
         if route_mode == "direct":
             logger.info(
@@ -272,6 +337,55 @@ class RuntimeRoutingService:
         if self._get_route_mode(request) != "auto":
             return False
         return self.gemini_native_service.supports_request(request)
+
+    def _should_use_tool_runtime_non_stream(self, request: ChatCompletionRequest) -> bool:
+        return self._can_use_tool_runtime(request)
+
+    def _should_use_tool_runtime_stream(self, request: ChatCompletionRequest) -> bool:
+        if request.stream_event_mode != "typed":
+            return False
+        return self._can_use_tool_runtime(request)
+
+    def _can_use_tool_runtime(self, request: ChatCompletionRequest) -> bool:
+        enable_tools = bool(request.enable_tools)
+        model_supports_tools = self._model_supports_tools(request)
+        mcp_has_tools = get_mcp_manager().has_tools()
+        enabled = enable_tools and model_supports_tools and mcp_has_tools
+
+        if enable_tools or mcp_has_tools:
+            capabilities: list[str] | None = None
+            if request.model_id:
+                entry = get_model_registry_service().get_entry(request.model_id)
+                if entry is not None:
+                    capabilities = list(entry.capabilities)
+            logger.info(
+                "[TOOL_ROUTE] enable_tools=%s stream_event_mode=%s provider=%s model=%s model_id=%s model_supports_tools=%s registry_capabilities=%s mcp_has_tools=%s enabled=%s",
+                enable_tools,
+                request.stream_event_mode,
+                request.provider.type if request.provider else "unknown",
+                request.model,
+                request.model_id,
+                model_supports_tools,
+                capabilities,
+                mcp_has_tools,
+                enabled,
+            )
+
+        return enabled
+
+    @staticmethod
+    def _model_supports_tools(request: ChatCompletionRequest) -> bool:
+        """Check model registry capabilities (user-confirmed truth).
+
+        Falls back to LiteLLM metadata only when no registry entry exists.
+        """
+        if request.model_id:
+            entry = get_model_registry_service().get_entry(request.model_id)
+            if entry is not None:
+                return "tool" in entry.capabilities
+        if request.provider:
+            return supports_function_calling(request.provider.type, request.model)
+        return False
 
     @staticmethod
     def _extract_error_from_sse_chunk(chunk: str) -> dict[str, str] | None:

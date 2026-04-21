@@ -1,4 +1,4 @@
-/// MCP 工具调用数据模型
+// MCP 工具调用数据模型
 import 'dart:convert';
 
 import 'package:hive/hive.dart';
@@ -60,6 +60,24 @@ class ToolCallData {
     this.result,
     this.errorMessage,
   });
+
+  factory ToolCallData.fromRecord(McpToolCallRecord record) {
+    final endTime = record.timestamp;
+    final startTime = record.durationMs != null
+        ? endTime.subtract(Duration(milliseconds: record.durationMs!))
+        : null;
+    return ToolCallData(
+      callId: record.callId,
+      toolName: record.toolName,
+      serverName: record.serverName,
+      status: record.statusEnum,
+      startTime: startTime,
+      endTime: record.durationMs != null ? endTime : null,
+      arguments: record.arguments,
+      result: record.result,
+      errorMessage: record.errorMessage,
+    );
+  }
 
   /// 获取执行耗时（毫秒）
   int? get durationMs {
@@ -178,8 +196,7 @@ class McpToolCallRecord {
       serverName: data.serverName,
       status: data.status.name,
       durationMs: data.durationMs,
-      argumentsJson:
-          data.arguments != null ? jsonEncode(data.arguments) : null,
+      argumentsJson: data.arguments != null ? jsonEncode(data.arguments) : null,
       result: data.result,
       errorMessage: data.errorMessage,
       timestamp: DateTime.now(),

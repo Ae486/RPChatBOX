@@ -97,8 +97,9 @@ class RequestNormalizationService:
     def _normalize_extra_body(
         self, request: ChatCompletionRequest
     ) -> dict | None:
+        provider_type = request.provider.type if request.provider else None
         extra_body = deepcopy(request.extra_body) if request.extra_body else None
-        if "gemini" not in request.model.lower():
+        if provider_type != "gemini":
             return extra_body
 
         if extra_body is None:

@@ -452,6 +452,12 @@ class ThreadManager {
     conversation.activeLeafId = thread.activeLeafId;
   }
 
+  /// Replace the in-memory thread with an externally loaded projection.
+  void replaceThread(ConversationThread thread) {
+    _thread = thread;
+    persistNoSave(thread);
+  }
+
   /// Schedules debounced persistence.
   void schedulePersist({
     Duration delay = const Duration(milliseconds: 350),

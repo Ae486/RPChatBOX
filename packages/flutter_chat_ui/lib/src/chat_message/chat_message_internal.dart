@@ -87,6 +87,14 @@ class _ChatMessageInternalState extends State<ChatMessageInternal> {
   }
 
   @override
+  void didUpdateWidget(ChatMessageInternal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.message != oldWidget.message) {
+      _updatedMessage = widget.message;
+    }
+  }
+
+  @override
   void dispose() {
     _operationsSubscription?.cancel();
     super.dispose();

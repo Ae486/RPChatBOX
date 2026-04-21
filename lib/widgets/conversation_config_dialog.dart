@@ -13,20 +13,24 @@ import '../design_system/design_tokens.dart';
 class ConversationConfigDialog extends StatefulWidget {
   final ConversationSettings settings;
   final Function(ConversationSettings) onSave;
+  final String Function(int contextLength)? contextTokenSummaryBuilder;
 
   const ConversationConfigDialog({
     super.key,
     required this.settings,
     required this.onSave,
+    this.contextTokenSummaryBuilder,
   });
 
   @override
-  State<ConversationConfigDialog> createState() => _ConversationConfigDialogState();
+  State<ConversationConfigDialog> createState() =>
+      _ConversationConfigDialogState();
 }
 
 class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
   late ModelParameters _parameters;
   late int _contextLength;
+  late bool _enableTools;
   late bool _enableExperimentalStreamingMarkdown;
 
   @override
@@ -34,13 +38,16 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
     super.initState();
     _parameters = widget.settings.parameters;
     _contextLength = widget.settings.contextLength;
-    _enableExperimentalStreamingMarkdown = widget.settings.enableExperimentalStreamingMarkdown;
+    _enableTools = widget.settings.enableTools;
+    _enableExperimentalStreamingMarkdown =
+        widget.settings.enableExperimentalStreamingMarkdown;
   }
 
   void _save() {
     final updated = widget.settings.copyWith(
       parameters: _parameters,
       contextLength: _contextLength,
+      enableTools: _enableTools,
       enableExperimentalStreamingMarkdown: _enableExperimentalStreamingMarkdown,
     );
 
@@ -77,8 +84,8 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                   Text(
                     '对话配置',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        ),
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    ),
                   ),
                   const Spacer(),
                   IconButton(
@@ -105,10 +112,13 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                       divisions: 20,
                       onChanged: (value) {
                         setState(() {
-                          _parameters = _parameters.copyWith(temperature: value);
+                          _parameters = _parameters.copyWith(
+                            temperature: value,
+                          );
                         });
                       },
-                      description: '控制输出的随机性。较低值(0.1-0.3)更确定和聚焦，较高值(0.7-1.0)更有创造性。',
+                      description:
+                          '控制输出的随机性。较低值(0.1-0.3)更确定和聚焦，较高值(0.7-1.0)更有创造性。',
                     ),
 
                     SizedBox(height: ChatBoxTokens.spacing.xl),
@@ -139,7 +149,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                       divisions: 63,
                       onChanged: (value) {
                         setState(() {
-                          _parameters = _parameters.copyWith(maxTokens: value.toInt());
+                          _parameters = _parameters.copyWith(
+                            maxTokens: value.toInt(),
+                          );
                         });
                       },
                       description: '单次响应的最大Token数量。过小可能导致回复被截断。',
@@ -150,6 +162,22 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
 
                     // Context Length - 特殊范围：1-30普通值，500特殊值，-1无限制
                     _buildContextLengthSlider(),
+
+                    SizedBox(height: ChatBoxTokens.spacing.xl),
+
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('启用 MCP / Function Calling'),
+                      subtitle: const Text(
+                        '开启后，已连接的 MCP 工具会通过后端注册为模型可调用工具；关闭时模型不会看到任何工具。',
+                      ),
+                      value: _enableTools,
+                      onChanged: (value) {
+                        setState(() {
+                          _enableTools = value;
+                        });
+                      },
+                    ),
 
                     SizedBox(height: ChatBoxTokens.spacing.xl),
 
@@ -171,10 +199,16 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                     Container(
                       padding: EdgeInsets.all(ChatBoxTokens.spacing.lg),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(ChatBoxTokens.radius.small),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceVariant.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(
+                          ChatBoxTokens.radius.small,
+                        ),
                         border: Border.all(
-                          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.outline.withOpacity(0.2),
                         ),
                       ),
                       child: Column(
@@ -185,14 +219,18 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                               Icon(
                                 OwuiIcons.info,
                                 size: 18,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
                               SizedBox(width: ChatBoxTokens.spacing.sm),
                               Text(
                                 '提示',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -202,7 +240,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                             '这些参数会影响模型的输出行为。不同模型对参数的支持可能不同，如果遇到错误，请尝试使用默认值。',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.8),
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant.withOpacity(0.8),
                             ),
                           ),
                         ],
@@ -217,9 +257,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
             Container(
               padding: EdgeInsets.all(ChatBoxTokens.spacing.lg + 4),
               decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: Colors.grey.shade300),
-                ),
+                border: Border(top: BorderSide(color: Colors.grey.shade300)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -229,10 +267,7 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                     child: const Text('取消'),
                   ),
                   SizedBox(width: ChatBoxTokens.spacing.md),
-                  ElevatedButton(
-                    onPressed: _save,
-                    child: const Text('保存'),
-                  ),
+                  ElevatedButton(onPressed: _save, child: const Text('保存')),
                 ],
               ),
             ),
@@ -244,8 +279,24 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
 
   Widget _buildContextLengthSlider() {
     // 定义合理的渐进式数值: 1, 5, 10, 15, 20, 50, 75, 100, 150, 200, 250, 300, 400, 500, 无限制
-    final List<int> contextValues = [1, 5, 10, 15, 20, 50, 75, 100, 150, 200, 250, 300, 400, 500, -1];
-    
+    final List<int> contextValues = [
+      1,
+      5,
+      10,
+      15,
+      20,
+      50,
+      75,
+      100,
+      150,
+      200,
+      250,
+      300,
+      400,
+      500,
+      -1,
+    ];
+
     // 查找当前值在列表中的索引
     int sliderIndex = contextValues.indexOf(_contextLength);
     if (sliderIndex < 0) {
@@ -253,7 +304,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
       if (_contextLength == -1) {
         sliderIndex = contextValues.length - 1;
       } else {
-        sliderIndex = contextValues.indexWhere((v) => v >= _contextLength && v != -1);
+        sliderIndex = contextValues.indexWhere(
+          (v) => v >= _contextLength && v != -1,
+        );
         if (sliderIndex < 0) sliderIndex = contextValues.length - 2; // 500
       }
     }
@@ -264,6 +317,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
     } else {
       displayValue = '$_contextLength 条';
     }
+    final contextTokenSummary = widget.contextTokenSummaryBuilder?.call(
+      _contextLength,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -273,9 +329,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
           children: [
             Text(
               '上下文消息数',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             Container(
               padding: EdgeInsets.symmetric(
@@ -284,7 +340,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
               ),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
+                borderRadius: BorderRadius.circular(
+                  ChatBoxTokens.radius.medium,
+                ),
               ),
               child: Text(
                 displayValue,
@@ -312,9 +370,19 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
         Text(
           '包含在请求中的历史消息数量。更多上下文消耗更多Token。无限制时将发送所有历史消息。',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-              ),
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+          ),
         ),
+        if (contextTokenSummary != null && contextTokenSummary.isNotEmpty) ...[
+          SizedBox(height: ChatBoxTokens.spacing.xs),
+          Text(
+            contextTokenSummary,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.9),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -339,9 +407,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
           children: [
             Text(
               label,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             Container(
               padding: EdgeInsets.symmetric(
@@ -350,7 +418,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
               ),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(ChatBoxTokens.radius.medium),
+                borderRadius: BorderRadius.circular(
+                  ChatBoxTokens.radius.medium,
+                ),
               ),
               child: Text(
                 formatter(value),
@@ -373,9 +443,9 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
         ),
         Text(
           description,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.grey.shade600,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
         ),
       ],
     );

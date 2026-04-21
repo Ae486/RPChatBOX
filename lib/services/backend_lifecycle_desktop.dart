@@ -80,12 +80,12 @@ class DesktopBackendLifecycle implements BackendLifecycle {
       );
 
       // Forward stdout/stderr to debug console
-      _process!.stdout.transform(const SystemEncoding().decoder).listen(
-            (data) => debugPrint('[Backend] $data'),
-          );
-      _process!.stderr.transform(const SystemEncoding().decoder).listen(
-            (data) => debugPrint('[Backend:ERR] $data'),
-          );
+      _process!.stdout
+          .transform(const SystemEncoding().decoder)
+          .listen((data) => debugPrint('[Backend] $data'));
+      _process!.stderr
+          .transform(const SystemEncoding().decoder)
+          .listen((data) => debugPrint('[Backend:ERR] $data'));
 
       // Monitor process exit
       _process!.exitCode.then(_onProcessExit);
@@ -188,8 +188,9 @@ class DesktopBackendLifecycle implements BackendLifecycle {
   Future<String> _getExecutablePath() async {
     // In production, use app support directory
     final appDir = await getApplicationSupportDirectory();
-    final execName =
-        Platform.isWindows ? 'chatbox-backend.exe' : 'chatbox-backend';
+    final execName = Platform.isWindows
+        ? 'chatbox-backend.exe'
+        : 'chatbox-backend';
     return p.join(appDir.path, 'backend', execName);
   }
 
@@ -212,8 +213,9 @@ class DesktopBackendLifecycle implements BackendLifecycle {
         );
       }
 
-      final execName =
-          Platform.isWindows ? 'chatbox-backend.exe' : 'chatbox-backend';
+      final execName = Platform.isWindows
+          ? 'chatbox-backend.exe'
+          : 'chatbox-backend';
       final devPath = p.join(projectRoot, 'backend', 'dist', execName);
       if (await File(devPath).exists()) {
         if (!Platform.isWindows) {
@@ -246,20 +248,23 @@ class DesktopBackendLifecycle implements BackendLifecycle {
   Future<_PythonLauncher?> _findPythonLauncher() async {
     final candidates = Platform.isWindows
         ? const [
-            _PythonLauncher(executable: 'py', args: ['-3'], display: 'py -3'),
             _PythonLauncher(executable: 'python', args: [], display: 'python'),
           ]
         : const [
-            _PythonLauncher(executable: 'python3', args: [], display: 'python3'),
+            _PythonLauncher(
+              executable: 'python3',
+              args: [],
+              display: 'python3',
+            ),
             _PythonLauncher(executable: 'python', args: [], display: 'python'),
           ];
 
     for (final candidate in candidates) {
       try {
-        final result = await Process.run(
-          candidate.executable,
-          [...candidate.args, '--version'],
-        );
+        final result = await Process.run(candidate.executable, [
+          ...candidate.args,
+          '--version',
+        ]);
         if (result.exitCode == 0) {
           return candidate;
         }

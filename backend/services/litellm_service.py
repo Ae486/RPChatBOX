@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 from typing import AsyncIterator
+from collections.abc import Mapping, Sequence
 
 import litellm
 
@@ -32,6 +33,7 @@ class LiteLLMService:
         self._routers: dict[str, litellm.Router] = {}
         litellm.telemetry = False
         litellm.drop_params = True
+        litellm.modify_params = True
         if self.settings.debug:
             litellm.set_verbose = True
 
@@ -79,6 +81,9 @@ class LiteLLMService:
             "stream": request.stream,
         }
 
+        if request.stream and provider.type in {"openai", "deepseek", "gemini"}:
+            kwargs["stream_options"] = {"include_usage": True}
+
         if request.temperature is not None:
             kwargs["temperature"] = request.temperature
         if request.max_tokens is not None:
@@ -97,6 +102,11 @@ class LiteLLMService:
 
         if request.include_reasoning is not None and provider.type != "gemini":
             kwargs["include_reasoning"] = request.include_reasoning
+
+        if request.tools:
+            kwargs["tools"] = request.tools
+        if request.tool_choice is not None:
+            kwargs["tool_choice"] = request.tool_choice
 
         return kwargs
 
@@ -129,6 +139,44 @@ class LiteLLMService:
         """Build kwargs for litellm.acompletion()."""
         normalized_request = get_request_normalization_service().normalize(request)
         return self._build_completion_kwargs_from_normalized(normalized_request)
+
+    def build_embedding_kwargs(
+        self,
+        *,
+        provider: ProviderConfig,
+        model: str,
+        input_texts: list[str] | str,
+    ) -> dict:
+        """Build kwargs for LiteLLM embedding requests."""
+        kwargs = {
+            "model": self._get_litellm_model(provider, model),
+            "input": input_texts,
+            "api_key": provider.api_key,
+            "timeout": self.settings.llm_request_timeout,
+        }
+        api_base = self._get_api_base(provider)
+        if api_base:
+            kwargs["api_base"] = api_base
+        if provider.custom_headers:
+            kwargs["extra_headers"] = provider.custom_headers
+        return kwargs
+
+    def embedding(
+        self,
+        *,
+        provider: ProviderConfig,
+        model: str,
+        input_texts: list[str] | str,
+    ) -> dict:
+        """Handle synchronous embedding calls via LiteLLM."""
+        response = litellm.embedding(
+            **self.build_embedding_kwargs(
+                provider=provider,
+                model=model,
+                input_texts=input_texts,
+            )
+        )
+        return response.model_dump() if hasattr(response, "model_dump") else dict(response)
 
     def _build_router_request_kwargs_from_normalized(
         self, request: ChatCompletionRequest
@@ -194,19 +242,31 @@ class LiteLLMService:
         )
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
-    def _get_router(self, request: ChatCompletionRequest) -> litellm.Router | None:
+    def _get_effective_num_retries(self, request: ChatCompletionRequest) -> int:
+        """Return 0 for explicit direct/proxy routes; use configured retries for auto."""
+        provider = request.provider
+        if provider and provider.backend_mode in ("direct", "proxy"):
+            return 0
+        return self.settings.llm_num_retries
+
+    def _get_router(
+        self,
+        request: ChatCompletionRequest,
+        *,
+        allow_cached: bool = True,
+    ) -> litellm.Router | None:
         """Return a cached LiteLLM Router for the current provider/model."""
         if not self.settings.use_litellm_router or not hasattr(litellm, "Router"):
             return None
 
         cache_key = self._router_cache_key(request)
-        router = self._routers.get(cache_key)
+        router = self._routers.get(cache_key) if allow_cached else None
         if router is not None:
             return router
 
         router_kwargs: dict[str, object] = {
             "model_list": self._build_router_model_list(request),
-            "num_retries": self.settings.llm_num_retries,
+            "num_retries": self._get_effective_num_retries(request),
             "timeout": self.settings.llm_request_timeout,
             "stream_timeout": (
                 self._get_effective_stream_timeout(request)
@@ -223,8 +283,13 @@ class LiteLLMService:
             router_kwargs["cooldown_time"] = cooldown_time
 
         router = litellm.Router(**router_kwargs)
-        self._routers[cache_key] = router
+        if allow_cached:
+            self._routers[cache_key] = router
         return router
+
+    def _invalidate_router(self, request: ChatCompletionRequest) -> None:
+        cache_key = self._router_cache_key(request)
+        self._routers.pop(cache_key, None)
 
     def _get_effective_stream_timeout(self, request: ChatCompletionRequest) -> float:
         """Resolve the first-chunk timeout for this request."""
@@ -291,7 +356,16 @@ class LiteLLMService:
             raise ValueError("Provider configuration is required")
 
         normalized_request = get_request_normalization_service().normalize(request)
-        router = self._get_router(normalized_request)
+        router = self._get_router(normalized_request, allow_cached=False)
+        logger.info(
+            "[LITELLM_STREAM] start model=%s model_id=%s provider_id=%s provider_type=%s typed_mode=%s use_router=%s",
+            normalized_request.model,
+            normalized_request.model_id or "",
+            normalized_request.provider_id or "",
+            normalized_request.provider.type,
+            normalized_request.stream_event_mode == "typed",
+            router is not None,
+        )
         if router is not None:
             kwargs = self._build_router_request_kwargs_from_normalized(
                 normalized_request
@@ -306,6 +380,9 @@ class LiteLLMService:
         )
         typed_mode = normalized_request.stream_event_mode == "typed"
 
+        response = None
+        chunk_count = 0
+        first_event_logged = False
         try:
             if router is not None:
                 response = await router.acompletion(**kwargs)
@@ -313,8 +390,18 @@ class LiteLLMService:
                 response = await litellm.acompletion(**kwargs)
 
             async for chunk in response:
-                chunk_dict = chunk.model_dump()
+                chunk_count += 1
+                chunk_dict = self._coerce_stream_chunk(chunk)
                 events = stream_normalizer.extract_events(chunk_dict)
+                if not first_event_logged and events:
+                    logger.info(
+                        "[LITELLM_STREAM] first_events model=%s provider_type=%s chunk_count=%s event_kinds=%s",
+                        normalized_request.model,
+                        normalized_request.provider.type,
+                        chunk_count,
+                        [event.kind for event in events],
+                    )
+                    first_event_logged = True
                 if typed_mode:
                     for payload in stream_normalizer.emit_typed_payloads(events):
                         yield f"data: {json.dumps(payload)}\n\n"
@@ -331,8 +418,25 @@ class LiteLLMService:
                 for normalized_chunk in stream_normalizer.flush():
                     yield f"data: {json.dumps(normalized_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
+            logger.info(
+                "[LITELLM_STREAM] complete model=%s provider_type=%s chunk_count=%s use_router=%s",
+                normalized_request.model,
+                normalized_request.provider.type,
+                chunk_count,
+                router is not None,
+            )
 
         except Exception as e:
+            if router is not None:
+                self._invalidate_router(normalized_request)
+            logger.exception(
+                "[LITELLM_STREAM] error model=%s provider_type=%s chunk_count=%s use_router=%s error_type=%s",
+                normalized_request.model,
+                normalized_request.provider.type,
+                chunk_count,
+                router is not None,
+                type(e).__name__,
+            )
             if typed_mode:
                 error_payload = {
                     "type": "error",
@@ -346,6 +450,105 @@ class LiteLLMService:
                 error_data = {"error": {"message": str(e), "type": type(e).__name__}}
                 yield f"data: {json.dumps(error_data)}\n\n"
                 yield "data: [DONE]\n\n"
+        finally:
+            aclose = getattr(response, "aclose", None)
+            if callable(aclose):
+                await aclose()
+            logger.info(
+                "[LITELLM_STREAM] closed model=%s provider_type=%s chunk_count=%s use_router=%s",
+                normalized_request.model,
+                normalized_request.provider.type,
+                chunk_count,
+                router is not None,
+            )
+
+    def _coerce_stream_chunk(self, chunk: object) -> dict[str, object]:
+        """Best-effort coercion for LiteLLM streaming chunks.
+
+        Some upstream/provider combinations expose nested pydantic objects that
+        do not serialize cleanly with a plain ``model_dump()``. Prefer explicit
+        field extraction and only use generic serialization as a fallback.
+        """
+        if isinstance(chunk, dict):
+            return chunk
+
+        if hasattr(chunk, "model_dump"):
+            for kwargs in (
+                {"exclude_none": True, "warnings": False, "serialize_as_any": True},
+                {"exclude_none": True, "warnings": False},
+                {"exclude_none": True},
+                {},
+            ):
+                try:
+                    dumped = chunk.model_dump(**kwargs)
+                    if isinstance(dumped, dict):
+                        return dumped
+                except TypeError:
+                    continue
+                except Exception:
+                    break
+
+        extracted: dict[str, object] = {}
+        for field_name in (
+            "id",
+            "object",
+            "created",
+            "model",
+            "system_fingerprint",
+            "choices",
+            "candidates",
+            "usage",
+            "usage_metadata",
+            "usageMetadata",
+            "error",
+        ):
+            value = self._get_chunk_field(chunk, field_name)
+            if value is not None:
+                extracted[field_name] = self._coerce_stream_value(value)
+
+        if extracted:
+            return extracted
+
+        raw = self._coerce_stream_value(chunk)
+        return raw if isinstance(raw, dict) else {"raw": raw}
+
+    def _get_chunk_field(self, chunk: object, field_name: str):
+        if isinstance(chunk, Mapping):
+            return chunk.get(field_name)
+        return getattr(chunk, field_name, None)
+
+    def _coerce_stream_value(self, value: object):
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Mapping):
+            return {
+                str(key): self._coerce_stream_value(item)
+                for key, item in value.items()
+                if not str(key).startswith("_")
+            }
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            return [self._coerce_stream_value(item) for item in value]
+        if hasattr(value, "model_dump"):
+            for kwargs in (
+                {"exclude_none": True, "warnings": False, "serialize_as_any": True},
+                {"exclude_none": True, "warnings": False},
+                {"exclude_none": True},
+                {},
+            ):
+                try:
+                    dumped = value.model_dump(**kwargs)
+                    return self._coerce_stream_value(dumped)
+                except TypeError:
+                    continue
+                except Exception:
+                    break
+        if hasattr(value, "__dict__"):
+            return {
+                str(key): self._coerce_stream_value(item)
+                for key, item in vars(value).items()
+                if not str(key).startswith("_")
+            }
+        return str(value)
 
 
 def get_http_status_for_exception(exc: Exception) -> tuple[int, str]:

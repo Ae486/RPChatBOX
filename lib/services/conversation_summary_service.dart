@@ -6,9 +6,9 @@ import 'dart:convert';
 import '../adapters/ai_provider.dart' as ai;
 import '../models/conversation.dart';
 import '../models/conversation_settings.dart';
-import '../models/conversation_thread.dart';
 import '../models/message.dart';
 import '../models/model_config.dart';
+import 'conversation_context_service.dart';
 
 class ConversationSummaryContext {
   final List<Message> messages;
@@ -37,6 +37,11 @@ class ConversationSummaryResult {
 }
 
 class ConversationSummaryService {
+  final ConversationContextService _contextService;
+
+  ConversationSummaryService({ConversationContextService? contextService})
+    : _contextService = contextService ?? const ConversationContextService();
+
   static const String _systemPrompt =
       'You are a structured summarizer. Output JSON only. '
       'Summarize the conversation for future continuation. '
@@ -57,29 +62,18 @@ Output JSON with this exact structure:
   ConversationSummaryContext buildSummaryContext({
     required Conversation conversation,
     required ConversationSettings settings,
+    List<Message>? historyOverride,
   }) {
-    final thread = _loadThread(conversation);
-    final history = thread?.buildActiveChain() ?? conversation.messages;
-
-    final contextLength = settings.contextLength;
-    // Range 语义：[0, startIndex) 是已压缩消息，[startIndex, end] 是当前窗口
-    final startIndex = (contextLength <= 0 ||
-            contextLength == -1 ||
-            history.length <= contextLength)
-        ? 0
-        : history.length - contextLength;
-
-    // 需要压缩的消息：[0, startIndex)
-    final toCompress = startIndex > 0
-        ? history.take(startIndex).toList(growable: false)
-        : <Message>[];
-    final rangeStartId = toCompress.isNotEmpty ? toCompress.first.id : null;
-    final rangeEndId = toCompress.isNotEmpty ? toCompress.last.id : null;
+    final window = _contextService.buildContextWindow(
+      conversation: conversation,
+      settings: settings,
+      historyOverride: historyOverride,
+    );
 
     return ConversationSummaryContext(
-      messages: toCompress,
-      rangeStartId: rangeStartId,
-      rangeEndId: rangeEndId,
+      messages: window.windowMessages,
+      rangeStartId: window.rangeStartId,
+      rangeEndId: window.rangeEndId,
     );
   }
 
@@ -89,10 +83,12 @@ Output JSON with this exact structure:
     required ai.AIProvider provider,
     required String modelName,
     ModelParameters? parameters,
+    List<Message>? historyOverride,
   }) async {
     final context = buildSummaryContext(
       conversation: conversation,
       settings: settings,
+      historyOverride: historyOverride,
     );
 
     if (context.messages.isEmpty) {
@@ -120,9 +116,12 @@ Output JSON with this exact structure:
 
     final cleaned = _cleanJsonResponse(summary);
     final validated = _validateAndNormalizeJson(cleaned);
+    final mergedRangeStartId = existingSummary.isNotEmpty
+        ? (conversation.summaryRangeStartId ?? context.rangeStartId)
+        : context.rangeStartId;
     final result = ConversationSummaryResult(
       summary: validated,
-      rangeStartId: context.rangeStartId,
+      rangeStartId: mergedRangeStartId,
       rangeEndId: context.rangeEndId,
       updatedAt: DateTime.now(),
     );
@@ -143,41 +142,15 @@ Output JSON with this exact structure:
       ..updatedAt = DateTime.now();
   }
 
-  ConversationThread? _loadThread(Conversation conversation) {
-    final raw = (conversation.threadJson ?? '').trim();
-    if (raw.isEmpty) return null;
-    try {
-      // Build lookup from conversation.messages for compact format
-      final messageMap = <String, Message>{};
-      for (final msg in conversation.messages) {
-        messageMap[msg.id] = msg;
-      }
-      final decoded = jsonDecode(raw);
-      if (decoded is Map<String, dynamic>) {
-        return ConversationThread.fromJson(
-          decoded,
-          messageLookup: (id) => messageMap[id],
-        );
-      }
-      if (decoded is Map) {
-        return ConversationThread.fromJson(
-          decoded.cast<String, dynamic>(),
-          messageLookup: (id) => messageMap[id],
-        );
-      }
-    } catch (_) {
-      // Fall back to linear messages.
-    }
-    return null;
-  }
-
   String _buildSummaryPrompt(List<Message> messages) {
     if (messages.isEmpty) {
       return 'There is no conversation history to summarize.';
     }
 
     final buffer = StringBuffer();
-    buffer.writeln('Summarize the following conversation into structured JSON.');
+    buffer.writeln(
+      'Summarize the following conversation into structured JSON.',
+    );
     buffer.writeln(_schemaHint);
     buffer.writeln('');
     buffer.writeln('Conversation:');
@@ -190,7 +163,9 @@ Output JSON with this exact structure:
 
   String _buildMergePrompt(String existingSummary, List<Message> newMessages) {
     final buffer = StringBuffer();
-    buffer.writeln('Merge the existing summary with new messages into updated structured JSON.');
+    buffer.writeln(
+      'Merge the existing summary with new messages into updated structured JSON.',
+    );
     buffer.writeln(_schemaHint);
     buffer.writeln('');
     buffer.writeln('Existing Summary:');

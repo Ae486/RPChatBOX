@@ -28,11 +28,17 @@ import 'owui_model_selector_sheet.dart';
 class OwuiComposer extends StatefulWidget {
   final TextEditingController textController;
   final bool isStreaming;
+  final bool isCompacting;
   final VoidCallback onSend;
   final VoidCallback onStop;
+  final VoidCallback onCompact;
   final ModelServiceManager serviceManager;
   final ConversationSettings conversationSettings;
   final ValueChanged<ConversationSettings> onSettingsChanged;
+  final String compactLabel;
+  final String compactTooltip;
+  final bool compactEnabled;
+  final String Function(int contextLength)? contextTokenSummaryBuilder;
   final bool attachmentBarVisible;
 
   /// Optional callback for the measured composer height (excluding bottom safe area).
@@ -51,11 +57,17 @@ class OwuiComposer extends StatefulWidget {
     super.key,
     required this.textController,
     required this.isStreaming,
+    this.isCompacting = false,
     required this.onSend,
     required this.onStop,
+    required this.onCompact,
     required this.serviceManager,
     required this.conversationSettings,
     required this.onSettingsChanged,
+    required this.compactLabel,
+    required this.compactTooltip,
+    this.compactEnabled = false,
+    this.contextTokenSummaryBuilder,
     this.attachmentBarVisible = true,
     this.onHeightChanged,
     this.sigmaX,
@@ -213,6 +225,7 @@ class _OwuiComposerState extends State<OwuiComposer> {
       builder: (context) => ConversationConfigDialog(
         settings: widget.conversationSettings,
         onSave: widget.onSettingsChanged,
+        contextTokenSummaryBuilder: widget.contextTokenSummaryBuilder,
       ),
     );
   }
@@ -267,6 +280,13 @@ class _OwuiComposerState extends State<OwuiComposer> {
       return;
     }
     widget.onSend();
+  }
+
+  void _handleCompact() {
+    if (!widget.compactEnabled || widget.isCompacting || widget.isStreaming) {
+      return;
+    }
+    widget.onCompact();
   }
 
   bool _canSend() {
@@ -381,6 +401,8 @@ class _OwuiComposerState extends State<OwuiComposer> {
                               onPressed: _showConfigDialog,
                               uiScale: uiScale,
                             ),
+                            SizedBox(width: 8 * uiScale),
+                            _buildCompactButton(uiScale),
                             const Spacer(),
                             _buildModelPill(
                               currentModel: currentModel,
@@ -470,6 +492,74 @@ class _OwuiComposerState extends State<OwuiComposer> {
         iconSize: 22 * uiScale,
         color: baseColor,
         splashRadius: 20 * uiScale,
+      ),
+    );
+  }
+
+  Widget _buildCompactButton(double uiScale) {
+    final isInteractive =
+        widget.compactEnabled && !widget.isStreaming && !widget.isCompacting;
+    final width = MediaQuery.of(context).size.width;
+    final showFullLabel = width >= 430;
+    final border = OwuiPalette.borderSubtle(context);
+    final activeBg = Theme.of(
+      context,
+    ).colorScheme.primary.withValues(alpha: 0.10);
+    final idleBg = OwuiPalette.surfaceCard(context);
+    final fg = isInteractive
+        ? Theme.of(context).colorScheme.primary
+        : OwuiPalette.textSecondary(context);
+    final label = showFullLabel
+        ? widget.compactLabel
+        : widget.compactLabel.replaceFirst('Compact ', '');
+
+    return Tooltip(
+      message: widget.compactTooltip,
+      child: InkWell(
+        onTap: isInteractive ? _handleCompact : null,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          constraints: BoxConstraints(minHeight: 40 * uiScale),
+          padding: EdgeInsets.symmetric(
+            horizontal: 12 * uiScale,
+            vertical: 8 * uiScale,
+          ),
+          decoration: BoxDecoration(
+            color: isInteractive ? activeBg : idleBg,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 16 * uiScale,
+                height: 16 * uiScale,
+                child: widget.isCompacting
+                    ? CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(fg),
+                      )
+                    : Icon(OwuiIcons.cleaning, size: 16 * uiScale, color: fg),
+              ),
+              SizedBox(width: 6 * uiScale),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: showFullLabel ? 108 * uiScale : 54 * uiScale,
+                ),
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12 * uiScale,
+                    fontWeight: FontWeight.w600,
+                    color: fg,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

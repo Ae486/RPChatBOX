@@ -1,6 +1,7 @@
 import 'package:flutter_chat_core/flutter_chat_core.dart' as chat;
 import '../models/message.dart' as app;
 import '../models/attached_file.dart';
+import '../models/mcp/mcp_tool_call.dart';
 
 /// 消息适配器
 ///
@@ -30,7 +31,8 @@ class ChatMessageAdapter {
   /// 转换用户消息
   static chat.Message _convertUserMessage(app.Message msg) {
     // 检查是否有附件
-    final hasAttachments = msg.attachedFiles != null && msg.attachedFiles!.isNotEmpty;
+    final hasAttachments =
+        msg.attachedFiles != null && msg.attachedFiles!.isNotEmpty;
 
     if (hasAttachments) {
       // 如果有图片附件，使用 ImageMessage
@@ -83,6 +85,9 @@ class ChatMessageAdapter {
           'modelName': msg.modelName,
           'providerName': msg.providerName,
           'thinkingDurationSeconds': msg.thinkingDurationSeconds,
+          'toolCallRecords': msg.toolCallRecords
+              ?.map((item) => item.toJson())
+              .toList(),
         },
       );
     }
@@ -98,6 +103,9 @@ class ChatMessageAdapter {
         'inputTokens': msg.inputTokens,
         'modelName': msg.modelName,
         'providerName': msg.providerName,
+        'toolCallRecords': msg.toolCallRecords
+            ?.map((item) => item.toJson())
+            .toList(),
       },
     );
   }
@@ -134,6 +142,18 @@ class ChatMessageAdapter {
           .toList();
     }
 
+    List<McpToolCallRecord>? toolCallRecords;
+    final toolCallRecordsJson = metadata['toolCallRecords'] as List?;
+    if (toolCallRecordsJson != null) {
+      toolCallRecords = toolCallRecordsJson
+          .whereType<Map>()
+          .map(
+            (item) =>
+                McpToolCallRecord.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList();
+    }
+
     return app.Message(
       id: msg.id,
       content: content,
@@ -144,6 +164,7 @@ class ChatMessageAdapter {
       modelName: metadata['modelName'] as String?,
       providerName: metadata['providerName'] as String?,
       attachedFiles: attachedFiles,
+      toolCallRecords: toolCallRecords,
     );
   }
 
@@ -160,12 +181,11 @@ class ChatMessageAdapter {
       if (endIdx == -1) continue;
 
       final thinking = content.substring(afterStart, endIdx);
-      final body = content.substring(0, startIdx) + content.substring(endIdx + endTag.length);
+      final body =
+          content.substring(0, startIdx) +
+          content.substring(endIdx + endTag.length);
 
-      return ThinkingResult(
-        thinking: thinking.trim(),
-        body: body.trim(),
-      );
+      return ThinkingResult(thinking: thinking.trim(), body: body.trim());
     }
 
     return null;
@@ -177,7 +197,10 @@ class ChatMessageAdapter {
   }
 
   /// 获取消息的显示作者名称
-  static String getAuthorDisplayName(chat.Message msg, {String defaultName = 'AI助手'}) {
+  static String getAuthorDisplayName(
+    chat.Message msg, {
+    String defaultName = 'AI助手',
+  }) {
     final metadata = msg.metadata ?? {};
     final modelName = metadata['modelName'] as String?;
     final providerName = metadata['providerName'] as String?;
@@ -199,8 +222,5 @@ class ThinkingResult {
   final String thinking;
   final String body;
 
-  ThinkingResult({
-    required this.thinking,
-    required this.body,
-  });
+  ThinkingResult({required this.thinking, required this.body});
 }

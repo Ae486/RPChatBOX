@@ -92,6 +92,18 @@ def test_existing_extra_body_is_preserved_and_merged():
     }
 
 
+def test_openai_compatible_gemini_named_model_does_not_inject_gemini_native_extra_body():
+    service = RequestNormalizationService()
+    request = build_request(
+        provider_type="openai",
+        model="gemini-2.5-flash",
+    )
+
+    normalized = service.normalize(request)
+
+    assert normalized.extra_body is None
+
+
 def test_files_are_merged_into_last_user_message_and_cleared_from_request(tmp_path):
     text_file = tmp_path / "notes.txt"
     text_file.write_text("Alpha content", encoding="utf-8")

@@ -5,6 +5,7 @@
 part of '../conversation_view_v2.dart';
 
 mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
+  @override
   Future<void> _showMessageActionsSheet(chat.Message message) async {
     if (!mounted || _isDisposed) return;
 
@@ -39,13 +40,9 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       liveText = message.source;
     }
 
-    // Find persisted message in conversation if available.
-    final messageIndex = widget.conversation.messages.indexWhere(
-      (m) => m.id == message.id,
-    );
-    final appMsg = messageIndex >= 0
-        ? widget.conversation.messages[messageIndex]
-        : null;
+    final visibleMessages = _currentVisibleMessages();
+    final messageIndex = visibleMessages.indexWhere((m) => m.id == message.id);
+    final appMsg = messageIndex >= 0 ? visibleMessages[messageIndex] : null;
 
     Future<void> doCopy() async {
       final text = (liveText ?? '').trim();
@@ -111,6 +108,24 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       }
 
       if (action == 'save') {
+        if (ai.ProviderFactory.pythonBackendEnabled) {
+          appMsg.editedAt = DateTime.now();
+          appMsg.content = newContent;
+          appMsg.inputTokens = TokenCounter.estimateTokens(newContent);
+          await _backendConversationSourceService.patchMessage(
+            conversationId: widget.conversation.id,
+            messageId: appMsg.id,
+            content: newContent,
+            editedAt: appMsg.editedAt,
+          );
+          await _loadBackendConversationState(autoFollow: false);
+          widget.onConversationUpdated();
+          widget.onTokenUsageUpdated(widget.conversation);
+          if (!mounted || _isDisposed) return;
+          GlobalToast.success(context, message: '已保存');
+          return;
+        }
+
         appMsg.content = newContent;
         appMsg.inputTokens = TokenCounter.estimateTokens(newContent);
 
@@ -215,6 +230,45 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
         }
       }
 
+      if (ai.ProviderFactory.pythonBackendEnabled) {
+        appMsg.editedAt = DateTime.now();
+        appMsg.content = newContent;
+        appMsg.inputTokens = TokenCounter.estimateTokens(newContent);
+        await _backendConversationSourceService.patchMessage(
+          conversationId: widget.conversation.id,
+          messageId: appMsg.id,
+          content: newContent,
+          editedAt: appMsg.editedAt,
+        );
+        await _loadBackendConversationState(autoFollow: false);
+        if (!mounted || _isDisposed) return;
+
+        widget.conversation.updatedAt = DateTime.now();
+        widget.onConversationUpdated();
+        widget.onTokenUsageUpdated(widget.conversation);
+        _showBackendPrefixToMessage(appMsg.id);
+
+        final modelId = _conversationSettings.selectedModelId;
+        if (modelId == null) {
+          GlobalToast.warning(context, message: '请先选择一个模型');
+          return;
+        }
+        final modelWithProvider = globalModelServiceManager
+            .getModelWithProvider(modelId);
+        if (modelWithProvider == null) {
+          GlobalToast.error(context, message: '无法找到指定的模型');
+          return;
+        }
+
+        await _startAssistantResponse(
+          modelWithProvider: modelWithProvider,
+          parentUserMessageId: appMsg.id,
+          animateInsert: false,
+          useAtomicSetMessages: true,
+        );
+        return;
+      }
+
       // V2 tree semantics: update user message, then create a NEW assistant variant.
       appMsg.content = newContent;
       appMsg.inputTokens = TokenCounter.estimateTokens(newContent);
@@ -231,6 +285,7 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       widget.conversation.updatedAt = DateTime.now();
       widget.onConversationUpdated();
       widget.onTokenUsageUpdated(widget.conversation);
+      if (!mounted || _isDisposed) return;
 
       final modelId = _conversationSettings.selectedModelId;
       if (modelId == null) {
@@ -301,6 +356,24 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
         return;
       }
 
+      if (ai.ProviderFactory.pythonBackendEnabled) {
+        appMsg.editedAt = DateTime.now();
+        appMsg.content = newContent;
+        appMsg.outputTokens = TokenCounter.estimateTokens(newContent);
+        await _backendConversationSourceService.patchMessage(
+          conversationId: widget.conversation.id,
+          messageId: appMsg.id,
+          content: newContent,
+          editedAt: appMsg.editedAt,
+        );
+        await _loadBackendConversationState(autoFollow: false);
+        widget.onConversationUpdated();
+        widget.onTokenUsageUpdated(widget.conversation);
+        if (!mounted || _isDisposed) return;
+        GlobalToast.success(context, message: '已保存');
+        return;
+      }
+
       appMsg.content = newContent;
       appMsg.outputTokens = TokenCounter.estimateTokens(newContent);
 
@@ -351,12 +424,13 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       if (format == null) return;
       if (!mounted || _isDisposed) return;
 
-      final exportMsg = appMsg ??
+      final exportMsg =
+          appMsg ??
           (liveText == null
               ? null
               : app.Message(
                   id: message.id,
-                  content: liveText!,
+                  content: liveText,
                   isUser: isUser,
                   timestamp: (message.createdAt ?? DateTime.now()).toLocal(),
                 ));
@@ -437,8 +511,35 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       ConversationThread? thread;
       String? scrollTargetId;
       var needsFullSync = true;
+      var usedDeleteFallback = false;
 
       if (messageIndex >= 0) {
+        if (ai.ProviderFactory.pythonBackendEnabled) {
+          try {
+            await _backendConversationSourceService.deleteMessage(
+              conversationId: widget.conversation.id,
+              messageId: message.id,
+            );
+            await _loadBackendConversationState(autoFollow: false);
+            widget.conversation.updatedAt = DateTime.now();
+            widget.onConversationUpdated();
+            _syncConversationToChatController(autoFollow: false);
+            if (!mounted || _isDisposed) return;
+            GlobalToast.success(context, message: '已删除');
+            return;
+          } on BackendConversationSourceDeleteUnsupportedException catch (e) {
+            usedDeleteFallback = true;
+            debugPrint(
+              '[ConversationViewV2] backend delete unsupported, fallback to local semantics: '
+              'HTTP ${e.statusCode}',
+            );
+          } catch (e) {
+            if (!mounted || _isDisposed) return;
+            GlobalToast.error(context, message: '删除失败: $e');
+            return;
+          }
+        }
+
         // Update thread structure (source of truth for persistence).
         thread = _getThread(rebuildFromMessagesIfMismatch: false);
         final node = thread.nodes[message.id];
@@ -495,18 +596,22 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       if (needsFullSync) {
         // Refresh entire chat view to show the new active chain (sibling branch).
         _syncConversationToChatController(autoFollow: false);
-        if ((scrollTargetId == null || scrollTargetId!.isEmpty) &&
+        if ((scrollTargetId == null || scrollTargetId.isEmpty) &&
             thread != null &&
             thread.rootId.isNotEmpty) {
           scrollTargetId = thread.rootId;
         }
-        if (scrollTargetId != null && scrollTargetId!.isNotEmpty) {
+        if (scrollTargetId != null && scrollTargetId.isNotEmpty) {
           // 使用平滑滚动但不高亮，减少视觉干扰
-          scrollToMessageSilently(scrollTargetId!);
+          scrollToMessageSilently(scrollTargetId);
         }
       }
       if (!mounted || _isDisposed) return;
-      GlobalToast.success(context, message: '已删除');
+      if (usedDeleteFallback) {
+        GlobalToast.warning(context, message: '当前后端未接入删除接口，已按 Flutter 侧语义删除');
+      } else {
+        GlobalToast.success(context, message: '已删除');
+      }
     }
 
     Future<void> doRegenerate() async {
@@ -523,14 +628,14 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       var targetIndex = messageIndex;
       if (isAssistant) {
         for (var i = messageIndex - 1; i >= 0; i--) {
-          if (widget.conversation.messages[i].isUser) {
+          if (visibleMessages[i].isUser) {
             targetIndex = i;
             break;
           }
         }
       }
 
-      final target = widget.conversation.messages[targetIndex];
+      final target = visibleMessages[targetIndex];
       if (!target.isUser) {
         GlobalToast.warning(context, message: '找不到可用于重新生成的用户消息');
         return;
@@ -622,6 +727,31 @@ mixin _ConversationViewV2MessageActionsMixin on _ConversationViewV2StateBase {
       widget.conversation.updatedAt = DateTime.now();
       widget.onConversationUpdated();
       widget.onTokenUsageUpdated(widget.conversation);
+      if (!mounted || _isDisposed) return;
+
+      if (ai.ProviderFactory.pythonBackendEnabled) {
+        _showBackendPrefixToMessage(target.id);
+
+        final modelId = _conversationSettings.selectedModelId;
+        if (modelId == null) {
+          GlobalToast.warning(context, message: '请先选择一个模型');
+          return;
+        }
+        final modelWithProvider = globalModelServiceManager
+            .getModelWithProvider(modelId);
+        if (modelWithProvider == null) {
+          GlobalToast.error(context, message: '无法找到指定的模型');
+          return;
+        }
+
+        await _startAssistantResponse(
+          modelWithProvider: modelWithProvider,
+          parentUserMessageId: target.id,
+          animateInsert: false,
+          useAtomicSetMessages: true,
+        );
+        return;
+      }
 
       final modelId = _conversationSettings.selectedModelId;
       if (modelId == null) {

@@ -1,6 +1,7 @@
 """Backend configuration management."""
 from pathlib import Path
 from functools import lru_cache
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -22,6 +23,7 @@ class Settings(BaseSettings):
     llm_max_tool_iterations: int = 10
     llm_num_retries: int = 2
     llm_stream_timeout: float = 30.0
+    llm_stream_idle_timeout: float = 60.0
     llm_allowed_fails: int = 0
     llm_cooldown_time: float = 0.0
     llm_enable_httpx_fallback: bool = True
@@ -30,6 +32,13 @@ class Settings(BaseSettings):
     # LiteLLM toggle (False = fallback to httpx direct proxy)
     use_litellm: bool = True
     use_litellm_router: bool = True
+    rp_setup_agent_runtime_v2_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_RP_SETUP_AGENT_RUNTIME_V2_ENABLED",
+            "RP_SETUP_AGENT_RUNTIME_V2_ENABLED",
+        ),
+    )
 
     # Version
     version: str = "0.1.0"

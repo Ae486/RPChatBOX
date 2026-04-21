@@ -71,11 +71,6 @@ void main() async {
   // 自动连接已启用的 MCP 服务器（非阻塞）
   unawaited(globalMcpClientService.start());
 
-  // 启动 Python 后端（桌面端 + 移动端）
-  if (!kIsWeb) {
-    _startBackendSilently();
-  }
-
   final themeMode = prefs.getString(_prefsThemeModeKey) ?? 'system';
   final uiScale = prefs.getDouble(_prefsUiScaleKey) ?? 1.0;
   final uiFontFamily = prefs.getString(_prefsUiFontFamilyKey) ?? 'system';
@@ -90,20 +85,6 @@ void main() async {
       initialUiCodeFontFamily: uiCodeFontFamily,
     ),
   );
-}
-
-/// Start backend silently, non-blocking.
-/// Failures are logged but don't prevent app startup.
-void _startBackendSilently() {
-  Future(() async {
-    try {
-      final backend = BackendLifecycleService.instance;
-      await backend.start();
-      debugPrint('Backend started: ${backend.baseUrl}');
-    } catch (e) {
-      debugPrint('Backend startup failed (will use direct mode): $e');
-    }
-  });
 }
 
 class MyApp extends StatefulWidget {
@@ -418,7 +399,10 @@ class MyAppState extends State<MyApp> with WidgetsBindingObserver {
       codeFontFallback: _codeFontFallback(),
     );
 
-    final owuiLight = OwuiTokens.light(uiScale: _uiScale, typography: typography);
+    final owuiLight = OwuiTokens.light(
+      uiScale: _uiScale,
+      typography: typography,
+    );
     final owuiDark = OwuiTokens.dark(uiScale: _uiScale, typography: typography);
 
     return MultiProvider(
@@ -431,7 +415,10 @@ class MyAppState extends State<MyApp> with WidgetsBindingObserver {
         title: 'AI ChatBox',
         debugShowCheckedModeBanner: false,
         theme: _buildOwuiTheme(brightness: Brightness.light, tokens: owuiLight),
-        darkTheme: _buildOwuiTheme(brightness: Brightness.dark, tokens: owuiDark),
+        darkTheme: _buildOwuiTheme(
+          brightness: Brightness.dark,
+          tokens: owuiDark,
+        ),
         themeMode: _themeMode,
         home: const ChatPage(),
       ),

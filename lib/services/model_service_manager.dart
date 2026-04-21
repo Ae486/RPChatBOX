@@ -9,6 +9,7 @@ import '../models/config_migration.dart';
 import '../models/chat_settings.dart';
 import '../models/backend_mode.dart';
 import '../adapters/ai_provider.dart';
+import 'backend_conversation_service.dart';
 import 'backend_model_registry_service.dart';
 import 'backend_provider_registry_service.dart';
 
@@ -27,6 +28,8 @@ class ModelServiceManager {
       BackendProviderRegistryService();
   final BackendModelRegistryService _backendModelRegistryService =
       BackendModelRegistryService();
+  final BackendConversationService _backendConversationService =
+      BackendConversationService();
 
   List<ProviderConfig> _providers = [];
   List<ModelConfig> _models = [];
@@ -340,8 +343,35 @@ class ModelServiceManager {
         ConversationSettings.createDefault(conversationId);
   }
 
+  /// 从 backend 拉取并缓存会话配置。
+  Future<ConversationSettings> refreshConversationSettingsFromBackend(
+    String conversationId,
+  ) async {
+    if (!ProviderFactory.pythonBackendEnabled) {
+      return getConversationSettings(conversationId);
+    }
+
+    final summary = await _backendConversationService.getConversationSettings(
+      conversationId,
+    );
+    final settings = summary.toConversationSettings();
+    _conversationSettings[conversationId] = settings;
+    await _saveRuntimeState();
+    return settings;
+  }
+
   /// 更新对话配置
   Future<void> updateConversationSettings(ConversationSettings settings) async {
+    if (ProviderFactory.pythonBackendEnabled) {
+      final summary = await _backendConversationService.updateConversationSettings(
+        settings,
+      );
+      _conversationSettings[settings.conversationId] =
+          summary.toConversationSettings();
+      await _saveRuntimeState();
+      return;
+    }
+
     _conversationSettings[settings.conversationId] = settings;
     await _saveData();
   }
@@ -349,7 +379,7 @@ class ModelServiceManager {
   /// 删除对话配置
   Future<void> deleteConversationSettings(String conversationId) async {
     _conversationSettings.remove(conversationId);
-    await _saveData();
+    await _saveRuntimeState();
   }
 
   // ============ 工具方法 ============

@@ -1,4 +1,6 @@
 """Contract tests for backend conversation/session endpoints."""
+import base64
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from config import get_settings
@@ -77,6 +79,58 @@ def test_conversation_crud_and_settings_flow(client):
     assert patched["latest_checkpoint_id"] == "cp-latest"
     assert patched["selected_checkpoint_id"] == "cp-selected"
     assert patched["is_pinned"] is True
+
+    compact_get = client.get(f"/api/conversations/{conversation_id}/compact-summary")
+    assert compact_get.status_code == 200
+    assert compact_get.json()["summary"] is None
+
+    compact_put = client.put(
+        f"/api/conversations/{conversation_id}/compact-summary",
+        json={
+            "summary": '{"intent":["continue story"]}',
+            "range_start_message_id": "msg-10",
+            "range_end_message_id": "msg-19",
+        },
+    )
+    assert compact_put.status_code == 200
+    compact = compact_put.json()
+    assert compact["summary"] == '{"intent":["continue story"]}'
+    assert compact["range_start_message_id"] == "msg-10"
+    assert compact["range_end_message_id"] == "msg-19"
+
+    compact_clear = client.delete(
+        f"/api/conversations/{conversation_id}/compact-summary"
+    )
+    assert compact_clear.status_code == 200
+    assert compact_clear.json()["summary"] is None
+
+    attachment_upload = client.post(
+        f"/api/conversations/{conversation_id}/attachments",
+        json={
+            "files": [
+                {
+                    "client_id": "file-1",
+                    "name": "hello.txt",
+                    "mime_type": "text/plain",
+                    "kind": "document",
+                    "data": base64.b64encode(b"hello backend attachment").decode("ascii"),
+                    "metadata": {"source": "test"},
+                }
+            ]
+        },
+    )
+    assert attachment_upload.status_code == 201
+    uploaded = attachment_upload.json()["data"][0]
+    assert uploaded["id"] == "file-1"
+    assert uploaded["original_name"] == "hello.txt"
+    assert uploaded["mime_type"] == "text/plain"
+    assert uploaded["size_bytes"] == len(b"hello backend attachment")
+    assert uploaded["kind"] == "document"
+    assert Path(uploaded["local_path"]).exists()
+
+    attachment_list = client.get(f"/api/conversations/{conversation_id}/attachments")
+    assert attachment_list.status_code == 200
+    assert attachment_list.json()["data"][0]["id"] == "file-1"
 
     delete_response = client.delete(f"/api/conversations/{conversation_id}")
     assert delete_response.status_code == 200

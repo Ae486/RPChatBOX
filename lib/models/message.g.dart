@@ -29,13 +29,14 @@ class MessageAdapter extends TypeAdapter<Message> {
       parentId: fields[9] as String?,
       editedAt: fields[10] as DateTime?,
       thinkingDurationSeconds: fields[11] as int?,
+      toolCallRecords: (fields[12] as List?)?.cast<McpToolCallRecord>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, Message obj) {
     writer
-      ..writeByte(12)
+      ..writeByte(13)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -59,7 +60,9 @@ class MessageAdapter extends TypeAdapter<Message> {
       ..writeByte(10)
       ..write(obj.editedAt)
       ..writeByte(11)
-      ..write(obj.thinkingDurationSeconds);
+      ..write(obj.thinkingDurationSeconds)
+      ..writeByte(12)
+      ..write(obj.toolCallRecords);
   }
 
   @override

@@ -1,8 +1,9 @@
-/// INPUT: User/assistant message content + metadata (tokens, provider, attachments)
-/// OUTPUT: Message model for persistence and UI adapters
-/// POS: Models / Base Chat / Message
+// INPUT: User/assistant message content + metadata (tokens, provider, attachments)
+// OUTPUT: Message model for persistence and UI adapters
+// POS: Models / Base Chat / Message
 import 'package:hive/hive.dart';
 import 'attached_file.dart';
+import 'mcp/mcp_tool_call.dart';
 
 part 'message.g.dart';
 
@@ -18,7 +19,7 @@ class Message {
   @HiveField(3)
   final DateTime timestamp;
   @HiveField(4)
-  int? inputTokens;  // 输入 token 数量
+  int? inputTokens; // 输入 token 数量
   @HiveField(5)
   int? outputTokens; // 输出 token 数量
   @HiveField(6)
@@ -33,6 +34,8 @@ class Message {
   DateTime? editedAt; // 编辑时间（可空，兼容旧数据）
   @HiveField(11)
   int? thinkingDurationSeconds; // 思考耗时（秒），用于 UI 显示
+  @HiveField(12)
+  List<McpToolCallRecord>? toolCallRecords; // 工具调用记录（可空，兼容旧数据）
 
   Message({
     required this.id,
@@ -47,6 +50,7 @@ class Message {
     this.parentId,
     this.editedAt,
     this.thinkingDurationSeconds,
+    this.toolCallRecords,
   });
 
   Map<String, dynamic> toJson() {
@@ -63,6 +67,7 @@ class Message {
       'parentId': parentId,
       'editedAt': editedAt?.toIso8601String(),
       'thinkingDurationSeconds': thinkingDurationSeconds,
+      'toolCallRecords': toolCallRecords?.map((item) => item.toJson()).toList(),
     };
   }
 
@@ -85,7 +90,13 @@ class Message {
           ? DateTime.tryParse(json['editedAt'] as String)
           : null,
       thinkingDurationSeconds: json['thinkingDurationSeconds'] as int?,
+      toolCallRecords: (json['toolCallRecords'] as List?)
+          ?.whereType<Map>()
+          .map(
+            (item) =>
+                McpToolCallRecord.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(),
     );
   }
 }
-

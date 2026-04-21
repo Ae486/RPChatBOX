@@ -1,6 +1,6 @@
-/// INPUT: ToolCallData（工具调用状态）+ uiScale
-/// OUTPUT: OwuiToolCallBubble - 工具调用气泡组件
-/// POS: UI 层 / Chat / Owui - MCP 工具调用状态展示
+// INPUT: ToolCallData（工具调用状态）+ uiScale
+// OUTPUT: OwuiToolCallBubble - 工具调用气泡组件
+// POS: UI 层 / Chat / Owui - MCP 工具调用状态展示
 
 import 'dart:async';
 import 'dart:convert';
@@ -14,10 +14,8 @@ import 'palette.dart';
 /// 工具调用气泡组件
 ///
 /// 状态设计：
-/// - pending: 灰色，等待执行
-/// - running: 琥珀色，脉冲动画，双行（工具名+秒数 / 参数摘要）
-/// - success: 绿色，单行（工具名+耗时），可展开
-/// - error: 红色，单行（工具名+错误），可展开
+/// - 统一采用 OWUI 风格中性灰外观，避免状态切换带来的明显抖动
+/// - 运行态保留轻微呼吸动画，完成态通过文案和展开区表达差异
 class OwuiToolCallBubble extends StatefulWidget {
   final ToolCallData toolCall;
   final double uiScale;
@@ -89,7 +87,6 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
   bool get _isPending => widget.toolCall.status == ToolCallStatus.pending;
   bool get _isSuccess => widget.toolCall.status == ToolCallStatus.success;
   bool get _isError => widget.toolCall.status == ToolCallStatus.error;
-  bool get _isCompleted => _isSuccess || _isError;
 
   void _startTimer() {
     if (_secondsTimer != null) return;
@@ -143,7 +140,7 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
         : Colors.black.withValues(alpha: 0.06);
 
     return GestureDetector(
-      onTap: () => setState(() => _expanded = !_expanded),
+      onTap: _canExpand ? () => setState(() => _expanded = !_expanded) : null,
       child: Container(
         width: double.infinity,
         decoration: _buildDecoration(context),
@@ -156,16 +153,17 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
                 horizontal: 12 * us,
                 vertical: 10 * us,
               ),
-              child: _isRunning || _isPending
-                  ? _buildRunningHeader(us: us, isDark: isDark)
-                  : _buildCompletedHeader(us: us, isDark: isDark),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: 40 * us),
+                child: _buildHeader(us: us, isDark: isDark),
+              ),
             ),
             AnimatedSize(
               duration: const Duration(milliseconds: 250),
               curve: Curves.fastOutSlowIn,
               alignment: Alignment.topCenter,
               clipBehavior: Clip.hardEdge,
-              child: _expanded && _isCompleted
+              child: _expanded && _canExpand
                   ? Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -184,31 +182,15 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
   BoxDecoration _buildDecoration(BuildContext context) {
     final isDark = OwuiPalette.isDark(context);
 
-    Color bgColor;
-    Color borderColor;
-
-    switch (widget.toolCall.status) {
-      case ToolCallStatus.pending:
-        bgColor = isDark ? const Color(0xFF1A1A1A) : const Color(0xFFF5F5F5);
-        borderColor = isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.black.withValues(alpha: 0.05);
-      case ToolCallStatus.running:
-        bgColor = isDark ? const Color(0xFF1C1A17) : const Color(0xFFFFFBEB);
-        borderColor = isDark
-            ? Colors.amber.withValues(alpha: 0.2)
-            : Colors.amber.withValues(alpha: 0.3);
-      case ToolCallStatus.success:
-        bgColor = isDark ? const Color(0xFF171917) : const Color(0xFFF0FDF4);
-        borderColor = isDark
-            ? Colors.green.withValues(alpha: 0.15)
-            : Colors.green.withValues(alpha: 0.2);
-      case ToolCallStatus.error:
-        bgColor = isDark ? const Color(0xFF1A1717) : const Color(0xFFFEF2F2);
-        borderColor = isDark
-            ? Colors.red.withValues(alpha: 0.15)
-            : Colors.red.withValues(alpha: 0.2);
-    }
+    final bgColor = isDark ? const Color(0xFF202020) : Colors.white;
+    final borderColor = switch (widget.toolCall.status) {
+      ToolCallStatus.running =>
+        isDark ? Colors.white.withValues(alpha: 0.14) : OwuiPalette.gray300,
+      ToolCallStatus.error =>
+        isDark ? Colors.white.withValues(alpha: 0.16) : OwuiPalette.gray300,
+      _ =>
+        isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0x14000000),
+    };
 
     return BoxDecoration(
       color: bgColor,
@@ -220,21 +202,30 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
   Color _getIconColor(bool isDark) {
     switch (widget.toolCall.status) {
       case ToolCallStatus.pending:
-        return isDark ? OwuiPalette.gray500 : OwuiPalette.gray400;
+        return isDark ? OwuiPalette.gray500 : OwuiPalette.gray500;
       case ToolCallStatus.running:
-        return isDark ? Colors.amber[400]! : Colors.amber[600]!;
+        return isDark ? Colors.white : OwuiPalette.gray700;
       case ToolCallStatus.success:
-        return isDark ? Colors.green[400]! : Colors.green[600]!;
+        return isDark ? OwuiPalette.gray300 : OwuiPalette.gray700;
       case ToolCallStatus.error:
-        return isDark ? Colors.red[400]! : Colors.red[600]!;
+        return isDark ? Colors.white : OwuiPalette.gray700;
     }
   }
 
-  /// 运行中/等待中：双行布局
-  Widget _buildRunningHeader({
-    required double us,
-    required bool isDark,
-  }) {
+  bool get _canExpand {
+    final hasArgs =
+        widget.toolCall.arguments != null &&
+        widget.toolCall.arguments!.isNotEmpty;
+    final hasResult =
+        widget.toolCall.result != null &&
+        widget.toolCall.result!.trim().isNotEmpty;
+    final hasError =
+        widget.toolCall.errorMessage != null &&
+        widget.toolCall.errorMessage!.trim().isNotEmpty;
+    return hasArgs || hasResult || hasError;
+  }
+
+  Widget _buildHeader({required double us, required bool isDark}) {
     final iconColor = _getIconColor(isDark);
     final textColor = OwuiPalette.textSecondary(context);
     final toolName = _extractToolName(widget.toolCall.toolName);
@@ -242,17 +233,14 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // 扳手图标 - 脉冲动画
         _isRunning
             ? AnimatedBuilder(
                 animation: _pulseAnimation,
-                builder: (context, child) => Opacity(
-                  opacity: _pulseAnimation.value,
-                  child: child,
-                ),
-                child: Icon(OwuiIcons.wrench, size: 18 * us, color: iconColor),
+                builder: (context, child) =>
+                    Opacity(opacity: _pulseAnimation.value, child: child),
+                child: Icon(OwuiIcons.wrench, size: 16 * us, color: iconColor),
               )
-            : Icon(OwuiIcons.wrench, size: 18 * us, color: iconColor),
+            : Icon(OwuiIcons.wrench, size: 16 * us, color: iconColor),
 
         SizedBox(width: 10 * us),
 
@@ -261,165 +249,158 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 第一行：工具名 + 状态 + 秒数
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      toolName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12 * us,
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    _isPending ? ' · 等待中' : ' · 执行中 ',
-                    style: TextStyle(fontSize: 12 * us, color: textColor),
-                  ),
-                  if (_isRunning)
-                    ValueListenableBuilder<int>(
-                      valueListenable: _secondsNotifier,
-                      builder: (context, seconds, _) => Text(
-                        '${seconds}s',
-                        style: TextStyle(
-                          fontSize: 12 * us,
-                          color: textColor,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-
-              SizedBox(height: 3 * us),
-
-              // 第二行：参数摘要
               Text(
-                widget.toolCall.argumentsSummary,
+                toolName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 11 * us,
-                  color: textColor.withValues(alpha: 0.7),
-                  fontFamily: 'monospace',
+                  fontSize: 12 * us,
+                  fontWeight: FontWeight.w600,
+                  color: OwuiPalette.textPrimary(context),
                 ),
               ),
+              SizedBox(height: 4 * us),
+              _buildSubtitle(us: us, textColor: textColor),
             ],
           ),
         ),
 
-        SizedBox(width: 4 * us),
+        SizedBox(width: 8 * us),
 
-        // 箭头（运行中不可展开，灰色）
-        Icon(
-          OwuiIcons.chevronDown,
-          size: 14 * us,
-          color: textColor.withValues(alpha: 0.3),
+        AnimatedRotation(
+          turns: _expanded && _canExpand ? 0.5 : 0.0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.fastOutSlowIn,
+          child: Icon(
+            OwuiIcons.chevronDown,
+            size: 14 * us,
+            color: textColor.withValues(alpha: _canExpand ? 0.65 : 0.24),
+          ),
         ),
       ],
     );
   }
 
-  /// 完成：单行布局
-  Widget _buildCompletedHeader({
-    required double us,
-    required bool isDark,
-  }) {
-    final iconColor = _getIconColor(isDark);
-    final textColor = OwuiPalette.textSecondary(context);
-    final toolName = _extractToolName(widget.toolCall.toolName);
-
-    final statusText = _isSuccess
-        ? '已完成（${widget.toolCall.durationDisplay}）'
-        : '执行失败';
-
-    return Row(
-      children: [
-        Icon(OwuiIcons.wrench, size: 14 * us, color: iconColor),
-
-        SizedBox(width: 6 * us),
-
-        Expanded(
-          child: Text(
-            '$toolName · $statusText',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12 * us,
-              color: textColor,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ),
-
-        SizedBox(width: 4 * us),
-
-        AnimatedRotation(
-          turns: _expanded ? 0.5 : 0.0,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.fastOutSlowIn,
-          child: Icon(OwuiIcons.chevronDown, size: 14 * us, color: textColor),
-        ),
-      ],
+  Widget _buildSubtitle({required double us, required Color textColor}) {
+    final style = TextStyle(
+      fontSize: 11 * us,
+      color: textColor.withValues(alpha: 0.9),
+      fontFeatures: const [FontFeature.tabularFigures()],
     );
+
+    if (_isRunning) {
+      return ValueListenableBuilder<int>(
+        valueListenable: _secondsNotifier,
+        builder: (context, seconds, _) => Text(
+          _subtitleText(runningSeconds: seconds),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        ),
+      );
+    }
+
+    return Text(
+      _subtitleText(),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
+  }
+
+  String _subtitleText({int? runningSeconds}) {
+    final parts = <String>[_statusText(runningSeconds: runningSeconds)];
+    final serverName = widget.toolCall.serverName?.trim();
+    if (serverName != null && serverName.isNotEmpty) {
+      parts.add(serverName);
+    }
+
+    final detail = _isError
+        ? _singleLine(widget.toolCall.errorMessage ?? '')
+        : _singleLine(widget.toolCall.argumentsSummary);
+    if (detail.isNotEmpty && detail != '{}') {
+      parts.add(detail);
+    }
+    return parts.join(' · ');
+  }
+
+  String _statusText({int? runningSeconds}) {
+    if (_isPending) {
+      return '等待中';
+    }
+    if (_isRunning) {
+      return '执行中 ${runningSeconds ?? 0}s';
+    }
+    if (_isSuccess) {
+      return '已完成 ${widget.toolCall.durationDisplay}';
+    }
+    return '执行失败';
+  }
+
+  String _singleLine(String value) {
+    final collapsed = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (collapsed.length <= 72) {
+      return collapsed;
+    }
+    return '${collapsed.substring(0, 69)}...';
   }
 
   /// 展开内容：输入参数 + 输出结果
-  Widget _buildExpandedContent({
-    required double us,
-    required bool isDark,
-  }) {
+  Widget _buildExpandedContent({required double us, required bool isDark}) {
     final sections = <Widget>[];
 
     // 输入参数
     if (widget.toolCall.arguments != null &&
         widget.toolCall.arguments!.isNotEmpty) {
-      sections.add(_buildSection(
-        title: '输入',
-        content: _formatJson(widget.toolCall.arguments!),
-        us: us,
-        isDark: isDark,
-      ));
+      sections.add(
+        _buildSection(
+          title: '输入',
+          content: _formatJson(widget.toolCall.arguments!),
+          us: us,
+          isDark: isDark,
+        ),
+      );
     }
 
     // 输出结果
-    if (widget.toolCall.result != null &&
-        widget.toolCall.result!.isNotEmpty) {
-      sections.add(_buildSection(
-        title: '输出',
-        content: widget.toolCall.result!,
-        us: us,
-        isDark: isDark,
-      ));
+    if (widget.toolCall.result != null && widget.toolCall.result!.isNotEmpty) {
+      sections.add(
+        _buildSection(
+          title: '输出',
+          content: widget.toolCall.result!,
+          us: us,
+          isDark: isDark,
+        ),
+      );
     }
 
     // 错误信息
     if (widget.toolCall.errorMessage != null &&
         widget.toolCall.errorMessage!.isNotEmpty) {
-      sections.add(_buildSection(
-        title: '错误',
-        content: widget.toolCall.errorMessage!,
-        us: us,
-        isDark: isDark,
-        isError: true,
-      ));
+      sections.add(
+        _buildSection(
+          title: '错误',
+          content: widget.toolCall.errorMessage!,
+          us: us,
+          isDark: isDark,
+          isError: true,
+        ),
+      );
     }
 
     if (sections.isEmpty) {
-      sections.add(Padding(
-        padding: EdgeInsets.all(12 * us),
-        child: Text(
-          '无详细信息',
-          style: TextStyle(
-            fontSize: 12 * us,
-            color: OwuiPalette.textSecondary(context),
+      sections.add(
+        Padding(
+          padding: EdgeInsets.all(12 * us),
+          child: Text(
+            '无详细信息',
+            style: TextStyle(
+              fontSize: 12 * us,
+              color: OwuiPalette.textSecondary(context),
+            ),
           ),
         ),
-      ));
+      );
     }
 
     return ConstrainedBox(
@@ -446,9 +427,7 @@ class _OwuiToolCallBubbleState extends State<OwuiToolCallBubble>
     required bool isDark,
     bool isError = false,
   }) {
-    final titleColor = isError
-        ? (isDark ? Colors.red[400]! : Colors.red[600]!)
-        : OwuiPalette.textSecondary(context);
+    final titleColor = OwuiPalette.textSecondary(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

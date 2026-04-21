@@ -1,6 +1,6 @@
-/// INPUT: Conversation/ChatSettings + threadJson/activeLeafId + globalModelServiceManager + flutter_chat_ui
-/// OUTPUT: ConversationViewV2() - 被 ConversationViewHost 使用；State API: scrollToMessage()/enterExportMode()
-/// POS: UI 层 / Chat / V2（flutter_chat_ui 集成）核心模块（改动需全量回归）
+// INPUT: Conversation/ChatSettings + threadJson/activeLeafId + globalModelServiceManager + flutter_chat_ui
+// OUTPUT: ConversationViewV2() - 被 ConversationViewHost 使用；State API: scrollToMessage()/enterExportMode()
+// POS: UI 层 / Chat / V2（flutter_chat_ui 集成）核心模块（改动需全量回归）
 
 import 'dart:async';
 import 'dart:convert';
@@ -21,6 +21,7 @@ import '../adapters/ai_provider.dart' as ai;
 import '../adapters/chat_message_adapter.dart';
 import '../adapters/hybrid_langchain_provider.dart';
 import '../adapters/mcp_tool_adapter.dart';
+import '../adapters/proxy_openai_provider.dart';
 import '../chat_ui/owui/assistant_message.dart';
 import '../chat_ui/owui/chat_theme.dart';
 import '../chat_ui/owui/owui_icons.dart';
@@ -42,7 +43,11 @@ import '../models/mcp/mcp_tool_call.dart';
 import '../models/message.dart' as app;
 import '../models/provider_config.dart';
 import '../providers/chat_session_provider.dart';
+import '../services/backend_conversation_service.dart';
 import '../services/export_service.dart';
+import '../services/backend_conversation_source_service.dart';
+import '../services/conversation_context_service.dart';
+import '../services/conversation_summary_service.dart';
 import '../services/image_persistence_service.dart';
 import '../services/roleplay/context_compiler/rp_context_compiler.dart';
 import '../services/roleplay/rp_memory_repository.dart';
@@ -58,6 +63,7 @@ part 'conversation_view_v2/build.dart';
 part 'conversation_view_v2/export_mode.dart';
 part 'conversation_view_v2/message_actions_sheet.dart';
 part 'conversation_view_v2/scroll_and_highlight.dart';
+part 'conversation_view_v2/compact.dart';
 part 'conversation_view_v2/streaming.dart';
 part 'conversation_view_v2/streaming_feature_flags.dart';
 part 'conversation_view_v2/tokens_and_ids.dart';
@@ -119,8 +125,21 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
   String? _activeStreamId;
   chat.Message? _activeAssistantPlaceholder;
+  String? _activeAssistantParentUserId;
   int? _activePromptTokensEstimate;
+  _StreamUsageSnapshot? _activeStreamUsage;
   late ThreadManager _threadManager;
+  final BackendConversationSourceService _backendConversationSourceService =
+      BackendConversationSourceService();
+  final BackendConversationService _backendConversationService =
+      BackendConversationService();
+  final ConversationContextService _conversationContextService =
+      const ConversationContextService();
+  late final ConversationSummaryService _conversationSummaryService =
+      ConversationSummaryService(contextService: _conversationContextService);
+  BackendConversationSourceProjection? _backendSourceProjection;
+  int _backendConversationLoadEpoch = 0;
+  bool _isCompacting = false;
 
   final Map<String, chat.Message> _chatMessageCache = <String, chat.Message>{};
   final Map<String, int> _chatMessageCacheFingerprints = <String, int>{};
@@ -147,7 +166,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   Timer? _stableRevealTimer;
   bool _stableRevealTicking = false;
   int _stableRevealDisplayedLen = 0;
-  bool _stableRevealKickstarted = false;  // FIX-2: 首次 tick 一次性标志
+  bool _stableRevealKickstarted = false; // FIX-2: 首次 tick 一次性标志
 
   // 待 finalize 状态（流结束后等待渐进式渲染完成）
   // 保存快照以避免 active 状态被清空导致持久化失败
@@ -157,8 +176,11 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     Object? error,
     String? streamId,
     chat.Message? placeholder,
+    String? parentUserId,
     int? promptTokens,
-  })? _pendingFinalize;
+    _StreamUsageSnapshot? usage,
+  })?
+  _pendingFinalize;
 
   // 图片持久化：将过期的网络图片保存到本地
   String? _imagePersistenceSweptConversationId;
@@ -197,7 +219,6 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     });
   }
 
-
   @override
   void initState() {
     super.initState();
@@ -228,10 +249,13 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       enableDebugLog: false,
     );
 
-    // 初始化同步对话消息到 chatController
-    scheduleMicrotask(() {
+    scheduleMicrotask(() async {
       if (!mounted) return;
-      _syncConversationToChatController();
+      if (ai.ProviderFactory.pythonBackendEnabled) {
+        await _loadBackendConversationState(autoFollow: false);
+      } else {
+        _syncConversationToChatController();
+      }
       _scheduleImagePersistenceSweep();
     });
   }
@@ -287,7 +311,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       _stableRevealTimer = null;
       _stableRevealTicking = false;
       _stableRevealDisplayedLen = 0;
-      _stableRevealKickstarted = false;  // FIX-2: 重置首次标志
+      _stableRevealKickstarted = false; // FIX-2: 重置首次标志
       _pendingFinalize = null;
 
       _streamImagePrefetchTimer?.cancel();
@@ -303,12 +327,17 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       _conversationSettings = globalModelServiceManager.getConversationSettings(
         widget.conversation.id,
       );
+      _backendSourceProjection = null;
 
       _chatMessageCache.clear();
       _chatMessageCacheFingerprints.clear();
-      scheduleMicrotask(() {
+      scheduleMicrotask(() async {
         if (!mounted) return;
-        _syncConversationToChatController();
+        if (ai.ProviderFactory.pythonBackendEnabled) {
+          await _loadBackendConversationState(autoFollow: false);
+        } else {
+          _syncConversationToChatController();
+        }
         _scheduleImagePersistenceSweep();
       });
     }
@@ -316,7 +345,9 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
   // Thread management delegates to ThreadManager
   ConversationThread _getThread({bool rebuildFromMessagesIfMismatch = true}) {
-    return _threadManager.getThread(rebuildFromMessagesIfMismatch: rebuildFromMessagesIfMismatch);
+    return _threadManager.getThread(
+      rebuildFromMessagesIfMismatch: rebuildFromMessagesIfMismatch,
+    );
   }
 
   void _persistThreadNoSave(ConversationThread thread) {
@@ -377,9 +408,12 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     if (widget.conversation.id != conversationId) return;
 
     final thread = _getThread(rebuildFromMessagesIfMismatch: false);
-    final chain = buildActiveMessageChain(thread);
+    final chain = ai.ProviderFactory.pythonBackendEnabled
+        ? widget.conversation.messages
+        : buildActiveMessageChain(thread);
 
     var changed = false;
+    final changedMessages = <app.Message>[];
     for (final msg in chain) {
       if (_isDisposed) return;
       if (epoch != _imagePersistenceSweepEpoch) return;
@@ -394,14 +428,28 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       _chatMessageCache.remove(msg.id);
       _chatMessageCacheFingerprints.remove(msg.id);
       changed = true;
+      changedMessages.add(msg);
     }
 
     if (!changed) return;
 
-    _syncConversationMessagesSnapshotFromThread(thread);
-    _persistThreadNoSave(thread);
-    _schedulePersistThread(delay: Duration.zero);
-    _syncConversationToChatController();
+    if (ai.ProviderFactory.pythonBackendEnabled) {
+      for (final msg in changedMessages) {
+        await _backendConversationSourceService.patchMessage(
+          conversationId: widget.conversation.id,
+          messageId: msg.id,
+          content: msg.content,
+          editedAt: msg.editedAt,
+          touchLastActivity: false,
+        );
+      }
+      await _loadBackendConversationState(autoFollow: false);
+    } else {
+      _syncConversationMessagesSnapshotFromThread(thread);
+      _persistThreadNoSave(thread);
+      _schedulePersistThread(delay: Duration.zero);
+      _syncConversationToChatController();
+    }
   }
 
   Future<void> _persistMarkdownImagesForMessageId(String messageId) async {
@@ -424,10 +472,21 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
       _chatMessageCache.remove(messageId);
       _chatMessageCacheFingerprints.remove(messageId);
 
-      _syncConversationMessagesSnapshotFromThread(thread);
-      _persistThreadNoSave(thread);
-      _schedulePersistThread(delay: Duration.zero);
-      _syncConversationToChatController();
+      if (ai.ProviderFactory.pythonBackendEnabled) {
+        await _backendConversationSourceService.patchMessage(
+          conversationId: widget.conversation.id,
+          messageId: msg.id,
+          content: msg.content,
+          editedAt: msg.editedAt,
+          touchLastActivity: false,
+        );
+        await _loadBackendConversationState(autoFollow: false);
+      } else {
+        _syncConversationMessagesSnapshotFromThread(thread);
+        _persistThreadNoSave(thread);
+        _schedulePersistThread(delay: Duration.zero);
+        _syncConversationToChatController();
+      }
     } finally {
       _persistingMarkdownMessageIds.remove(messageId);
     }
@@ -442,16 +501,39 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
               (f) => Object.hash(f.id, f.path, f.mimeType, f.name),
             ),
           );
+    final toolCallRecords = message.toolCallRecords;
+    final toolCallRecordsKey =
+        toolCallRecords == null || toolCallRecords.isEmpty
+        ? 0
+        : Object.hashAll(
+            toolCallRecords.map(
+              (record) => Object.hash(
+                record.callId,
+                record.messageId,
+                record.toolName,
+                record.serverName ?? '',
+                record.status,
+                record.durationMs ?? -1,
+                record.argumentsJson ?? '',
+                record.result ?? '',
+                record.errorMessage ?? '',
+                record.timestamp.millisecondsSinceEpoch,
+              ),
+            ),
+          );
 
     return Object.hash(
       message.isUser,
       message.content,
       message.timestamp.millisecondsSinceEpoch,
+      message.editedAt?.millisecondsSinceEpoch ?? -1,
       message.inputTokens ?? -1,
       message.outputTokens ?? -1,
       message.modelName ?? '',
       message.providerName ?? '',
+      message.thinkingDurationSeconds ?? -1,
       attachmentsKey,
+      toolCallRecordsKey,
     );
   }
 
@@ -476,13 +558,320 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
     String userMessageId,
     ConversationThread thread,
   ) {
-    return _threadManager.getAssistantVariantIds(userMessageId, thread);
+    final variants = _threadManager.getAssistantVariantIds(
+      userMessageId,
+      thread,
+    );
+    final pendingVariantId = _pendingAssistantVariantIdForUser(
+      userMessageId,
+      variants,
+    );
+    if (pendingVariantId == null) {
+      return variants;
+    }
+    return [...variants, pendingVariantId];
+  }
+
+  String? _pendingAssistantVariantIdForUser(
+    String userMessageId,
+    List<String> existingVariants,
+  ) {
+    if (!ai.ProviderFactory.pythonBackendEnabled) {
+      return null;
+    }
+    final pendingVariantId = _activeStreamId;
+    if (pendingVariantId == null ||
+        _activeAssistantParentUserId != userMessageId) {
+      return null;
+    }
+    if (existingVariants.contains(pendingVariantId)) {
+      return null;
+    }
+    return pendingVariantId;
+  }
+
+  bool _sameChatMessageIds(List<chat.Message> left, List<chat.Message> right) {
+    if (identical(left, right)) return true;
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (left[index].id != right[index].id) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<app.Message> _currentVisibleMessages() {
+    return widget.conversation.messages
+        .map(_cloneAppMessage)
+        .toList(growable: false);
+  }
+
+  app.Message _cloneAppMessage(app.Message message) {
+    return app.Message.fromJson(message.toJson());
+  }
+
+  ConversationThread _cloneThreadModel(ConversationThread thread) {
+    final messageLookup = <String, app.Message>{
+      for (final entry in thread.nodes.entries) entry.key: entry.value.message,
+    };
+    return ConversationThread.fromJson(
+      thread.toJson(),
+      messageLookup: (id) => messageLookup[id],
+    );
+  }
+
+  List<app.Message> _messagesPathToNode(
+    ConversationThread thread,
+    String messageId,
+  ) {
+    final path = <app.Message>[];
+    var currentId = messageId;
+    final visited = <String>{};
+
+    while (currentId.isNotEmpty && visited.add(currentId)) {
+      final node = thread.nodes[currentId];
+      if (node == null) break;
+      path.add(_cloneAppMessage(node.message));
+      final parentId = node.parentId;
+      if (parentId == null || parentId.isEmpty) break;
+      currentId = parentId;
+    }
+
+    return path.reversed.toList(growable: false);
+  }
+
+  void _setBackendVisibleMessages(
+    List<app.Message> messages, {
+    required bool autoFollow,
+  }) {
+    widget.conversation.messages
+      ..clear()
+      ..addAll(messages.map(_cloneAppMessage));
+    widget.conversation.activeLeafId = messages.isNotEmpty
+        ? messages.last.id
+        : null;
+    _syncConversationToChatController(autoFollow: autoFollow);
+  }
+
+  void _showBackendPrefixToMessage(
+    String messageId, {
+    bool autoFollow = false,
+  }) {
+    final projection = _backendSourceProjection;
+    if (projection == null) return;
+    final visibleMessages = _messagesPathToNode(projection.thread, messageId);
+    if (visibleMessages.isEmpty) return;
+    _setBackendVisibleMessages(visibleMessages, autoFollow: autoFollow);
+  }
+
+  void _replaceBackendProjectionThread(
+    ConversationThread thread, {
+    BackendConversationSourceSnapshot? current,
+  }) {
+    final projection = _backendSourceProjection;
+    if (projection == null) return;
+    _backendSourceProjection = BackendConversationSourceProjection(
+      current: current ?? projection.current,
+      checkpoints: projection.checkpoints,
+      thread: thread,
+      checkpointByMessageId: projection.checkpointByMessageId,
+    );
+  }
+
+  void _mergeBackendSnapshotIntoThread(
+    BackendConversationSourceSnapshot snapshot, {
+    required bool autoFollow,
+  }) {
+    final messages = snapshot.messages
+        .map(_cloneAppMessage)
+        .toList(growable: false);
+    final projection = _backendSourceProjection;
+
+    if (projection == null) {
+      final thread = ConversationThread.fromLinearMessages(
+        widget.conversation.id,
+        messages,
+      );
+      _threadManager.replaceThread(thread);
+      _replaceBackendProjectionThread(thread, current: snapshot);
+      _setBackendVisibleMessages(messages, autoFollow: autoFollow);
+      return;
+    }
+
+    final thread = _cloneThreadModel(projection.thread);
+    var fallbackToLinear = false;
+    for (var index = 0; index < messages.length; index++) {
+      final message = messages[index];
+      final parentId = index == 0 ? null : messages[index - 1].id;
+      final existing = thread.nodes[message.id];
+      if (existing != null) {
+        thread.nodes[message.id] = existing.copyWith(message: message);
+        if (parentId != null) {
+          final parent = thread.nodes[parentId];
+          if (parent == null) {
+            fallbackToLinear = true;
+            break;
+          }
+          if (!parent.children.contains(message.id)) {
+            thread.nodes[parentId] = parent.copyWith(
+              children: [...parent.children, message.id],
+            );
+          }
+        }
+      } else {
+        if (index == 0) {
+          if (thread.nodes.isEmpty) {
+            thread.nodes[message.id] = ThreadNode(
+              id: message.id,
+              parentId: null,
+              message: message,
+              children: const [],
+            );
+            thread.rootId = message.id;
+          } else {
+            fallbackToLinear = true;
+            break;
+          }
+        } else {
+          final parent = thread.nodes[parentId];
+          if (parent == null) {
+            fallbackToLinear = true;
+            break;
+          }
+          thread.nodes[message.id] = ThreadNode(
+            id: message.id,
+            parentId: parentId,
+            message: message,
+            children: const [],
+          );
+          thread.nodes[parentId!] = parent.copyWith(
+            children: [...parent.children, message.id],
+          );
+        }
+      }
+    }
+
+    final mergedThread = fallbackToLinear
+        ? ConversationThread.fromLinearMessages(
+            widget.conversation.id,
+            messages,
+          )
+        : thread;
+    _threadManager.replaceThread(mergedThread);
+    _replaceBackendProjectionThread(mergedThread, current: snapshot);
+    _setBackendVisibleMessages(messages, autoFollow: autoFollow);
+  }
+
+  Future<void> _loadBackendConversationState({bool autoFollow = true}) async {
+    if (!ai.ProviderFactory.pythonBackendEnabled || _isDisposed) return;
+
+    final conversationId = widget.conversation.id;
+    final loadEpoch = ++_backendConversationLoadEpoch;
+    try {
+      final results = await Future.wait([
+        _backendConversationSourceService.getProjection(conversationId),
+        globalModelServiceManager.refreshConversationSettingsFromBackend(
+          conversationId,
+        ),
+        _backendConversationService.getCompactSummary(conversationId),
+      ]);
+      if (!mounted || _isDisposed) return;
+      if (widget.conversation.id != conversationId) return;
+      if (loadEpoch != _backendConversationLoadEpoch) return;
+
+      final projection = results[0] as BackendConversationSourceProjection;
+      final settings = results[1] as ConversationSettings;
+      final compactSummary = results[2] as BackendConversationCompactSummary;
+
+      _backendSourceProjection = projection;
+      _conversationSettings = settings;
+      compactSummary.applyToConversation(widget.conversation);
+      _applyBackendProjection(projection, autoFollow: autoFollow);
+      if (mounted && !_isDisposed) {
+        setState(() {});
+      }
+    } catch (e) {
+      if (loadEpoch != _backendConversationLoadEpoch) return;
+      debugPrint('[ConversationViewV2] backend conversation load failed: $e');
+    }
+  }
+
+  void _applyBackendProjection(
+    BackendConversationSourceProjection projection, {
+    required bool autoFollow,
+  }) {
+    _backendSourceProjection = projection;
+    final visibleMessages = projection.current.messages
+        .map(_cloneAppMessage)
+        .toList(growable: false);
+    widget.conversation.messages
+      ..clear()
+      ..addAll(visibleMessages);
+    _threadManager.replaceThread(projection.thread);
+    widget.conversation.activeLeafId = visibleMessages.isNotEmpty
+        ? visibleMessages.last.id
+        : null;
+    _syncConversationToChatController(autoFollow: autoFollow);
+  }
+
+  void _applyBackendSourceSnapshot(
+    BackendConversationSourceSnapshot snapshot, {
+    required bool autoFollow,
+  }) {
+    _backendConversationLoadEpoch++;
+    _mergeBackendSnapshotIntoThread(snapshot, autoFollow: autoFollow);
+  }
+
+  BackendConversationSourceSnapshot _snapshotWithLocalMessage(
+    BackendConversationSourceSnapshot snapshot,
+    app.Message localMessage,
+  ) {
+    final mergedMessages = snapshot.messages
+        .map(
+          (message) => message.id == localMessage.id
+              ? _cloneAppMessage(localMessage)
+              : _cloneAppMessage(message),
+        )
+        .toList(growable: false);
+    return BackendConversationSourceSnapshot(
+      conversationId: snapshot.conversationId,
+      checkpointId: snapshot.checkpointId,
+      latestCheckpointId: snapshot.latestCheckpointId,
+      selectedCheckpointId: snapshot.selectedCheckpointId,
+      messages: mergedMessages,
+    );
   }
 
   Future<void> _switchAssistantVariant(String userMessageId, int delta) async {
     if (_isDisposed) return;
     if (_isLoading || _streamController.isStreaming) {
       GlobalToast.warning(context, message: '请先停止输出再切换版本');
+      return;
+    }
+
+    if (ai.ProviderFactory.pythonBackendEnabled) {
+      final projection = _backendSourceProjection;
+      if (projection == null) return;
+      final thread = projection.thread;
+      final variants = _assistantVariantIdsForUser(userMessageId, thread);
+      if (variants.length <= 1) return;
+
+      final selected = thread.selectedChild[userMessageId];
+      var index = selected == null ? -1 : variants.indexOf(selected);
+      if (index < 0) index = variants.length - 1;
+
+      final rawNext = index + delta;
+      final nextIndex =
+          ((rawNext % variants.length) + variants.length) % variants.length;
+      final targetChildId = variants[nextIndex];
+
+      await _backendConversationSourceService.selectCheckpoint(
+        conversationId: widget.conversation.id,
+        messageId: targetChildId,
+      );
+      await _loadBackendConversationState(autoFollow: false);
+      scrollToMessage(userMessageId);
       return;
     }
 
@@ -506,7 +895,6 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
 
   bool _handleChatScrollNotification(ScrollNotification notification);
 
-
   void _requestAutoFollow({required bool smooth, bool force = false});
   Widget _wrapHighlighted({required String messageId, required Widget child});
   Widget _wrapExportSelectable({
@@ -527,6 +915,7 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   });
   Future<void> _stopStreaming();
   Future<void> _showMessageActionsSheet(chat.Message message);
+  Future<void> _runCompact();
 
   bool _isProbablyNetworkUrl(String source);
   String _toFilePathIfNeeded(String source);
@@ -539,9 +928,36 @@ class ConversationViewV2State extends _ConversationViewV2StateBase
     with
         _ConversationViewV2ScrollMixin,
         _ConversationViewV2ExportMixin,
+        _ConversationViewV2CompactMixin,
         _ConversationViewV2TokensMixin,
         _ConversationViewV2StreamingMixin,
         _ConversationViewV2MessageActionsMixin,
         _ConversationViewV2UserBubbleMixin,
-        _ConversationViewV2BuildMixin {}
+        _ConversationViewV2BuildMixin {
+  Future<void> refreshFromBackend() =>
+      _loadBackendConversationState(autoFollow: false);
+}
 
+class _StreamUsageSnapshot {
+  final int promptTokens;
+  final int completionTokens;
+  final int totalTokens;
+
+  const _StreamUsageSnapshot({
+    required this.promptTokens,
+    required this.completionTokens,
+    required this.totalTokens,
+  });
+
+  _StreamUsageSnapshot add({
+    required int promptTokens,
+    required int completionTokens,
+    required int totalTokens,
+  }) {
+    return _StreamUsageSnapshot(
+      promptTokens: this.promptTokens + promptTokens,
+      completionTokens: this.completionTokens + completionTokens,
+      totalTokens: this.totalTokens + totalTokens,
+    );
+  }
+}

@@ -113,35 +113,27 @@ void main() {
       expect(outputs, ['片段A', '片段B', '片段C']);
     });
 
-    test('adapts typed SSE thinking/text events into current UI-compatible chunks', () {
-      final parser = ProxyStreamChunkParser(isGeminiModel: false);
+    test(
+      'adapts typed SSE thinking/text events into current UI-compatible chunks',
+      () {
+        final parser = ProxyStreamChunkParser(isGeminiModel: false);
 
-      final outputs = <String>[
-        ...parser.parse({
-          'type': 'thinking_delta',
-          'delta': '先分析',
-        }),
-        ...parser.parse({
-          'type': 'text_delta',
-          'delta': '最终回答',
-        }),
-        ...parser.parse({
-          'type': 'done',
-        }),
-        ...parser.flush(),
-      ];
+        final outputs = <String>[
+          ...parser.parse({'type': 'thinking_delta', 'delta': '先分析'}),
+          ...parser.parse({'type': 'text_delta', 'delta': '最终回答'}),
+          ...parser.parse({'type': 'done'}),
+          ...parser.flush(),
+        ];
 
-      expect(outputs, ['<think>', '先分析', '</think>', '最终回答']);
-    });
+        expect(outputs, ['<think>', '先分析', '</think>', '最终回答']);
+      },
+    );
 
     test('closes typed thinking before tool_call event', () {
       final parser = ProxyStreamChunkParser(isGeminiModel: false);
 
       final outputs = <String>[
-        ...parser.parse({
-          'type': 'thinking_delta',
-          'delta': '先分析',
-        }),
+        ...parser.parse({'type': 'thinking_delta', 'delta': '先分析'}),
         ...parser.parse({
           'type': 'tool_call',
           'tool_calls': [
@@ -152,10 +144,7 @@ void main() {
             },
           ],
         }),
-        ...parser.parse({
-          'type': 'text_delta',
-          'delta': '最终回答',
-        }),
+        ...parser.parse({'type': 'text_delta', 'delta': '最终回答'}),
         ...parser.flush(),
       ];
 
@@ -166,14 +155,8 @@ void main() {
       final parser = ProxyStreamChunkParser(isGeminiModel: false);
 
       final events = <AIStreamEvent>[
-        ...parser.parseEvents({
-          'type': 'thinking_delta',
-          'delta': '先分析',
-        }),
-        ...parser.parseEvents({
-          'type': 'text_delta',
-          'delta': '最终回答',
-        }),
+        ...parser.parseEvents({'type': 'thinking_delta', 'delta': '先分析'}),
+        ...parser.parseEvents({'type': 'text_delta', 'delta': '最终回答'}),
         ...parser.parseEvents({
           'type': 'tool_call',
           'tool_calls': [
@@ -236,6 +219,26 @@ void main() {
       expect(events[2].callId, 'call_2');
       expect(events[2].errorMessage, 'permission denied');
       expect(events[2].isTypedSemantic, isTrue);
+    });
+
+    test('emits structured typed usage events', () {
+      final parser = ProxyStreamChunkParser(isGeminiModel: false);
+
+      final events = <AIStreamEvent>[
+        ...parser.parseEvents({
+          'type': 'usage',
+          'prompt_tokens': 120,
+          'completion_tokens': 34,
+          'total_tokens': 154,
+        }),
+      ];
+
+      expect(events, hasLength(1));
+      expect(events[0].type, AIStreamEventType.usage);
+      expect(events[0].promptTokens, 120);
+      expect(events[0].completionTokens, 34);
+      expect(events[0].totalTokens, 154);
+      expect(events[0].isTypedSemantic, isTrue);
     });
   });
 }

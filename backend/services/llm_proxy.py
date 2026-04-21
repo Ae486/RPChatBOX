@@ -72,6 +72,13 @@ class LLMProxyService:
             "stream": request.stream,
         }
 
+        if request.stream and request.provider and request.provider.type in (
+            "openai",
+            "deepseek",
+            "gemini",
+        ):
+            body["stream_options"] = {"include_usage": True}
+
         # Add optional parameters if provided
         if request.temperature is not None:
             body["temperature"] = request.temperature
@@ -91,6 +98,12 @@ class LLMProxyService:
             body["include_reasoning"] = request.include_reasoning
         if request.extra_body:
             body["extra_body"] = request.extra_body
+
+        # Tool / function calling
+        if request.tools:
+            body["tools"] = request.tools
+        if request.tool_choice is not None:
+            body["tool_choice"] = request.tool_choice
 
         return body
 

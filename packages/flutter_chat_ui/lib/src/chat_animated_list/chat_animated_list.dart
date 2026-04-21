@@ -227,6 +227,19 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
   bool _keyboardAutoScroll = false;
   double _lastKeyboardHeight = 0.0;
 
+  List<Message> _dedupeMessagesByIdKeepingLast(List<Message> messages) {
+    if (messages.length <= 1) return messages;
+
+    final seen = <String>{};
+    final dedupedReversed = <Message>[];
+    for (final message in messages.reversed) {
+      if (seen.add(message.id)) {
+        dedupedReversed.add(message);
+      }
+    }
+    return dedupedReversed.reversed.toList(growable: false);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1122,6 +1135,15 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
     final Message data,
     final bool animated,
   ) {
+    final existingIndex = _oldList.indexWhere((m) => m.id == data.id);
+    if (existingIndex != -1) {
+      _oldList[existingIndex] = data;
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+
     // If for some reason `_userHasScrolled` is true and the user is not at the bottom of the list,
     // set `_userHasScrolled` to false
     if (_userHasScrolled && _isAtChatEndScrollPosition) {
@@ -1170,6 +1192,28 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
     List<Message> messagesToInsert,
     final bool animated,
   ) {
+    final normalizedMessages = _dedupeMessagesByIdKeepingLast(messagesToInsert);
+    final existingIds = _oldList.map((m) => m.id).toSet();
+    final uniqueMessages = <Message>[];
+    for (final message in normalizedMessages) {
+      if (existingIds.contains(message.id)) {
+        final existingIndex = _oldList.indexWhere((m) => m.id == message.id);
+        if (existingIndex != -1) {
+          _oldList[existingIndex] = message;
+        }
+      } else {
+        uniqueMessages.add(message);
+        existingIds.add(message.id);
+      }
+    }
+    if (uniqueMessages.isEmpty) {
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    messagesToInsert = uniqueMessages;
+
     // If for some reason `_userHasScrolled` is true and the user is not at the bottom of the list,
     // set `_userHasScrolled` to false
     if (_userHasScrolled && _isAtChatEndScrollPosition) {
@@ -1268,8 +1312,14 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
     Message newData,
     bool animated,
   ) {
-    _onRemoved(position, oldData, animated);
-    _onInserted(position, newData, animated);
+    if (position < 0 || position >= _oldList.length) {
+      return;
+    }
+
+    _oldList[position] = newData;
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   /// Handles a `Move` operation as identified by `diffutil.calculateDiff`.
@@ -1386,7 +1436,9 @@ class _ChatAnimatedListState extends State<ChatAnimatedList>
           case ChatOperationType.set:
             // If op.messages is provided (even if empty), it's the new desired state.
             // If op.messages is null, it signifies that the list should be cleared.
-            final newList = op.messages ?? const <Message>[];
+            final newList = _dedupeMessagesByIdKeepingLast(
+              op.messages ?? const <Message>[],
+            );
 
             final updates =
                 diffutil

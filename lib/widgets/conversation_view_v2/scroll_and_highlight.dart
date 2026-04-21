@@ -5,6 +5,20 @@
 part of '../conversation_view_v2.dart';
 
 mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
+  List<chat.Message> _dedupeChatMessagesById(List<chat.Message> messages) {
+    if (messages.length <= 1) return messages;
+
+    final seen = <String>{};
+    final dedupedReversed = <chat.Message>[];
+    for (final message in messages.reversed) {
+      if (seen.add(message.id)) {
+        dedupedReversed.add(message);
+      }
+    }
+
+    return dedupedReversed.reversed.toList(growable: false);
+  }
+
   void scrollToMessage(String messageId) {
     _pendingScrollToMessageId = messageId;
     _pendingScrollToMessageAttempts = 0;
@@ -12,8 +26,9 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
   }
 
   void _syncConversationToChatController({bool autoFollow = true}) {
-    final thread = _getThread();
-    final chain = buildActiveMessageChain(thread);
+    final chain = ai.ProviderFactory.pythonBackendEnabled
+        ? widget.conversation.messages
+        : buildActiveMessageChain(_getThread());
     final msgs = chain.map(ChatMessageAdapter.toFlutterChatMessage).toList();
 
     // Keep the active streaming placeholder in the list during a best-effort sync,
@@ -27,7 +42,37 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
       msgs.add(placeholder);
     }
 
-    _chatController.setMessages(msgs, animated: false);
+    final normalizedMsgs = _dedupeChatMessagesById(msgs);
+    // During backend streaming the live assistant row is owned by incremental
+    // `updateMessage` calls only. Replacing the full list here reintroduces a
+    // second writer and can leave two visible assistant rows racing in the UI.
+    final shouldFreezeBackendStreamingList =
+        ai.ProviderFactory.pythonBackendEnabled &&
+        streamId != null &&
+        placeholder != null &&
+        _chatController.messages.any((m) => m.id == placeholder.id);
+    if (shouldFreezeBackendStreamingList) {
+      _tryScrollToPendingMessage();
+      if (autoFollow && _pendingScrollToMessageId == null) {
+        _requestAutoFollow(smooth: false, force: true);
+      }
+      return;
+    }
+
+    final shouldKeepStreamingList =
+        ai.ProviderFactory.pythonBackendEnabled &&
+        streamId != null &&
+        placeholder != null &&
+        _sameChatMessageIds(_chatController.messages, normalizedMsgs);
+    if (shouldKeepStreamingList) {
+      _tryScrollToPendingMessage();
+      if (autoFollow && _pendingScrollToMessageId == null) {
+        _requestAutoFollow(smooth: false, force: true);
+      }
+      return;
+    }
+
+    _chatController.setMessages(normalizedMsgs, animated: false);
     _tryScrollToPendingMessage();
 
     // Scroll to bottom after messages are set
