@@ -222,6 +222,27 @@ class SetupPendingUserEditDeltaRecord(SQLModel, table=True):
     consumed_at: datetime | None = Field(default=None, index=True)
 
 
+class SetupAgentRuntimeStateRecord(SQLModel, table=True):
+    """Runtime-private cognitive state snapshot for one workspace step."""
+
+    __tablename__ = "rp_setup_agent_runtime_states"
+    __table_args__ = (UniqueConstraint("workspace_id", "step_id"),)
+
+    runtime_state_id: str = Field(primary_key=True, index=True)
+    workspace_id: str = Field(
+        foreign_key="rp_setup_workspaces.workspace_id",
+        index=True,
+    )
+    step_id: str = Field(index=True)
+    state_version: int = 1
+    snapshot_json: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(_JSON_VARIANT, nullable=False),
+    )
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    updated_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
 class SetupOpenQuestionRecord(SQLModel, table=True):
     """Open question record owned by SetupWorkspace."""
 

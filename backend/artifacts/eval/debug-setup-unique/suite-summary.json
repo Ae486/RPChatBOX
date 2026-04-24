@@ -1,0 +1,115 @@
+{
+  "suite_id": "fe8569c7043c49ad8f4d176cb4e245ed",
+  "case_count": 1,
+  "run_count": 1,
+  "pass_count": 0,
+  "fail_count": 1,
+  "output_dir": "artifacts/eval/debug-setup-unique",
+  "items": [
+    {
+      "case_id": "setup.repair.writing_contract.ask_user_after_semantic_fail.v1",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "scope": "setup",
+      "status": "failed",
+      "attempt_index": 1,
+      "replay_path": "artifacts/eval/debug-setup-unique/replays/setup.repair.writing_contract.ask_user_after_semantic_fail.v1--e9bd8d3ceaec4ba49c8f728cf40acaf2.json",
+      "report_path": "artifacts/eval/debug-setup-unique/reports/setup.repair.writing_contract.ask_user_after_semantic_fail.v1--e9bd8d3ceaec4ba49c8f728cf40acaf2.json",
+      "report": {
+        "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+        "case_id": "setup.repair.writing_contract.ask_user_after_semantic_fail.v1",
+        "scope": "setup",
+        "status": "failed",
+        "assertion_summary": {
+          "pass": 0,
+          "fail": 4,
+          "warn": 0,
+          "skip": 1
+        },
+        "hard_failures": [
+          "finish_is_awaiting_user_input",
+          "repair_route_is_ask_user",
+          "warnings_include_requires_user_input",
+          "assistant_asks_for_preferences"
+        ],
+        "failure_layer": "infra",
+        "finish_reason": null,
+        "repair_route": null,
+        "completion_guard_reason": null,
+        "last_failure_category": null,
+        "last_failure_message": null,
+        "cognitive_state_invalidated": null,
+        "cognitive_ready_for_review": null,
+        "cognitive_invalidation_reasons": [],
+        "remaining_open_issues": [],
+        "commit_blocked": false,
+        "subjective_hook_summary": {
+          "total": 1,
+          "pending": 1,
+          "executed": 0,
+          "judge_family_counts": {
+            "llm_judge": 1
+          },
+          "rubric_refs": [
+            "setup/clarification-quality/v1"
+          ],
+          "status_counts": {
+            "skip": 1
+          },
+          "average_numeric_score": null,
+          "rubric_summaries": {
+            "setup/clarification-quality/v1": {
+              "total": 1,
+              "pending": 1,
+              "executed": 0,
+              "status_counts": {
+                "skip": 1
+              },
+              "average_numeric_score": null,
+              "hook_ids": [
+                "clarification_quality"
+              ],
+              "case_count": 1
+            }
+          },
+          "artifact_count": 1
+        },
+        "subjective_hook_results": [
+          {
+            "hook_id": "clarification_quality",
+            "artifact_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:subjective_hook:clarification_quality",
+            "judge_family": "llm_judge",
+            "rubric_ref": "setup/clarification-quality/v1",
+            "rubric_title": "Setup Clarification Quality",
+            "status": "skip",
+            "score": null,
+            "label": "pending",
+            "explanation": "Subjective hook prepared but no judge executor is configured yet",
+            "judge_model_id": null,
+            "judge_provider_id": null,
+            "judge_prompt_version": "llm-judge/v2",
+            "judge_response_schema_version": "judge-response/v2",
+            "judge_skip_reason": null,
+            "judge_status_source": null,
+            "judge_score_source": null,
+            "judge_score_band": null,
+            "judge_score_band_conflict": false,
+            "judge_strengths": [],
+            "judge_issues": [],
+            "target_available": false,
+            "resolved_source": "runtime_result",
+            "resolved_path": "assistant_text"
+          }
+        ],
+        "subjective_hook_artifact_ids": [
+          "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:subjective_hook:clarification_quality"
+        ],
+        "pending_judge_hook_ids": [
+          "clarification_quality"
+        ],
+        "end_reason_summary": null,
+        "phoenix": null,
+        "replay_path": "artifacts/eval/debug-setup-unique/replays/setup.repair.writing_contract.ask_user_after_semantic_fail.v1--e9bd8d3ceaec4ba49c8f728cf40acaf2.json"
+      }
+    }
+  ]
+}

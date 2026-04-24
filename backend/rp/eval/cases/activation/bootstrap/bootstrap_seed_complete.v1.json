@@ -1,0 +1,151 @@
+{
+  "case_id": "activation.bootstrap.bootstrap_seed_complete.v1",
+  "title": "Activation should seed the initial session and chapter bootstrap state with foundation and blueprint digests",
+  "scope": "activation",
+  "category": "handoff_complete",
+  "tags": ["mvp", "deterministic", "activation", "bootstrap"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "activation_graph_runner.activate_workspace",
+    "graph_id": "activation_v1",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-activation-bootstrap-seed-001"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-activation-bootstrap-seed-001",
+      "mode": "longform",
+      "current_step": "longform_blueprint",
+      "drafts": {
+        "story_config": {
+          "model_profile_ref": "model.default",
+          "worker_profile_ref": "worker.default",
+          "post_write_policy_preset": "balanced",
+          "notes": "Keep the post-write loop conservative."
+        },
+        "writing_contract": {
+          "pov_rules": ["third_person_limited"],
+          "style_rules": ["restrained"],
+          "writing_constraints": ["avoid exposition dumps"]
+        },
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "bootstrap_foundation_char",
+              "domain": "character",
+              "path": "cast.archivist",
+              "title": "Archivist",
+              "tags": ["keeper"],
+              "source_refs": [],
+              "content": {
+                "summary": "The archivist seals every ledger at dawn."
+              }
+            }
+          ]
+        },
+        "longform_blueprint": {
+          "premise": "An archivist discovers forged keys in the city ledger.",
+          "central_conflict": "The archivist must prove the forgery before the purge begins.",
+          "chapter_strategy": "Escalate from discovery to exposure.",
+          "chapter_blueprints": [
+            {
+              "chapter_id": "ch1",
+              "title": "The First Seal",
+              "purpose": "Reveal the forged key.",
+              "major_beats": ["Discovery", "Suspicion"],
+              "setup_payoff_targets": ["forged key"]
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "story_config",
+          "target_draft_refs": ["draft:story_config"],
+          "reason": "freeze story_config"
+        },
+        {
+          "step_id": "writing_contract",
+          "target_draft_refs": ["draft:writing_contract"],
+          "reason": "freeze writing_contract"
+        },
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:bootstrap_foundation_char"],
+          "reason": "freeze foundation"
+        },
+        {
+          "step_id": "longform_blueprint",
+          "target_draft_refs": ["draft:longform_blueprint"],
+          "reason": "freeze blueprint"
+        }
+      ]
+    },
+    "env_overrides": {
+      "run_pending_retrieval_ingestion_for_all_commits": true
+    }
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_activation_completed",
+        "source": "activation_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "activation_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "session_phase_seeded",
+        "source": "session_truth",
+        "type": "equals",
+        "path": "session.current_state_json.narrative_progress.current_phase",
+        "expected": "outline_drafting",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "foundation_digest_present",
+        "source": "session_truth",
+        "type": "count_gte",
+        "path": "chapter.builder_snapshot_json.foundation_digest",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "blueprint_digest_present",
+        "source": "session_truth",
+        "type": "count_gte",
+        "path": "chapter.builder_snapshot_json.blueprint_digest",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "chapter_goal_exists",
+        "source": "session_truth",
+        "type": "exists",
+        "path": "chapter.chapter_goal",
+        "expected": true,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

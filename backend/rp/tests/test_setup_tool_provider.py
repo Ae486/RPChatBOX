@@ -16,6 +16,11 @@ class _DummyContextBuilder:
         raise AssertionError("context builder should not be used in this test")
 
 
+class _DummyRuntimeStateService:
+    def get_snapshot(self, *, workspace_id: str, step_id):
+        return None
+
+
 class _FakeWorkspaceService:
     def __init__(self, workspace=None) -> None:
         self._workspace = workspace
@@ -37,6 +42,7 @@ async def test_setup_tool_provider_schema_validation_returns_machine_readable_de
     provider = SetupToolProvider(
         workspace_service=_FakeWorkspaceService(),
         context_builder=_DummyContextBuilder(),
+        runtime_state_service=_DummyRuntimeStateService(),
     )
 
     result = await provider.call_tool(
@@ -69,6 +75,7 @@ async def test_setup_tool_provider_blocks_commit_when_blocking_questions_exist()
     provider = SetupToolProvider(
         workspace_service=service,
         context_builder=_DummyContextBuilder(),
+        runtime_state_service=_DummyRuntimeStateService(),
     )
 
     result = await provider.call_tool(
@@ -107,6 +114,7 @@ async def test_setup_tool_provider_blocks_reproposal_after_rejection():
     provider = SetupToolProvider(
         workspace_service=service,
         context_builder=_DummyContextBuilder(),
+        runtime_state_service=_DummyRuntimeStateService(),
     )
 
     result = await provider.call_tool(

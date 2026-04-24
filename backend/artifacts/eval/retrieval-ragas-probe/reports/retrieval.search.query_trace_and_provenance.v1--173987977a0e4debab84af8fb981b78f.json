@@ -1,0 +1,171 @@
+{
+  "run_id": "173987977a0e4debab84af8fb981b78f",
+  "case_id": "retrieval.search.query_trace_and_provenance.v1",
+  "scope": "retrieval",
+  "status": "completed",
+  "assertion_summary": {
+    "pass": 8,
+    "fail": 0,
+    "warn": 0,
+    "skip": 1
+  },
+  "hard_failures": [],
+  "failure_layer": null,
+  "finish_reason": "retrieval_completed",
+  "repair_route": null,
+  "completion_guard_reason": null,
+  "last_failure_category": null,
+  "last_failure_message": null,
+  "cognitive_state_invalidated": null,
+  "cognitive_ready_for_review": null,
+  "cognitive_invalidation_reasons": [],
+  "remaining_open_issues": [],
+  "commit_blocked": false,
+  "subjective_hook_summary": {
+    "total": 1,
+    "pending": 1,
+    "executed": 0,
+    "judge_family_counts": {
+      "llm_judge": 1
+    },
+    "rubric_refs": [
+      "retrieval/query-quality/v1"
+    ],
+    "status_counts": {
+      "skip": 1
+    },
+    "average_numeric_score": null,
+    "rubric_summaries": {
+      "retrieval/query-quality/v1": {
+        "total": 1,
+        "pending": 1,
+        "executed": 0,
+        "status_counts": {
+          "skip": 1
+        },
+        "average_numeric_score": null,
+        "hook_ids": [
+          "retrieval_query_quality"
+        ],
+        "case_count": 1
+      }
+    },
+    "artifact_count": 1
+  },
+  "subjective_hook_results": [
+    {
+      "hook_id": "retrieval_query_quality",
+      "artifact_id": "173987977a0e4debab84af8fb981b78f:artifact:subjective_hook:retrieval_query_quality",
+      "judge_family": "llm_judge",
+      "rubric_ref": "retrieval/query-quality/v1",
+      "rubric_title": "Retrieval Query Quality",
+      "status": "skip",
+      "score": null,
+      "label": "pending",
+      "explanation": "Subjective hook prepared but no judge executor is configured yet",
+      "judge_model_id": null,
+      "judge_provider_id": null,
+      "judge_prompt_version": "llm-judge/v2",
+      "judge_response_schema_version": "judge-response/v2",
+      "judge_skip_reason": null,
+      "judge_status_source": null,
+      "judge_score_source": null,
+      "judge_score_band": null,
+      "judge_score_band_conflict": false,
+      "judge_strengths": [],
+      "judge_issues": [],
+      "target_available": true,
+      "resolved_source": "retrieval_result",
+      "resolved_path": "query_input.text_query"
+    }
+  ],
+  "subjective_hook_artifact_ids": [
+    "173987977a0e4debab84af8fb981b78f:artifact:subjective_hook:retrieval_query_quality"
+  ],
+  "pending_judge_hook_ids": [
+    "retrieval_query_quality"
+  ],
+  "end_reason_summary": "retrieval_completed",
+  "phoenix": null,
+  "ragas": {
+    "enabled": true,
+    "available": true,
+    "status": "failed",
+    "metric_names": [
+      "faithfulness"
+    ],
+    "sample_count": 1,
+    "record_count": 0,
+    "metric_summary": {
+      "faithfulness": null
+    },
+    "sample_overview": [
+      {
+        "sample_id": "retrieval.search.query_trace_and_provenance.v1:173987977a0e4debab84af8fb981b78f",
+        "case_id": "retrieval.search.query_trace_and_provenance.v1",
+        "query": "archive sunrise ledger",
+        "retrieved_context_count": 2,
+        "has_response": true,
+        "has_reference": true,
+        "metadata": {
+          "run_id": "173987977a0e4debab84af8fb981b78f",
+          "trace_id": "5996daa6406f4985bb1a0526fbaa514c",
+          "story_id": "story-case-retrieval-trace-001",
+          "workspace_id": "5b7cbf1c67e349e9adfb72c8710b41ba",
+          "commit_id": "f64c12d25a724c94b950b10ad8684960",
+          "query_kind": "archival",
+          "top_k": 2,
+          "domains": [
+            "world_rule"
+          ],
+          "rerank": true,
+          "retrieval_route": "retrieval.hybrid.rrf",
+          "retrieval_result_kind": "chunk",
+          "pipeline_stages": [
+            "retrieve",
+            "fusion",
+            "rerank",
+            "chunk_result_builder"
+          ],
+          "returned_count": 2,
+          "retrieval_warnings": [
+            "embedding_provider_failed:APIError",
+            "embedding_fallback:deterministic_local_v1",
+            "rerank_backend_unavailable:no_supported_model",
+            "rerank_backend_unavailable:no_local_model"
+          ]
+        }
+      }
+    ],
+    "error": {
+      "type": "TypeError",
+      "message": "All metrics must be initialised metric objects, e.g: metrics=[BleuScore(), AspectCritic()]"
+    },
+    "runtime": {
+      "metric_names": [
+        "faithfulness"
+      ],
+      "story_id": "story-case-retrieval-trace-001",
+      "llm": {
+        "model_id": "93f78365-dcb2-451e-9cf4-53e5895659b9",
+        "model_name": "gpt-4o-mini",
+        "provider_id": "7b2b2ef8-4014-4ddd-a554-bf106546f926",
+        "provider_type": "openai"
+      }
+    }
+  },
+  "diagnostics": {
+    "diagnostic_version": "v1",
+    "capabilities": {},
+    "attribution": {
+      "primary_suspects": [],
+      "optimization_candidates": [],
+      "dimensions": {}
+    },
+    "observability": {
+      "supported_scope": "retrieval",
+      "diagnostic_mode": "not_implemented_for_scope"
+    }
+  },
+  "replay_path": "artifacts/eval/retrieval-ragas-probe/replays/retrieval.search.query_trace_and_provenance.v1--173987977a0e4debab84af8fb981b78f.json"
+}

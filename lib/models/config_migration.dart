@@ -52,8 +52,16 @@ class ConfigMigration {
 
   /// 从模型名称推断能力
   static Set<ModelCapability> _inferCapabilities(String modelName) {
-    final capabilities = <ModelCapability>{ModelCapability.text};
+    final capabilities = <ModelCapability>{};
     final modelLower = modelName.toLowerCase();
+
+    if (modelLower.contains('reason') ||
+        modelLower.contains('o1') ||
+        modelLower.contains('gpt-5') ||
+        modelLower.contains('gemini-2.5') ||
+        modelLower.contains('deepseek-r1')) {
+      capabilities.add(ModelCapability.reasoning);
+    }
 
     // 视觉能力
     if (modelLower.contains('vision') ||

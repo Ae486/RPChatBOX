@@ -158,6 +158,13 @@ def _get_llm_service():
     return get_llm_proxy_service()
 
 
+def _get_litellm_backend_service():
+    """Get the LiteLLM service for non-chat OpenAI-compatible endpoints."""
+    from services.litellm_service import get_litellm_service
+
+    return get_litellm_service()
+
+
 async def _wait_for_client_disconnect(
     request: Request,
     *,
@@ -338,6 +345,65 @@ def _build_stream_error_sse(*, code: str, message: str) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+async def _resolve_non_chat_runtime(request: Request) -> tuple[dict[str, Any], str, ProviderConfig]:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "JSON body must be an object", "code": "invalid_json_body"}},
+        )
+
+    provider_data = body.get("provider")
+    provider: ProviderConfig | None = None
+    if provider_data is not None:
+        try:
+            provider = ProviderConfig(**provider_data)
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=e.errors())
+
+    model = str(body.get("model") or "").strip()
+    if not model:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"message": "Model is required", "code": "missing_model"}},
+        )
+
+    resolved_model, resolved_provider_id = _resolve_runtime_model(
+        model_id=body.get("model_id"),
+        request_model=model,
+        provider_id=body.get("provider_id"),
+    )
+    resolved_provider = _resolve_runtime_provider(
+        provider_id=resolved_provider_id,
+        inline_provider=provider,
+    )
+    if resolved_provider is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "Provider configuration is required", "code": "missing_provider"}},
+        )
+    return body, resolved_model, resolved_provider
+
+
+def _raise_non_chat_service_error(exc: Exception) -> None:
+    if settings.use_litellm:
+        from services.litellm_service import get_http_status_for_exception
+
+        status_code, error_code = get_http_status_for_exception(exc)
+        raise HTTPException(
+            status_code=status_code,
+            detail={"error": {"message": str(exc), "code": error_code}},
+        )
+    raise HTTPException(
+        status_code=500,
+        detail={"error": {"message": f"Internal error: {exc}", "code": "internal_error"}},
+    )
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """
@@ -473,6 +539,87 @@ async def chat_completions(request: Request):
             status_code=500,
             detail={"error": {"message": f"Internal error: {e}", "code": "internal_error"}},
         )
+
+
+@router.post("/embeddings")
+@router.post("/v1/embeddings")
+async def embeddings(request: Request):
+    body, resolved_model, resolved_provider = await _resolve_non_chat_runtime(request)
+    input_payload = body.get("input")
+    if input_payload is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"message": "input is required", "code": "missing_input"}},
+        )
+
+    service = _get_litellm_backend_service()
+    try:
+        return await asyncio.to_thread(
+            service.embedding,
+            provider=resolved_provider,
+            model=resolved_model,
+            input_texts=input_payload,
+            encoding_format=(
+                str(body.get("encoding_format"))
+                if body.get("encoding_format") is not None
+                else None
+            ),
+            dimensions=(
+                int(body.get("dimensions"))
+                if body.get("dimensions") is not None
+                else None
+            ),
+        )
+    except Exception as e:
+        logger.exception(
+            "[OBS] embeddings_request_failed provider=%s model=%s",
+            resolved_provider.type,
+            resolved_model,
+        )
+        _raise_non_chat_service_error(e)
+
+
+@router.post("/rerank")
+@router.post("/v1/rerank")
+async def rerank(request: Request):
+    body, resolved_model, resolved_provider = await _resolve_non_chat_runtime(request)
+    query = str(body.get("query") or "").strip()
+    documents = body.get("documents")
+    top_n = body.get("top_n")
+
+    if not query:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"message": "query is required", "code": "missing_query"}},
+        )
+    if not isinstance(documents, list) or not documents:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "message": "documents must be a non-empty list",
+                    "code": "missing_documents",
+                }
+            },
+        )
+
+    normalized_documents = [str(item) for item in documents]
+    try:
+        return await asyncio.to_thread(
+            _get_litellm_backend_service().rerank,
+            provider=resolved_provider,
+            model=resolved_model,
+            query=query,
+            documents=normalized_documents,
+            top_n=(int(top_n) if top_n is not None else None),
+        )
+    except Exception as e:
+        logger.exception(
+            "[OBS] rerank_request_failed provider=%s model=%s",
+            resolved_provider.type,
+            resolved_model,
+        )
+        _raise_non_chat_service_error(e)
 
 
 @router.get("/models")

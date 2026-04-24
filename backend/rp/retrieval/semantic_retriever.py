@@ -19,6 +19,7 @@ from .embedder import Embedder
 from .search_utils import (
     build_chunk_hit,
     build_filters_applied,
+    chunk_view_priority,
     cosine_similarity,
     query_vector_literal,
     row_matches_common_filters,
@@ -34,6 +35,26 @@ class SemanticRetriever:
 
     async def search(self, query: RetrievalQuery) -> RetrievalSearchResult:
         started = time.perf_counter()
+        if not (query.text_query or "").strip():
+            warning = "dense_unavailable:empty_query"
+            return RetrievalSearchResult(
+                query="",
+                hits=[],
+                trace=RetrievalTrace(
+                    trace_id=f"trace_{uuid.uuid4().hex[:10]}",
+                    query_id=query.query_id,
+                    route="retrieval.semantic.empty",
+                    result_kind="chunk",
+                    filters_applied=build_filters_applied(query),
+                    retriever_routes=["retrieval.semantic.empty"],
+                    pipeline_stages=["retrieve"],
+                    candidate_count=0,
+                    returned_count=0,
+                    timings={"semantic_ms": round((time.perf_counter() - started) * 1000, 3)},
+                    warnings=[warning],
+                ),
+                warnings=[warning],
+            )
         vector, warnings, embedding_model = self._embedder.embed_query(query.text_query or "")
         rows, extra_warnings, route = self._load_ranked_rows(query, vector=vector)
         warnings = [*warnings, *extra_warnings]
@@ -59,7 +80,10 @@ class SemanticRetriever:
                 trace_id=f"trace_{uuid.uuid4().hex[:10]}",
                 query_id=query.query_id,
                 route=route,
+                result_kind="chunk",
                 filters_applied=build_filters_applied(query),
+                retriever_routes=[route],
+                pipeline_stages=["retrieve"],
                 candidate_count=len(rows),
                 returned_count=len(hits),
                 timings={"semantic_ms": round((time.perf_counter() - started) * 1000, 3)},
@@ -195,5 +219,11 @@ class SemanticRetriever:
             if score <= 0.0:
                 continue
             rows.append((chunk, asset, collection, score))
-        rows.sort(key=lambda item: item[3], reverse=True)
+        rows.sort(
+            key=lambda item: (
+                -item[3],
+                chunk_view_priority(item[0].metadata_json or {}),
+                item[0].chunk_index,
+            )
+        )
         return rows

@@ -63,7 +63,13 @@ class TestGetLitellmModel:
         assert service._get_litellm_model(p, "claude-3-opus") == "anthropic/claude-3-opus"
 
     def test_already_prefixed(self, service, openai_provider):
-        assert service._get_litellm_model(openai_provider, "custom/model") == "custom/model"
+        assert service._get_litellm_model(openai_provider, "openai/custom-model") == "openai/custom-model"
+
+    def test_openai_compatible_vendor_model_gets_openai_prefix(self, service, openai_provider):
+        assert (
+            service._get_litellm_model(openai_provider, "Qwen/Qwen3-Embedding-8B")
+            == "openai/Qwen/Qwen3-Embedding-8B"
+        )
 
     def test_unknown_provider_defaults_openai(self, service):
         p = ProviderConfig(type="unknown", api_key="", api_url="https://custom.com")
@@ -80,6 +86,10 @@ class TestGetApiBase:
     def test_strips_messages(self, service):
         p = ProviderConfig(type="claude", api_key="", api_url="https://api.anthropic.com/v1/messages")
         assert service._get_api_base(p) == "https://api.anthropic.com/v1"
+
+    def test_strips_rerank(self, service):
+        p = ProviderConfig(type="openai", api_key="", api_url="https://api.siliconflow.com/v1/rerank")
+        assert service._get_api_base(p) == "https://api.siliconflow.com/v1"
 
     def test_no_stripping_needed(self, service):
         p = ProviderConfig(type="openai", api_key="", api_url="https://my-proxy.com/v1")
@@ -213,6 +223,63 @@ class TestBuildCompletionKwargs:
         kwargs = service._build_completion_kwargs(req)
         assert "include_reasoning" not in kwargs
         assert kwargs["extra_body"]["google"]["thinking_config"]["include_thoughts"] is True
+
+
+class TestNonChatKwargs:
+    def test_build_embedding_kwargs_uses_openai_prefix_for_openai_compatible_vendor_model(
+        self, service, openai_provider
+    ):
+        kwargs = service.build_embedding_kwargs(
+            provider=openai_provider,
+            model="Qwen/Qwen3-Embedding-8B",
+            input_texts="hi",
+        )
+        assert kwargs["model"] == "openai/Qwen/Qwen3-Embedding-8B"
+
+    def test_build_direct_embedding_kwargs_uses_embeddings_endpoint(self, service):
+        provider = ProviderConfig(
+            type="openai",
+            api_key="sk-test",
+            api_url="https://api.siliconflow.com/v1/chat/completions",
+            custom_headers={"X-Test": "1"},
+        )
+        url, headers, payload = service._build_direct_embedding_kwargs(
+            provider=provider,
+            model="Qwen/Qwen3-Embedding-8B",
+            input_texts="hi",
+            encoding_format="float",
+            dimensions=1024,
+        )
+        assert url == "https://api.siliconflow.com/v1/embeddings"
+        assert headers["Authorization"] == "Bearer sk-test"
+        assert headers["X-Test"] == "1"
+        assert payload == {
+            "model": "Qwen/Qwen3-Embedding-8B",
+            "input": "hi",
+            "encoding_format": "float",
+            "dimensions": 1024,
+        }
+
+    def test_build_direct_rerank_kwargs_uses_base_rerank_endpoint(self, service):
+        provider = ProviderConfig(
+            type="openai",
+            api_key="sk-test",
+            api_url="https://api.siliconflow.com/v1/chat/completions",
+            custom_headers={"X-Test": "1"},
+        )
+        url, headers, payload = service._build_direct_rerank_kwargs(
+            provider=provider,
+            model="Qwen/Qwen3-VL-Reranker-8B",
+            query="hi",
+            documents=["hello", "hi"],
+            top_n=1,
+        )
+        assert url == "https://api.siliconflow.com/v1/rerank"
+        assert headers["Authorization"] == "Bearer sk-test"
+        assert headers["X-Test"] == "1"
+        assert payload["model"] == "Qwen/Qwen3-VL-Reranker-8B"
+        assert payload["return_documents"] is False
+        assert payload["top_n"] == 1
 
     def test_files_are_merged_into_messages_before_litellm_call(
         self, service, openai_provider, tmp_path

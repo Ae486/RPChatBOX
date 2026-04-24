@@ -10,6 +10,8 @@ class BackendModelSummary {
   final String modelName;
   final String displayName;
   final Set<ModelCapability> capabilities;
+  final String? capabilitySource;
+  final ModelCapabilityProfile? capabilityProfile;
   final ModelParameters defaultParams;
   final bool isEnabled;
   final String? description;
@@ -22,6 +24,8 @@ class BackendModelSummary {
     required this.modelName,
     required this.displayName,
     required this.capabilities,
+    required this.capabilitySource,
+    required this.capabilityProfile,
     required this.defaultParams,
     required this.isEnabled,
     required this.description,
@@ -37,13 +41,15 @@ class BackendModelSummary {
       modelName: json['model_name'] as String,
       displayName: json['display_name'] as String,
       capabilities: rawCapabilities
-          .map(
-            (item) => ModelCapability.values.firstWhere(
-              (value) => value.name == item,
-              orElse: () => ModelCapability.text,
-            ),
-          )
+          .map((item) => ModelCapability.fromWire(item?.toString()))
+          .whereType<ModelCapability>()
           .toSet(),
+      capabilitySource: json['capability_source'] as String?,
+      capabilityProfile: json['capability_profile'] != null
+          ? ModelCapabilityProfile.fromJson(
+              Map<String, dynamic>.from(json['capability_profile'] as Map),
+            )
+          : null,
       defaultParams: json['default_params'] != null
           ? ModelParameters.fromJson(
               _defaultParamsFromBackend(
@@ -76,6 +82,44 @@ class BackendModelSummary {
   }
 }
 
+class BackendModelCapabilityPreview {
+  final String providerId;
+  final String modelName;
+  final String displayName;
+  final Set<ModelCapability> capabilities;
+  final String? capabilitySource;
+  final ModelCapabilityProfile? capabilityProfile;
+
+  const BackendModelCapabilityPreview({
+    required this.providerId,
+    required this.modelName,
+    required this.displayName,
+    required this.capabilities,
+    required this.capabilitySource,
+    required this.capabilityProfile,
+  });
+
+  factory BackendModelCapabilityPreview.fromJson(Map<String, dynamic> json) {
+    final rawCapabilities = json['capabilities'] as List? ?? const [];
+    return BackendModelCapabilityPreview(
+      providerId: json['provider_id'] as String,
+      modelName: json['model_name'] as String,
+      displayName:
+          json['display_name'] as String? ?? json['model_name'] as String,
+      capabilities: rawCapabilities
+          .map((item) => ModelCapability.fromWire(item?.toString()))
+          .whereType<ModelCapability>()
+          .toSet(),
+      capabilitySource: json['capability_source'] as String?,
+      capabilityProfile: json['capability_profile'] != null
+          ? ModelCapabilityProfile.fromJson(
+              Map<String, dynamic>.from(json['capability_profile'] as Map),
+            )
+          : null,
+    );
+  }
+}
+
 class BackendModelRegistryService {
   static const String defaultBaseUrl = 'http://localhost:8765';
 
@@ -100,7 +144,9 @@ class BackendModelRegistryService {
       'provider_id': model.providerId,
       'model_name': model.modelName,
       'display_name': model.displayName,
-      'capabilities': model.capabilities.map((item) => item.name).toList(),
+      'capabilities': model.capabilities.map((item) => item.wireName).toList(),
+      'capability_source': model.capabilitySource,
+      'capability_profile': model.capabilityProfile?.toJson(),
       'default_params': {
         'temperature': model.defaultParams.temperature,
         'max_tokens': model.defaultParams.maxTokens,
@@ -132,6 +178,28 @@ class BackendModelRegistryService {
     }
 
     return BackendModelSummary.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<BackendModelCapabilityPreview> previewModelCapabilities({
+    required ProviderConfig provider,
+    required String modelName,
+  }) async {
+    final response = await _dio.get(
+      '${_resolveBaseUrl(provider.proxyApiUrl)}/api/providers/${provider.id}/models/_preview',
+      queryParameters: {'model_name': modelName},
+      options: _buildOptions(provider.proxyHeaders),
+    );
+
+    final statusCode = response.statusCode ?? 500;
+    if (statusCode < 200 || statusCode >= 300) {
+      throw Exception(
+        'Backend model capability preview failed: ${response.statusCode}',
+      );
+    }
+
+    return BackendModelCapabilityPreview.fromJson(
       Map<String, dynamic>.from(response.data as Map),
     );
   }

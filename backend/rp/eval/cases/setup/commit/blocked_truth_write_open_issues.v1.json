@@ -1,0 +1,111 @@
+{
+  "case_id": "setup.commit.blocked.truth_write_open_issues.v1",
+  "title": "Commit proposal is blocked when truth write still has open issues",
+  "scope": "setup",
+  "category": "commit_recovery",
+  "tags": ["mvp", "deterministic", "setup-v2", "cognitive-runtime"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-commit-block-open-issues-001",
+      "target_step": "foundation",
+      "user_prompt": "如果可以的话，直接发起 review。",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-commit-block-open-issues-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "cognitive_states": [
+        {
+          "workspace_id": "case-commit-block-open-issues-001",
+          "current_step": "foundation",
+          "state_version": 1,
+          "active_truth_write": {
+            "write_id": "write-foundation-2",
+            "current_step": "foundation",
+            "block_type": "foundation_entry",
+            "operation": "replace",
+            "target_ref": "foundation:world_rule_2",
+            "payload": {
+              "entry_id": "world_rule_2",
+              "domain": "rule",
+              "path": "world.guild_penalty",
+              "content": "Penalty details are still unstable."
+            },
+            "ready_for_review": true,
+            "remaining_open_issues": ["Need to settle the final penalty rule."]
+          },
+          "source_basis": {
+            "workspace_version": 1,
+            "draft_fingerprint": null,
+            "pending_user_edit_delta_ids": [],
+            "last_proposal_status": null,
+            "current_step": "foundation"
+          }
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_awaiting_user_input",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "awaiting_user_input",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "warnings_include_commit_blocked",
+        "source": "runtime_result",
+        "type": "contains",
+        "path": "warnings",
+        "expected": "commit_proposal_blocked",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "completion_guard_requires_discussion",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "structured_payload.completion_guard.reason",
+        "expected": "discussion_continues_without_commit",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "remaining_open_issues_exposed",
+        "source": "runtime_result",
+        "type": "contains",
+        "path": "structured_payload.cognitive_state_summary.remaining_open_issues",
+        "expected": "Need to settle the final penalty rule.",
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "warnings", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

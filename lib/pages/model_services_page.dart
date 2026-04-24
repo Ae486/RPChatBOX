@@ -1,11 +1,6 @@
-/// INPUT: ModelServiceManager
-/// OUTPUT: ModelServicesPage - Provider/Model 管理入口（列表/启用/编辑/删除）
-/// POS: UI 层 / Pages - 模型服务管理页
-
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 
-import '../adapters/ai_provider.dart';
 import '../chat_ui/owui/components/owui_app_bar.dart';
 import '../chat_ui/owui/components/owui_scaffold.dart';
 import '../chat_ui/owui/components/owui_snack_bar.dart';
@@ -44,10 +39,6 @@ class _ModelServicesPageState extends State<ModelServicesPage> {
     setState(() => _isLoading = true);
 
     try {
-      if (ProviderFactory.pythonBackendEnabled) {
-        await widget.serviceManager.refreshBackendMirrors(sync: false);
-      }
-
       final providers = widget.serviceManager.getProviders();
       final models = <String, List<ModelConfig>>{};
 

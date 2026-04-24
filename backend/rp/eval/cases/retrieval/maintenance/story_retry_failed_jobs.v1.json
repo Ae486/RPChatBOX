@@ -1,0 +1,121 @@
+{
+  "case_id": "retrieval.maintenance.story_retry_failed_jobs.v1",
+  "title": "Retrieval maintenance should retry and dedupe failed jobs for the same story asset",
+  "scope": "retrieval",
+  "category": "maintenance_retry",
+  "tags": ["mvp", "deterministic", "retrieval-core", "maintenance"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "retrieval_maintenance_service.retry_story_failed_jobs",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-retry-001"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-retry-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "retry_archive_rule",
+              "domain": "world",
+              "path": "world.retry_archive_rule",
+              "title": "Retry Archive Rule",
+              "tags": ["archive"],
+              "source_refs": [],
+              "content": {
+                "summary": "The archive vault rotates seals every dusk."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:retry_archive_rule"],
+          "reason": "freeze foundation"
+        }
+      ]
+    },
+    "env_overrides": {
+      "create_failed_reindex_jobs_for_story": true,
+      "create_failed_reindex_jobs_count": 2,
+      "run_retry_story_failed_jobs": true
+    }
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "maintenance_operation_is_retry",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "maintenance.operation",
+        "expected": "retry_story_failed_jobs",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "requested_failed_jobs_gte_two",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "maintenance.retry_batch.requested_job_ids",
+        "expected": 2,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "deduped_failed_jobs_gte_one",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "maintenance.retry_batch.deduped_job_ids",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "retried_jobs_gte_one",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "maintenance.retry_batch.retried_jobs",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "retried_job_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "maintenance.retry_batch.retried_jobs[0].job_state",
+        "expected": "completed",
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

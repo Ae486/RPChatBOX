@@ -5,14 +5,18 @@ from __future__ import annotations
 from rp.models.story_runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
+    SpecialistResultBundle,
     StoryArtifact,
     StorySession,
 )
+from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from .legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
 from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_specialist_service import LongformSpecialistService
+from .projection_refresh_service import ProjectionRefreshService
+from .proposal_workflow_service import ProposalWorkflowService
 from .recall_summary_ingestion_service import RecallSummaryIngestionService
 from .story_session_service import StorySessionService
-from .story_state_apply_service import StoryStateApplyService
 
 
 class LongformRegressionService:
@@ -24,14 +28,27 @@ class LongformRegressionService:
         story_session_service: StorySessionService,
         orchestrator_service: LongformOrchestratorService,
         specialist_service: LongformSpecialistService,
-        story_state_apply_service: StoryStateApplyService | None = None,
+        proposal_workflow_service: ProposalWorkflowService,
+        legacy_state_patch_proposal_builder: LegacyStatePatchProposalBuilder | None = None,
+        projection_refresh_service: ProjectionRefreshService | None = None,
         recall_summary_ingestion_service: RecallSummaryIngestionService | None = None,
+        regression_policy: PostWriteMaintenancePolicy | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
         self._specialist_service = specialist_service
-        self._story_state_apply_service = story_state_apply_service or StoryStateApplyService()
+        self._proposal_workflow_service = proposal_workflow_service
+        self._legacy_state_patch_proposal_builder = (
+            legacy_state_patch_proposal_builder or LegacyStatePatchProposalBuilder()
+        )
+        self._projection_refresh_service = (
+            projection_refresh_service or ProjectionRefreshService(story_session_service)
+        )
         self._recall_summary_ingestion_service = recall_summary_ingestion_service
+        self._regression_policy = regression_policy or PostWriteMaintenancePolicy(
+            preset_id="phase_e_internal_regression",
+            fallback_decision=PolicyDecision.NOTIFY_APPLY,
+        )
 
     async def run_light_regression(
         self,
@@ -59,19 +76,13 @@ class LongformRegressionService:
             model_id=model_id,
             provider_id=provider_id,
             user_prompt=None,
-            accepted_segments=[
-                *[
-                    item
-                    for item in self._story_session_service.list_artifacts(
-                        chapter_workspace_id=chapter.chapter_workspace_id
-                    )
-                    if item.status.value == "accepted" and item.artifact_kind.value == "story_segment"
-                ],
-                accepted_artifact,
-            ],
+            accepted_segments=self._collect_light_regression_segments(
+                chapter=chapter,
+                accepted_artifact=accepted_artifact,
+            ),
             pending_artifact=accepted_artifact,
         )
-        return self._apply_bundle(session=session, chapter=chapter, bundle=bundle)
+        return await self._apply_bundle(session=session, chapter=chapter, bundle=bundle)
 
     async def run_heavy_regression(
         self,
@@ -108,7 +119,7 @@ class LongformRegressionService:
             accepted_segments=accepted_segments,
             pending_artifact=accepted_segments[-1] if accepted_segments else None,
         )
-        updated_session, updated_chapter = self._apply_bundle(
+        updated_session, updated_chapter = await self._apply_bundle(
             session=session,
             chapter=chapter,
             bundle=bundle,
@@ -123,36 +134,47 @@ class LongformRegressionService:
             )
         return updated_session, updated_chapter
 
-    def _apply_bundle(
+    async def _apply_bundle(
         self,
         *,
         session: StorySession,
         chapter: ChapterWorkspace,
-        bundle,
+        bundle: SpecialistResultBundle,
     ) -> tuple[StorySession, ChapterWorkspace]:
-        updated_state = self._story_state_apply_service.apply(
-            current_state_json=session.current_state_json,
-            patch=bundle.state_patch_proposals,
-        )
-        updated_session = self._story_session_service.update_session(
-            session_id=session.session_id,
-            current_state_json=updated_state,
-        )
-        snapshot = dict(chapter.builder_snapshot_json)
-        snapshot.update(
-            {
-                "chapter_index": chapter.chapter_index,
-                "phase": chapter.phase.value,
-                "foundation_digest": bundle.foundation_digest,
-                "blueprint_digest": bundle.blueprint_digest,
-                "current_outline_digest": bundle.current_outline_digest,
-                "recent_segment_digest": bundle.recent_segment_digest,
-                "current_state_digest": bundle.current_state_digest,
-                "writer_hints": bundle.writer_hints,
-            }
-        )
-        updated_chapter = self._story_session_service.update_chapter_workspace(
-            chapter_workspace_id=chapter.chapter_workspace_id,
-            builder_snapshot_json=snapshot,
+        if bundle.state_patch_proposals:
+            proposal_inputs = self._legacy_state_patch_proposal_builder.build_inputs(
+                story_id=session.story_id,
+                mode=session.mode,
+                patch=bundle.state_patch_proposals,
+            )
+            for proposal_input in proposal_inputs:
+                await self._proposal_workflow_service.submit_and_route(
+                    proposal_input,
+                    session_id=session.session_id,
+                    chapter_workspace_id=chapter.chapter_workspace_id,
+                    submit_source="post_write_regression",
+                    policy=self._regression_policy,
+                )
+        updated_session = self._story_session_service.get_session(session.session_id) or session
+        updated_chapter = self._projection_refresh_service.refresh_from_bundle(
+            chapter=chapter,
+            bundle=bundle,
         )
         return updated_session, updated_chapter
+
+    def _collect_light_regression_segments(
+        self,
+        *,
+        chapter: ChapterWorkspace,
+        accepted_artifact: StoryArtifact,
+    ) -> list[StoryArtifact]:
+        accepted_segments = [
+            item
+            for item in self._story_session_service.list_artifacts(
+                chapter_workspace_id=chapter.chapter_workspace_id
+            )
+            if item.status.value == "accepted" and item.artifact_kind.value == "story_segment"
+        ]
+        if all(item.artifact_id != accepted_artifact.artifact_id for item in accepted_segments):
+            accepted_segments.append(accepted_artifact)
+        return accepted_segments

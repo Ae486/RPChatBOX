@@ -21,10 +21,21 @@ def test_setup_workspace_patch_and_step_context_flow(client):
 
     response = client.patch(
         f"/api/rp/setup/workspaces/{workspace_id}/story-config",
-        json={"model_profile_ref": "model.default", "notes": "Use balanced preset"},
+        json={
+            "model_profile_ref": "model.default",
+            "retrieval_embedding_model_id": "embedding-model-a",
+            "retrieval_embedding_provider_id": "provider-embedding",
+            "retrieval_rerank_model_id": "rerank-model-a",
+            "retrieval_rerank_provider_id": "provider-rerank",
+            "notes": "Use balanced preset",
+        },
     )
     assert response.status_code == 200
     assert response.json()["success"] is True
+
+    workspace_payload = client.get(f"/api/rp/setup/workspaces/{workspace_id}").json()
+    assert workspace_payload["story_config_draft"]["retrieval_embedding_model_id"] == "embedding-model-a"
+    assert workspace_payload["story_config_draft"]["retrieval_rerank_model_id"] == "rerank-model-a"
 
     response = client.post(
         f"/api/rp/setup/workspaces/{workspace_id}/foundation/entries",
@@ -92,6 +103,10 @@ def test_setup_commit_ingestion_and_activation_check(client):
             "model_profile_ref": "model.default",
             "worker_profile_ref": "worker.default",
             "post_write_policy_preset": "balanced",
+            "retrieval_embedding_model_id": "embedding-model-a",
+            "retrieval_embedding_provider_id": "provider-embedding",
+            "retrieval_rerank_model_id": "rerank-model-a",
+            "retrieval_rerank_provider_id": "provider-rerank",
         },
     ).status_code == 200
     assert client.patch(
@@ -180,6 +195,8 @@ def test_setup_commit_ingestion_and_activation_check(client):
     assert payload["handoff"]["blueprint_commit_ref"] is not None
     assert payload["handoff"]["foundation_commit_refs"]
     assert payload["handoff"]["archival_ready_refs"]
+    assert payload["handoff"]["runtime_story_config"]["retrieval_embedding_model_id"] == "embedding-model-a"
+    assert payload["handoff"]["runtime_story_config"]["retrieval_rerank_model_id"] == "rerank-model-a"
 
     workspace = client.get(f"/api/rp/setup/workspaces/{workspace_id}").json()
     assert workspace["workspace_state"] == "ready_to_activate"
@@ -193,4 +210,3 @@ def test_setup_commit_ingestion_and_activation_check(client):
 
     assert len(chunk_count) >= 2
     assert len(assets) >= 2
-

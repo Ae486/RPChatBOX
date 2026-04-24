@@ -1,0 +1,112 @@
+{
+  "case_id": "retrieval.maintenance.story_backfill_stub_embeddings.v1",
+  "title": "Retrieval maintenance should backfill stub embeddings into completed reindex jobs",
+  "scope": "retrieval",
+  "category": "maintenance_backfill",
+  "tags": ["mvp", "deterministic", "retrieval-core", "maintenance"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "retrieval_maintenance_service.backfill_story_embeddings",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-backfill-001"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-backfill-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "backfill_archive_rule",
+              "domain": "world",
+              "path": "world.backfill_archive_rule",
+              "title": "Backfill Archive Rule",
+              "tags": ["archive"],
+              "source_refs": [],
+              "content": {
+                "summary": "The archive ledger is resealed before every dawn bell."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:backfill_archive_rule"],
+          "reason": "freeze foundation"
+        }
+      ]
+    },
+    "env_overrides": {
+      "force_stub_embeddings_for_story": true,
+      "run_backfill_story_embeddings": true
+    }
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "maintenance_operation_is_backfill",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "maintenance.operation",
+        "expected": "backfill_story_embeddings",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "backfill_jobs_created",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "maintenance.jobs",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "backfill_job_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "maintenance.jobs[0].job_state",
+        "expected": "completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "backfill_candidates_cleared",
+        "source": "retrieval_result",
+        "type": "exists",
+        "path": "maintenance.story_snapshot.backfill_candidate_asset_ids[0]",
+        "expected": false,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

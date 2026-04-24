@@ -1,0 +1,143 @@
+{
+  "case_id": "setup.cognitive.invalidate_after_user_edit.v1",
+  "title": "Pending user edits should invalidate stale cognitive state and keep the agent in follow-up mode",
+  "scope": "setup",
+  "category": "cognitive_invalidation",
+  "tags": ["mvp", "deterministic", "setup-v2", "cognitive-runtime"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-cognitive-user-edit-001",
+      "target_step": "writing_contract",
+      "user_prompt": "I changed the tone note. Please reconcile it before review.",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-cognitive-user-edit-001",
+      "mode": "longform",
+      "current_step": "writing_contract",
+      "drafts": {
+        "writing_contract": {
+          "notes": "Keep the tone restrained.",
+          "style_rules": ["restrained"]
+        }
+      },
+      "pending_user_edit_deltas": [
+        {
+          "delta_id": "delta-writing-contract-note",
+          "step_id": "writing_contract",
+          "target_block": "writing_contract",
+          "target_ref": "draft:writing_contract",
+          "changes": [
+            {
+              "change_kind": "replace",
+              "path": "notes",
+              "before_value": "Keep the tone restrained.",
+              "after_value": "User changed the tone to colder and drier."
+            }
+          ]
+        }
+      ],
+      "cognitive_states": [
+        {
+          "workspace_id": "seed-ignored",
+          "current_step": "writing_contract",
+          "discussion_state": {
+            "current_step": "writing_contract",
+            "discussion_topic": "Lock the writing tone",
+            "confirmed_points": ["The baseline tone should stay restrained."],
+            "candidate_directions": [],
+            "open_questions": [],
+            "unresolved_conflicts": [],
+            "user_preference_signals": ["restrained"],
+            "next_focus": "finalize tone"
+          },
+          "chunk_candidates": [],
+          "active_truth_write": {
+            "write_id": "truth-write-writing-contract",
+            "current_step": "writing_contract",
+            "block_type": "writing_contract",
+            "target_ref": "draft:writing_contract",
+            "operation": "merge",
+            "payload": {
+              "notes": "Keep the tone restrained.",
+              "style_rules": ["restrained"]
+            },
+            "remaining_open_issues": [],
+            "ready_for_review": true
+          },
+          "invalidated": false,
+          "invalidation_reasons": [],
+          "source_basis": {
+            "workspace_version": 1,
+            "draft_fingerprint": "seed-writing-contract",
+            "pending_user_edit_delta_ids": [],
+            "last_proposal_status": null,
+            "current_step": "writing_contract"
+          }
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_awaiting_user_input",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "awaiting_user_input",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "cognitive_state_invalidated",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "structured_payload.cognitive_state_summary.invalidated",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "invalidation_mentions_user_edit_delta",
+        "source": "runtime_result",
+        "type": "contains",
+        "path": "structured_payload.cognitive_state_summary.invalidation_reasons",
+        "expected": "user_edit_delta",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "no_commit_proposal_created",
+        "source": "workspace_truth",
+        "type": "exists",
+        "path": "commit_proposals[0]",
+        "expected": false,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

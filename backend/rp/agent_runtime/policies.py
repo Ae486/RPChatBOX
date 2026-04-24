@@ -8,6 +8,7 @@ from .contracts import (
     RuntimeProfile,
     RuntimeToolResult,
     SetupCompletionGuard,
+    SetupCognitiveStateSummary,
     SetupLastFailure,
     SetupPendingObligation,
     SetupReflectionTicket,
@@ -267,7 +268,7 @@ class RepairDecisionPolicy:
             }
 
         obligation = SetupPendingObligation(
-            obligation_type="reassess_commit_readiness",
+            obligation_type="continue_after_tool_failure",
             reason=failure_state.message,
             tool_name=failure.tool_name,
         )
@@ -302,6 +303,7 @@ class CompletionGuardPolicy:
         assistant_text: str,
         pending_obligation: SetupPendingObligation | None,
         reflection_ticket: SetupReflectionTicket | None,
+        cognitive_state_summary: SetupCognitiveStateSummary | None = None,
     ) -> dict[str, Any]:
         if reflection_ticket is not None:
             guard = SetupCompletionGuard(
@@ -330,6 +332,40 @@ class CompletionGuardPolicy:
                         summary="Assistant output was empty while the turn was still active.",
                         required_decision="retry",
                     ).model_dump(mode="json", exclude_none=True),
+                }
+
+            if cognitive_state_summary is not None and (
+                cognitive_state_summary.invalidated
+                or (
+                    not cognitive_state_summary.ready_for_review
+                    or bool(cognitive_state_summary.remaining_open_issues)
+                )
+            ):
+                finish_reason = (
+                    "awaiting_user_input"
+                    if terminal_kind == "ask_user"
+                    else "continue_discussion"
+                )
+                guard = SetupCompletionGuard(
+                    allow_finalize=True,
+                    reason=(
+                        "cognitive_state_requires_follow_up"
+                        if cognitive_state_summary.invalidated
+                        else (
+                            "truth_write_still_has_open_issues"
+                            if cognitive_state_summary.remaining_open_issues
+                            else "truth_write_not_ready_for_review"
+                        )
+                    ),
+                    required_action="finalize_success",
+                    finish_reason=finish_reason,
+                )
+                return {
+                    "allow_finalize": True,
+                    "finish_reason": finish_reason,
+                    "completion_guard": guard.model_dump(mode="json", exclude_none=True),
+                    "pending_obligation": None,
+                    "reflection_ticket": None,
                 }
 
             finish_reason = FinishPolicy.completed_text_finish_reason(assistant_text)
@@ -479,7 +515,11 @@ class ReflectionTriggerPolicy:
         return {"action": "continue", "warning": "reflection_continue_discussion"}
 
     @staticmethod
-    def blocked_commit_ticket(*, context_bundle: dict[str, Any]) -> dict[str, Any] | None:
+    def blocked_commit_ticket(
+        *,
+        context_bundle: dict[str, Any],
+        cognitive_state_summary: SetupCognitiveStateSummary | None = None,
+    ) -> dict[str, Any] | None:
         blocking_open_questions = int(context_bundle.get("blocking_open_question_count") or 0)
         if blocking_open_questions > 0:
             return SetupReflectionTicket(
@@ -487,6 +527,42 @@ class ReflectionTriggerPolicy:
                 summary=(
                     "Commit proposal is blocked because the current step still has "
                     f"{blocking_open_questions} blocking open question(s)."
+                ),
+                required_decision="block_commit",
+            ).model_dump(mode="json", exclude_none=True)
+
+        if cognitive_state_summary is not None and cognitive_state_summary.invalidated:
+            return SetupReflectionTicket(
+                trigger="before_commit_proposal",
+                summary=(
+                    "Commit proposal is blocked because the current cognitive state is stale "
+                    "and must be reconciled with the latest draft first."
+                ),
+                required_decision="block_commit",
+            ).model_dump(mode="json", exclude_none=True)
+
+        if (
+            cognitive_state_summary is not None
+            and not cognitive_state_summary.ready_for_review
+        ):
+            return SetupReflectionTicket(
+                trigger="before_commit_proposal",
+                summary=(
+                    "Commit proposal is blocked because the current truth write has not "
+                    "entered review-ready state yet."
+                ),
+                required_decision="block_commit",
+            ).model_dump(mode="json", exclude_none=True)
+
+        if (
+            cognitive_state_summary is not None
+            and bool(cognitive_state_summary.remaining_open_issues)
+        ):
+            return SetupReflectionTicket(
+                trigger="before_commit_proposal",
+                summary=(
+                    "Commit proposal is blocked because the current truth write still has "
+                    "open issues that must be resolved first."
                 ),
                 required_decision="block_commit",
             ).model_dump(mode="json", exclude_none=True)

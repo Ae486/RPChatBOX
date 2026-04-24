@@ -68,7 +68,7 @@ class MemoryCrudToolProvider:
                 ("memory.get_summary", "Read summary/projection entries for one or more domains.", MemoryGetSummaryInput),
                 ("memory.search_recall", "Search recall memory using the unified retrieval surface.", MemorySearchRecallInput),
                 ("memory.search_archival", "Search archival knowledge using the unified retrieval surface.", MemorySearchArchivalInput),
-                ("proposal.submit", "Submit a pending state patch proposal without applying it.", ProposalSubmitInput),
+                ("proposal.submit", "Submit an authoritative state patch proposal into the governed workflow.", ProposalSubmitInput),
                 ("memory.list_versions", "List versions for a memory object reference.", MemoryListVersionsInput),
                 ("memory.read_provenance", "Read provenance references for a memory object.", MemoryReadProvenanceInput),
             )

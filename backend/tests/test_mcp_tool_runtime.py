@@ -311,6 +311,40 @@ def test_tool_runtime_emit_helpers():
     assert json.loads(done[6:]) == {"type": "done"}
 
 
+class _FakeLangfuseObservation:
+    def __init__(self, *, sink: list[dict], name: str) -> None:
+        self._sink = sink
+        self._name = name
+
+    def __enter__(self):
+        self._sink.append({"kind": "observation_enter", "name": self._name})
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._sink.append({"kind": "observation_exit", "name": self._name})
+        return False
+
+    def update(self, **kwargs):
+        self._sink.append({"kind": "observation_update", "name": self._name, "payload": kwargs})
+
+    def start_as_current_observation(self, **kwargs):
+        return _FakeLangfuseObservation(
+            sink=self._sink,
+            name=str(kwargs.get("name") or "unknown"),
+        )
+
+
+class _FakeLangfuseService:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def start_as_current_observation(self, **kwargs):
+        return _FakeLangfuseObservation(
+            sink=self.events,
+            name=str(kwargs.get("name") or "unknown"),
+        )
+
+
 @pytest.mark.asyncio
 async def test_tool_runtime_passthrough_without_tools():
     """When LLM returns no tool_calls, events pass through and end with done."""
@@ -645,3 +679,102 @@ async def test_tool_runtime_non_stream_executes_tool_call_and_continues():
     assert captured_requests[1].messages[-1].role == "tool"
     assert captured_requests[1].messages[-1].name == "search"
     assert captured_requests[1].messages[-1].content == "Search result: test data"
+
+
+@pytest.mark.asyncio
+async def test_tool_runtime_emits_langfuse_observations(monkeypatch):
+    from models.chat import ChatCompletionRequest, ChatMessage, ProviderConfig
+
+    fake_langfuse = _FakeLangfuseService()
+    monkeypatch.setattr(
+        "services.tool_runtime_service.get_langfuse_service",
+        lambda: fake_langfuse,
+    )
+
+    call_count = 0
+
+    class MockLLMService:
+        async def chat_completion(self, request):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "search",
+                                            "arguments": "{\"q\":\"test\"}",
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Found results",
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 6,
+                    "total_tokens": 18,
+                },
+            }
+
+    manager = McpManager(storage_path=None)
+    manager._load_configs = lambda: {}
+    manager._save_configs = lambda c: None
+
+    async def mock_call(*, qualified_name, arguments):
+        return {
+            "success": True,
+            "content": "Search result: test data",
+            "error_code": None,
+        }
+
+    manager.call_tool_by_qualified_name = mock_call
+    service = ToolRuntimeService(mcp_manager=manager)
+    request = ChatCompletionRequest(
+        model="gpt-4o",
+        messages=[ChatMessage(role="user", content="Search for test")],
+        stream=False,
+        provider=ProviderConfig(
+            type="openai",
+            api_key="test",
+            api_url="https://api.openai.com/v1",
+        ),
+    )
+
+    result = await service.chat_completion(request, llm_service=MockLLMService())
+
+    assert result["choices"][0]["message"]["content"] == "Found results"
+    assert any(
+        item["kind"] == "observation_enter" and item["name"] == "tool_runtime.chat_completion"
+        for item in fake_langfuse.events
+    )
+    assert any(
+        item["kind"] == "observation_enter" and item["name"] == "tool_runtime.model_round"
+        for item in fake_langfuse.events
+    )
+    assert any(
+        item["kind"] == "observation_enter" and item["name"] == "tool_runtime.tool:search"
+        for item in fake_langfuse.events
+    )

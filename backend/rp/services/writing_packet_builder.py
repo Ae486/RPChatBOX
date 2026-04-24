@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from rp.models.story_runtime import ChapterWorkspace, OrchestratorPlan, SpecialistResultBundle, StorySession
+from rp.models.story_runtime import ChapterWorkspace, OrchestratorPlan, StorySession
 from rp.models.writing_runtime import WritingPacket
 
 
@@ -17,7 +17,8 @@ class WritingPacketBuilder:
         session: StorySession,
         chapter: ChapterWorkspace,
         plan: OrchestratorPlan,
-        specialist_bundle: SpecialistResultBundle,
+        projection_context_sections: list[dict[str, object]],
+        runtime_writer_hints: list[str],
         user_instruction: str,
     ) -> WritingPacket:
         writer_contract = session.writer_contract
@@ -40,17 +41,9 @@ class WritingPacketBuilder:
                 )
             )
 
-        context_sections = []
-        for label, items in (
-            ("foundation_digest", specialist_bundle.foundation_digest),
-            ("blueprint_digest", specialist_bundle.blueprint_digest),
-            ("current_outline_digest", specialist_bundle.current_outline_digest),
-            ("recent_segment_digest", specialist_bundle.recent_segment_digest),
-            ("current_state_digest", specialist_bundle.current_state_digest),
-            ("writer_hints", specialist_bundle.writer_hints),
-        ):
-            if items:
-                context_sections.append({"label": label, "items": list(items)})
+        context_sections = list(projection_context_sections)
+        if runtime_writer_hints:
+            context_sections.append({"label": "writer_hints", "items": list(runtime_writer_hints)})
 
         metadata = {
             "story_id": session.story_id,

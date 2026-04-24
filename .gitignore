@@ -252,7 +252,7 @@ $RECYCLE.BIN/
 .snow
 
 # 忽略整个 research 文件夹
-docs/research/
+docs
 .ace-tool/
 
 # Python Backend build artifacts

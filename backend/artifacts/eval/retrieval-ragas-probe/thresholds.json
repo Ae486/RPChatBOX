@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "max_fail": 0,
+  "max_warn": null,
+  "effective_fail_total": 0,
+  "warn_total": 0,
+  "failed_run_count": 0,
+  "soft_failed_case_ids": [],
+  "soft_failed_assertions": 0,
+  "breaches": []
+}

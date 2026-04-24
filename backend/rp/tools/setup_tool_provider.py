@@ -3,9 +3,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from models.mcp_config import McpToolInfo
+from rp.agent_runtime.contracts import (
+    ChunkCandidate,
+    DiscussionState,
+    DraftTruthWrite,
+)
 from rp.models.setup_drafts import (
     FoundationEntry,
     LongformBlueprintDraft,
@@ -21,6 +26,7 @@ from rp.models.setup_workspace import (
     SetupStepId,
 )
 from rp.services.memory_crud_serialization_service import MemoryCrudSerializationService
+from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
 from rp.services.setup_workspace_service import SetupWorkspaceService
 
@@ -92,6 +98,35 @@ class SetupReadStepContextInput(BaseModel):
 
     workspace_id: str
     step_id: SetupStepId
+    user_edit_delta_ids: list[str] = Field(default_factory=list)
+
+
+class SetupDiscussionUpdateStateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    step_id: SetupStepId
+    user_edit_delta_ids: list[str] = Field(default_factory=list)
+    discussion_state: DiscussionState
+
+
+class SetupChunkUpsertInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    step_id: SetupStepId
+    user_edit_delta_ids: list[str] = Field(default_factory=list)
+    action: Literal["create", "refine", "promote"]
+    chunk: ChunkCandidate
+
+
+class SetupTruthWriteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    step_id: SetupStepId
+    user_edit_delta_ids: list[str] = Field(default_factory=list)
+    truth_write: DraftTruthWrite
 
 
 class SetupToolContractError(ValueError):
@@ -124,12 +159,17 @@ class SetupToolProvider:
         *,
         workspace_service: SetupWorkspaceService,
         context_builder: SetupContextBuilder,
+        runtime_state_service: SetupAgentRuntimeStateService,
         serialization_service: MemoryCrudSerializationService | None = None,
     ) -> None:
         self._workspace_service = workspace_service
         self._context_builder = context_builder
+        self._runtime_state_service = runtime_state_service
         self._serialization_service = serialization_service or MemoryCrudSerializationService()
         self._schemas = {
+            "setup.discussion.update_state": SetupDiscussionUpdateStateInput,
+            "setup.chunk.upsert": SetupChunkUpsertInput,
+            "setup.truth.write": SetupTruthWriteInput,
             "setup.patch.story_config": SetupPatchStoryConfigInput,
             "setup.patch.writing_contract": SetupPatchWritingContractInput,
             "setup.patch.foundation_entry": SetupPatchFoundationEntryInput,
@@ -151,6 +191,21 @@ class SetupToolProvider:
                 input_schema=model.model_json_schema(),
             )
             for tool_name, description, model in (
+                (
+                    "setup.discussion.update_state",
+                    "Update the runtime-private discussion state for the current setup step. Use when you have clarified confirmed points, open questions, conflicts, or candidate directions. Optionally pass selected user_edit_delta_ids when reconciling against specific user edits. Do not use this to mutate SetupWorkspace drafts directly. Target object: DiscussionState. Important field: discussion_state.",
+                    SetupDiscussionUpdateStateInput,
+                ),
+                (
+                    "setup.chunk.upsert",
+                    "Create, refine, or promote one chunk candidate distilled from discussion. Use when a specific setup block is becoming structured enough to track as a truth candidate. Optionally pass selected user_edit_delta_ids when the chunk is being reconciled after user edits. Do not use this as the final draft write. Target object: ChunkCandidate. Important fields: action, chunk.",
+                    SetupChunkUpsertInput,
+                ),
+                (
+                    "setup.truth.write",
+                    "Lower one runtime-private draft truth write intent into the current setup draft via the existing patch/controller chain. Use only when one chunk is stable enough to land in draft. Optionally pass selected user_edit_delta_ids when writing a truth update that responds to specific user edits. Do not use this for commit proposal directly. Target object: DraftTruthWrite. Important field: truth_write.",
+                    SetupTruthWriteInput,
+                ),
                 (
                     "setup.patch.story_config",
                     "Update the story_config draft. Use when converging model/runtime preferences. Do not use for mode changes. Target object: StoryConfigDraft. Important field: patch. Example: set notes or post_write_policy_preset.",
@@ -193,7 +248,7 @@ class SetupToolProvider:
                 ),
                 (
                     "setup.read.step_context",
-                    "Read a deterministic context packet for one setup step. Use when you need the current draft snapshot plus committed summaries. Do not use to mutate anything. Target object: SetupContextPacket. Important field: step_id.",
+                    "Read a deterministic context packet for one setup step. Use when you need the current draft snapshot plus committed summaries and optionally selected user edit deltas. Do not use to mutate anything. Target object: SetupContextPacket. Important field: step_id.",
                     SetupReadStepContextInput,
                 ),
             )
@@ -281,6 +336,67 @@ class SetupToolProvider:
             }
 
     async def _dispatch(self, *, tool_name: str, input_model: Any) -> Any:
+        if tool_name == "setup.discussion.update_state":
+            workspace = self._require_workspace(input_model.workspace_id)
+            context_packet = self._build_context_packet(
+                workspace_id=input_model.workspace_id,
+                step_id=input_model.step_id,
+                user_edit_delta_ids=list(input_model.user_edit_delta_ids),
+            )
+            snapshot = self._runtime_state_service.replace_discussion_state(
+                workspace=workspace,
+                context_packet=context_packet,
+                step_id=input_model.step_id,
+                discussion_state=input_model.discussion_state,
+            )
+            return self._cognitive_tool_result(
+                message="Updated discussion state",
+                updated_refs=["cognitive:discussion_state"],
+                snapshot=snapshot,
+            )
+        if tool_name == "setup.chunk.upsert":
+            workspace = self._require_workspace(input_model.workspace_id)
+            context_packet = self._build_context_packet(
+                workspace_id=input_model.workspace_id,
+                step_id=input_model.step_id,
+                user_edit_delta_ids=list(input_model.user_edit_delta_ids),
+            )
+            snapshot = self._runtime_state_service.upsert_chunk(
+                workspace=workspace,
+                context_packet=context_packet,
+                step_id=input_model.step_id,
+                chunk=input_model.chunk,
+                action=input_model.action,
+            )
+            return self._cognitive_tool_result(
+                message="Upserted chunk candidate",
+                updated_refs=[f"cognitive:chunk:{input_model.chunk.candidate_id}"],
+                snapshot=snapshot,
+            )
+        if tool_name == "setup.truth.write":
+            workspace = self._require_workspace(input_model.workspace_id)
+            updated_refs = self._apply_truth_write(
+                workspace_id=input_model.workspace_id,
+                step_id=input_model.step_id,
+                truth_write=input_model.truth_write,
+            )
+            refreshed_workspace = self._require_workspace(input_model.workspace_id)
+            context_packet = self._build_context_packet(
+                workspace_id=input_model.workspace_id,
+                step_id=input_model.step_id,
+                user_edit_delta_ids=list(input_model.user_edit_delta_ids),
+            )
+            snapshot = self._runtime_state_service.record_truth_write(
+                workspace=refreshed_workspace,
+                context_packet=context_packet,
+                step_id=input_model.step_id,
+                truth_write=input_model.truth_write,
+            )
+            return self._cognitive_tool_result(
+                message="Wrote draft truth into setup draft",
+                updated_refs=updated_refs,
+                snapshot=snapshot,
+            )
         if tool_name == "setup.patch.story_config":
             self._workspace_service.patch_story_config(
                 workspace_id=input_model.workspace_id,
@@ -362,25 +478,13 @@ class SetupToolProvider:
                 warnings=proposal.unresolved_warnings,
             )
         if tool_name == "setup.read.workspace":
-            workspace = self._workspace_service.get_workspace(input_model.workspace_id)
-            if workspace is None:
-                raise ValueError(f"SetupWorkspace not found: {input_model.workspace_id}")
-            return workspace
+            return self._require_workspace(input_model.workspace_id)
         if tool_name == "setup.read.step_context":
-            workspace = self._workspace_service.get_workspace(input_model.workspace_id)
-            if workspace is None:
-                raise ValueError(f"SetupWorkspace not found: {input_model.workspace_id}")
-            packet = self._context_builder.build(
-                SetupContextBuilderInput(
-                    mode=workspace.mode.value,
-                    workspace_id=input_model.workspace_id,
-                    current_step=input_model.step_id.value,
-                    user_prompt="",
-                    user_edit_delta_ids=[],
-                    token_budget=None,
-                )
+            return self._build_context_packet(
+                workspace_id=input_model.workspace_id,
+                step_id=input_model.step_id,
+                user_edit_delta_ids=list(input_model.user_edit_delta_ids),
             )
-            return packet
         raise ValueError(f"Unknown setup tool: {tool_name}")
 
     def _ensure_commit_targets_present(self, *, input_model: SetupProposalCommitInput) -> None:
@@ -398,9 +502,11 @@ class SetupToolProvider:
         )
 
     def _ensure_commit_allowed(self, *, input_model: SetupProposalCommitInput) -> None:
-        workspace = self._workspace_service.get_workspace(input_model.workspace_id)
-        if workspace is None:
-            raise ValueError(f"SetupWorkspace not found: {input_model.workspace_id}")
+        workspace = self._require_workspace(input_model.workspace_id)
+        self._ensure_commit_not_blocked_by_cognitive_state(
+            workspace_id=input_model.workspace_id,
+            step_id=input_model.step_id,
+        )
 
         blocking_questions = [
             question
@@ -517,6 +623,463 @@ class SetupToolProvider:
         if extra:
             details.update(extra)
         return details
+
+    def _ensure_commit_not_blocked_by_cognitive_state(
+        self,
+        *,
+        workspace_id: str,
+        step_id: SetupStepId,
+    ) -> None:
+        snapshot = self._runtime_state_service.get_snapshot(
+            workspace_id=workspace_id,
+            step_id=step_id,
+        )
+        if snapshot is None:
+            return
+
+        if snapshot.invalidated:
+            raise SetupToolContractError(
+                code="setup_commit_blocked_by_invalidated_cognitive_state",
+                message=(
+                    "Commit proposal is blocked because the current cognitive state is stale "
+                    "and must be reconciled against the latest draft first."
+                ),
+                details=self._error_details(
+                    tool_name="setup.proposal.commit",
+                    failure_origin="policy",
+                    repair_strategy="block_commit",
+                    block_commit=True,
+                    extra={
+                        "invalidation_reasons": list(snapshot.invalidation_reasons),
+                    },
+                ),
+            )
+
+        truth_write = snapshot.active_truth_write
+        if truth_write is None:
+            return
+        if not truth_write.ready_for_review:
+            raise SetupToolContractError(
+                code="setup_commit_blocked_truth_write_not_ready_for_review",
+                message=(
+                    "Commit proposal is blocked because the current draft truth write has not "
+                    "explicitly entered review-ready state yet."
+                ),
+                details=self._error_details(
+                    tool_name="setup.proposal.commit",
+                    failure_origin="policy",
+                    repair_strategy="block_commit",
+                    block_commit=True,
+                    extra={
+                        "ready_for_review": truth_write.ready_for_review,
+                    },
+                ),
+            )
+
+        if not truth_write.remaining_open_issues:
+            return
+
+        raise SetupToolContractError(
+            code="setup_commit_blocked_by_truth_write_issues",
+            message=(
+                "Commit proposal is blocked because the current draft truth write still has "
+                "open issues that must be resolved first."
+            ),
+            details=self._error_details(
+                tool_name="setup.proposal.commit",
+                failure_origin="policy",
+                repair_strategy="block_commit",
+                block_commit=True,
+                extra={
+                    "remaining_open_issues": list(truth_write.remaining_open_issues),
+                },
+            ),
+        )
+
+    def _apply_truth_write(
+        self,
+        *,
+        workspace_id: str,
+        step_id: SetupStepId,
+        truth_write: DraftTruthWrite,
+    ) -> list[str]:
+        workspace = self._require_workspace(workspace_id)
+        expected_step = self._step_for_truth_block_type(truth_write.block_type)
+        if expected_step != step_id:
+            raise SetupToolContractError(
+                code="setup_truth_write_step_mismatch",
+                message="Truth write block_type does not match the target setup step.",
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="validation",
+                    repair_strategy="auto_repair",
+                    required_fields=["truth_write.block_type", "step_id"],
+                ),
+            )
+
+        if truth_write.block_type == "story_config":
+            patch = self._build_singleton_truth_write_payload(
+                truth_write=truth_write,
+                current_model=workspace.story_config_draft,
+                model_cls=StoryConfigDraft,
+                fixed_target_ref="draft:story_config",
+            )
+            self._validate_truth_write_semantics(
+                block_type=truth_write.block_type,
+                payload_model=patch,
+            )
+            self._workspace_service.patch_story_config(workspace_id=workspace_id, patch=patch)
+            return ["draft:story_config"]
+
+        if truth_write.block_type == "writing_contract":
+            patch = self._build_singleton_truth_write_payload(
+                truth_write=truth_write,
+                current_model=workspace.writing_contract_draft,
+                model_cls=WritingContractDraft,
+                fixed_target_ref="draft:writing_contract",
+            )
+            self._validate_truth_write_semantics(
+                block_type=truth_write.block_type,
+                payload_model=patch,
+            )
+            self._workspace_service.patch_writing_contract(workspace_id=workspace_id, patch=patch)
+            return ["draft:writing_contract"]
+
+        if truth_write.block_type == "foundation_entry":
+            entry = self._build_foundation_truth_write_entry(
+                truth_write=truth_write,
+                workspace=workspace,
+            )
+            self._validate_truth_write_semantics(
+                block_type=truth_write.block_type,
+                payload_model=entry,
+            )
+            self._workspace_service.patch_foundation_entry(workspace_id=workspace_id, entry=entry)
+            return [f"foundation:{entry.entry_id}"]
+
+        if truth_write.block_type == "longform_blueprint":
+            patch = self._build_singleton_truth_write_payload(
+                truth_write=truth_write,
+                current_model=workspace.longform_blueprint_draft,
+                model_cls=LongformBlueprintDraft,
+                fixed_target_ref="draft:longform_blueprint",
+            )
+            self._validate_truth_write_semantics(
+                block_type=truth_write.block_type,
+                payload_model=patch,
+            )
+            self._workspace_service.patch_longform_blueprint(workspace_id=workspace_id, patch=patch)
+            return ["draft:longform_blueprint"]
+
+        raise SetupToolContractError(
+            code="setup_truth_write_unknown_block_type",
+            message=f"Unsupported truth write block_type: {truth_write.block_type}",
+            details=self._error_details(
+                tool_name="setup.truth.write",
+                failure_origin="validation",
+                repair_strategy="auto_repair",
+                required_fields=["truth_write.block_type"],
+            ),
+        )
+
+    def _build_context_packet(
+        self,
+        *,
+        workspace_id: str,
+        step_id: SetupStepId,
+        user_edit_delta_ids: list[str] | None = None,
+    ):
+        workspace = self._require_workspace(workspace_id)
+        return self._context_builder.build(
+            SetupContextBuilderInput(
+                mode=workspace.mode.value,
+                workspace_id=workspace_id,
+                current_step=step_id.value,
+                user_prompt="",
+                user_edit_delta_ids=list(user_edit_delta_ids or []),
+                token_budget=None,
+            )
+        )
+
+    def _build_singleton_truth_write_payload(
+        self,
+        *,
+        truth_write: DraftTruthWrite,
+        current_model: Any,
+        model_cls: Any,
+        fixed_target_ref: str,
+    ):
+        if truth_write.target_ref is not None and truth_write.target_ref != fixed_target_ref:
+            raise SetupToolContractError(
+                code="setup_truth_write_target_ref_mismatch",
+                message=(
+                    f"Truth write target_ref must be {fixed_target_ref!r} for "
+                    f"{truth_write.block_type}."
+                ),
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="validation",
+                    repair_strategy="auto_repair",
+                    required_fields=["truth_write.target_ref"],
+                ),
+            )
+
+        existing_payload = (
+            current_model.model_dump(mode="json", exclude_none=True)
+            if current_model is not None
+            else {}
+        )
+        has_existing = self._has_meaningful_payload(existing_payload)
+
+        if truth_write.operation == "create" and has_existing:
+            raise SetupToolContractError(
+                code="setup_truth_write_create_requires_empty_target",
+                message="Truth write create cannot target a draft block that already has content.",
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="validation",
+                    repair_strategy="continue_discussion",
+                    required_fields=["truth_write.operation"],
+                ),
+            )
+
+        if truth_write.operation == "merge":
+            merged_payload = self._deep_merge(existing_payload, truth_write.payload)
+            return model_cls.model_validate(merged_payload)
+
+        return model_cls.model_validate(truth_write.payload)
+
+    def _build_foundation_truth_write_entry(
+        self,
+        *,
+        truth_write: DraftTruthWrite,
+        workspace,
+    ) -> FoundationEntry:
+        entry = FoundationEntry.model_validate(truth_write.payload)
+        expected_target_ref = f"foundation:{entry.entry_id}"
+        if truth_write.target_ref is not None and truth_write.target_ref != expected_target_ref:
+            raise SetupToolContractError(
+                code="setup_truth_write_target_ref_mismatch",
+                message=(
+                    f"Truth write target_ref must be {expected_target_ref!r} for "
+                    "this foundation entry."
+                ),
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="validation",
+                    repair_strategy="auto_repair",
+                    required_fields=["truth_write.target_ref"],
+                ),
+            )
+
+        existing_entry = None
+        foundation_draft = workspace.foundation_draft
+        if foundation_draft is not None:
+            existing_entry = next(
+                (item for item in foundation_draft.entries if item.entry_id == entry.entry_id),
+                None,
+            )
+
+        if truth_write.operation == "create" and existing_entry is not None:
+            raise SetupToolContractError(
+                code="setup_truth_write_create_requires_empty_target",
+                message="Truth write create cannot target an existing foundation entry.",
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="validation",
+                    repair_strategy="continue_discussion",
+                    required_fields=["truth_write.operation"],
+                ),
+            )
+
+        if truth_write.operation == "replace" and existing_entry is None:
+            raise SetupToolContractError(
+                code="setup_truth_write_replace_requires_existing_target",
+                message="Truth write replace requires the target foundation entry to already exist.",
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="validation",
+                    repair_strategy="continue_discussion",
+                    required_fields=["truth_write.operation", "truth_write.target_ref"],
+                ),
+            )
+
+        if truth_write.operation == "merge" and existing_entry is not None:
+            merged_payload = self._deep_merge(
+                existing_entry.model_dump(mode="json", exclude_none=True),
+                truth_write.payload,
+            )
+            return FoundationEntry.model_validate(merged_payload)
+
+        return entry
+
+    @staticmethod
+    def _has_meaningful_payload(payload: dict[str, Any]) -> bool:
+        for value in payload.values():
+            if isinstance(value, dict) and value:
+                return True
+            if isinstance(value, list) and value:
+                return True
+            if value not in (None, "", [], {}):
+                return True
+        return False
+
+    @staticmethod
+    def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(base)
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = SetupToolProvider._deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    def _validate_truth_write_semantics(
+        self,
+        *,
+        block_type: str,
+        payload_model: Any,
+    ) -> None:
+        if block_type == "story_config":
+            model = payload_model
+            has_value = any(
+                bool(value)
+                for value in (
+                    model.model_profile_ref,
+                    model.worker_profile_ref,
+                    model.post_write_policy_preset,
+                    model.notes,
+                )
+            )
+            if has_value:
+                return
+            raise SetupToolContractError(
+                code="setup_truth_write_requires_user_input",
+                message=(
+                    "Story config truth write still lacks user-confirmed configuration "
+                    "content and should be clarified first."
+                ),
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="semantic_validation",
+                    repair_strategy="ask_user",
+                    required_fields=["truth_write.payload"],
+                ),
+            )
+
+        if block_type == "writing_contract":
+            model = payload_model
+            has_value = any(
+                (
+                    model.pov_rules,
+                    model.style_rules,
+                    model.writing_constraints,
+                    model.task_writing_rules,
+                    bool(model.notes),
+                )
+            )
+            if has_value:
+                return
+            raise SetupToolContractError(
+                code="setup_truth_write_requires_user_input",
+                message=(
+                    "Writing contract truth write still lacks concrete user-facing writing "
+                    "preferences and should ask the user first."
+                ),
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="semantic_validation",
+                    repair_strategy="ask_user",
+                    required_fields=["truth_write.payload"],
+                ),
+            )
+
+        if block_type == "foundation_entry":
+            model = payload_model
+            has_content = bool(model.content)
+            if has_content:
+                return
+            raise SetupToolContractError(
+                code="setup_truth_write_requires_user_input",
+                message=(
+                    "Foundation entry truth write is structurally valid but still lacks the "
+                    "actual fact content that must be confirmed with the user."
+                ),
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="semantic_validation",
+                    repair_strategy="ask_user",
+                    required_fields=["truth_write.payload.content"],
+                ),
+            )
+
+        if block_type == "longform_blueprint":
+            model = payload_model
+            has_value = any(
+                (
+                    model.premise,
+                    model.central_conflict,
+                    model.protagonist_arc,
+                    model.cast_plan,
+                    model.chapter_strategy,
+                    model.section_strategy,
+                    model.ending_direction,
+                    model.chapter_blueprints,
+                )
+            )
+            if has_value:
+                return
+            raise SetupToolContractError(
+                code="setup_truth_write_requires_user_input",
+                message=(
+                    "Longform blueprint truth write still lacks concrete blueprint content "
+                    "and should be clarified with the user first."
+                ),
+                details=self._error_details(
+                    tool_name="setup.truth.write",
+                    failure_origin="semantic_validation",
+                    repair_strategy="ask_user",
+                    required_fields=["truth_write.payload"],
+                ),
+            )
+
+    def _cognitive_tool_result(
+        self,
+        *,
+        message: str,
+        updated_refs: list[str],
+        snapshot,
+    ) -> dict[str, Any]:
+        summary = self._runtime_state_service.summarize_for_prompt(snapshot)
+        return {
+            "success": True,
+            "message": message,
+            "updated_refs": updated_refs,
+            "cognitive_state_snapshot": snapshot.model_dump(mode="json", exclude_none=True),
+            "cognitive_state_summary": (
+                summary.model_dump(mode="json", exclude_none=True)
+                if summary is not None
+                else None
+            ),
+        }
+
+    def _require_workspace(self, workspace_id: str):
+        workspace = self._workspace_service.get_workspace(workspace_id)
+        if workspace is None:
+            raise ValueError(f"SetupWorkspace not found: {workspace_id}")
+        return workspace
+
+    @staticmethod
+    def _step_for_truth_block_type(block_type: str) -> SetupStepId:
+        mapping = {
+            "story_config": SetupStepId.STORY_CONFIG,
+            "writing_contract": SetupStepId.WRITING_CONTRACT,
+            "foundation_entry": SetupStepId.FOUNDATION,
+            "longform_blueprint": SetupStepId.LONGFORM_BLUEPRINT,
+        }
+        if block_type not in mapping:
+            raise ValueError(f"Unsupported truth write block_type: {block_type}")
+        return mapping[block_type]
 
     @staticmethod
     def _latest_step_proposal(*, workspace, step_id: SetupStepId):

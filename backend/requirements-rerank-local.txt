@@ -1,0 +1,16 @@
+# Optional dependencies for local CrossEncoder-based retrieval reranking.
+#
+# Recommended install flow:
+# 1. Install a suitable PyTorch build for your OS/CPU/GPU from the official selector:
+#    https://pytorch.org/get-started/locally/
+# 2. Install this file:
+#    pip install -r requirements-rerank-local.txt
+#
+# Notes:
+# - We keep these dependencies out of the main requirements.txt because local rerank
+#   is optional and substantially heavier than the hosted rerank path.
+# - ONNX / OpenVINO acceleration is intentionally not included in the first cut.
+
+torch>=2.1.0
+transformers>=4.41.0
+sentence-transformers>=5.2.0

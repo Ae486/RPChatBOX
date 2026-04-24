@@ -41,6 +41,19 @@ def create_db_and_tables() -> None:
         ConversationSourceVisibilityRecord,
     )
     from models.custom_role import CustomRoleRecord
+    from models.rp_memory_store import (
+        MemoryApplyReceiptRecord,
+        MemoryApplyTargetLinkRecord,
+        MemoryProposalRecord,
+        ensure_memory_store_compatible_schema,
+    )
+    from models.rp_core_state_store import (
+        CoreStateAuthoritativeObjectRecord,
+        CoreStateAuthoritativeRevisionRecord,
+        CoreStateProjectionSlotRecord,
+        CoreStateProjectionSlotRevisionRecord,
+        ensure_core_state_store_compatible_schema,
+    )
     from models.rp_retrieval_store import (
         EmbeddingRecordRecord,
         IndexJobRecord,
@@ -52,6 +65,7 @@ def create_db_and_tables() -> None:
     )
     from models.rp_setup_store import (
         SetupAcceptedCommitRecord,
+        SetupAgentRuntimeStateRecord,
         SetupCommitProposalRecord,
         SetupDraftBlockRecord,
         SetupImportedAssetRecord,
@@ -84,6 +98,7 @@ def create_db_and_tables() -> None:
         SetupDraftBlockRecord,
         SetupImportedAssetRecord,
         SetupStepAssetBindingRecord,
+        SetupAgentRuntimeStateRecord,
         SetupCommitProposalRecord,
         SetupAcceptedCommitRecord,
         SetupPendingUserEditDeltaRecord,
@@ -93,6 +108,13 @@ def create_db_and_tables() -> None:
         ChapterWorkspaceRecord,
         StoryArtifactRecord,
         StoryDiscussionEntryRecord,
+        MemoryProposalRecord,
+        MemoryApplyReceiptRecord,
+        MemoryApplyTargetLinkRecord,
+        CoreStateAuthoritativeObjectRecord,
+        CoreStateAuthoritativeRevisionRecord,
+        CoreStateProjectionSlotRecord,
+        CoreStateProjectionSlotRevisionRecord,
         KnowledgeCollectionRecord,
         SourceAssetRecord,
         ParsedDocumentRecord,
@@ -103,6 +125,8 @@ def create_db_and_tables() -> None:
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
     ensure_setup_store_compatible_schema(engine)
+    ensure_memory_store_compatible_schema(engine)
+    ensure_core_state_store_compatible_schema(engine)
     ensure_retrieval_store_compatible_schema(engine)
     ensure_story_store_compatible_schema(engine)
 

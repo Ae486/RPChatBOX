@@ -14,6 +14,10 @@ class StoryConfigDraft(BaseModel):
     model_profile_ref: str | None = None
     worker_profile_ref: str | None = None
     post_write_policy_preset: str | None = None
+    retrieval_embedding_model_id: str | None = None
+    retrieval_embedding_provider_id: str | None = None
+    retrieval_rerank_model_id: str | None = None
+    retrieval_rerank_provider_id: str | None = None
     notes: str | None = None
 
 
@@ -76,4 +80,3 @@ class LongformBlueprintDraft(BaseModel):
     section_strategy: str | None = None
     ending_direction: str | None = None
     chapter_blueprints: list[ChapterBlueprintEntry] = Field(default_factory=list)
-

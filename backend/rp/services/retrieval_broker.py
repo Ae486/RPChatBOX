@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
+from config import get_settings
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_crud import (
     MemoryGetStateInput,
@@ -21,12 +22,24 @@ from rp.models.memory_crud import (
     RetrievalSearchResult,
     StateReadResult,
     StateReadResultItem,
-    SummaryEntry,
     SummaryReadResult,
     VersionListResult,
 )
+from rp.observability.langfuse_scores import emit_retrieval_trace_scores
+from rp.services.core_state_backfill_service import CoreStateBackfillService
+from rp.services.core_state_read_service import CoreStateReadService
+from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.proposal_repository import ProposalRepository
+from rp.services.provenance_read_service import ProvenanceReadService
+from rp.services.projection_read_service import ProjectionReadService
+from rp.services.retrieval_observability_service import RetrievalObservabilityService
 from rp.services.retrieval_service import RetrievalService
+from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story_session_service import StorySessionService
+from rp.services.chapter_workspace_projection_adapter import ChapterWorkspaceProjectionAdapter
+from rp.services.version_history_read_service import VersionHistoryReadService
 from services.database import get_engine
+from services.langfuse_service import get_langfuse_service
 
 
 class RetrievalBroker:
@@ -37,69 +50,55 @@ class RetrievalBroker:
         *,
         default_story_id: str | None = None,
         retrieval_service_factory=None,
+        core_state_read_service_factory=None,
+        projection_read_service_factory=None,
+        langfuse_service=None,
     ) -> None:
         self._default_story_id = default_story_id
         self._retrieval_service_factory = retrieval_service_factory or (lambda session: RetrievalService(session))
+        self._core_state_read_service_factory = core_state_read_service_factory or (
+            lambda session: self._build_core_state_read_service(session)
+        )
+        self._projection_read_service_factory = projection_read_service_factory or (
+            lambda session: self._build_projection_read_service(session)
+        )
+        self._langfuse = langfuse_service or get_langfuse_service()
 
     async def get_state(self, input_model: MemoryGetStateInput) -> StateReadResult:
-        items: list[StateReadResultItem] = []
-        refs = input_model.refs or [
-            ObjectRef(
-                object_id=f"{input_model.domain.value}.current",
-                layer=Layer.CORE_STATE_AUTHORITATIVE,
-                domain=input_model.domain,
-                domain_path=f"{input_model.domain.value}.current",
-                scope=input_model.scope,
-                revision=1,
-            )
-        ]
-        for ref in refs:
-            items.append(
-                StateReadResultItem(
-                    object_ref=ref,
-                    data={
-                        "object_id": ref.object_id,
-                        "layer": ref.layer.value,
-                        "domain": ref.domain.value,
-                        "domain_path": ref.domain_path,
-                        "scope": ref.scope,
-                        "revision": ref.revision or 1,
-                        "content": "State retrieval remains out of retrieval-core scope in Phase B",
-                    },
+        try:
+            with Session(get_engine()) as session:
+                service = self._core_state_read_service_factory(session)
+                return await service.get_state(input_model)
+        except SQLAlchemyError as exc:
+            items: list[StateReadResultItem] = []
+            refs = input_model.refs or [
+                ObjectRef(
+                    object_id=f"{input_model.domain.value}.current",
+                    layer=Layer.CORE_STATE_AUTHORITATIVE,
+                    domain=input_model.domain,
+                    domain_path=f"{input_model.domain.value}.current",
+                    scope=input_model.scope,
+                    revision=1,
                 )
+            ]
+            for ref in refs:
+                items.append(StateReadResultItem(object_ref=ref, data={}, warnings=[]))
+            return StateReadResult(
+                items=items,
+                version_refs=[f"{item.object_ref.object_id}@{item.object_ref.revision or 1}" for item in items],
+                warnings=[f"story_store_unavailable:{type(exc).__name__}"],
             )
-        return StateReadResult(
-            items=items,
-            version_refs=[f"{item.object_ref.object_id}@{item.object_ref.revision or 1}" for item in items],
-        )
 
     async def get_summary(self, input_model: MemoryGetSummaryInput) -> SummaryReadResult:
-        items: list[SummaryEntry] = []
-        if input_model.summary_ids:
-            for summary_id in input_model.summary_ids:
-                domain = self._domain_for_summary_id(summary_id)
-                items.append(
-                    SummaryEntry(
-                        summary_id=summary_id,
-                        domain=domain,
-                        domain_path=summary_id,
-                        summary_text=f"Summary projection for {summary_id} is not persisted yet",
-                        metadata={"scope": input_model.scope, "route": "phase_b_placeholder"},
-                    )
-                )
-        else:
-            for domain in input_model.domains:
-                summary_id = f"{domain.value}.current"
-                items.append(
-                    SummaryEntry(
-                        summary_id=summary_id,
-                        domain=domain,
-                        domain_path=summary_id,
-                        summary_text=f"Summary projection for {domain.value} is not persisted yet",
-                        metadata={"scope": input_model.scope, "route": "phase_b_placeholder"},
-                    )
-                )
-        return SummaryReadResult(items=items)
+        try:
+            with Session(get_engine()) as session:
+                service = self._projection_read_service_factory(session)
+                return await service.get_summary(input_model)
+        except SQLAlchemyError as exc:
+            return SummaryReadResult(
+                items=[],
+                warnings=[f"story_store_unavailable:{type(exc).__name__}"],
+            )
 
     async def search_recall(
         self,
@@ -136,33 +135,21 @@ class RetrievalBroker:
         self,
         input_model: MemoryListVersionsInput,
     ) -> VersionListResult:
-        current_ref = (
-            f"{input_model.target_ref.object_id}@{input_model.target_ref.revision or 1}"
-        )
-        versions = [current_ref]
-        if input_model.include_audit:
-            versions.append(f"{input_model.target_ref.object_id}@0")
-        return VersionListResult(versions=versions, current_ref=current_ref)
+        with Session(get_engine()) as session:
+            service = self._projection_read_service_factory(session) if (
+                input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION
+            ) else self._core_state_read_service_factory(session)
+            return await service.list_versions(input_model)
 
     async def read_provenance(
         self,
         input_model: MemoryReadProvenanceInput,
     ) -> ProvenanceResult:
-        return ProvenanceResult(
-            target_ref=input_model.target_ref,
-            source_refs=[f"source:{input_model.target_ref.object_id}"],
-            proposal_refs=[f"proposal:{input_model.target_ref.object_id}"],
-            ingestion_refs=[f"ingestion:{input_model.target_ref.object_id}"],
-        )
-
-    @staticmethod
-    def _domain_for_summary_id(summary_id: str) -> Domain:
-        prefix = summary_id.split(".", 1)[0]
-        aliases = {"world": "world_rule"}
-        try:
-            return Domain(aliases.get(prefix, prefix))
-        except ValueError:
-            return Domain.SCENE
+        with Session(get_engine()) as session:
+            service = self._projection_read_service_factory(session) if (
+                input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION
+            ) else self._core_state_read_service_factory(session)
+            return await service.read_provenance(input_model)
 
     def _build_query(
         self,
@@ -186,28 +173,155 @@ class RetrievalBroker:
             rerank=False,
         )
 
+    def _build_core_state_read_service(self, session: Session) -> CoreStateReadService:
+        story_session_service = StorySessionService(session)
+        adapter = StorySessionCoreStateAdapter(
+            story_session_service,
+            default_story_id=self._default_story_id,
+        )
+        proposal_repository = ProposalRepository(session)
+        core_state_store_repository = CoreStateStoreRepository(session)
+        store_read_enabled = bool(get_settings().rp_memory_core_state_store_read_enabled)
+        backfill_service = CoreStateBackfillService(
+            story_session_service=story_session_service,
+            proposal_repository=proposal_repository,
+            core_state_store_repository=core_state_store_repository,
+        )
+        return CoreStateReadService(
+            adapter=adapter,
+            version_history_read_service=VersionHistoryReadService(
+                adapter=adapter,
+                proposal_repository=proposal_repository,
+                core_state_store_repository=core_state_store_repository,
+                store_read_enabled=store_read_enabled,
+            ),
+            provenance_read_service=ProvenanceReadService(
+                adapter=adapter,
+                proposal_repository=proposal_repository,
+                core_state_store_repository=core_state_store_repository,
+                store_read_enabled=store_read_enabled,
+            ),
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+            core_state_backfill_service=backfill_service,
+        )
+
+    def _build_projection_read_service(self, session: Session) -> ProjectionReadService:
+        story_session_service = StorySessionService(session)
+        proposal_repository = ProposalRepository(session)
+        core_state_store_repository = CoreStateStoreRepository(session)
+        return ProjectionReadService(
+            adapter=ChapterWorkspaceProjectionAdapter(
+                story_session_service,
+                default_story_id=self._default_story_id,
+            ),
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=bool(get_settings().rp_memory_core_state_store_read_enabled),
+            core_state_backfill_service=CoreStateBackfillService(
+                story_session_service=story_session_service,
+                proposal_repository=proposal_repository,
+                core_state_store_repository=core_state_store_repository,
+            ),
+        )
+
     async def _search(
         self,
         query: RetrievalQuery,
         *,
         search_kind: str,
     ) -> RetrievalSearchResult:
-        started = perf_counter()
-        try:
-            with Session(get_engine()) as session:
-                service = self._retrieval_service_factory(session)
-                if search_kind == "documents":
-                    result = await service.search_documents(query)
-                else:
-                    result = await service.search_chunks(query)
-            trace = result.trace
-            if trace is not None and "broker_ms" not in trace.timings:
-                trace.timings["broker_ms"] = round((perf_counter() - started) * 1000, 3)
-            return result
-        except SQLAlchemyError as exc:
-            return RetrievalSearchResult(
-                query=query.text_query or "",
-                hits=[],
-                trace=None,
-                warnings=[f"retrieval_store_unavailable:{type(exc).__name__}"],
-            )
+        observation_name = f"rp.retrieval.search_{query.query_kind}"
+        with self._langfuse.start_as_current_observation(
+            name=observation_name,
+            as_type="chain",
+            input={
+                "query": query.model_dump(mode="json"),
+                "search_kind": search_kind,
+            },
+        ) as observation:
+            started = perf_counter()
+            try:
+                with Session(get_engine()) as session:
+                    service = self._retrieval_service_factory(session)
+                    if search_kind == "documents":
+                        result = await service.search_documents(query)
+                    else:
+                        result = await service.search_chunks(query)
+                    trace = result.trace
+                    if trace is not None and "broker_ms" not in trace.timings:
+                        trace.timings["broker_ms"] = round((perf_counter() - started) * 1000, 3)
+                    observability = RetrievalObservabilityService(session).build_view(
+                        query=query,
+                        result=result,
+                        include_story_snapshot=False,
+                        max_hits=3,
+                    )
+                output = {
+                    "status": "ok",
+                    "search_kind": search_kind,
+                    "observability": observability.model_dump(mode="json"),
+                }
+                observation.update(output=output)
+                emit_retrieval_trace_scores(
+                    observation,
+                    query_payload=query.model_dump(mode="json"),
+                    result_payload=result.model_dump(mode="json"),
+                    observability_payload=output["observability"],
+                )
+                return result
+            except SQLAlchemyError as exc:
+                result = RetrievalSearchResult(
+                    query=query.text_query or "",
+                    hits=[],
+                    trace=None,
+                    warnings=[f"retrieval_store_unavailable:{type(exc).__name__}"],
+                )
+                observability = RetrievalObservabilityService().build_view(
+                    query=query,
+                    result=result,
+                    include_story_snapshot=False,
+                    max_hits=0,
+                )
+                output = {
+                    "status": "fallback",
+                    "search_kind": search_kind,
+                    "observability": observability.model_dump(mode="json"),
+                    "error": {
+                        "type": type(exc).__name__,
+                        "message": str(exc),
+                        "code": "retrieval_store_unavailable",
+                    },
+                }
+                observation.update(output=output)
+                emit_retrieval_trace_scores(
+                    observation,
+                    query_payload=query.model_dump(mode="json"),
+                    result_payload=result.model_dump(mode="json"),
+                    observability_payload=output["observability"],
+                    failure_layer="infra",
+                    error_code="retrieval_store_unavailable",
+                )
+                return result
+            except Exception as exc:
+                observation.update(
+                    output={
+                        "status": "error",
+                        "search_kind": search_kind,
+                        "query_id": query.query_id,
+                        "story_id": query.story_id,
+                        "query_kind": query.query_kind,
+                        "error": {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                        },
+                    }
+                )
+                emit_retrieval_trace_scores(
+                    observation,
+                    query_payload=query.model_dump(mode="json"),
+                    result_payload={"hits": [], "warnings": [], "trace": None},
+                    observability_payload=None,
+                    failure_layer="retrieval",
+                    error_code=type(exc).__name__,
+                )
+                raise

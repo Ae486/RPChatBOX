@@ -1,0 +1,132 @@
+{
+  "case_id": "setup.cognitive.invalidate_after_proposal_reject.v1",
+  "title": "Rejected proposals should invalidate stale cognitive state and force further discussion",
+  "scope": "setup",
+  "category": "cognitive_invalidation",
+  "tags": ["mvp", "deterministic", "setup-v2", "cognitive-runtime"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-cognitive-reject-001",
+      "target_step": "story_config",
+      "user_prompt": "The last review was rejected. What still needs to change?",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-cognitive-reject-001",
+      "mode": "longform",
+      "current_step": "story_config",
+      "drafts": {
+        "story_config": {
+          "notes": "Use a balanced post-write policy."
+        }
+      },
+      "rejected_proposals": [
+        {
+          "step_id": "story_config",
+          "target_draft_refs": ["draft:story_config"],
+          "reason": "The previous proposal was rejected."
+        }
+      ],
+      "cognitive_states": [
+        {
+          "workspace_id": "seed-ignored",
+          "current_step": "story_config",
+          "discussion_state": {
+            "current_step": "story_config",
+            "discussion_topic": "Lock runtime preferences",
+            "confirmed_points": ["Balanced post-write policy is acceptable."],
+            "candidate_directions": [],
+            "open_questions": [],
+            "unresolved_conflicts": [],
+            "user_preference_signals": ["balanced"],
+            "next_focus": "review"
+          },
+          "chunk_candidates": [],
+          "active_truth_write": {
+            "write_id": "truth-write-story-config",
+            "current_step": "story_config",
+            "block_type": "story_config",
+            "target_ref": "draft:story_config",
+            "operation": "merge",
+            "payload": {
+              "notes": "Use a balanced post-write policy."
+            },
+            "remaining_open_issues": [],
+            "ready_for_review": true
+          },
+          "invalidated": false,
+          "invalidation_reasons": [],
+          "source_basis": {
+            "workspace_version": 1,
+            "draft_fingerprint": "seed-story-config",
+            "pending_user_edit_delta_ids": [],
+            "last_proposal_status": null,
+            "current_step": "story_config"
+          }
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_awaiting_user_input",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "awaiting_user_input",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "cognitive_state_invalidated",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "structured_payload.cognitive_state_summary.invalidated",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "invalidation_mentions_reject",
+        "source": "runtime_result",
+        "type": "contains",
+        "path": "structured_payload.cognitive_state_summary.invalidation_reasons",
+        "expected": "proposal_rejected",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "latest_proposal_stays_rejected",
+        "source": "workspace_truth",
+        "type": "equals",
+        "path": "commit_proposals[-1].status",
+        "expected": "rejected",
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

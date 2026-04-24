@@ -27,6 +27,7 @@ class SetupAgentTurnRequest(BaseModel):
     provider_id: str | None = None
     target_step: SetupStepId | None = None
     history: list[SetupAgentDialogueMessage] = Field(default_factory=list)
+    user_edit_delta_ids: list[str] = Field(default_factory=list)
     user_prompt: str
 
 

@@ -13,6 +13,7 @@ import uvicorn
 from api import api_router
 from config import get_settings
 from services.database import create_db_and_tables
+from services.langfuse_service import get_langfuse_service
 from services.langgraph_checkpoint_store import ensure_langgraph_checkpoint_schema
 from services.mcp_manager import get_mcp_manager
 
@@ -62,6 +63,7 @@ def create_app() -> FastAPI:
         settings.ensure_dirs()
         create_db_and_tables()
         ensure_langgraph_checkpoint_schema()
+        _ = get_langfuse_service()
         app.state.mcp_connect_task = asyncio.create_task(
             get_mcp_manager().connect_enabled_servers()
         )
@@ -76,6 +78,7 @@ def create_app() -> FastAPI:
             mcp_connect_task.cancel()
             with suppress(asyncio.CancelledError):
                 await mcp_connect_task
+        get_langfuse_service().shutdown()
         await get_mcp_manager().disconnect_all()
 
     @app.post("/api/shutdown")

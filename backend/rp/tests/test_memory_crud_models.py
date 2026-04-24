@@ -73,6 +73,9 @@ def test_receipt_and_hit_dump_stably():
     assert receipt.model_dump(mode="json")["domain"] == "scene"
     assert hit.model_dump(mode="json")["domain"] == "scene"
     assert trace.model_dump(mode="json")["route"] == "fake_recall"
+    assert trace.model_dump(mode="json")["retriever_routes"] == []
+    assert trace.model_dump(mode="json")["pipeline_stages"] == []
+    assert trace.model_dump(mode="json")["details"] == {}
 
 
 def test_retrieval_query_uses_phase_a_shared_shape():

@@ -1,0 +1,754 @@
+{
+  "case": {
+    "case_id": "setup.repair.writing_contract.ask_user_after_semantic_fail.v1",
+    "title": "Semantic validation failure should turn into a targeted user question",
+    "scope": "setup",
+    "category": "repair",
+    "tags": [
+      "mvp",
+      "deterministic",
+      "setup-v2",
+      "cognitive-runtime"
+    ],
+    "runtime_target": {
+      "mode": "in_process",
+      "entrypoint": "setup_graph_runner.run_turn",
+      "graph_id": "setup_v2",
+      "stream": false
+    },
+    "input": {
+      "request": {
+        "workspace_id": "case-ask-user-debug-001",
+        "target_step": "writing_contract",
+        "user_prompt": "请整理写作契约。",
+        "history": [],
+        "model_id": "model-eval",
+        "provider_id": "provider-eval"
+      },
+      "workspace_seed": {
+        "story_id": "story-case-ask-user-debug-001",
+        "mode": "longform",
+        "current_step": "writing_contract"
+      },
+      "env_overrides": {
+        "save_replay_dir": "artifacts\\eval\\debug-setup-unique\\replays"
+      }
+    },
+    "preconditions": {},
+    "expected": {
+      "deterministic_assertions": [
+        {
+          "assertion_id": "finish_is_awaiting_user_input",
+          "source": "runtime_result",
+          "type": "equals",
+          "path": "finish_reason",
+          "expected": "awaiting_user_input",
+          "severity": "error"
+        },
+        {
+          "assertion_id": "repair_route_is_ask_user",
+          "source": "runtime_result",
+          "type": "equals",
+          "path": "structured_payload.repair_route",
+          "expected": "ask_user",
+          "severity": "error"
+        },
+        {
+          "assertion_id": "warnings_include_requires_user_input",
+          "source": "runtime_result",
+          "type": "contains",
+          "path": "warnings",
+          "expected": "tool_failure_requires_user_input",
+          "severity": "error"
+        },
+        {
+          "assertion_id": "assistant_asks_for_preferences",
+          "source": "runtime_result",
+          "type": "contains",
+          "path": "assistant_text",
+          "expected": "Which POV and style rules",
+          "severity": "error"
+        }
+      ],
+      "subjective_hooks": [
+        {
+          "hook_id": "clarification_quality",
+          "judge_family": "llm_judge",
+          "rubric_ref": "setup/clarification-quality/v1",
+          "target": "assistant_text"
+        }
+      ]
+    },
+    "trace_hooks": {
+      "capture_runtime_events": true,
+      "capture_graph_debug": true,
+      "capture_workspace_before_after": true,
+      "export_phoenix": false
+    },
+    "repeat": {
+      "count": 1,
+      "stop_on_first_hard_failure": false
+    },
+    "baseline": {
+      "compare_by": [
+        "finish_reason",
+        "warnings",
+        "assertion_pass_rate"
+      ],
+      "baseline_tags": [
+        "main"
+      ]
+    },
+    "metadata": {}
+  },
+  "run": {
+    "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+    "case_id": "setup.repair.writing_contract.ask_user_after_semantic_fail.v1",
+    "scope": "setup",
+    "status": "failed",
+    "started_at": "2026-04-22T13:02:29.715907Z",
+    "finished_at": "2026-04-22T13:02:30.725148Z",
+    "runtime_target": "setup_v2",
+    "baseline_tags": [
+      "main"
+    ],
+    "trace_id": "1946fc2ea847434c9fe35dfca764c126",
+    "failure": {
+      "layer": "infra",
+      "code": "APIError",
+      "message": "litellm.APIError: APIError: OpenAIException - <!doctype html><html lang=\"en\"><head><title>Example Domain</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.<p><a href=\"https://iana.org/domains/example\">Learn more</a></div></body></html>. Received Model Group=gpt-4o-mini\nAvailable Model Group Fallbacks=None",
+      "retryable": false,
+      "source": "runner_exception"
+    },
+    "metadata": {
+      "workspace_id": "cad50a12953445e99a6911a727c8b911",
+      "story_id": "story-case-ask-user-debug-001"
+    }
+  },
+  "trace": {
+    "trace_id": "1946fc2ea847434c9fe35dfca764c126",
+    "spans": [
+      {
+        "span_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:root",
+        "trace_id": "1946fc2ea847434c9fe35dfca764c126",
+        "parent_span_id": null,
+        "name": "setup.turn",
+        "span_kind": "AGENT",
+        "status": "error",
+        "started_at": "2026-04-22T13:02:29.715907Z",
+        "finished_at": "2026-04-22T13:02:30.725148Z",
+        "input": {
+          "workspace_id": "cad50a12953445e99a6911a727c8b911",
+          "model_id": "model-eval",
+          "provider_id": "provider-eval",
+          "target_step": "writing_contract",
+          "history": [],
+          "user_edit_delta_ids": [],
+          "user_prompt": "请整理写作契约。"
+        },
+        "output": {},
+        "attributes": {
+          "case_id": "setup.repair.writing_contract.ask_user_after_semantic_fail.v1",
+          "workspace_id": "cad50a12953445e99a6911a727c8b911",
+          "target_step": "writing_contract",
+          "model_id": "model-eval",
+          "provider_id": "provider-eval",
+          "finish_reason": null,
+          "repair_route": null,
+          "cognitive_state_invalidated": null,
+          "cognitive_ready_for_review": null,
+          "cognitive_remaining_issue_count": 0
+        },
+        "error": null
+      }
+    ],
+    "events": []
+  },
+  "artifacts": [
+    {
+      "artifact_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:runtime_result",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "kind": "runtime_result",
+      "name": "RpAgentTurnResult",
+      "content_type": "application/json",
+      "payload": {}
+    },
+    {
+      "artifact_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:workspace_before",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "kind": "workspace_before",
+      "name": "SetupWorkspaceBefore",
+      "content_type": "application/json",
+      "payload": {
+        "workspace_id": "cad50a12953445e99a6911a727c8b911",
+        "story_id": "story-case-ask-user-debug-001",
+        "mode": "longform",
+        "workspace_state": "drafting",
+        "current_step": "writing_contract",
+        "step_states": [
+          {
+            "step_id": "foundation",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          },
+          {
+            "step_id": "longform_blueprint",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          },
+          {
+            "step_id": "writing_contract",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          },
+          {
+            "step_id": "story_config",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          }
+        ],
+        "story_config_draft": null,
+        "writing_contract_draft": null,
+        "foundation_draft": null,
+        "longform_blueprint_draft": null,
+        "imported_assets": [],
+        "step_asset_bindings": [],
+        "retrieval_ingestion_jobs": [],
+        "commit_proposals": [],
+        "accepted_commits": [],
+        "pending_user_edit_deltas": [],
+        "open_questions": [],
+        "readiness_status": {
+          "step_readiness": {
+            "foundation": "not_ready",
+            "longform_blueprint": "not_ready",
+            "writing_contract": "not_ready",
+            "story_config": "not_ready"
+          },
+          "blocking_issues": [],
+          "warnings": [
+            "Step foundation has no draft content yet",
+            "Step longform_blueprint has no draft content yet",
+            "Step writing_contract has no draft content yet",
+            "Step story_config has no draft content yet"
+          ]
+        },
+        "version": 1,
+        "created_at": "2026-04-22T13:02:29.773158",
+        "updated_at": "2026-04-22T13:02:29.773158",
+        "activated_at": null,
+        "activated_story_session_id": null
+      }
+    },
+    {
+      "artifact_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:workspace_after",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "kind": "workspace_after",
+      "name": "SetupWorkspaceAfter",
+      "content_type": "application/json",
+      "payload": {
+        "workspace_id": "cad50a12953445e99a6911a727c8b911",
+        "story_id": "story-case-ask-user-debug-001",
+        "mode": "longform",
+        "workspace_state": "drafting",
+        "current_step": "writing_contract",
+        "step_states": [
+          {
+            "step_id": "foundation",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          },
+          {
+            "step_id": "longform_blueprint",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          },
+          {
+            "step_id": "writing_contract",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          },
+          {
+            "step_id": "story_config",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-22T13:02:29.773158"
+          }
+        ],
+        "story_config_draft": null,
+        "writing_contract_draft": null,
+        "foundation_draft": null,
+        "longform_blueprint_draft": null,
+        "imported_assets": [],
+        "step_asset_bindings": [],
+        "retrieval_ingestion_jobs": [],
+        "commit_proposals": [],
+        "accepted_commits": [],
+        "pending_user_edit_deltas": [],
+        "open_questions": [],
+        "readiness_status": {
+          "step_readiness": {
+            "foundation": "not_ready",
+            "longform_blueprint": "not_ready",
+            "writing_contract": "not_ready",
+            "story_config": "not_ready"
+          },
+          "blocking_issues": [],
+          "warnings": [
+            "Step foundation has no draft content yet",
+            "Step longform_blueprint has no draft content yet",
+            "Step writing_contract has no draft content yet",
+            "Step story_config has no draft content yet"
+          ]
+        },
+        "version": 1,
+        "created_at": "2026-04-22T13:02:29.773158",
+        "updated_at": "2026-04-22T13:02:29.773158",
+        "activated_at": null,
+        "activated_story_session_id": null
+      }
+    },
+    {
+      "artifact_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:graph_debug",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "kind": "graph_debug",
+      "name": "SetupGraphRuntimeDebug",
+      "content_type": "application/json",
+      "payload": {
+        "thread_id": "cad50a12953445e99a6911a727c8b911:rp_setup",
+        "namespace": "rp_setup",
+        "latest_checkpoint": {
+          "checkpoint_id": "1f13e4b8-4eb2-6a08-bfff-28251cc233e5",
+          "parent_checkpoint_id": null,
+          "status": null,
+          "state": {},
+          "cognitive_state_summary": null,
+          "repair_route": null,
+          "summary": {
+            "checkpoint_id": "1f13e4b8-4eb2-6a08-bfff-28251cc233e5",
+            "parent_checkpoint_id": null,
+            "created_at": "2026-04-22T13:02:29.866957+00:00",
+            "status": null,
+            "state_keys": []
+          }
+        },
+        "latest_meaningful_checkpoint": {
+          "checkpoint_id": "1f13e4b8-4edc-6255-8002-85f0b4a8844a",
+          "parent_checkpoint_id": "1f13e4b8-4ecb-6329-8001-09fb161ed9bd",
+          "status": "context_built",
+          "state": {
+            "workspace_id": "cad50a12953445e99a6911a727c8b911",
+            "mode": "longform",
+            "current_step": "writing_contract",
+            "target_step": "writing_contract",
+            "model_id": "model-eval",
+            "provider_id": "provider-eval",
+            "user_prompt": "请整理写作契约。",
+            "history": [],
+            "user_edit_delta_ids": [],
+            "stream_mode": false,
+            "status": "context_built",
+            "context_packet": {
+              "workspace_id": "cad50a12953445e99a6911a727c8b911",
+              "current_step": "writing_contract",
+              "committed_summaries": [],
+              "current_draft_snapshot": {},
+              "step_asset_preview": [],
+              "user_prompt": "请整理写作契约。",
+              "user_edit_deltas": [],
+              "spotlights": []
+            },
+            "assistant_text": "",
+            "finish_reason": null,
+            "warnings": [],
+            "response_payload": {},
+            "error": null
+          },
+          "cognitive_state_summary": null,
+          "repair_route": null,
+          "summary": {
+            "checkpoint_id": "1f13e4b8-4edc-6255-8002-85f0b4a8844a",
+            "parent_checkpoint_id": "1f13e4b8-4ecb-6329-8001-09fb161ed9bd",
+            "created_at": "2026-04-22T13:02:29.883963+00:00",
+            "status": "context_built",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "current_step",
+              "error",
+              "finish_reason",
+              "history",
+              "mode",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          }
+        },
+        "history": [
+          {
+            "checkpoint_id": "1f13e4b8-4edc-6255-8002-85f0b4a8844a",
+            "parent_checkpoint_id": "1f13e4b8-4ecb-6329-8001-09fb161ed9bd",
+            "created_at": "2026-04-22T13:02:29.883963+00:00",
+            "status": "context_built",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "current_step",
+              "error",
+              "finish_reason",
+              "history",
+              "mode",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          },
+          {
+            "checkpoint_id": "1f13e4b8-4ecb-6329-8001-09fb161ed9bd",
+            "parent_checkpoint_id": "1f13e4b8-4eb5-611f-8000-abb419ea4f02",
+            "created_at": "2026-04-22T13:02:29.877021+00:00",
+            "status": "workspace_loaded",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "current_step",
+              "error",
+              "finish_reason",
+              "history",
+              "mode",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          },
+          {
+            "checkpoint_id": "1f13e4b8-4eb5-611f-8000-abb419ea4f02",
+            "parent_checkpoint_id": "1f13e4b8-4eb2-6a08-bfff-28251cc233e5",
+            "created_at": "2026-04-22T13:02:29.867958+00:00",
+            "status": "received",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "error",
+              "finish_reason",
+              "history",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          },
+          {
+            "checkpoint_id": "1f13e4b8-4eb2-6a08-bfff-28251cc233e5",
+            "parent_checkpoint_id": null,
+            "created_at": "2026-04-22T13:02:29.866957+00:00",
+            "status": null,
+            "state_keys": []
+          }
+        ]
+      }
+    },
+    {
+      "artifact_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:subjective_hook:clarification_quality",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "kind": "subjective_hook_record",
+      "name": "SubjectiveHookRecord:clarification_quality",
+      "content_type": "application/json",
+      "payload": {
+        "hook_id": "clarification_quality",
+        "name": "hook:clarification_quality",
+        "kind": "llm",
+        "status": "skip",
+        "label": "pending",
+        "score": null,
+        "explanation": "Subjective hook prepared but no judge executor is configured yet",
+        "severity": "warn",
+        "judge_family": "llm_judge",
+        "rubric_ref": "setup/clarification-quality/v1",
+        "rubric_title": "Setup Clarification Quality",
+        "target": {
+          "name": "assistant_text",
+          "available": false,
+          "source": "runtime_result",
+          "path": "assistant_text",
+          "preview": null
+        },
+        "judge": {
+          "model_id": null,
+          "provider_id": null,
+          "prompt_version": "llm-judge/v2",
+          "response_schema_version": "judge-response/v2",
+          "status_source": null,
+          "score_source": null,
+          "score_band": null,
+          "score_band_conflict": false,
+          "skip_reason": null
+        },
+        "request": null,
+        "response": null,
+        "strengths": [],
+        "issues": []
+      }
+    }
+  ],
+  "scores": [
+    {
+      "score_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:score:finish_is_awaiting_user_input",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "span_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:root",
+      "name": "finish_is_awaiting_user_input",
+      "kind": "code",
+      "status": "fail",
+      "value_type": "boolean",
+      "value": false,
+      "label": "fail",
+      "explanation": "expected='awaiting_user_input' actual=None",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "finish_reason",
+        "expected": "awaiting_user_input",
+        "actual": null
+      }
+    },
+    {
+      "score_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:score:repair_route_is_ask_user",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "span_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:root",
+      "name": "repair_route_is_ask_user",
+      "kind": "code",
+      "status": "fail",
+      "value_type": "boolean",
+      "value": false,
+      "label": "fail",
+      "explanation": "expected='ask_user' actual=None",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "structured_payload.repair_route",
+        "expected": "ask_user",
+        "actual": null
+      }
+    },
+    {
+      "score_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:score:warnings_include_requires_user_input",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "span_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:root",
+      "name": "warnings_include_requires_user_input",
+      "kind": "code",
+      "status": "fail",
+      "value_type": "boolean",
+      "value": false,
+      "label": "fail",
+      "explanation": "contains expected='tool_failure_requires_user_input' actual=None",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "warnings",
+        "expected": "tool_failure_requires_user_input",
+        "actual": null
+      }
+    },
+    {
+      "score_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:score:assistant_asks_for_preferences",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "span_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:root",
+      "name": "assistant_asks_for_preferences",
+      "kind": "code",
+      "status": "fail",
+      "value_type": "boolean",
+      "value": false,
+      "label": "fail",
+      "explanation": "contains expected='Which POV and style rules' actual=None",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "assistant_text",
+        "expected": "Which POV and style rules",
+        "actual": null
+      }
+    },
+    {
+      "score_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:score:hook:clarification_quality",
+      "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+      "span_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:root",
+      "name": "hook:clarification_quality",
+      "kind": "llm",
+      "status": "skip",
+      "value_type": "categorical",
+      "value": "pending",
+      "label": "pending",
+      "explanation": "Subjective hook prepared but no judge executor is configured yet",
+      "severity": "warn",
+      "metadata": {
+        "hook_id": "clarification_quality",
+        "judge_family": "llm_judge",
+        "rubric_ref": "setup/clarification-quality/v1",
+        "target": "assistant_text",
+        "resolved_source": "runtime_result",
+        "resolved_path": "assistant_text",
+        "target_available": false,
+        "target_preview": null,
+        "rubric_title": "Setup Clarification Quality",
+        "judge_prompt_version": "llm-judge/v2",
+        "judge_response_schema_version": "judge-response/v2"
+      }
+    }
+  ],
+  "runtime_result": {},
+  "report": {
+    "run_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2",
+    "case_id": "setup.repair.writing_contract.ask_user_after_semantic_fail.v1",
+    "scope": "setup",
+    "status": "failed",
+    "assertion_summary": {
+      "pass": 0,
+      "fail": 4,
+      "warn": 0,
+      "skip": 1
+    },
+    "hard_failures": [
+      "finish_is_awaiting_user_input",
+      "repair_route_is_ask_user",
+      "warnings_include_requires_user_input",
+      "assistant_asks_for_preferences"
+    ],
+    "failure_layer": "infra",
+    "finish_reason": null,
+    "repair_route": null,
+    "completion_guard_reason": null,
+    "last_failure_category": null,
+    "last_failure_message": null,
+    "cognitive_state_invalidated": null,
+    "cognitive_ready_for_review": null,
+    "cognitive_invalidation_reasons": [],
+    "remaining_open_issues": [],
+    "commit_blocked": false,
+    "subjective_hook_summary": {
+      "total": 1,
+      "pending": 1,
+      "executed": 0,
+      "judge_family_counts": {
+        "llm_judge": 1
+      },
+      "rubric_refs": [
+        "setup/clarification-quality/v1"
+      ],
+      "status_counts": {
+        "skip": 1
+      },
+      "average_numeric_score": null,
+      "rubric_summaries": {
+        "setup/clarification-quality/v1": {
+          "total": 1,
+          "pending": 1,
+          "executed": 0,
+          "status_counts": {
+            "skip": 1
+          },
+          "average_numeric_score": null,
+          "hook_ids": [
+            "clarification_quality"
+          ],
+          "case_count": 1
+        }
+      },
+      "artifact_count": 1
+    },
+    "subjective_hook_results": [
+      {
+        "hook_id": "clarification_quality",
+        "artifact_id": "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:subjective_hook:clarification_quality",
+        "judge_family": "llm_judge",
+        "rubric_ref": "setup/clarification-quality/v1",
+        "rubric_title": "Setup Clarification Quality",
+        "status": "skip",
+        "score": null,
+        "label": "pending",
+        "explanation": "Subjective hook prepared but no judge executor is configured yet",
+        "judge_model_id": null,
+        "judge_provider_id": null,
+        "judge_prompt_version": "llm-judge/v2",
+        "judge_response_schema_version": "judge-response/v2",
+        "judge_skip_reason": null,
+        "judge_status_source": null,
+        "judge_score_source": null,
+        "judge_score_band": null,
+        "judge_score_band_conflict": false,
+        "judge_strengths": [],
+        "judge_issues": [],
+        "target_available": false,
+        "resolved_source": "runtime_result",
+        "resolved_path": "assistant_text"
+      }
+    ],
+    "subjective_hook_artifact_ids": [
+      "e9bd8d3ceaec4ba49c8f728cf40acaf2:artifact:subjective_hook:clarification_quality"
+    ],
+    "pending_judge_hook_ids": [
+      "clarification_quality"
+    ],
+    "end_reason_summary": null,
+    "phoenix": null
+  },
+  "phoenix": null
+}

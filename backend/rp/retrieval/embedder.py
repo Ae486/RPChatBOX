@@ -55,7 +55,7 @@ class Embedder:
         self.last_warnings: list[str] = []
 
     def embed(self, chunks: list[KnowledgeChunk]) -> list[EmbeddingRecord]:
-        texts = [chunk.text for chunk in chunks]
+        texts = [self._text_for_chunk(chunk) for chunk in chunks]
         target = self._resolve_target()
         vectors = self._embed_texts(texts, target=target)
         now = _utcnow()
@@ -74,6 +74,13 @@ class Embedder:
             )
             for chunk, vector in zip(chunks, vectors, strict=False)
         ]
+
+    @staticmethod
+    def _text_for_chunk(chunk: KnowledgeChunk) -> str:
+        contextual_text = chunk.metadata.get("contextual_text")
+        if isinstance(contextual_text, str) and contextual_text.strip():
+            return contextual_text
+        return chunk.text
 
     def embed_query(self, text: str) -> tuple[list[float], list[str], str]:
         target = self._resolve_target()
@@ -155,6 +162,9 @@ class Embedder:
         for entry in entries:
             if not entry.is_enabled:
                 continue
+            profile = entry.capability_profile
+            if profile is not None and profile.mode == "embedding":
+                return entry
             if "embedding" in entry.capabilities or "embedding" in entry.model_name.lower():
                 return entry
         return None

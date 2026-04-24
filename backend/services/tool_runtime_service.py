@@ -7,6 +7,7 @@ import uuid
 from typing import Any, AsyncIterator
 
 from models.chat import ChatCompletionRequest, ChatMessage
+from services.langfuse_service import get_langfuse_service
 from services.mcp_manager import McpManager, get_mcp_manager
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class ToolRuntimeService:
 
     def __init__(self, *, mcp_manager: McpManager | None = None):
         self._mcp = mcp_manager or get_mcp_manager()
+        self._langfuse = get_langfuse_service()
 
     async def chat_completion(
         self,
@@ -48,44 +50,73 @@ class ToolRuntimeService:
             "completion_tokens": 0,
             "total_tokens": 0,
         }
+        with self._langfuse.start_as_current_observation(
+            name="tool_runtime.chat_completion",
+            as_type="chain",
+            input={
+                "model": request.model,
+                "message_count": len(messages),
+                "tool_definition_count": len(tools_defs),
+                "stream": False,
+            },
+        ) as root_observation:
+            for round_idx in range(_MAX_TOOL_ROUNDS):
+                round_request = request.model_copy(
+                    update={
+                        "messages": messages,
+                        "tools": tools_defs,
+                        "tool_choice": "auto",
+                        "stream": False,
+                    }
+                )
 
-        for round_idx in range(_MAX_TOOL_ROUNDS):
-            round_request = request.model_copy(
-                update={
-                    "messages": messages,
-                    "tools": tools_defs,
-                    "tool_choice": "auto",
-                    "stream": False,
-                }
-            )
+                with root_observation.start_as_current_observation(
+                    name="tool_runtime.model_round",
+                    as_type="generation",
+                    model=request.model,
+                    input={
+                        "round_no": round_idx + 1,
+                        "message_count": len(messages),
+                        "tool_definition_count": len(tools_defs),
+                    },
+                ) as generation:
+                    response_dict = self._coerce_response_dict(
+                        await llm_service.chat_completion(round_request)
+                    )
+                    self._accumulate_usage(usage_totals, response_dict.get("usage"))
+                    generation.update(
+                        output=self._get_first_choice(response_dict),
+                        usage_details=(
+                            dict(response_dict.get("usage"))
+                            if isinstance(response_dict.get("usage"), dict)
+                            else None
+                        ),
+                    )
 
-            response_dict = self._coerce_response_dict(
-                await llm_service.chat_completion(round_request)
-            )
-            self._accumulate_usage(usage_totals, response_dict.get("usage"))
+                choice = self._get_first_choice(response_dict)
+                if choice is None:
+                    response_dict["usage"] = usage_totals
+                    root_observation.update(output={"usage": usage_totals, "completed": True})
+                    return response_dict
 
-            choice = self._get_first_choice(response_dict)
-            if choice is None:
-                response_dict["usage"] = usage_totals
-                return response_dict
+                message_payload = choice.get("message") or {}
+                raw_tool_calls = message_payload.get("tool_calls") or []
+                tool_calls = [call for call in raw_tool_calls if isinstance(call, dict)]
 
-            message_payload = choice.get("message") or {}
-            raw_tool_calls = message_payload.get("tool_calls") or []
-            tool_calls = [call for call in raw_tool_calls if isinstance(call, dict)]
+                if not tool_calls:
+                    response_dict["usage"] = usage_totals
+                    root_observation.update(output={"usage": usage_totals, "completed": True})
+                    return response_dict
 
-            if not tool_calls:
-                response_dict["usage"] = usage_totals
-                return response_dict
+                messages.append(self._build_assistant_tool_message(message_payload, tool_calls))
+                tool_results_messages = await self._execute_tool_calls(tool_calls)
+                messages.extend(tool_results_messages)
 
-            messages.append(self._build_assistant_tool_message(message_payload, tool_calls))
-            tool_results_messages = await self._execute_tool_calls(tool_calls)
-            messages.extend(tool_results_messages)
-
-            logger.info(
-                "[TOOL] round=%d tool_calls=%d continuing",
-                round_idx + 1,
-                len(tool_calls),
-            )
+                logger.info(
+                    "[TOOL] round=%d tool_calls=%d continuing",
+                    round_idx + 1,
+                    len(tool_calls),
+                )
 
         raise RuntimeError(f"Tool loop exceeded {_MAX_TOOL_ROUNDS} rounds")
 
@@ -110,174 +141,202 @@ class ToolRuntimeService:
             len(messages),
             len(tools_defs),
         )
+        with self._langfuse.start_as_current_observation(
+            name="tool_runtime.chat_completion_stream",
+            as_type="chain",
+            input={
+                "model": request.model,
+                "message_count": len(messages),
+                "tool_definition_count": len(tools_defs),
+                "stream": True,
+            },
+        ) as root_observation:
+            for round_idx in range(_MAX_TOOL_ROUNDS):
+                logger.info(
+                    "[TOOL_STREAM] round_start round=%s model=%s message_count=%s",
+                    round_idx + 1,
+                    request.model,
+                    len(messages),
+                )
+                round_request = request.model_copy(
+                    update={
+                        "messages": messages,
+                        "tools": tools_defs,
+                        "tool_choice": "auto",
+                        "stream": True,
+                        "stream_event_mode": "typed",
+                    }
+                )
 
-        for round_idx in range(_MAX_TOOL_ROUNDS):
-            logger.info(
-                "[TOOL_STREAM] round_start round=%s model=%s message_count=%s",
-                round_idx + 1,
-                request.model,
-                len(messages),
-            )
-            # Build request for this round
-            round_request = request.model_copy(
-                update={
-                    "messages": messages,
-                    "tools": tools_defs,
-                    "tool_choice": "auto",
-                    "stream": True,
-                    "stream_event_mode": "typed",
-                }
-            )
+                accumulated_tool_calls: dict[int, dict[str, Any]] = {}
+                accumulated_text = ""
+                saw_done = False
+                usage_details: dict[str, int] | None = None
+                with root_observation.start_as_current_observation(
+                    name="tool_runtime.model_round.stream",
+                    as_type="generation",
+                    model=request.model,
+                    input={
+                        "round_no": round_idx + 1,
+                        "message_count": len(messages),
+                        "tool_definition_count": len(tools_defs),
+                    },
+                ) as generation:
+                    async for line in llm_service.chat_completion_stream(round_request):
+                        payload = self._parse_sse_payload(line)
+                        if payload is None:
+                            continue
 
-            # Accumulate this round's full response for context
-            accumulated_tool_calls: dict[int, dict[str, Any]] = {}
-            accumulated_text = ""
-            saw_done = False
-            async for line in llm_service.chat_completion_stream(round_request):
-                payload = self._parse_sse_payload(line)
-                if payload is None:
-                    continue
+                        event_type = payload.get("type")
 
-                event_type = payload.get("type")
+                        if event_type == "done":
+                            saw_done = True
+                            logger.info(
+                                "[TOOL_STREAM] round_done_signal round=%s text_chars=%s tool_call_slots=%s",
+                                round_idx + 1,
+                                len(accumulated_text),
+                                len(accumulated_tool_calls),
+                            )
+                            break
 
-                if event_type == "done":
-                    # Don't forward yet — check if we need another round
-                    saw_done = True
+                        if event_type in ("thinking_delta", "text_delta"):
+                            if event_type == "text_delta":
+                                accumulated_text += payload.get("delta", "")
+                            yield line
+                            continue
+
+                        if event_type == "tool_call":
+                            raw_calls = payload.get("tool_calls", [])
+                            self._merge_stream_tool_calls(accumulated_tool_calls, raw_calls)
+                            logger.info(
+                                "[TOOL_STREAM] round_tool_call round=%s raw_calls=%s accumulated_slots=%s",
+                                round_idx + 1,
+                                len(raw_calls) if isinstance(raw_calls, list) else 0,
+                                len(accumulated_tool_calls),
+                            )
+                            yield line
+                            continue
+
+                        if event_type == "error":
+                            logger.error(
+                                "[TOOL_STREAM] round_error_event round=%s payload=%s",
+                                round_idx + 1,
+                                payload,
+                            )
+                            generation.update(output={"error": payload})
+                            yield line
+                            yield self._emit_done()
+                            return
+
+                        if event_type == "usage":
+                            usage_details = {
+                                "prompt_tokens": int(payload.get("prompt_tokens") or 0),
+                                "completion_tokens": int(payload.get("completion_tokens") or 0),
+                                "total_tokens": int(payload.get("total_tokens") or 0),
+                            }
+
+                        yield line
+
+                    generation.update(
+                        output={
+                            "content": accumulated_text or None,
+                            "tool_calls": self._finalize_stream_tool_calls(accumulated_tool_calls),
+                        },
+                        usage_details=usage_details,
+                    )
+
+                finalized_tool_calls = self._finalize_stream_tool_calls(accumulated_tool_calls)
+                logger.info(
+                    "[TOOL_STREAM] round_end round=%s saw_done=%s text_chars=%s finalized_tool_calls=%s",
+                    round_idx + 1,
+                    saw_done,
+                    len(accumulated_text),
+                    len(finalized_tool_calls),
+                )
+                if not finalized_tool_calls:
                     logger.info(
-                        "[TOOL_STREAM] round_done_signal round=%s text_chars=%s tool_call_slots=%s",
+                        "[TOOL_STREAM] complete_no_tools round=%s final_text_chars=%s",
                         round_idx + 1,
                         len(accumulated_text),
-                        len(accumulated_tool_calls),
                     )
-                    break
-
-                if event_type in ("thinking_delta", "text_delta"):
-                    if event_type == "text_delta":
-                        accumulated_text += payload.get("delta", "")
-                    yield line
-                    continue
-
-                if event_type == "tool_call":
-                    raw_calls = payload.get("tool_calls", [])
-                    self._merge_stream_tool_calls(accumulated_tool_calls, raw_calls)
-                    logger.info(
-                        "[TOOL_STREAM] round_tool_call round=%s raw_calls=%s accumulated_slots=%s",
-                        round_idx + 1,
-                        len(raw_calls) if isinstance(raw_calls, list) else 0,
-                        len(accumulated_tool_calls),
-                    )
-                    # Forward tool_call event to frontend (pending bubbles)
-                    yield line
-                    continue
-
-                if event_type == "error":
-                    logger.error(
-                        "[TOOL_STREAM] round_error_event round=%s payload=%s",
-                        round_idx + 1,
-                        payload,
-                    )
-                    yield line
+                    root_observation.update(output={"completed": True})
                     yield self._emit_done()
                     return
 
-                # Pass through other events
-                yield line
+                tool_results_messages = []
 
-            # Round finished. Were there tool calls?
-            finalized_tool_calls = self._finalize_stream_tool_calls(accumulated_tool_calls)
-            logger.info(
-                "[TOOL_STREAM] round_end round=%s saw_done=%s text_chars=%s finalized_tool_calls=%s",
-                round_idx + 1,
-                saw_done,
-                len(accumulated_text),
-                len(finalized_tool_calls),
-            )
-            if not finalized_tool_calls:
-                # No tools needed — stream is complete
-                logger.info(
-                    "[TOOL_STREAM] complete_no_tools round=%s final_text_chars=%s",
-                    round_idx + 1,
-                    len(accumulated_text),
-                )
-                yield self._emit_done()
-                return
+                for call in finalized_tool_calls:
+                    call_id = self._tool_call_id(call)
+                    tool_name = self._tool_name(call)
 
-            # Execute tool calls and emit lifecycle events
-            tool_results_messages = []
+                    yield self._emit_typed(
+                        {"type": "tool_started", "call_id": call_id, "tool_name": tool_name}
+                    )
 
-            for call in finalized_tool_calls:
-                call_id = self._tool_call_id(call)
-                tool_name = self._tool_name(call)
-
-                yield self._emit_typed(
-                    {"type": "tool_started", "call_id": call_id, "tool_name": tool_name}
-                )
-
-                logger.info(
-                    "[TOOL_STREAM] tool_start round=%s call_id=%s tool_name=%s",
-                    round_idx + 1,
-                    call_id,
-                    tool_name,
-                )
-                result = await self._call_tool(call)
-
-                if result["success"]:
                     logger.info(
-                        "[TOOL_STREAM] tool_success round=%s call_id=%s tool_name=%s content_chars=%s",
+                        "[TOOL_STREAM] tool_start round=%s call_id=%s tool_name=%s",
                         round_idx + 1,
                         call_id,
                         tool_name,
-                        len(str(result.get("content") or "")),
                     )
-                    yield self._emit_typed(
-                        {
-                            "type": "tool_result",
-                            "call_id": call_id,
-                            "tool_name": tool_name,
-                            "result": result["content"],
-                        }
-                    )
-                else:
-                    logger.warning(
-                        "[TOOL_STREAM] tool_failure round=%s call_id=%s tool_name=%s error_code=%s content_chars=%s",
-                        round_idx + 1,
-                        call_id,
-                        tool_name,
-                        result.get("error_code"),
-                        len(str(result.get("content") or "")),
-                    )
-                    yield self._emit_typed(
-                        {
-                            "type": "tool_error",
-                            "call_id": call_id,
-                            "tool_name": tool_name,
-                            "error": result["content"],
-                        }
+                    result = await self._call_tool(call)
+
+                    if result["success"]:
+                        logger.info(
+                            "[TOOL_STREAM] tool_success round=%s call_id=%s tool_name=%s content_chars=%s",
+                            round_idx + 1,
+                            call_id,
+                            tool_name,
+                            len(str(result.get("content") or "")),
+                        )
+                        yield self._emit_typed(
+                            {
+                                "type": "tool_result",
+                                "call_id": call_id,
+                                "tool_name": tool_name,
+                                "result": result["content"],
+                            }
+                        )
+                    else:
+                        logger.warning(
+                            "[TOOL_STREAM] tool_failure round=%s call_id=%s tool_name=%s error_code=%s content_chars=%s",
+                            round_idx + 1,
+                            call_id,
+                            tool_name,
+                            result.get("error_code"),
+                            len(str(result.get("content") or "")),
+                        )
+                        yield self._emit_typed(
+                            {
+                                "type": "tool_error",
+                                "call_id": call_id,
+                                "tool_name": tool_name,
+                                "error": result["content"],
+                            }
+                        )
+
+                    tool_results_messages.append(
+                        ChatMessage(
+                            role="tool",
+                            name=tool_name,
+                            tool_call_id=call_id,
+                            content=result["content"],
+                        )
                     )
 
-                tool_results_messages.append(
-                    ChatMessage(
-                        role="tool",
-                        name=tool_name,
-                        tool_call_id=call_id,
-                        content=result["content"],
+                messages.append(
+                    self._build_assistant_tool_message(
+                        {"content": accumulated_text or None},
+                        finalized_tool_calls,
                     )
                 )
+                messages.extend(tool_results_messages)
 
-            # Append assistant message with tool_calls + tool results to context
-            messages.append(
-                self._build_assistant_tool_message(
-                    {"content": accumulated_text or None},
-                    finalized_tool_calls,
+                logger.info(
+                    "[TOOL] round=%d tool_calls=%d continuing",
+                    round_idx + 1,
+                    len(finalized_tool_calls),
                 )
-            )
-            messages.extend(tool_results_messages)
-
-            logger.info(
-                "[TOOL] round=%d tool_calls=%d continuing",
-                round_idx + 1,
-                len(finalized_tool_calls),
-            )
 
         # Max rounds exhausted
         logger.error(
@@ -319,10 +378,19 @@ class ToolRuntimeService:
         return tool_messages
 
     async def _call_tool(self, call: dict[str, Any]) -> dict[str, Any]:
-        return await self._mcp.call_tool_by_qualified_name(
-            qualified_name=self._tool_name(call),
-            arguments=self._tool_arguments(call),
-        )
+        tool_name = self._tool_name(call)
+        arguments = self._tool_arguments(call)
+        with self._langfuse.start_as_current_observation(
+            name=f"tool_runtime.tool:{tool_name}",
+            as_type="tool",
+            input={"tool_name": tool_name, "arguments": arguments},
+        ) as tool_observation:
+            result = await self._mcp.call_tool_by_qualified_name(
+                qualified_name=tool_name,
+                arguments=arguments,
+            )
+            tool_observation.update(output=result)
+            return result
 
     @staticmethod
     def _coerce_response_dict(response: Any) -> dict[str, Any]:

@@ -39,6 +39,85 @@ class Settings(BaseSettings):
             "RP_SETUP_AGENT_RUNTIME_V2_ENABLED",
         ),
     )
+    rp_memory_core_state_store_write_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_ENABLED",
+            "RP_MEMORY_CORE_STATE_STORE_WRITE_ENABLED",
+        ),
+    )
+    rp_memory_core_state_store_read_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+            "RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+        ),
+    )
+    rp_memory_core_state_store_write_switch_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_SWITCH_ENABLED",
+            "RP_MEMORY_CORE_STATE_STORE_WRITE_SWITCH_ENABLED",
+        ),
+    )
+
+    # Langfuse observability
+    langfuse_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_ENABLED",
+            "LANGFUSE_ENABLED",
+        ),
+    )
+    langfuse_public_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_PUBLIC_KEY",
+            "LANGFUSE_PUBLIC_KEY",
+        ),
+    )
+    langfuse_secret_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_SECRET_KEY",
+            "LANGFUSE_SECRET_KEY",
+        ),
+    )
+    langfuse_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_BASE_URL",
+            "LANGFUSE_BASE_URL",
+        ),
+    )
+    langfuse_environment: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_ENVIRONMENT",
+            "LANGFUSE_ENVIRONMENT",
+        ),
+    )
+    langfuse_release: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_RELEASE",
+            "LANGFUSE_RELEASE",
+        ),
+    )
+    langfuse_sample_rate: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_SAMPLE_RATE",
+            "LANGFUSE_SAMPLE_RATE",
+        ),
+    )
+    langfuse_debug: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_LANGFUSE_DEBUG",
+            "LANGFUSE_DEBUG",
+        ),
+    )
 
     # Version
     version: str = "0.1.0"

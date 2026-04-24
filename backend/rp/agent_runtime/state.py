@@ -30,6 +30,9 @@ class RpAgentRunState(TypedDict, total=False):
     last_failure: dict[str, Any] | None
     reflection_ticket: dict[str, Any] | None
     completion_guard: dict[str, Any] | None
+    cognitive_state: dict[str, Any] | None
+    cognitive_state_summary: dict[str, Any] | None
+    repair_route: str | None
     next_action: str
     schema_retry_count: int
     error_event_emitted: bool

@@ -350,6 +350,26 @@ class SetupRuntimeController:
                         if workspace.story_config_draft is not None
                         else None
                     ),
+                    retrieval_embedding_model_id=(
+                        workspace.story_config_draft.retrieval_embedding_model_id
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    retrieval_embedding_provider_id=(
+                        workspace.story_config_draft.retrieval_embedding_provider_id
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    retrieval_rerank_model_id=(
+                        workspace.story_config_draft.retrieval_rerank_model_id
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    retrieval_rerank_provider_id=(
+                        workspace.story_config_draft.retrieval_rerank_provider_id
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
                 ),
                 writer_contract=WriterContractSeed(
                     pov_rules=(

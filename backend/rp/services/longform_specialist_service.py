@@ -14,7 +14,9 @@ from rp.models.story_runtime import (
     StoryArtifact,
     StorySession,
 )
+from .authoritative_state_view_service import AuthoritativeStateViewService
 from .memory_os_service import MemoryOsService
+from .projection_state_service import ProjectionStateService
 from .retrieval_broker import RetrievalBroker
 from .story_llm_gateway import StoryLlmGateway
 
@@ -26,9 +28,13 @@ class LongformSpecialistService:
         self,
         *,
         llm_gateway: StoryLlmGateway | None = None,
+        authoritative_state_view_service: AuthoritativeStateViewService,
+        projection_state_service: ProjectionStateService,
         memory_os_factory=None,
     ) -> None:
         self._llm_gateway = llm_gateway or StoryLlmGateway()
+        self._authoritative_state_view_service = authoritative_state_view_service
+        self._projection_state_service = projection_state_service
         self._memory_os_factory = memory_os_factory or (
             lambda story_id: MemoryOsService(
                 retrieval_broker=RetrievalBroker(default_story_id=story_id)
@@ -66,6 +72,10 @@ class LongformSpecialistService:
             )
             recall_hits.extend(result.hits)
 
+        projection_state = self._projection_state_service.get_slot_map(session_id=session.session_id)
+        authoritative_state = self._authoritative_state_view_service.get_state_map(
+            session_id=session.session_id
+        )
         fallback = self._fallback_bundle(
             session=session,
             chapter=chapter,
@@ -76,6 +86,8 @@ class LongformSpecialistService:
             pending_artifact=pending_artifact,
             archival_hits=archival_hits,
             recall_hits=recall_hits,
+            projection_state=projection_state,
+            authoritative_state=authoritative_state,
         )
         if command_kind in {
             LongformTurnCommandKind.ACCEPT_OUTLINE,
@@ -91,11 +103,27 @@ class LongformSpecialistService:
             "validation findings, and minimal state_patch_proposals."
         )
         user_payload = {
-            "session": session.model_dump(mode="json"),
-            "chapter": chapter.model_dump(mode="json"),
+            "session": {
+                "session_id": session.session_id,
+                "story_id": session.story_id,
+                "mode": session.mode,
+                "current_chapter_index": session.current_chapter_index,
+                "current_phase": session.current_phase.value,
+            },
+            "chapter": {
+                "chapter_workspace_id": chapter.chapter_workspace_id,
+                "chapter_index": chapter.chapter_index,
+                "phase": chapter.phase.value,
+                "chapter_goal": chapter.chapter_goal,
+                "accepted_outline": chapter.accepted_outline_json,
+                "pending_segment_artifact_id": chapter.pending_segment_artifact_id,
+                "accepted_segment_ids": list(chapter.accepted_segment_ids),
+            },
             "plan": plan.model_dump(mode="json"),
             "command_kind": command_kind.value,
             "user_prompt": user_prompt,
+            "authoritative_state": authoritative_state,
+            "projection_state": projection_state,
             "accepted_segments": [
                 {
                     "artifact_id": item.artifact_id,
@@ -144,8 +172,8 @@ class LongformSpecialistService:
         except Exception:
             return fallback
 
-    @staticmethod
     def _fallback_bundle(
+        self,
         *,
         session: StorySession,
         chapter: ChapterWorkspace,
@@ -156,10 +184,12 @@ class LongformSpecialistService:
         pending_artifact: StoryArtifact | None,
         archival_hits: list,
         recall_hits: list,
+        projection_state: dict[str, list[str]],
+        authoritative_state: dict[str, object],
     ) -> SpecialistResultBundle:
-        blueprint_digest = list(chapter.builder_snapshot_json.get("blueprint_digest", []))
-        foundation_digest = list(chapter.builder_snapshot_json.get("foundation_digest", []))
-        current_outline_digest = list(chapter.builder_snapshot_json.get("current_outline_digest", []))
+        blueprint_digest = list(projection_state.get("blueprint_digest", []))
+        foundation_digest = list(projection_state.get("foundation_digest", []))
+        current_outline_digest = list(projection_state.get("current_outline_digest", []))
         recent_segment_digest = [
             item.content_text[:240] for item in accepted_segments[-2:]
         ]
@@ -168,11 +198,13 @@ class LongformSpecialistService:
             f"chapter={chapter.chapter_index}",
             f"accepted_segments={len(chapter.accepted_segment_ids)}",
         ]
+        narrative_progress = authoritative_state.get("narrative_progress") or {}
+        chapter_digest = authoritative_state.get("chapter_digest") or {}
         current_state_digest.extend(
             value
             for value in (
-                session.current_state_json.get("narrative_progress", {}).get("chapter_summary"),
-                session.current_state_json.get("chapter_digest", {}).get("title"),
+                narrative_progress.get("chapter_summary"),
+                chapter_digest.get("title"),
             )
             if value
         )

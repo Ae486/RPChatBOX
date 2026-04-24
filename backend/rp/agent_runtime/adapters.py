@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 from models.chat import ProviderConfig
-from rp.agent_runtime.contracts import RpAgentTurnInput, RpAgentTurnResult, RuntimeProfile
+from rp.agent_runtime.contracts import (
+    RpAgentTurnInput,
+    RpAgentTurnResult,
+    RuntimeProfile,
+    SetupCognitiveStateSnapshot,
+    SetupCognitiveStateSummary,
+)
 from rp.agent_runtime.profiles import SETUP_AGENT_VISIBLE_TOOLS, build_setup_agent_profile
 from rp.models.setup_agent import SetupAgentTurnRequest, SetupAgentTurnResponse
 from rp.models.setup_handoff import SetupContextPacket
@@ -28,6 +34,8 @@ class SetupRuntimeAdapter:
         context_packet: SetupContextPacket,
         model_name: str,
         provider: ProviderConfig,
+        cognitive_state: SetupCognitiveStateSnapshot | None = None,
+        cognitive_state_summary: SetupCognitiveStateSummary | None = None,
     ) -> RpAgentTurnInput:
         current_step = request.target_step or workspace.current_step
         system_prompt = self._prompt_service.build_system_prompt(
@@ -74,12 +82,26 @@ class SetupRuntimeAdapter:
                 "open_question_count": len(open_questions),
                 "blocking_open_question_count": len(blocking_open_questions),
                 "open_question_texts": [question.text for question in open_questions[:5]],
+                "has_user_edit_deltas": bool(context_packet.user_edit_deltas),
                 "last_proposal_status": (
                     latest_proposal.status.value if latest_proposal is not None else None
                 ),
                 "has_rejected_commit_proposal": bool(
                     latest_proposal is not None
                     and latest_proposal.status == CommitProposalStatus.REJECTED
+                ),
+                "cognitive_state": (
+                    cognitive_state.model_dump(mode="json", exclude_none=True)
+                    if cognitive_state is not None
+                    else None
+                ),
+                "cognitive_state_summary": (
+                    cognitive_state_summary.model_dump(mode="json", exclude_none=True)
+                    if cognitive_state_summary is not None
+                    else None
+                ),
+                "cognitive_state_invalidated": bool(
+                    cognitive_state_summary is not None and cognitive_state_summary.invalidated
                 ),
             },
             tool_scope=list(SETUP_AGENT_VISIBLE_TOOLS),

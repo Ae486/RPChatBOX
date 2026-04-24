@@ -143,6 +143,89 @@ class ProxyOpenAIProvider extends AIProvider {
   }
 
   @override
+  Future<ProviderTestResult> testModel(ModelConfig model) async {
+    if (model.isEmbeddingModel) {
+      return _testEmbeddingModel(model);
+    }
+    if (model.isRerankModel) {
+      return _testRerankModel(model);
+    }
+    return super.testModel(model);
+  }
+
+  Future<ProviderTestResult> _testEmbeddingModel(ModelConfig model) async {
+    try {
+      await _ensureProviderRegistered();
+      final stopwatch = Stopwatch()..start();
+      final dio = DioService().dataPlaneDio;
+
+      final response = await dio.post(
+        '$_proxyBaseUrl/v1/embeddings',
+        data: {
+          'model': model.modelName,
+          'model_id': model.id,
+          'provider_id': config.id,
+          'input': 'hi',
+          'encoding_format': 'float',
+        },
+        options: Options(headers: _buildProxyHeaders()),
+      );
+
+      stopwatch.stop();
+      final data = response.data;
+      if (response.statusCode == 200 &&
+          data is Map<String, dynamic> &&
+          data['data'] is List &&
+          (data['data'] as List).isNotEmpty) {
+        return ProviderTestResult.success(
+          responseTimeMs: stopwatch.elapsedMilliseconds,
+        );
+      }
+
+      return ProviderTestResult.failure(_invalidProxyResponseMessage(data));
+    } on DioException catch (e) {
+      return ProviderTestResult.failure(_extractDioErrorMessage(e));
+    } catch (e) {
+      return ProviderTestResult.failure('Embedding 测试失败: $e');
+    }
+  }
+
+  Future<ProviderTestResult> _testRerankModel(ModelConfig model) async {
+    try {
+      await _ensureProviderRegistered();
+      final stopwatch = Stopwatch()..start();
+      final dio = DioService().dataPlaneDio;
+
+      final response = await dio.post(
+        '$_proxyBaseUrl/v1/rerank',
+        data: {
+          'model': model.modelName,
+          'model_id': model.id,
+          'provider_id': config.id,
+          'query': 'hi',
+          'documents': ['hello', 'hi'],
+          'top_n': 1,
+        },
+        options: Options(headers: _buildProxyHeaders()),
+      );
+
+      stopwatch.stop();
+      final data = response.data;
+      if (response.statusCode == 200 && data is Map<String, dynamic>) {
+        return ProviderTestResult.success(
+          responseTimeMs: stopwatch.elapsedMilliseconds,
+        );
+      }
+
+      return ProviderTestResult.failure(_invalidProxyResponseMessage(data));
+    } on DioException catch (e) {
+      return ProviderTestResult.failure(_extractDioErrorMessage(e));
+    } catch (e) {
+      return ProviderTestResult.failure('Rerank 测试失败: $e');
+    }
+  }
+
+  @override
   Future<List<String>> listAvailableModels() async {
     try {
       await _ensureProviderRegistered();
@@ -395,9 +478,14 @@ class ProxyOpenAIProvider extends AIProvider {
           return message['content'] as String? ?? '';
         }
       }
+      final errorObj = data['error'] as Map<String, dynamic>?;
+      if (errorObj != null) {
+        throw Exception(_extractProxyErrorMessage(errorObj));
+      }
+      throw Exception(_invalidProxyResponseMessage(data));
     }
 
-    throw Exception('Invalid response from proxy');
+    throw Exception(_invalidProxyResponseMessage(response.data));
   }
 
   /// 取消当前请求
@@ -409,6 +497,51 @@ class ProxyOpenAIProvider extends AIProvider {
         debugPrint('✅ [ProxyOpenAIProvider] 请求已取消');
       }
     }
+  }
+
+  String _extractDioErrorMessage(DioException error) {
+    final responseData = error.response?.data;
+    if (responseData is Map<String, dynamic>) {
+      final errorObj = responseData['error'];
+      if (errorObj is Map<String, dynamic>) {
+        return _extractProxyErrorMessage(errorObj);
+      }
+      final detail = responseData['detail'];
+      if (detail is Map<String, dynamic>) {
+        final nestedError = detail['error'];
+        if (nestedError is Map<String, dynamic>) {
+          return _extractProxyErrorMessage(nestedError);
+        }
+        return jsonEncode(detail);
+      }
+      return jsonEncode(responseData);
+    }
+    if (responseData is String && responseData.trim().isNotEmpty) {
+      return responseData;
+    }
+    return error.message ?? error.toString();
+  }
+
+  String _extractProxyErrorMessage(Map<String, dynamic> errorObj) {
+    final message = errorObj['message']?.toString().trim();
+    final code = errorObj['code']?.toString().trim();
+    if (message != null &&
+        message.isNotEmpty &&
+        code != null &&
+        code.isNotEmpty) {
+      return '$message ($code)';
+    }
+    if (message != null && message.isNotEmpty) {
+      return message;
+    }
+    return jsonEncode(errorObj);
+  }
+
+  String _invalidProxyResponseMessage(dynamic data) {
+    if (data is Map<String, dynamic>) {
+      return '代理返回了非预期格式: ${jsonEncode(data)}';
+    }
+    return '代理返回了非预期格式: ${data ?? 'null'}';
   }
 }
 

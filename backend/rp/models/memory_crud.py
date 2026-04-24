@@ -138,11 +138,16 @@ class RetrievalTrace(BaseModel):
     trace_id: str
     query_id: str
     route: str
+    result_kind: str | None = None
     filters_applied: dict[str, Any] = Field(default_factory=dict)
+    retriever_routes: list[str] = Field(default_factory=list)
+    pipeline_stages: list[str] = Field(default_factory=list)
+    reranker_name: str | None = None
     candidate_count: int = 0
     returned_count: int = 0
     timings: dict[str, float] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class RetrievalSearchResult(BaseModel):
@@ -246,7 +251,7 @@ class ProposalReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proposal_id: str
-    status: Literal["pending"] = "pending"
+    status: Literal["pending", "applied", "review_required", "failed"] = "pending"
     mode: str
     domain: Domain
     domain_path: str | None = None

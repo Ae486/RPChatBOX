@@ -74,6 +74,128 @@ class RuntimeWorkingNote(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class DiscussionCandidateDirection(BaseModel):
+    """One candidate direction still under discussion in the current step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction_id: str
+    label: str
+    summary: str
+    supporting_points: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    status: Literal["active", "selected", "discarded"] = "active"
+
+
+class DiscussionState(BaseModel):
+    """Runtime-private discussion map for the current setup step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_step: str
+    discussion_topic: str
+    confirmed_points: list[str] = Field(default_factory=list)
+    candidate_directions: list[DiscussionCandidateDirection] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    unresolved_conflicts: list[str] = Field(default_factory=list)
+    user_preference_signals: list[str] = Field(default_factory=list)
+    next_focus: str | None = None
+    convergence_score: float | None = None
+
+
+class ChunkCandidate(BaseModel):
+    """Structured truth candidate distilled from discussion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    current_step: str
+    block_type: Literal[
+        "story_config",
+        "writing_contract",
+        "foundation_entry",
+        "longform_blueprint",
+    ]
+    target_ref: str | None = None
+    title: str
+    content: str
+    detail_level: Literal["rough", "usable", "truth_candidate"]
+    tags: list[str] = Field(default_factory=list)
+    source_turn_refs: list[str] = Field(default_factory=list)
+    unresolved_issues: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    confidence: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DraftTruthWrite(BaseModel):
+    """Runtime-private structured write intent before commit proposal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    write_id: str
+    current_step: str
+    block_type: Literal[
+        "story_config",
+        "writing_contract",
+        "foundation_entry",
+        "longform_blueprint",
+    ]
+    target_ref: str | None = None
+    operation: Literal["create", "merge", "replace"]
+    payload: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    remaining_open_issues: list[str] = Field(default_factory=list)
+    ready_for_review: bool = False
+
+
+class SetupCognitiveSourceBasis(BaseModel):
+    """Workspace-side source basis used to validate cross-turn cognitive state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_version: int
+    draft_fingerprint: str | None = None
+    pending_user_edit_delta_ids: list[str] = Field(default_factory=list)
+    last_proposal_status: str | None = None
+    current_step: str
+
+
+class SetupCognitiveStateSnapshot(BaseModel):
+    """Cross-turn runtime-private cognitive snapshot for one setup step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    current_step: str
+    state_version: int = 1
+    discussion_state: DiscussionState | None = None
+    chunk_candidates: list[ChunkCandidate] = Field(default_factory=list)
+    active_truth_write: DraftTruthWrite | None = None
+    invalidated: bool = False
+    invalidation_reasons: list[str] = Field(default_factory=list)
+    source_basis: SetupCognitiveSourceBasis
+
+
+class SetupCognitiveStateSummary(BaseModel):
+    """Prompt-sized summary view of the current cognitive snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_step: str
+    invalidated: bool = False
+    invalidation_reasons: list[str] = Field(default_factory=list)
+    discussion_topic: str | None = None
+    confirmed_points: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    unresolved_conflicts: list[str] = Field(default_factory=list)
+    candidate_titles: list[str] = Field(default_factory=list)
+    truth_write_status: str | None = None
+    ready_for_review: bool = False
+    remaining_open_issues: list[str] = Field(default_factory=list)
+
+
 class SetupTurnGoal(BaseModel):
     """Setup-only per-turn goal derived from step state and runtime obligations."""
 
@@ -81,9 +203,13 @@ class SetupTurnGoal(BaseModel):
 
     current_step: str
     goal_type: Literal[
+        "brainstorm_and_clarify",
         "clarify_user_intent",
         "fill_missing_step_fields",
         "patch_draft",
+        "reconcile_after_user_edit",
+        "refine_chunk_candidate",
+        "write_draft_truth",
         "prepare_commit_intent",
         "recover_from_tool_failure",
     ]
@@ -97,6 +223,9 @@ class SetupWorkingPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     missing_information: list[str] = Field(default_factory=list)
+    discussion_actions: list[str] = Field(default_factory=list)
+    candidate_targets: list[str] = Field(default_factory=list)
+    draft_write_targets: list[str] = Field(default_factory=list)
     patch_targets: list[str] = Field(default_factory=list)
     question_targets: list[str] = Field(default_factory=list)
     commit_readiness_checks: list[str] = Field(default_factory=list)
@@ -111,7 +240,9 @@ class SetupPendingObligation(BaseModel):
     obligation_type: Literal[
         "repair_tool_call",
         "ask_user_for_missing_info",
+        "continue_after_tool_failure",
         "reassess_commit_readiness",
+        "reconcile_after_user_edit",
     ]
     reason: str
     tool_name: str | None = None

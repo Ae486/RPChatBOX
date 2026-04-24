@@ -105,6 +105,52 @@ class _FakeToolExecutor:
         )
 
 
+class _FakeLangfuseObservation:
+    def __init__(self, *, sink: list[dict], name: str) -> None:
+        self._sink = sink
+        self._name = name
+
+    def __enter__(self):
+        self._sink.append({"kind": "observation_enter", "name": self._name})
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._sink.append({"kind": "observation_exit", "name": self._name})
+        return False
+
+    def update(self, **kwargs):
+        self._sink.append({"kind": "observation_update", "name": self._name, "payload": kwargs})
+
+    def score(self, **kwargs):
+        self._sink.append({"kind": "score", "name": self._name, "payload": kwargs})
+
+    def score_trace(self, **kwargs):
+        self._sink.append({"kind": "score_trace", "name": self._name, "payload": kwargs})
+
+    def start_as_current_observation(self, **kwargs):
+        return _FakeLangfuseObservation(
+            sink=self._sink,
+            name=str(kwargs.get("name") or "unknown"),
+        )
+
+
+class _FakeLangfuseService:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def start_as_current_observation(self, **kwargs):
+        return _FakeLangfuseObservation(
+            sink=self.events,
+            name=str(kwargs.get("name") or "unknown"),
+        )
+
+    def propagate_attributes(self, **kwargs):
+        return _FakeLangfuseObservation(
+            sink=self.events,
+            name="propagate",
+        )
+
+
 class _TextOnlyLLM:
     async def chat_completion(self, request):
         return {
@@ -356,6 +402,57 @@ class _CommitTooEarlyThenQuestionLLM:
         }
 
 
+class _TruthWriteFailureThenDiscussionLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_truth_write",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.truth.write",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": "workspace-1",
+                                                "step_id": "story_config",
+                                                "truth_write": {
+                                                    "write_id": "write-1",
+                                                    "current_step": "story_config",
+                                                    "block_type": "story_config",
+                                                    "operation": "merge",
+                                                    "payload": {"notes": "draft notes"},
+                                                },
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "The draft write is not stable yet. We should continue refining this setup detail before review.",
+                    }
+                }
+            ]
+        }
+
+
 class _StreamToolLLM:
     def __init__(self) -> None:
         self.round = 0
@@ -370,6 +467,13 @@ class _StreamToolLLM:
             yield 'data: {"type":"done"}\n\n'
             return
         yield 'data: {"type":"text_delta","delta":"Applied and finalized."}\n\n'
+        yield 'data: {"type":"done"}\n\n'
+
+
+class _StreamUsageLLM:
+    async def chat_completion_stream(self, request):
+        yield 'data: {"type":"text_delta","delta":"Streaming answer."}\n\n'
+        yield 'data: {"type":"usage","prompt_tokens":11,"completion_tokens":7,"total_tokens":18}\n\n'
         yield 'data: {"type":"done"}\n\n'
 
 
@@ -561,6 +665,69 @@ async def test_runtime_executor_does_not_repropose_commit_after_rejection():
 
 
 @pytest.mark.asyncio
+async def test_runtime_executor_blocks_commit_when_cognitive_state_is_invalidated():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="Please commit this step.",
+            tool_scope=["setup.proposal.commit"],
+            context_bundle={
+                "cognitive_state_summary": {
+                    "current_step": "story_config",
+                    "invalidated": True,
+                    "invalidation_reasons": ["user_edit_delta"],
+                }
+            },
+        ),
+        _profile(),
+        llm_service=_CommitTooEarlyThenQuestionLLM(),
+    )
+
+    assert result.status == "completed"
+    assert result.finish_reason == "awaiting_user_input"
+    assert tool_executor.calls == []
+    assert "commit_proposal_blocked" in result.warnings
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_keeps_non_commit_tool_failure_in_recovery_semantics():
+    tool_executor = _FakeToolExecutor(
+        results=[
+            RuntimeToolResult(
+                call_id="call_truth_write",
+                tool_name="rp_setup__setup.truth.write",
+                success=False,
+                content_text=json.dumps(
+                    {
+                        "code": "setup_tool_failed",
+                        "message": "Draft truth write could not be applied yet.",
+                        "details": {
+                            "repair_strategy": "continue_discussion",
+                        },
+                    }
+                ),
+                error_code="SETUP_TOOL_FAILED",
+            )
+        ]
+    )
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(tool_scope=["setup.truth.write"]),
+        _profile(),
+        llm_service=_TruthWriteFailureThenDiscussionLLM(),
+    )
+
+    assert result.status == "completed"
+    assert result.finish_reason == "continue_discussion"
+    assert result.structured_payload["turn_goal"]["goal_type"] == "recover_from_tool_failure"
+    assert result.structured_payload["last_failure"]["failure_category"] == "continue_discussion"
+    assert result.structured_payload["repair_route"] == "continue_discussion"
+
+
+@pytest.mark.asyncio
 async def test_runtime_executor_fails_fast_on_unknown_tool():
     tool_executor = _FakeToolExecutor(
         results=[
@@ -615,3 +782,54 @@ async def test_runtime_executor_stream_preserves_typed_event_order():
         "text_delta",
         "done",
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_emits_langfuse_generation_and_tool_observations(
+    monkeypatch,
+):
+    fake_langfuse = _FakeLangfuseService()
+    monkeypatch.setattr(
+        "rp.agent_runtime.executor.get_langfuse_service",
+        lambda: fake_langfuse,
+    )
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(tool_scope=["setup.patch.story_config"]),
+        _profile(),
+        llm_service=_ToolThenTextLLM(),
+    )
+
+    assert result.finish_reason == "completed_text"
+    assert any(
+        item["kind"] == "observation_enter" and item["name"] == "rp.runtime.model_call"
+        for item in fake_langfuse.events
+    )
+    assert any(
+        item["kind"] == "observation_enter"
+        and item["name"] == "rp.runtime.tool:rp_setup__setup.patch.story_config"
+        for item in fake_langfuse.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_stream_preserves_usage_in_latest_response():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    chunks = []
+    async for chunk in executor.run_stream(
+        _turn_input(stream=True, tool_scope=[]),
+        _profile(),
+        llm_service=_StreamUsageLLM(),
+    ):
+        chunks.append(chunk)
+
+    assert chunks
+    assert executor.last_result is not None
+    latest_response = executor.last_result.structured_payload["latest_response"]
+    assert latest_response["usage"]["prompt_tokens"] == 11
+    assert latest_response["usage"]["completion_tokens"] == 7
+    assert latest_response["usage"]["total_tokens"] == 18

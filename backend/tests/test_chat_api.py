@@ -54,6 +54,51 @@ class StubLLMService:
         yield "data: [DONE]\n\n"
 
 
+class StubNonChatService:
+    def __init__(self):
+        self.embedding_calls = []
+        self.rerank_calls = []
+
+    def embedding(self, *, provider, model, input_texts, encoding_format=None, dimensions=None):
+        self.embedding_calls.append(
+            {
+                "provider": provider,
+                "model": model,
+                "input_texts": input_texts,
+                "encoding_format": encoding_format,
+                "dimensions": dimensions,
+            }
+        )
+        return {
+            "object": "list",
+            "data": [
+                {
+                    "object": "embedding",
+                    "embedding": [0.1, 0.2],
+                    "index": 0,
+                }
+            ],
+            "model": model,
+        }
+
+    def rerank(self, *, provider, model, query, documents, top_n=None):
+        self.rerank_calls.append(
+            {
+                "provider": provider,
+                "model": model,
+                "query": query,
+                "documents": documents,
+                "top_n": top_n,
+            }
+        )
+        return {
+            "results": [
+                {"index": 1, "relevance_score": 0.99},
+            ],
+            "model": model,
+        }
+
+
 class CapturingStubLLMService(StubLLMService):
     def __init__(self):
         self.last_request = None
@@ -269,6 +314,92 @@ def test_chat_completions_typed_stream_contract(client):
     assert 'data: {"type":"text_delta","delta":"answer"}' in body
     assert 'data: {"type":"done"}' in body
     assert "data: [DONE]" not in body
+
+
+def test_embeddings_endpoint_resolves_model_and_provider(client):
+    provider_payload = {
+        "id": "provider-embed",
+        "name": "Embed Provider",
+        "type": "openai",
+        "api_key": "sk-registry",
+        "api_url": "https://api.openai.com/v1",
+        "custom_headers": {},
+        "is_enabled": True,
+    }
+    model_payload = {
+        "id": "model-embed",
+        "provider_id": "provider-embed",
+        "model_name": "Qwen/Qwen3-Embedding-8B",
+        "display_name": "Embed Model",
+        "capabilities": ["embedding"],
+        "is_enabled": True,
+    }
+    assert client.put("/api/providers/provider-embed", json=provider_payload).status_code == 200
+    assert (
+        client.put("/api/providers/provider-embed/models/model-embed", json=model_payload).status_code
+        == 200
+    )
+
+    service = StubNonChatService()
+    with patch("api.chat._get_litellm_backend_service", return_value=service):
+        response = client.post(
+            "/v1/embeddings",
+            json={
+                "model": "stale-local-model",
+                "model_id": "model-embed",
+                "provider_id": "provider-embed",
+                "input": "hi",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["object"] == "embedding"
+    assert service.embedding_calls[0]["model"] == "Qwen/Qwen3-Embedding-8B"
+    assert service.embedding_calls[0]["input_texts"] == "hi"
+
+
+def test_rerank_endpoint_resolves_model_and_provider(client):
+    provider_payload = {
+        "id": "provider-rerank",
+        "name": "Rerank Provider",
+        "type": "openai",
+        "api_key": "sk-registry",
+        "api_url": "https://api.openai.com/v1",
+        "custom_headers": {},
+        "is_enabled": True,
+    }
+    model_payload = {
+        "id": "model-rerank",
+        "provider_id": "provider-rerank",
+        "model_name": "Qwen/Qwen3-Reranker-8B",
+        "display_name": "Rerank Model",
+        "capabilities": ["rerank"],
+        "is_enabled": True,
+    }
+    assert client.put("/api/providers/provider-rerank", json=provider_payload).status_code == 200
+    assert (
+        client.put("/api/providers/provider-rerank/models/model-rerank", json=model_payload).status_code
+        == 200
+    )
+
+    service = StubNonChatService()
+    with patch("api.chat._get_litellm_backend_service", return_value=service):
+        response = client.post(
+            "/v1/rerank",
+            json={
+                "model": "stale-local-model",
+                "model_id": "model-rerank",
+                "provider_id": "provider-rerank",
+                "query": "hi",
+                "documents": ["hello", "hi"],
+                "top_n": 1,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["relevance_score"] == 0.99
+    assert service.rerank_calls[0]["model"] == "Qwen/Qwen3-Reranker-8B"
+    assert service.rerank_calls[0]["documents"] == ["hello", "hi"]
 
 
 def test_chat_completions_non_stream_tool_runtime_contract(client):

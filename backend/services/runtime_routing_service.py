@@ -382,6 +382,11 @@ class RuntimeRoutingService:
         if request.model_id:
             entry = get_model_registry_service().get_entry(request.model_id)
             if entry is not None:
+                if (
+                    entry.capability_profile is not None
+                    and entry.capability_profile.supports_function_calling is not None
+                ):
+                    return bool(entry.capability_profile.supports_function_calling)
                 return "tool" in entry.capabilities
         if request.provider:
             return supports_function_calling(request.provider.type, request.model)

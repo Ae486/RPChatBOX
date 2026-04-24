@@ -7,17 +7,16 @@ import '../chat_ui/owui/components/owui_scaffold.dart';
 import '../chat_ui/owui/components/owui_snack_bar.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../main.dart';
+import '../models/model_config.dart';
 import '../models/story_runtime.dart';
+import '../pages/rp_model_config_page.dart';
 import '../services/backend_story_service.dart';
 import '../widgets/story_session_drawer.dart';
 
 class LongformStoryPage extends StatefulWidget {
   final String? sessionId;
 
-  const LongformStoryPage({
-    super.key,
-    this.sessionId,
-  });
+  const LongformStoryPage({super.key, this.sessionId});
 
   @override
   State<LongformStoryPage> createState() => _LongformStoryPageState();
@@ -32,6 +31,10 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   String? _currentSessionId;
   String? _selectedProviderId;
   String? _selectedModelId;
+  String? _selectedRetrievalEmbeddingProviderId;
+  String? _selectedRetrievalEmbeddingModelId;
+  String? _selectedRetrievalRerankProviderId;
+  String? _selectedRetrievalRerankModelId;
   bool _isLoading = true;
   bool _isSending = false;
   String _streamingText = '';
@@ -69,7 +72,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         _snapshot = snapshot;
         _isLoading = false;
       });
-      _syncSelectedProviderAndModel();
+      _syncModelSelections();
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -89,7 +92,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       _currentSessionId = resolvedSessionId;
       _snapshot = snapshot;
     });
-    _syncSelectedProviderAndModel();
+    _syncModelSelections();
   }
 
   String? _resolveSessionId(List<RpStorySession> sessions) {
@@ -125,12 +128,17 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         _currentSessionId = sessionId;
         _isLoading = false;
       });
-      _syncSelectedProviderAndModel();
+      _syncModelSelections();
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
       OwuiSnackBars.error(context, message: '切换 story session 失败: $e');
     }
+  }
+
+  void _syncModelSelections() {
+    _syncSelectedProviderAndModel();
+    _syncRetrievalModelSelections();
   }
 
   void _syncSelectedProviderAndModel() {
@@ -163,16 +171,244 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     });
   }
 
+  void _updateAgentSelection({
+    required String? providerId,
+    required String? modelId,
+  }) {
+    if (!mounted) return;
+    setState(() {
+      _selectedProviderId = providerId;
+      _selectedModelId = modelId;
+    });
+  }
+
+  void _syncRetrievalModelSelections() {
+    final config =
+        _snapshot?.session.runtimeStoryConfig ?? const <String, dynamic>{};
+    final embeddingSelection = _normalizeRetrievalSelection(
+      providerId: config['retrieval_embedding_provider_id']?.toString(),
+      modelId: config['retrieval_embedding_model_id']?.toString(),
+      providerCandidates: _retrievalEmbeddingProviders(),
+      modelCandidatesForProvider: _retrievalEmbeddingModelsForProvider,
+    );
+    final rerankSelection = _normalizeRetrievalSelection(
+      providerId: config['retrieval_rerank_provider_id']?.toString(),
+      modelId: config['retrieval_rerank_model_id']?.toString(),
+      providerCandidates: _retrievalRerankProviders(),
+      modelCandidatesForProvider: _retrievalRerankModelsForProvider,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _selectedRetrievalEmbeddingProviderId = embeddingSelection.providerId;
+      _selectedRetrievalEmbeddingModelId = embeddingSelection.modelId;
+      _selectedRetrievalRerankProviderId = rerankSelection.providerId;
+      _selectedRetrievalRerankModelId = rerankSelection.modelId;
+    });
+  }
+
+  ({String? providerId, String? modelId}) _normalizeRetrievalSelection({
+    required String? providerId,
+    required String? modelId,
+    required List<String> providerCandidates,
+    required List<ModelConfig> Function(String providerId)
+    modelCandidatesForProvider,
+  }) {
+    String? normalizedProviderId = providerId;
+    String? normalizedModelId = modelId;
+
+    if (normalizedModelId != null) {
+      final modelWithProvider = globalModelServiceManager.getModelWithProvider(
+        normalizedModelId,
+      );
+      if (modelWithProvider == null || !modelWithProvider.model.isEnabled) {
+        normalizedProviderId = null;
+        normalizedModelId = null;
+      } else {
+        normalizedProviderId = modelWithProvider.provider.id;
+      }
+    }
+
+    if (normalizedProviderId != null &&
+        !providerCandidates.contains(normalizedProviderId)) {
+      normalizedProviderId = null;
+      normalizedModelId = null;
+    }
+
+    if (normalizedProviderId != null && normalizedModelId != null) {
+      final models = modelCandidatesForProvider(normalizedProviderId);
+      if (!models.any((item) => item.id == normalizedModelId)) {
+        normalizedModelId = null;
+      }
+    }
+
+    return (providerId: normalizedProviderId, modelId: normalizedModelId);
+  }
+
+  List<String> _retrievalEmbeddingProviders() {
+    return globalModelServiceManager
+        .getEnabledProviders()
+        .where(
+          (provider) =>
+              _retrievalEmbeddingModelsForProvider(provider.id).isNotEmpty,
+        )
+        .map((provider) => provider.id)
+        .toList();
+  }
+
+  List<ModelConfig> _retrievalEmbeddingModelsForProvider(String providerId) {
+    return globalModelServiceManager
+        .getModelsByProvider(providerId)
+        .where((item) => item.isEnabled)
+        .where(_isEmbeddingCandidateModel)
+        .toList();
+  }
+
+  List<String> _retrievalRerankProviders() {
+    return globalModelServiceManager
+        .getEnabledProviders()
+        .where(
+          (provider) =>
+              _retrievalRerankModelsForProvider(provider.id).isNotEmpty,
+        )
+        .map((provider) => provider.id)
+        .toList();
+  }
+
+  List<ModelConfig> _retrievalRerankModelsForProvider(String providerId) {
+    return globalModelServiceManager
+        .getModelsByProvider(providerId)
+        .where((item) => item.isEnabled)
+        .where(_isRerankCandidateModel)
+        .toList();
+  }
+
+  bool _isEmbeddingCandidateModel(ModelConfig model) {
+    final lowerName = model.modelName.toLowerCase();
+    return model.isEmbeddingModel ||
+        lowerName.startsWith('bge-') ||
+        lowerName.startsWith('e5-') ||
+        lowerName.startsWith('gte-');
+  }
+
+  bool _isRerankCandidateModel(ModelConfig model) {
+    return model.isRerankModel || model.isCrossEncoderRerankModel;
+  }
+
+  Future<void> _persistRetrievalRuntimeConfig({
+    required String? embeddingProviderId,
+    required String? embeddingModelId,
+    required String? rerankProviderId,
+    required String? rerankModelId,
+  }) async {
+    final sessionId = _currentSessionId;
+    final current = _snapshot?.session.runtimeStoryConfig;
+    if (sessionId == null || current == null) {
+      return;
+    }
+
+    if (current['retrieval_embedding_provider_id']?.toString() ==
+            embeddingProviderId &&
+        current['retrieval_embedding_model_id']?.toString() ==
+            embeddingModelId &&
+        current['retrieval_rerank_provider_id']?.toString() ==
+            rerankProviderId &&
+        current['retrieval_rerank_model_id']?.toString() == rerankModelId) {
+      return;
+    }
+
+    final snapshot = await _service.updateRuntimeStoryConfig(
+      sessionId: sessionId,
+      patch: {
+        'retrieval_embedding_provider_id': embeddingProviderId,
+        'retrieval_embedding_model_id': embeddingModelId,
+        'retrieval_rerank_provider_id': rerankProviderId,
+        'retrieval_rerank_model_id': rerankModelId,
+      },
+    );
+    List<RpStorySession>? sessions;
+    try {
+      sessions = await _service.listSessions();
+    } catch (_) {
+      sessions = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _snapshot = snapshot;
+      if (sessions != null) {
+        _sessions = sessions;
+      }
+    });
+    _syncRetrievalModelSelections();
+  }
+
+  Future<void> _resetRetrievalRuntimeOverrides() async {
+    await _persistRetrievalRuntimeConfig(
+      embeddingProviderId: null,
+      embeddingModelId: null,
+      rerankProviderId: null,
+      rerankModelId: null,
+    );
+  }
+
+  Future<void> _openModelConfigPage() async {
+    if (_snapshot == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RpModelConfigPage(
+          title: 'Longform Story · 模型配置',
+          subtitle: '将 story 页面里的 agent / retrieval 配置表单抽离到独立页面，避免挤占正文讨论与审阅空间。',
+          agentSectionTitle: 'Story Runtime 模型',
+          agentSectionDescription: '这里选择当前 story 命令和讨论发送使用的模型，只影响前端当前会话的发送行为。',
+          retrievalSectionTitle: 'Retrieval Runtime',
+          retrievalSectionDescription:
+              '这里修改 active story session 的 retrieval override；清空后会回退到 setup 阶段写入的默认配置。',
+          agentProviders: globalModelServiceManager.getEnabledProviders(),
+          agentModelsForProvider: (providerId) => globalModelServiceManager
+              .getModelsByProvider(providerId)
+              .where((item) => item.isEnabled)
+              .toList(),
+          initialAgentProviderId: _selectedProviderId,
+          initialAgentModelId: _selectedModelId,
+          onAgentSelectionChanged: _updateAgentSelection,
+          retrievalEmbeddingProviderIds: _retrievalEmbeddingProviders(),
+          retrievalEmbeddingModelsForProvider:
+              _retrievalEmbeddingModelsForProvider,
+          retrievalRerankProviderIds: _retrievalRerankProviders(),
+          retrievalRerankModelsForProvider: _retrievalRerankModelsForProvider,
+          initialRetrievalEmbeddingProviderId:
+              _selectedRetrievalEmbeddingProviderId,
+          initialRetrievalEmbeddingModelId: _selectedRetrievalEmbeddingModelId,
+          initialRetrievalRerankProviderId: _selectedRetrievalRerankProviderId,
+          initialRetrievalRerankModelId: _selectedRetrievalRerankModelId,
+          onPersistRetrievalConfig: _persistRetrievalRuntimeConfig,
+          retrievalSecondaryActionLabel: 'Use Setup Defaults',
+          onRetrievalSecondaryAction: _resetRetrievalRuntimeOverrides,
+          retrievalSecondaryActionClearsSelections: true,
+          embeddingEmptyHint:
+              '当前没有识别到 embedding 模型。可在模型管理页给模型添加 embedding 能力，或使用名称包含 embedding / bge / e5 / gte 的模型。',
+          rerankEmptyHint:
+              '当前没有识别到 rerank 模型。可在模型管理页给模型添加 rerank / cross_encoder_rerank 能力。',
+        ),
+      ),
+    );
+  }
+
   Future<void> _runImmediateCommand(
     String commandKind, {
     String? targetArtifactId,
   }) async {
     final modelId = _selectedModelId;
     final sessionId = _currentSessionId;
-    if (_snapshot == null || modelId == null || _isSending || sessionId == null) {
+    if (_snapshot == null ||
+        modelId == null ||
+        _isSending ||
+        sessionId == null) {
       return;
     }
-    final providerModel = globalModelServiceManager.getModelWithProvider(modelId);
+    final providerModel = globalModelServiceManager.getModelWithProvider(
+      modelId,
+    );
     if (providerModel == null) {
       OwuiSnackBars.warning(context, message: '请先选择可用模型');
       return;
@@ -208,10 +444,15 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   }) async {
     final modelId = _selectedModelId;
     final sessionId = _currentSessionId;
-    if (_snapshot == null || modelId == null || _isSending || sessionId == null) {
+    if (_snapshot == null ||
+        modelId == null ||
+        _isSending ||
+        sessionId == null) {
       return;
     }
-    final providerModel = globalModelServiceManager.getModelWithProvider(modelId);
+    final providerModel = globalModelServiceManager.getModelWithProvider(
+      modelId,
+    );
     if (providerModel == null) {
       OwuiSnackBars.warning(context, message: '请先选择可用模型');
       return;
@@ -265,7 +506,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     if (prompt.isEmpty) return;
     _messageController.clear();
     await _runStreamingCommand(
-      _discussionCommandForPhase(_snapshot?.chapter.phase ?? 'outline_drafting'),
+      _discussionCommandForPhase(
+        _snapshot?.chapter.phase ?? 'outline_drafting',
+      ),
       userPrompt: prompt,
     );
   }
@@ -295,7 +538,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         ),
         appBar: _buildAppBar(title: 'Longform Story'),
         body: const Center(
-          child: Text('当前还没有 active story session，可先从 prestory setup 里 activate。'),
+          child: Text(
+            '当前还没有 active story session，可先从 prestory setup 里 activate。',
+          ),
         ),
       );
     }
@@ -326,14 +571,20 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                       children: [
                         Expanded(flex: 7, child: _buildStoryPane(snapshot)),
                         SizedBox(width: spacing.lg),
-                        Expanded(flex: 5, child: _buildDiscussionPane(snapshot)),
+                        Expanded(
+                          flex: 5,
+                          child: _buildDiscussionPane(snapshot),
+                        ),
                       ],
                     )
                   : Column(
                       children: [
                         Expanded(flex: 6, child: _buildStoryPane(snapshot)),
                         SizedBox(height: spacing.lg),
-                        Expanded(flex: 5, child: _buildDiscussionPane(snapshot)),
+                        Expanded(
+                          flex: 5,
+                          child: _buildDiscussionPane(snapshot),
+                        ),
                       ],
                     ),
             ),
@@ -382,7 +633,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   Widget _buildHeader(RpChapterSnapshot snapshot) {
     final spacing = context.owuiSpacing;
     final colors = context.owuiColors;
-    final title = snapshot.chapter.acceptedOutlineJson?['title']?.toString() ??
+    final title =
+        snapshot.chapter.acceptedOutlineJson?['title']?.toString() ??
         snapshot.chapter.chapterGoal ??
         'Chapter ${snapshot.chapter.chapterIndex}';
 
@@ -394,9 +646,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           Text(
             title,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.4,
+            ),
           ),
           SizedBox(height: spacing.sm),
           Wrap(
@@ -409,22 +661,23 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                 'Accepted Segments',
                 snapshot.chapter.acceptedSegmentIds.length.toString(),
               ),
-              if (snapshot.session.currentStateJson['narrative_progress'] is Map)
+              if (snapshot.session.currentStateJson['narrative_progress']
+                  is Map)
                 _statusChip(
                   'Progress',
                   (snapshot.session.currentStateJson['narrative_progress']
-                                  as Map)['accepted_segments']
-                              ?.toString() ??
-                          '0',
+                              as Map)['accepted_segments']
+                          ?.toString() ??
+                      '0',
                 ),
             ],
           ),
           SizedBox(height: spacing.md),
           Text(
             'Left column keeps accepted outline and prose visible. Right column stays for discussion, review, and command control.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colors.textSecondary,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
           ),
         ],
       ),
@@ -456,37 +709,44 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       padding: EdgeInsets.all(spacing.lg),
       child: ListView(
         children: [
-          Text(
-            'Story Surface',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
+          Text('Story Surface', style: Theme.of(context).textTheme.titleLarge),
           SizedBox(height: spacing.md),
-          if (acceptedOutline != null) _buildArtifactCard(acceptedOutline, isPrimary: true),
+          if (acceptedOutline != null)
+            _buildArtifactCard(acceptedOutline, isPrimary: true),
           if (acceptedOutline == null && snapshot.latestOutlineDraft != null)
             _buildArtifactCard(snapshot.latestOutlineDraft!, isPrimary: true),
           if (acceptedOutline == null && snapshot.latestOutlineDraft == null)
-            _emptyPaneNote('No outline yet. Generate one to start the chapter loop.'),
+            _emptyPaneNote(
+              'No outline yet. Generate one to start the chapter loop.',
+            ),
           if (acceptedSegments.isNotEmpty) ...[
             SizedBox(height: spacing.lg),
-            Text('Accepted Segments', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Accepted Segments',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             SizedBox(height: spacing.md),
-            ...acceptedSegments.map((item) => Padding(
-                  padding: EdgeInsets.only(bottom: spacing.md),
-                  child: _buildArtifactCard(item),
-                )),
+            ...acceptedSegments.map(
+              (item) => Padding(
+                padding: EdgeInsets.only(bottom: spacing.md),
+                child: _buildArtifactCard(item),
+              ),
+            ),
           ],
           if (pendingSegment != null || _isStreamingLeftPane) ...[
             SizedBox(height: spacing.lg),
-            Text('Pending Candidate', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Pending Candidate',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             SizedBox(height: spacing.md),
             if (pendingSegment != null)
-              _buildArtifactCard(
-                pendingSegment,
-                isPending: true,
-              ),
+              _buildArtifactCard(pendingSegment, isPending: true),
             if (_isStreamingLeftPane)
               Padding(
-                padding: EdgeInsets.only(top: pendingSegment != null ? spacing.md : 0),
+                padding: EdgeInsets.only(
+                  top: pendingSegment != null ? spacing.md : 0,
+                ),
                 child: _buildStreamingCard(),
               ),
           ],
@@ -503,7 +763,10 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Discussion / Review', style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            'Discussion / Review',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
           SizedBox(height: spacing.md),
           Wrap(
             spacing: spacing.sm,
@@ -536,71 +799,114 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
             ),
           ),
           SizedBox(height: spacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _selectedProviderId,
-                  decoration: const InputDecoration(labelText: 'Provider'),
-                  items: globalModelServiceManager
-                      .getEnabledProviders()
-                      .map(
-                        (provider) => DropdownMenuItem<String>(
-                          value: provider.id,
-                          child: Text(provider.name),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedProviderId = value;
-                      final models = value == null
-                          ? const []
-                          : globalModelServiceManager
-                              .getModelsByProvider(value)
-                              .where((item) => item.isEnabled)
-                              .toList();
-                      _selectedModelId =
-                          models.isEmpty ? null : models.first.id;
-                    });
-                  },
-                ),
-              ),
-              SizedBox(width: spacing.md),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _selectedModelId,
-                  decoration: const InputDecoration(labelText: 'Model'),
-                  items: (_selectedProviderId == null
-                          ? const []
-                          : globalModelServiceManager
-                              .getModelsByProvider(_selectedProviderId!)
-                              .where((item) => item.isEnabled)
-                              .toList())
-                      .map(
-                        (model) => DropdownMenuItem<String>(
-                          value: model.id,
-                          child: Text(model.displayName),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedModelId = value;
-                    });
-                  },
-                ),
-              ),
-              SizedBox(width: spacing.md),
-              FilledButton.icon(
-                onPressed: _isSending ? null : _sendDiscussion,
-                icon: const Icon(Icons.send_outlined),
-                label: const Text('Send'),
-              ),
-            ],
-          ),
+          _buildComposerFooter(),
         ],
       ),
+    );
+  }
+
+  String? _formatModelSelectionSummary({
+    required String? providerId,
+    required String? modelId,
+  }) {
+    if ((providerId == null || providerId.isEmpty) &&
+        (modelId == null || modelId.isEmpty)) {
+      return null;
+    }
+    final providerName = providerId == null
+        ? null
+        : globalModelServiceManager.getProvider(providerId)?.name ?? providerId;
+    final modelName = modelId == null
+        ? null
+        : globalModelServiceManager.getModel(modelId)?.displayName ?? modelId;
+    if (providerName != null && modelName != null) {
+      return '$providerName · $modelName';
+    }
+    return modelName ?? providerName;
+  }
+
+  Widget _buildComposerFooter() {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final agentSummary =
+        _formatModelSelectionSummary(
+          providerId: _selectedProviderId,
+          modelId: _selectedModelId,
+        ) ??
+        '未选择';
+    final embeddingSummary =
+        _formatModelSelectionSummary(
+          providerId: _selectedRetrievalEmbeddingProviderId,
+          modelId: _selectedRetrievalEmbeddingModelId,
+        ) ??
+        '跟随 setup 默认';
+    final rerankSummary =
+        _formatModelSelectionSummary(
+          providerId: _selectedRetrievalRerankProviderId,
+          modelId: _selectedRetrievalRerankModelId,
+        ) ??
+        '跟随 setup 默认';
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final summary = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('当前模型配置', style: Theme.of(context).textTheme.titleSmall),
+            SizedBox(height: spacing.xs),
+            Text(
+              'Agent: $agentSummary',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+            SizedBox(height: spacing.xs),
+            Text(
+              'Retrieval: Embedding $embeddingSummary · Rerank $rerankSummary',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+          ],
+        );
+
+        final actions = Wrap(
+          spacing: spacing.md,
+          runSpacing: spacing.sm,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _isSending ? null : _openModelConfigPage,
+              icon: const Icon(Icons.tune),
+              label: const Text('模型配置'),
+            ),
+            FilledButton.icon(
+              onPressed: _isSending ? null : _sendDiscussion,
+              icon: const Icon(Icons.send_outlined),
+              label: const Text('Send'),
+            ),
+          ],
+        );
+
+        if (constraints.maxWidth >= 760) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(child: summary),
+              SizedBox(width: spacing.md),
+              actions,
+            ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            summary,
+            SizedBox(height: spacing.md),
+            actions,
+          ],
+        );
+      },
     );
   }
 
@@ -626,9 +932,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           onPressed: _isSending
               ? null
               : () => _runImmediateCommand(
-                    'accept_outline',
-                    targetArtifactId: outlineDraft.artifactId,
-                  ),
+                  'accept_outline',
+                  targetArtifactId: outlineDraft.artifactId,
+                ),
           child: const Text('Accept Outline'),
         ),
       );
@@ -649,9 +955,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           onPressed: _isSending
               ? null
               : () => _runStreamingCommand(
-                    'rewrite_pending_segment',
-                    targetArtifactId: pendingSegment.artifactId,
-                  ),
+                  'rewrite_pending_segment',
+                  targetArtifactId: pendingSegment.artifactId,
+                ),
           child: const Text('Rewrite'),
         ),
       );
@@ -660,9 +966,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           onPressed: _isSending
               ? null
               : () => _runImmediateCommand(
-                    'accept_pending_segment',
-                    targetArtifactId: pendingSegment.artifactId,
-                  ),
+                  'accept_pending_segment',
+                  targetArtifactId: pendingSegment.artifactId,
+                ),
           child: const Text('Accept Segment'),
         ),
       );
@@ -707,9 +1013,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         children: [
           Text(
             '${artifact.artifactKind} · ${artifact.status} · r${artifact.revision}',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: colors.textSecondary),
           ),
           SizedBox(height: spacing.sm),
           SelectableText(
@@ -739,14 +1045,11 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            switch (entry.role) {
-              'user' => 'You',
-              'system' => 'System',
-              _ => 'Story Runtime',
-            },
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          Text(switch (entry.role) {
+            'user' => 'You',
+            'system' => 'System',
+            _ => 'Story Runtime',
+          }, style: Theme.of(context).textTheme.titleSmall),
           SizedBox(height: spacing.sm),
           SelectableText(entry.contentText),
         ],
@@ -769,18 +1072,18 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         children: [
           Text(
             'Streaming · ${_streamingCommandKind ?? 'story'}',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: colors.textSecondary),
           ),
           if (_streamingThinking.isNotEmpty) ...[
             SizedBox(height: spacing.sm),
             Text(
               _streamingThinking,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    fontStyle: FontStyle.italic,
-                  ),
+                color: colors.textSecondary,
+                fontStyle: FontStyle.italic,
+              ),
             ),
           ],
           if (_streamingText.isNotEmpty) ...[
@@ -797,9 +1100,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   Widget _emptyPaneNote(String text) {
     return Text(
       text,
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: context.owuiColors.textSecondary,
-          ),
+      style: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(color: context.owuiColors.textSecondary),
     );
   }
 

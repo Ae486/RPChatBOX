@@ -1,0 +1,117 @@
+{
+  "case_id": "retrieval.ingestion.commit_ingestion_and_query.v1",
+  "title": "Accepted commit should create retrieval artifacts and support archival query",
+  "scope": "retrieval",
+  "category": "ingestion_complete",
+  "tags": ["mvp", "deterministic", "retrieval-core"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-001",
+      "query": {
+        "query_kind": "archival",
+        "text_query": "archive keepers sunrise",
+        "domains": ["world_rule"],
+        "top_k": 3,
+        "filters": {},
+        "search_kind": "chunks"
+      }
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "archive_rule",
+              "domain": "world",
+              "path": "world.archive_rule",
+              "title": "Archive Rule",
+              "tags": ["archive"],
+              "source_refs": [],
+              "content": {
+                "summary": "Archive keepers seal the ledger room before sunrise."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:archive_rule"],
+          "reason": "freeze foundation"
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "completed_job_count_gte_one",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "completed_job_ids",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "source_assets_exist",
+        "source": "retrieval_truth",
+        "type": "count_gte",
+        "path": "source_assets",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "chunks_exist",
+        "source": "retrieval_truth",
+        "type": "count_gte",
+        "path": "chunks",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_hits_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.hits",
+        "expected": 1,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

@@ -50,6 +50,19 @@ class StorySessionService:
         record = self._session.get(StorySessionRecord, session_id)
         return self._record_to_story_session(record) if record is not None else None
 
+    def get_latest_session_for_story(
+        self,
+        story_id: str,
+        *,
+        session_state: StorySessionState | None = StorySessionState.ACTIVE,
+    ) -> StorySession | None:
+        stmt = select(StorySessionRecord).where(StorySessionRecord.story_id == story_id)
+        if session_state is not None:
+            stmt = stmt.where(StorySessionRecord.session_state == session_state.value)
+        stmt = stmt.order_by(StorySessionRecord.updated_at.desc(), StorySessionRecord.created_at.desc())
+        record = self._session.exec(stmt).first()
+        return self._record_to_story_session(record) if record is not None else None
+
     def create_session(
         self,
         *,
@@ -88,6 +101,7 @@ class StorySessionService:
         session_state: StorySessionState | None = None,
         current_chapter_index: int | None = None,
         current_phase: LongformChapterPhase | None = None,
+        runtime_story_config_patch: dict | None = None,
         current_state_json: dict | None = None,
     ) -> StorySession:
         record = self._require_session_record(session_id)
@@ -97,6 +111,10 @@ class StorySessionService:
             record.current_chapter_index = current_chapter_index
         if current_phase is not None:
             record.current_phase = current_phase.value
+        if runtime_story_config_patch is not None:
+            next_runtime_story_config = dict(record.runtime_story_config_json or {})
+            next_runtime_story_config.update(dict(runtime_story_config_patch))
+            record.runtime_story_config_json = next_runtime_story_config
         if current_state_json is not None:
             record.current_state_json = dict(current_state_json)
         record.updated_at = _utcnow()
@@ -107,6 +125,12 @@ class StorySessionService:
     def get_current_chapter(self, session_id: str) -> ChapterWorkspace | None:
         session = self._require_session_record(session_id)
         return self.get_chapter_by_index(session_id=session_id, chapter_index=session.current_chapter_index)
+
+    def get_current_chapter_for_story(self, story_id: str) -> ChapterWorkspace | None:
+        session = self.get_latest_session_for_story(story_id)
+        if session is None:
+            return None
+        return self.get_current_chapter(session.session_id)
 
     def get_chapter_by_index(
         self,
@@ -121,6 +145,18 @@ class StorySessionService:
         )
         record = self._session.exec(stmt).first()
         return self._record_to_chapter(record) if record is not None else None
+
+    def get_chapter_workspace(self, chapter_workspace_id: str) -> ChapterWorkspace | None:
+        record = self._session.get(ChapterWorkspaceRecord, chapter_workspace_id)
+        return self._record_to_chapter(record) if record is not None else None
+
+    def list_chapter_workspaces(self, *, session_id: str) -> list[ChapterWorkspace]:
+        stmt = (
+            select(ChapterWorkspaceRecord)
+            .where(ChapterWorkspaceRecord.session_id == session_id)
+            .order_by(ChapterWorkspaceRecord.chapter_index.asc())
+        )
+        return [self._record_to_chapter(record) for record in self._session.exec(stmt).all()]
 
     def create_chapter_workspace(
         self,

@@ -34,6 +34,8 @@ class ModelServiceManager {
   List<ProviderConfig> _providers = [];
   List<ModelConfig> _models = [];
   Map<String, ConversationSettings> _conversationSettings = {};
+  bool _backendMirrorsHydrated = false;
+  bool _backendMirrorsDirty = true;
 
   ModelServiceManager(this._prefs);
 
@@ -180,6 +182,8 @@ class ModelServiceManager {
       ..._providers.where((entry) => entry.id != merged.id),
       merged,
     ];
+    _backendMirrorsHydrated = true;
+    _backendMirrorsDirty = false;
     await _saveRuntimeState();
     return merged;
   }
@@ -198,6 +202,8 @@ class ModelServiceManager {
         provider,
       );
       _providers[index] = _mergeProviderMirror(provider, summary);
+      _backendMirrorsHydrated = true;
+      _backendMirrorsDirty = false;
       await _saveRuntimeState();
     }
   }
@@ -213,6 +219,8 @@ class ModelServiceManager {
 
     _providers.removeWhere((p) => p.id == providerId);
     _models.removeWhere((m) => m.providerId == providerId);
+    _backendMirrorsHydrated = true;
+    _backendMirrorsDirty = false;
     await _saveRuntimeState();
   }
 
@@ -226,10 +234,10 @@ class ModelServiceManager {
   /// 发送实际测试请求来验证模型是否可用
   Future<ProviderTestResult> testProviderWithModel(
     ProviderConfig provider,
-    String modelName,
+    ModelConfig model,
   ) async {
     final aiProvider = ProviderFactory.createProviderWithRouting(provider);
-    return await aiProvider.testModel(modelName);
+    return await aiProvider.testModel(model);
   }
 
   // ============ Model管理 ============
@@ -275,8 +283,38 @@ class ModelServiceManager {
     );
     final merged = _mergeModelMirror(model, summary);
     _models = [..._models.where((entry) => entry.id != merged.id), merged];
+    _backendMirrorsHydrated = true;
+    _backendMirrorsDirty = false;
     await _saveRuntimeState();
     return merged;
+  }
+
+  Future<ModelConfig> buildSuggestedModel({
+    required ProviderConfig provider,
+    required String modelName,
+    String? modelId,
+  }) async {
+    if (ProviderFactory.pythonBackendEnabled) {
+      final preview = await _backendModelRegistryService
+          .previewModelCapabilities(provider: provider, modelName: modelName);
+      return ModelConfig(
+        id: modelId ?? generateId(),
+        providerId: provider.id,
+        modelName: modelName,
+        displayName: preview.displayName,
+        capabilities: preview.capabilities,
+        capabilitySource: preview.capabilitySource,
+        capabilityProfile: preview.capabilityProfile,
+      );
+    }
+
+    return ModelConfig(
+      id: modelId ?? generateId(),
+      providerId: provider.id,
+      modelName: modelName,
+      displayName: modelName,
+      capabilities: const <ModelCapability>{},
+    );
   }
 
   /// 批量添加Models
@@ -311,6 +349,8 @@ class ModelServiceManager {
         model: model,
       );
       _models[index] = _mergeModelMirror(model, summary);
+      _backendMirrorsHydrated = true;
+      _backendMirrorsDirty = false;
       await _saveRuntimeState();
     }
   }
@@ -332,6 +372,8 @@ class ModelServiceManager {
     }
 
     _models.removeWhere((m) => m.id == modelId);
+    _backendMirrorsHydrated = true;
+    _backendMirrorsDirty = false;
     await _saveRuntimeState();
   }
 
@@ -363,11 +405,10 @@ class ModelServiceManager {
   /// 更新对话配置
   Future<void> updateConversationSettings(ConversationSettings settings) async {
     if (ProviderFactory.pythonBackendEnabled) {
-      final summary = await _backendConversationService.updateConversationSettings(
-        settings,
-      );
-      _conversationSettings[settings.conversationId] =
-          summary.toConversationSettings();
+      final summary = await _backendConversationService
+          .updateConversationSettings(settings);
+      _conversationSettings[settings.conversationId] = summary
+          .toConversationSettings();
       await _saveRuntimeState();
       return;
     }
@@ -474,6 +515,9 @@ class ModelServiceManager {
   /// - 本地仍保留镜像/回滚层
   Future<void> refreshBackendMirrors({bool sync = true}) async {
     if (!ProviderFactory.pythonBackendEnabled) return;
+    if (!sync && _backendMirrorsHydrated && !_backendMirrorsDirty) {
+      return;
+    }
 
     if (sync) {
       await syncProvidersToBackend();
@@ -482,6 +526,8 @@ class ModelServiceManager {
 
     await refreshProviderMirrorsFromBackend();
     await refreshModelMirrorsFromBackend();
+    _backendMirrorsHydrated = true;
+    _backendMirrorsDirty = false;
   }
 
   /// 从 backend provider registry 拉取 summary，并以 backend 结果校准本地镜像。
@@ -507,7 +553,10 @@ class ModelServiceManager {
           break;
         }
       }
-      if (unchanged) return;
+      if (unchanged) {
+        _backendMirrorsHydrated = true;
+        return;
+      }
     }
 
     _providers = updatedProviders;
@@ -551,7 +600,10 @@ class ModelServiceManager {
           break;
         }
       }
-      if (unchanged) return;
+      if (unchanged) {
+        _backendMirrorsHydrated = true;
+        return;
+      }
     }
 
     _models = mergedModels;
@@ -732,6 +784,8 @@ class ModelServiceManager {
               modelName: summary.modelName,
               displayName: summary.displayName,
               capabilities: summary.capabilities,
+              capabilitySource: summary.capabilitySource,
+              capabilityProfile: summary.capabilityProfile,
               defaultParams: summary.defaultParams,
               isEnabled: summary.isEnabled,
               description: summary.description,
@@ -743,6 +797,8 @@ class ModelServiceManager {
           modelName: summary.modelName,
           displayName: summary.displayName,
           capabilities: summary.capabilities,
+          capabilitySource: summary.capabilitySource,
+          capabilityProfile: summary.capabilityProfile,
           defaultParams: summary.defaultParams,
           isEnabled: summary.isEnabled,
           description: summary.description,
@@ -757,6 +813,9 @@ class ModelServiceManager {
         left.modelName == right.modelName &&
         left.displayName == right.displayName &&
         setEquals(left.capabilities, right.capabilities) &&
+        left.capabilitySource == right.capabilitySource &&
+        jsonEncode(left.capabilityProfile?.toJson()) ==
+            jsonEncode(right.capabilityProfile?.toJson()) &&
         left.defaultParams.temperature == right.defaultParams.temperature &&
         left.defaultParams.maxTokens == right.defaultParams.maxTokens &&
         left.defaultParams.topP == right.defaultParams.topP &&

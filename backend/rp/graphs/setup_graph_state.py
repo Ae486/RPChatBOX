@@ -13,6 +13,7 @@ class SetupGraphState(TypedDict, total=False):
     provider_id: str | None
     user_prompt: str
     history: list[dict[str, str]]
+    user_edit_delta_ids: list[str]
     stream_mode: bool
     status: str
     context_packet: dict[str, Any]

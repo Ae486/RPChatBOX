@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rp.models.story_runtime import LongformChapterPhase, StoryActivationResult
+from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.setup_runtime_controller import SetupRuntimeController
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
@@ -17,10 +18,12 @@ class StoryActivationService:
         setup_controller: SetupRuntimeController,
         workspace_service: SetupWorkspaceService,
         story_session_service: StorySessionService,
+        core_state_dual_write_service: CoreStateDualWriteService | None = None,
     ) -> None:
         self._setup_controller = setup_controller
         self._workspace_service = workspace_service
         self._story_session_service = story_session_service
+        self._core_state_dual_write_service = core_state_dual_write_service
 
     def activate_workspace(self, *, workspace_id: str) -> StoryActivationResult:
         workspace = self._workspace_service.get_workspace(workspace_id)
@@ -60,13 +63,18 @@ class StoryActivationService:
             current_state_json=self._initial_current_state(workspace),
             initial_phase=initial_phase,
         )
-        self._story_session_service.create_chapter_workspace(
+        chapter = self._story_session_service.create_chapter_workspace(
             session_id=session.session_id,
             chapter_index=1,
             phase=initial_phase,
             chapter_goal=self._chapter_goal(workspace, chapter_index=1),
             builder_snapshot_json=self._initial_builder_snapshot(workspace),
         )
+        if self._core_state_dual_write_service is not None:
+            self._core_state_dual_write_service.seed_activation_state(
+                session=self._story_session_service.get_session(session.session_id) or session,
+                chapter=chapter,
+            )
         self._workspace_service.mark_activated_story_session(
             workspace_id=workspace_id,
             session_id=session.session_id,
@@ -130,7 +138,6 @@ class StoryActivationService:
             "blueprint_digest": blueprint_digest,
             "current_outline_digest": [],
             "recent_segment_digest": [],
-            "writer_hints": [],
         }
 
     @staticmethod

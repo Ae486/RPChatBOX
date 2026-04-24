@@ -4,6 +4,7 @@ from __future__ import annotations
 from rp.agent_runtime.contracts import (
     RuntimeProfile,
     RuntimeToolResult,
+    SetupCognitiveStateSummary,
     SetupPendingObligation,
     SetupReflectionTicket,
 )
@@ -81,6 +82,39 @@ def test_repair_decision_policy_returns_ask_user_obligation():
     assert decision["last_failure"]["failure_category"] == "ask_user"
 
 
+def test_repair_decision_policy_continue_discussion_does_not_become_commit_reassessment():
+    result = RuntimeToolResult(
+        call_id="call_truth_write",
+        tool_name="rp_setup__setup.truth.write",
+        success=False,
+        content_text='{"code":"setup_tool_failed"}',
+        error_code="SETUP_TOOL_FAILED",
+        structured_payload={
+            "error_payload": {
+                "code": "setup_tool_failed",
+                "message": "Draft truth write could not be applied yet.",
+                "details": {
+                    "repair_strategy": "continue_discussion",
+                },
+            }
+        },
+    )
+
+    decision = RepairDecisionPolicy.assess(
+        profile=_profile(),
+        tool_results=[result],
+        schema_retry_count=0,
+        round_no=1,
+    )
+
+    assert decision["action"] == "continue"
+    assert (
+        decision["pending_obligation"]["obligation_type"]
+        == "continue_after_tool_failure"
+    )
+    assert decision["last_failure"]["failure_category"] == "continue_discussion"
+
+
 def test_completion_guard_blocks_unresolved_repair_obligation():
     obligation = SetupPendingObligation(
         obligation_type="repair_tool_call",
@@ -147,3 +181,64 @@ def test_reflection_trigger_policy_fails_when_retry_budget_is_exhausted():
 
     assert decision["action"] == "finalize_failure"
     assert decision["finish_reason"] == "repair_obligation_unfulfilled"
+
+
+def test_blocked_commit_ticket_respects_invalidated_cognitive_state():
+    ticket = ReflectionTriggerPolicy.blocked_commit_ticket(
+        context_bundle={},
+        cognitive_state_summary=SetupCognitiveStateSummary(
+            current_step="story_config",
+            invalidated=True,
+            invalidation_reasons=["user_edit_delta"],
+        ),
+    )
+
+    assert ticket is not None
+    assert ticket["required_decision"] == "block_commit"
+
+
+def test_blocked_commit_ticket_blocks_when_truth_write_not_review_ready():
+    ticket = ReflectionTriggerPolicy.blocked_commit_ticket(
+        context_bundle={},
+        cognitive_state_summary=SetupCognitiveStateSummary(
+            current_step="story_config",
+            ready_for_review=False,
+            remaining_open_issues=[],
+        ),
+    )
+
+    assert ticket is not None
+    assert ticket["required_decision"] == "block_commit"
+
+
+def test_completion_guard_downgrades_stale_state_to_continue_discussion():
+    decision = CompletionGuardPolicy.assess(
+        assistant_text="I updated the draft direction and we should keep refining it.",
+        pending_obligation=None,
+        reflection_ticket=None,
+        cognitive_state_summary=SetupCognitiveStateSummary(
+            current_step="foundation",
+            invalidated=True,
+            invalidation_reasons=["user_edit_delta"],
+        ),
+    )
+
+    assert decision["allow_finalize"] is True
+    assert decision["finish_reason"] == "continue_discussion"
+
+
+def test_completion_guard_treats_truth_write_not_ready_for_review_as_follow_up():
+    decision = CompletionGuardPolicy.assess(
+        assistant_text="The draft has improved, but it is not ready for review yet.",
+        pending_obligation=None,
+        reflection_ticket=None,
+        cognitive_state_summary=SetupCognitiveStateSummary(
+            current_step="foundation",
+            ready_for_review=False,
+            remaining_open_issues=[],
+        ),
+    )
+
+    assert decision["allow_finalize"] is True
+    assert decision["finish_reason"] == "continue_discussion"
+    assert decision["completion_guard"]["reason"] == "truth_write_not_ready_for_review"

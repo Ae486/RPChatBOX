@@ -5,6 +5,7 @@ import pytest
 from config import get_settings
 from main import create_app
 from services.database import get_engine
+from services.langfuse_service import reset_langfuse_service
 from services.mcp_manager import reset_mcp_manager
 from services.provider_registry import get_provider_registry_service
 
@@ -19,11 +20,13 @@ def client(tmp_path, monkeypatch):
     get_settings.cache_clear()
     get_engine.cache_clear()
     get_provider_registry_service.cache_clear()
+    reset_langfuse_service()
     reset_mcp_manager()
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
     reset_mcp_manager()
+    reset_langfuse_service()
     get_provider_registry_service.cache_clear()
     get_engine.cache_clear()
     get_settings.cache_clear()

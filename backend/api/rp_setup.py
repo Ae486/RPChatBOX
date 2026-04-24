@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -23,10 +24,15 @@ from rp.models.setup_workspace import (
 )
 from rp.graphs.activation_graph_runner import ActivationGraphRunner
 from rp.graphs.setup_graph_runner import SetupGraphRunner
+from rp.observability.langfuse_scores import (
+    emit_activation_trace_scores,
+    emit_setup_trace_scores,
+)
 from rp.services.setup_runtime_controller import SetupRuntimeController
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from services.database import get_session
+from services.langfuse_service import get_langfuse_service
 
 router = APIRouter()
 
@@ -313,33 +319,149 @@ async def get_setup_step_context(
 @router.post("/api/rp/setup/workspaces/{workspace_id}/activation-check")
 async def run_setup_activation_check(
     workspace_id: str,
+    request: Request,
     controller: SetupRuntimeController = Depends(_controller),
 ):
-    result = controller.run_activation_check(workspace_id=workspace_id)
-    if result is None:
-        raise _workspace_not_found(workspace_id)
-    return result.model_dump(mode="json", exclude_none=True)
+    request_id = (request.headers.get("X-Request-Id") if request is not None else None) or uuid.uuid4().hex[:12]
+    langfuse = get_langfuse_service()
+    metadata = {
+        "route": "rp_setup.activation_check",
+        "request_id": request_id,
+        "workspace_id": workspace_id,
+    }
+    with langfuse.propagate_attributes(
+        session_id=workspace_id,
+        tags=["rp", "activation", "api"],
+        metadata=metadata,
+        trace_name="rp.setup.activation_check",
+    ):
+        with langfuse.start_as_current_observation(
+            name="rp.setup.activation_check",
+            as_type="chain",
+            input={"workspace_id": workspace_id},
+        ) as observation:
+            result = controller.run_activation_check(workspace_id=workspace_id)
+            if result is None:
+                emit_activation_trace_scores(
+                    observation,
+                    runtime_result={
+                        "finish_reason": "activation_failed",
+                        "activation_check": {},
+                        "activation_result": {},
+                        "error": {
+                            "message": f"SetupWorkspace not found: {workspace_id}",
+                            "type": "setup_workspace_not_found",
+                        },
+                    },
+                    failure_layer="deterministic",
+                    error_code="setup_workspace_not_found",
+                )
+                observation.update(
+                    output={
+                        "error": {
+                            "message": f"SetupWorkspace not found: {workspace_id}",
+                            "code": "setup_workspace_not_found",
+                        }
+                    }
+                )
+                raise _workspace_not_found(workspace_id)
+            payload = result.model_dump(mode="json", exclude_none=True)
+            observation.update(output=payload)
+            emit_activation_trace_scores(
+                observation,
+                runtime_result={
+                    "finish_reason": "activation_checked",
+                    "activation_check": payload,
+                    "activation_result": {},
+                },
+            )
+            return payload
 
 
 @router.post("/api/rp/setup/workspaces/{workspace_id}/activate")
 async def activate_story_from_workspace(
     workspace_id: str,
+    request: Request,
     runner: ActivationGraphRunner = Depends(_activation_graph_runner),
+    controller: SetupRuntimeController = Depends(_controller),
 ):
-    try:
-        result = runner.activate_workspace(workspace_id=workspace_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"error": {"message": str(exc), "code": "story_activation_failed"}},
-        ) from exc
-    return result.model_dump(mode="json")
+    request_id = (request.headers.get("X-Request-Id") if request is not None else None) or uuid.uuid4().hex[:12]
+    langfuse = get_langfuse_service()
+    metadata = {
+        "route": "rp_setup.activate",
+        "request_id": request_id,
+        "workspace_id": workspace_id,
+    }
+    with langfuse.propagate_attributes(
+        session_id=workspace_id,
+        tags=["rp", "activation", "api", "bootstrap"],
+        metadata=metadata,
+        trace_name="rp.setup.activate",
+    ):
+        with langfuse.start_as_current_observation(
+            name="rp.setup.activate",
+            as_type="chain",
+            input={"workspace_id": workspace_id},
+        ) as observation:
+            activation_check = controller.run_activation_check(workspace_id=workspace_id)
+            try:
+                result = runner.activate_workspace(workspace_id=workspace_id)
+            except ValueError as exc:
+                runtime_payload = {
+                    "finish_reason": "activation_failed",
+                    "activation_check": (
+                        activation_check.model_dump(mode="json", exclude_none=True)
+                        if activation_check is not None
+                        else {}
+                    ),
+                    "activation_result": {},
+                    "error": {
+                        "message": str(exc),
+                        "type": "story_activation_failed",
+                    },
+                }
+                emit_activation_trace_scores(
+                    observation,
+                    runtime_result=runtime_payload,
+                    failure_layer="deterministic",
+                    error_code="story_activation_failed",
+                )
+                observation.update(output=runtime_payload)
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": {"message": str(exc), "code": "story_activation_failed"}},
+                ) from exc
+            payload = result.model_dump(mode="json")
+            observation.update(
+                output={
+                    "activation_check": (
+                        activation_check.model_dump(mode="json", exclude_none=True)
+                        if activation_check is not None
+                        else {}
+                    ),
+                    "activation_result": payload,
+                }
+            )
+            emit_activation_trace_scores(
+                observation,
+                runtime_result={
+                    "finish_reason": "activation_completed",
+                    "activation_check": (
+                        activation_check.model_dump(mode="json", exclude_none=True)
+                        if activation_check is not None
+                        else {}
+                    ),
+                    "activation_result": payload,
+                },
+            )
+            return payload
 
 
 @router.post("/api/rp/setup/workspaces/{workspace_id}/turn")
 async def run_setup_agent_turn(
     workspace_id: str,
     payload: SetupAgentTurnRequest,
+    request: Request,
     runner: SetupGraphRunner = Depends(_setup_graph_runner),
 ):
     if payload.workspace_id != workspace_id:
@@ -352,20 +474,73 @@ async def run_setup_agent_turn(
                 }
             },
         )
-    try:
-        result = await runner.run_turn(payload)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"error": {"message": str(exc), "code": "setup_agent_turn_failed"}},
-        ) from exc
-    return result.model_dump(mode="json")
+    request_id = (request.headers.get("X-Request-Id") if request is not None else None) or uuid.uuid4().hex[:12]
+    langfuse = get_langfuse_service()
+    metadata = {
+        "route": "rp_setup.turn",
+        "request_id": request_id,
+        "workspace_id": workspace_id,
+        "target_step": payload.target_step.value if payload.target_step is not None else None,
+        "stream": False,
+    }
+    with langfuse.propagate_attributes(
+        session_id=workspace_id,
+        tags=["rp", "setup", "api"],
+        metadata=metadata,
+        trace_name="rp.setup.turn",
+    ):
+        with langfuse.start_as_current_observation(
+            name="rp.setup.turn",
+            as_type="agent",
+            input=payload.model_dump(mode="json"),
+        ) as observation:
+            try:
+                result = await runner.run_turn(payload)
+            except ValueError as exc:
+                emit_setup_trace_scores(
+                    observation,
+                    runtime_result={
+                        "finish_reason": None,
+                        "assistant_text": "",
+                        "warnings": [],
+                        "structured_payload": {},
+                    },
+                    failure_layer="infra",
+                    error_code="setup_agent_turn_failed",
+                )
+                observation.update(
+                    output={
+                        "error": {
+                            "message": str(exc),
+                            "code": "setup_agent_turn_failed",
+                        }
+                    }
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": {"message": str(exc), "code": "setup_agent_turn_failed"}},
+                ) from exc
+            runtime_result = runner.last_runtime_result
+            observation.update(
+                output=(
+                    runtime_result.model_dump(mode="json")
+                    if runtime_result is not None
+                    else result.model_dump(mode="json")
+                )
+            )
+            if runtime_result is not None:
+                emit_setup_trace_scores(
+                    observation,
+                    runtime_result=runtime_result.model_dump(mode="json"),
+                )
+            return result.model_dump(mode="json")
 
 
 @router.post("/api/rp/setup/workspaces/{workspace_id}/turn/stream")
 async def run_setup_agent_turn_stream(
     workspace_id: str,
     payload: SetupAgentTurnRequest,
+    request: Request,
     runner: SetupGraphRunner = Depends(_setup_graph_runner),
 ):
     if payload.workspace_id != workspace_id:
@@ -379,25 +554,86 @@ async def run_setup_agent_turn_stream(
             },
         )
 
+    request_id = (request.headers.get("X-Request-Id") if request is not None else None) or uuid.uuid4().hex[:12]
+    langfuse = get_langfuse_service()
+
     async def _stream():
-        try:
-            async for chunk in runner.run_turn_stream(payload):
-                yield chunk
-        except ValueError as exc:
-            yield (
-                "data: "
-                + json.dumps(
-                    {
-                        "type": "error",
-                        "error": {
-                            "message": str(exc),
-                            "type": "setup_agent_turn_failed",
+        metadata = {
+            "route": "rp_setup.turn.stream",
+            "request_id": request_id,
+            "workspace_id": workspace_id,
+            "target_step": payload.target_step.value if payload.target_step is not None else None,
+            "stream": True,
+        }
+        with langfuse.propagate_attributes(
+            session_id=workspace_id,
+            tags=["rp", "setup", "api", "stream"],
+            metadata=metadata,
+            trace_name="rp.setup.turn.stream",
+        ):
+            with langfuse.start_as_current_observation(
+                name="rp.setup.turn.stream",
+                as_type="agent",
+                input=payload.model_dump(mode="json"),
+            ) as observation:
+                chunk_count = 0
+                try:
+                    async for chunk in runner.run_turn_stream(payload):
+                        chunk_count += 1
+                        yield chunk
+                except ValueError as exc:
+                    emit_setup_trace_scores(
+                        observation,
+                        runtime_result={
+                            "finish_reason": None,
+                            "assistant_text": "",
+                            "warnings": [],
+                            "structured_payload": {},
                         },
-                    }
-                )
-                + "\n\n"
-            )
-            yield "data: " + json.dumps({"type": "done"}) + "\n\n"
+                        failure_layer="infra",
+                        error_code="setup_agent_turn_failed",
+                    )
+                    observation.update(
+                        output={
+                            "error": {
+                                "message": str(exc),
+                                "code": "setup_agent_turn_failed",
+                            },
+                            "stream_chunk_count": chunk_count,
+                        }
+                    )
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "error",
+                                "error": {
+                                    "message": str(exc),
+                                    "type": "setup_agent_turn_failed",
+                                },
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    yield "data: " + json.dumps({"type": "done"}) + "\n\n"
+                else:
+                    runtime_result = runner.last_runtime_result
+                    output_payload = (
+                        runtime_result.model_dump(mode="json")
+                        if runtime_result is not None
+                        else {"status": "stream_completed"}
+                    )
+                    if isinstance(output_payload, dict):
+                        output_payload = {
+                            **output_payload,
+                            "stream_chunk_count": chunk_count,
+                        }
+                    observation.update(output=output_payload)
+                    if runtime_result is not None:
+                        emit_setup_trace_scores(
+                            observation,
+                            runtime_result=runtime_result.model_dump(mode="json"),
+                        )
 
     return StreamingResponse(
         _stream(),
@@ -406,5 +642,6 @@ async def run_setup_agent_turn_stream(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "X-Request-Id": request_id,
         },
     )

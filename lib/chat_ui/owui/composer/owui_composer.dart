@@ -1,7 +1,3 @@
-/// INPUT: ConversationSettings/ModelServiceManager + flutter_chat_ui ComposerHeightNotifier
-/// OUTPUT: OwuiComposer - V2 输入区（附件/联网/配置/模型/发送-停止）
-/// POS: UI 层 / Chat / Owui - OpenWebUI 风格输入组件
-
 import 'dart:io';
 import 'dart:ui';
 
@@ -12,7 +8,6 @@ import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../../design_system/design_tokens.dart';
-import '../../../adapters/ai_provider.dart';
 import '../../../models/attached_file.dart';
 import '../../../models/conversation_settings.dart';
 import '../../../models/model_config.dart';
@@ -231,16 +226,6 @@ class _OwuiComposerState extends State<OwuiComposer> {
   }
 
   Future<void> _showModelSelector() async {
-    if (ProviderFactory.pythonBackendEnabled) {
-      try {
-        await widget.serviceManager.refreshBackendMirrors(sync: false);
-      } catch (e) {
-        if (mounted) {
-          debugPrint('[OwuiComposer] backend mirror refresh failed: $e');
-        }
-      }
-    }
-
     if (!mounted) return;
 
     showModalBottomSheet<void>(

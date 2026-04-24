@@ -123,6 +123,12 @@ class StoryActivationResult(BaseModel):
     initial_outline_required: bool = True
 
 
+class StoryRuntimeConfigPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    runtime_story_config: dict[str, Any] = Field(default_factory=dict)
+
+
 class LongformTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

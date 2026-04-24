@@ -12,14 +12,24 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StorySession,
 )
+from .authoritative_state_view_service import AuthoritativeStateViewService
+from .projection_state_service import ProjectionStateService
 from .story_llm_gateway import StoryLlmGateway
 
 
 class LongformOrchestratorService:
     """Produce one minimal worker plan per story turn."""
 
-    def __init__(self, *, llm_gateway: StoryLlmGateway | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm_gateway: StoryLlmGateway | None = None,
+        authoritative_state_view_service: AuthoritativeStateViewService,
+        projection_state_service: ProjectionStateService,
+    ) -> None:
         self._llm_gateway = llm_gateway or StoryLlmGateway()
+        self._authoritative_state_view_service = authoritative_state_view_service
+        self._projection_state_service = projection_state_service
 
     async def plan(
         self,
@@ -32,11 +42,18 @@ class LongformOrchestratorService:
         user_prompt: str | None,
         target_artifact_id: str | None,
     ) -> OrchestratorPlan:
+        projection_snapshot = self._projection_state_service.build_planner_projection(
+            session_id=session.session_id
+        )
+        authoritative_state = self._authoritative_state_view_service.get_state_map(
+            session_id=session.session_id
+        )
         fallback = self._fallback_plan(
             session=session,
             chapter=chapter,
             command_kind=command_kind,
             user_prompt=user_prompt,
+            projection_snapshot=projection_snapshot,
         )
         if command_kind in {
             LongformTurnCommandKind.ACCEPT_OUTLINE,
@@ -59,8 +76,8 @@ class LongformOrchestratorService:
             "chapter_index": chapter.chapter_index,
             "chapter_goal": chapter.chapter_goal,
             "accepted_outline": chapter.accepted_outline_json,
-            "builder_snapshot": chapter.builder_snapshot_json,
-            "current_state": session.current_state_json,
+            "projection_state": projection_snapshot,
+            "authoritative_state": authoritative_state,
             "user_prompt": user_prompt,
             "target_artifact_id": target_artifact_id,
             "response_schema": {
@@ -91,13 +108,14 @@ class LongformOrchestratorService:
         except Exception:
             return fallback
 
-    @staticmethod
     def _fallback_plan(
+        self,
         *,
         session: StorySession,
         chapter: ChapterWorkspace,
         command_kind: LongformTurnCommandKind,
         user_prompt: str | None,
+        projection_snapshot: dict[str, object],
     ) -> OrchestratorPlan:
         if command_kind == LongformTurnCommandKind.GENERATE_OUTLINE:
             return OrchestratorPlan(
@@ -107,7 +125,7 @@ class LongformOrchestratorService:
                     query
                     for query in (
                         chapter.chapter_goal,
-                        " ".join(chapter.builder_snapshot_json.get("blueprint_digest", [])[:2]),
+                        " ".join(projection_snapshot.get("blueprint_digest", [])[:2]),
                     )
                     if query
                 ],
@@ -147,7 +165,8 @@ class LongformOrchestratorService:
                 query
                 for query in (
                     chapter.chapter_goal,
-                    " ".join(chapter.builder_snapshot_json.get("writer_hints", [])[:2]),
+                    " ".join(projection_snapshot.get("current_outline_digest", [])[:2]),
+                    " ".join(projection_snapshot.get("current_state_digest", [])[:2]),
                 )
                 if query
             ],

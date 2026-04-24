@@ -1,0 +1,100 @@
+{
+  "case_id": "setup.repair.writing_contract.ask_user_after_semantic_fail.v1",
+  "title": "Semantic validation failure should turn into a targeted user question",
+  "scope": "setup",
+  "category": "repair",
+  "tags": [
+    "mvp",
+    "deterministic",
+    "setup-v2",
+    "cognitive-runtime"
+  ],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-ask-user-debug-001",
+      "target_step": "writing_contract",
+      "user_prompt": "请整理写作契约。",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-ask-user-debug-001",
+      "mode": "longform",
+      "current_step": "writing_contract"
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_awaiting_user_input",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "awaiting_user_input",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "repair_route_is_ask_user",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "structured_payload.repair_route",
+        "expected": "ask_user",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "warnings_include_requires_user_input",
+        "source": "runtime_result",
+        "type": "contains",
+        "path": "warnings",
+        "expected": "tool_failure_requires_user_input",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "assistant_asks_for_preferences",
+        "source": "runtime_result",
+        "type": "contains",
+        "path": "assistant_text",
+        "expected": "Which POV and style rules",
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": [
+      {
+        "hook_id": "clarification_quality",
+        "judge_family": "llm_judge",
+        "rubric_ref": "setup/clarification-quality/v1",
+        "target": "assistant_text"
+      }
+    ]
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true,
+    "export_phoenix": false
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": [
+      "finish_reason",
+      "warnings",
+      "assertion_pass_rate"
+    ],
+    "baseline_tags": [
+      "main"
+    ]
+  },
+  "metadata": {}
+}

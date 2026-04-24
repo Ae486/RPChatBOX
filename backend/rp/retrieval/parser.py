@@ -99,6 +99,15 @@ class Parser:
             text = raw.get("text")
             if not isinstance(text, str) or not text.strip():
                 continue
+            metadata = dict(raw.get("metadata") or {})
+            page_no, page_label = self._resolve_page_metadata(raw=raw, metadata=metadata)
+            image_caption = self._resolve_image_caption(raw=raw, metadata=metadata)
+            if page_no not in (None, "") and metadata.get("page_no") in (None, ""):
+                metadata["page_no"] = page_no
+            if page_label not in (None, "") and metadata.get("page_label") in (None, ""):
+                metadata["page_label"] = page_label
+            if image_caption not in (None, "") and metadata.get("image_caption") in (None, ""):
+                metadata["image_caption"] = image_caption
             normalized.append(
                 ParsedDocumentSection(
                     section_id=str(raw.get("section_id") or uuid4().hex),
@@ -106,10 +115,88 @@ class Parser:
                     path=str(raw.get("path") or f"section.{index}"),
                     level=max(1, int(raw.get("level") or 1)),
                     text=text.strip(),
-                    metadata=dict(raw.get("metadata") or {}),
+                    metadata=metadata,
                 )
             )
         return normalized
+
+    @staticmethod
+    def _resolve_page_metadata(*, raw: dict[str, Any], metadata: dict[str, Any]) -> tuple[object | None, object | None]:
+        raw_page = raw.get("page")
+        metadata_page = metadata.get("page")
+        page_no = Parser._first_non_empty(
+            raw.get("page_no"),
+            metadata.get("page_no"),
+            Parser._read_mapping_value(raw_page, "no", "page_no", "page_number", "index"),
+            Parser._read_mapping_value(metadata_page, "no", "page_no", "page_number", "index"),
+        )
+        page_label = Parser._first_non_empty(
+            raw.get("page_label"),
+            metadata.get("page_label"),
+            Parser._read_mapping_value(raw_page, "label", "page_label", "display"),
+            Parser._read_mapping_value(metadata_page, "label", "page_label", "display"),
+        )
+        return page_no, page_label
+
+    @staticmethod
+    def _resolve_image_caption(*, raw: dict[str, Any], metadata: dict[str, Any]) -> str | None:
+        explicit = Parser._first_non_empty(
+            raw.get("image_caption"),
+            metadata.get("image_caption"),
+            Parser._read_caption(raw.get("image")),
+            Parser._read_caption(metadata.get("image")),
+        )
+        if explicit not in (None, ""):
+            return str(explicit).strip() or None
+
+        captions = Parser._collect_captions(raw.get("images"))
+        captions.extend(Parser._collect_captions(metadata.get("images")))
+        captions.extend(Parser._collect_captions(raw.get("figures")))
+        captions.extend(Parser._collect_captions(metadata.get("figures")))
+        deduped = list(dict.fromkeys(captions))
+        if not deduped:
+            return None
+        return " | ".join(deduped[:2]).strip() or None
+
+    @staticmethod
+    def _collect_captions(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        captions: list[str] = []
+        for item in value:
+            caption = Parser._read_caption(item)
+            if caption:
+                captions.append(caption)
+        return captions
+
+    @staticmethod
+    def _read_caption(value: Any) -> str | None:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        if isinstance(value, dict):
+            for key in ("caption", "image_caption", "alt", "summary"):
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+        return None
+
+    @staticmethod
+    def _read_mapping_value(value: Any, *keys: str) -> Any:
+        if not isinstance(value, dict):
+            return None
+        for key in keys:
+            candidate = value.get(key)
+            if candidate not in (None, ""):
+                return candidate
+        return None
+
+    @staticmethod
+    def _first_non_empty(*values: Any) -> Any:
+        for value in values:
+            if value not in (None, ""):
+                return value
+        return None
 
     @staticmethod
     def render_payload_text(payload: Any) -> str:

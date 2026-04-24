@@ -20,7 +20,13 @@ abstract class AIProvider {
   Future<ProviderTestResult> testConnection();
 
   /// 测试指定模型（发送实际测试请求）
-  Future<ProviderTestResult> testModel(String modelName) async {
+  Future<ProviderTestResult> testModel(ModelConfig model) async {
+    if (model.isEmbeddingModel) {
+      return ProviderTestResult.failure('当前测试入口未实现 Embedding 模型测试');
+    }
+    if (model.isRerankModel) {
+      return ProviderTestResult.failure('当前测试入口未实现 Rerank 模型测试');
+    }
     // 默认实现：发送简单的测试消息
     try {
       final stopwatch = Stopwatch()..start();
@@ -28,10 +34,10 @@ abstract class AIProvider {
       final testMessage = ChatMessage(role: 'user', content: 'Hi');
 
       await sendMessage(
-        model: modelName,
+        model: model.modelName,
         messages: [testMessage],
         parameters: const ModelParameters(temperature: 0.7, maxTokens: 10),
-        modelId: null,
+        modelId: model.id,
       );
 
       stopwatch.stop();

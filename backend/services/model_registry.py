@@ -7,6 +7,8 @@ from threading import RLock
 
 from config import get_settings
 from models.model_registry import ModelRegistryEntry
+from services.model_capability_service import hydrate_registry_model_entry
+from services.provider_registry import get_provider_registry_service
 
 
 class ModelRegistryService:
@@ -69,11 +71,24 @@ class ModelRegistryService:
             return {}
 
         entries: dict[str, ModelRegistryEntry] = {}
+        provider_registry = get_provider_registry_service()
+        dirty = False
         for raw in payload:
             if not isinstance(raw, dict):
                 continue
             entry = ModelRegistryEntry.model_validate(raw)
-            entries[entry.id] = entry
+            provider_entry = provider_registry.get_entry(entry.provider_id)
+            hydrated = hydrate_registry_model_entry(
+                entry=entry,
+                provider_type=provider_entry.type if provider_entry is not None else None,
+            )
+            if hydrated.model_dump(mode="json", exclude_none=False) != entry.model_dump(
+                mode="json", exclude_none=False
+            ):
+                dirty = True
+            entries[hydrated.id] = hydrated
+        if dirty:
+            self._save_entries(entries)
         return entries
 
     def _save_entries(self, entries: dict[str, ModelRegistryEntry]) -> None:

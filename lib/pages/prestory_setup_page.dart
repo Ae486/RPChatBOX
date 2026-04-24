@@ -7,8 +7,13 @@ import '../chat_ui/owui/components/owui_scaffold.dart';
 import '../chat_ui/owui/components/owui_snack_bar.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../pages/longform_story_page.dart';
+import '../pages/rp_model_config_page.dart';
 import '../main.dart';
+import '../models/model_config.dart';
+import '../models/provider_config.dart';
+import '../models/rp_retrieval.dart';
 import '../models/rp_setup.dart';
+import '../services/backend_rp_retrieval_service.dart';
 import '../services/backend_rp_setup_service.dart';
 import '../services/backend_story_service.dart';
 
@@ -21,6 +26,7 @@ class PrestorySetupPage extends StatefulWidget {
 
 class _PrestorySetupPageState extends State<PrestorySetupPage> {
   final _service = BackendRpSetupService();
+  final _retrievalService = BackendRpRetrievalService();
   final _storyService = BackendStoryService();
   final _messageController = TextEditingController();
   final Map<String, List<_SetupChatEntry>> _dialogues = {};
@@ -28,11 +34,21 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
   List<RpSetupWorkspace> _workspaces = const [];
   RpSetupWorkspace? _currentWorkspace;
   RpActivationCheckResult? _lastActivationCheck;
+  RpRetrievalStoryMaintenanceSnapshot? _retrievalMaintenance;
   _SetupWizardStage _selectedStage = _SetupWizardStage.worldBackground;
   String? _selectedProviderId;
   String? _selectedModelId;
+  String? _selectedRetrievalEmbeddingProviderId;
+  String? _selectedRetrievalEmbeddingModelId;
+  String? _selectedRetrievalRerankProviderId;
+  String? _selectedRetrievalRerankModelId;
+  String? _retrievalMaintenanceError;
+  String? _retrievalMaintenanceActionLabel;
   bool _isLoading = true;
+  bool _isLoadingRetrievalMaintenance = false;
+  bool _isRunningRetrievalMaintenanceAction = false;
   bool _isSending = false;
+  int _retrievalMaintenanceRequestToken = 0;
 
   @override
   void initState() {
@@ -59,10 +75,24 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         _currentWorkspace = workspaces.isNotEmpty ? workspaces.first : null;
         _isLoading = false;
       });
+      if (_currentWorkspace == null) {
+        setState(() {
+          _retrievalMaintenance = null;
+          _retrievalMaintenanceError = null;
+          _selectedRetrievalEmbeddingProviderId = null;
+          _selectedRetrievalEmbeddingModelId = null;
+          _selectedRetrievalRerankProviderId = null;
+          _selectedRetrievalRerankModelId = null;
+        });
+      }
       _syncSelectedStage(force: true);
       _syncSelectedProviderAndModel();
+      _syncRetrievalModelSelections();
       if (_currentWorkspace != null) {
-        await _refreshWorkspace(_currentWorkspace!.workspaceId, preserveStage: false);
+        await _refreshWorkspace(
+          _currentWorkspace!.workspaceId,
+          preserveStage: false,
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -77,11 +107,14 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
   }) async {
     final workspace = await _service.getWorkspace(workspaceId);
     if (!mounted) return;
-    final workspaceChanged = _currentWorkspace?.workspaceId != workspace.workspaceId;
+    final workspaceChanged =
+        _currentWorkspace?.workspaceId != workspace.workspaceId;
     setState(() {
       _workspaces = [
         workspace,
-        ..._workspaces.where((item) => item.workspaceId != workspace.workspaceId),
+        ..._workspaces.where(
+          (item) => item.workspaceId != workspace.workspaceId,
+        ),
       ];
       _currentWorkspace = workspace;
     });
@@ -89,6 +122,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       _syncSelectedStage(force: true);
     }
     _syncSelectedProviderAndModel();
+    _syncRetrievalModelSelections();
+    await _refreshRetrievalMaintenance(workspace.storyId, silent: true);
   }
 
   void _syncSelectedStage({bool force = false}) {
@@ -112,7 +147,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
   }
 
   void _syncSelectedProviderAndModel() {
-    final providers = globalModelServiceManager.getEnabledProviders();
+    final providers = _agentProviders();
     if (providers.isEmpty) {
       if (!mounted) return;
       setState(() {
@@ -125,10 +160,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     final providerId = providers.any((item) => item.id == _selectedProviderId)
         ? _selectedProviderId!
         : providers.first.id;
-    final models = globalModelServiceManager
-        .getModelsByProvider(providerId)
-        .where((item) => item.isEnabled)
-        .toList();
+    final models = _agentModelsForProvider(providerId);
     final modelId = models.any((item) => item.id == _selectedModelId)
         ? _selectedModelId
         : (models.isNotEmpty ? models.first.id : null);
@@ -138,6 +170,106 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       _selectedProviderId = providerId;
       _selectedModelId = modelId;
     });
+  }
+
+  List<ProviderConfig> _agentProviders() {
+    return globalModelServiceManager
+        .getEnabledProviders()
+        .where((provider) => _agentModelsForProvider(provider.id).isNotEmpty)
+        .toList();
+  }
+
+  List<ModelConfig> _agentModelsForProvider(String providerId) {
+    return globalModelServiceManager
+        .getModelsByProvider(providerId)
+        .where((item) => item.isEnabled)
+        .where((item) => item.isAgentCapable)
+        .toList();
+  }
+
+  void _updateAgentSelection({
+    required String? providerId,
+    required String? modelId,
+  }) {
+    if (!mounted) return;
+    setState(() {
+      _selectedProviderId = providerId;
+      _selectedModelId = modelId;
+    });
+  }
+
+  void _syncRetrievalModelSelections() {
+    final workspace = _currentWorkspace;
+    if (workspace == null) {
+      if (!mounted) return;
+      setState(() {
+        _selectedRetrievalEmbeddingProviderId = null;
+        _selectedRetrievalEmbeddingModelId = null;
+        _selectedRetrievalRerankProviderId = null;
+        _selectedRetrievalRerankModelId = null;
+      });
+      return;
+    }
+
+    final config = workspace.storyConfigDraft ?? const <String, dynamic>{};
+    final embeddingSelection = _normalizeRetrievalSelection(
+      providerId: config['retrieval_embedding_provider_id']?.toString(),
+      modelId: config['retrieval_embedding_model_id']?.toString(),
+      providerCandidates: _retrievalEmbeddingProviders(),
+      modelCandidatesForProvider: _retrievalEmbeddingModelsForProvider,
+    );
+    final rerankSelection = _normalizeRetrievalSelection(
+      providerId: config['retrieval_rerank_provider_id']?.toString(),
+      modelId: config['retrieval_rerank_model_id']?.toString(),
+      providerCandidates: _retrievalRerankProviders(),
+      modelCandidatesForProvider: _retrievalRerankModelsForProvider,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _selectedRetrievalEmbeddingProviderId = embeddingSelection.providerId;
+      _selectedRetrievalEmbeddingModelId = embeddingSelection.modelId;
+      _selectedRetrievalRerankProviderId = rerankSelection.providerId;
+      _selectedRetrievalRerankModelId = rerankSelection.modelId;
+    });
+  }
+
+  ({String? providerId, String? modelId}) _normalizeRetrievalSelection({
+    required String? providerId,
+    required String? modelId,
+    required List<String> providerCandidates,
+    required List<ModelConfig> Function(String providerId)
+    modelCandidatesForProvider,
+  }) {
+    String? normalizedProviderId = providerId;
+    String? normalizedModelId = modelId;
+
+    if (normalizedModelId != null) {
+      final modelWithProvider = globalModelServiceManager.getModelWithProvider(
+        normalizedModelId,
+      );
+      if (modelWithProvider == null || !modelWithProvider.model.isEnabled) {
+        normalizedProviderId = null;
+        normalizedModelId = null;
+      } else {
+        normalizedProviderId = modelWithProvider.provider.id;
+      }
+    }
+
+    if (normalizedProviderId != null &&
+        !providerCandidates.contains(normalizedProviderId)) {
+      normalizedProviderId = null;
+      normalizedModelId = null;
+    }
+
+    if (normalizedProviderId != null && normalizedModelId != null) {
+      final models = modelCandidatesForProvider(normalizedProviderId);
+      if (!models.any((item) => item.id == normalizedModelId)) {
+        normalizedModelId = null;
+      }
+    }
+
+    return (providerId: normalizedProviderId, modelId: normalizedModelId);
   }
 
   Future<void> _createWorkspace() async {
@@ -161,7 +293,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
             child: const Text('取消'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
             child: const Text('创建'),
           ),
         ],
@@ -174,8 +307,13 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       setState(() {
         _workspaces = [workspace, ..._workspaces];
         _currentWorkspace = workspace;
+        _retrievalMaintenance = null;
+        _retrievalMaintenanceError = null;
       });
       _syncSelectedStage(force: true);
+      _syncRetrievalModelSelections();
+      await _refreshRetrievalMaintenance(workspace.storyId, silent: true);
+      if (!mounted) return;
       OwuiSnackBars.success(context, message: '已创建 prestory workspace');
     } catch (e) {
       if (!mounted) return;
@@ -183,14 +321,333 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     }
   }
 
+  List<String> _retrievalEmbeddingProviders() {
+    return globalModelServiceManager
+        .getEnabledProviders()
+        .where(
+          (provider) =>
+              _retrievalEmbeddingModelsForProvider(provider.id).isNotEmpty,
+        )
+        .map((provider) => provider.id)
+        .toList();
+  }
+
+  List<ModelConfig> _retrievalEmbeddingModelsForProvider(String providerId) {
+    return globalModelServiceManager
+        .getModelsByProvider(providerId)
+        .where((item) => item.isEnabled)
+        .where(_isEmbeddingCandidateModel)
+        .toList();
+  }
+
+  List<String> _retrievalRerankProviders() {
+    return globalModelServiceManager
+        .getEnabledProviders()
+        .where(
+          (provider) =>
+              _retrievalRerankModelsForProvider(provider.id).isNotEmpty,
+        )
+        .map((provider) => provider.id)
+        .toList();
+  }
+
+  List<ModelConfig> _retrievalRerankModelsForProvider(String providerId) {
+    return globalModelServiceManager
+        .getModelsByProvider(providerId)
+        .where((item) => item.isEnabled)
+        .where(_isRerankCandidateModel)
+        .toList();
+  }
+
+  bool _isEmbeddingCandidateModel(ModelConfig model) {
+    final lowerName = model.modelName.toLowerCase();
+    return model.isEmbeddingModel ||
+        lowerName.startsWith('bge-') ||
+        lowerName.startsWith('e5-') ||
+        lowerName.startsWith('gte-');
+  }
+
+  bool _isRerankCandidateModel(ModelConfig model) {
+    return model.isRerankModel || model.isCrossEncoderRerankModel;
+  }
+
+  Future<void> _persistRetrievalStoryConfig({
+    required String? embeddingProviderId,
+    required String? embeddingModelId,
+    required String? rerankProviderId,
+    required String? rerankModelId,
+  }) async {
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+
+    final current = Map<String, dynamic>.from(
+      workspace.storyConfigDraft ?? const <String, dynamic>{},
+    );
+    final nextPatch = {
+      ...current,
+      'retrieval_embedding_provider_id': embeddingProviderId,
+      'retrieval_embedding_model_id': embeddingModelId,
+      'retrieval_rerank_provider_id': rerankProviderId,
+      'retrieval_rerank_model_id': rerankModelId,
+    };
+
+    if (current['retrieval_embedding_provider_id']?.toString() ==
+            embeddingProviderId &&
+        current['retrieval_embedding_model_id']?.toString() ==
+            embeddingModelId &&
+        current['retrieval_rerank_provider_id']?.toString() ==
+            rerankProviderId &&
+        current['retrieval_rerank_model_id']?.toString() == rerankModelId) {
+      return;
+    }
+
+    await _service.patchStoryConfig(
+      workspaceId: workspace.workspaceId,
+      patch: nextPatch,
+    );
+    await _refreshWorkspace(workspace.workspaceId);
+  }
+
+  Future<void> _openModelConfigPage() async {
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RpModelConfigPage(
+          title: 'Prestory Setup · 模型配置',
+          subtitle:
+              '将 SetupAgent 对话模型和 retrieval 外部模型移到独立页面，避免在 setup 主界面占据过多空间。',
+          agentSectionTitle: 'SetupAgent 模型',
+          agentSectionDescription:
+              '这里选择当前 setup 讨论轮次使用的 agent 模型，只影响前端当前工作区的对话发送。',
+          retrievalSectionTitle: 'Retrieval 外部模型',
+          retrievalSectionDescription:
+              'Embedding 影响入库向量化，Rerank 影响检索重排；修改后会写入当前 workspace 的 story_config。',
+          agentProviders: _agentProviders(),
+          agentModelsForProvider: _agentModelsForProvider,
+          initialAgentProviderId: _selectedProviderId,
+          initialAgentModelId: _selectedModelId,
+          onAgentSelectionChanged: _updateAgentSelection,
+          agentEmptyHint:
+              '当前没有识别到可用于 SetupAgent 的模型。需要模型具备 LiteLLM 模板解析出的 function calling/tool_choice 能力。',
+          retrievalEmbeddingProviderIds: _retrievalEmbeddingProviders(),
+          retrievalEmbeddingModelsForProvider:
+              _retrievalEmbeddingModelsForProvider,
+          retrievalRerankProviderIds: _retrievalRerankProviders(),
+          retrievalRerankModelsForProvider: _retrievalRerankModelsForProvider,
+          initialRetrievalEmbeddingProviderId:
+              _selectedRetrievalEmbeddingProviderId,
+          initialRetrievalEmbeddingModelId: _selectedRetrievalEmbeddingModelId,
+          initialRetrievalRerankProviderId: _selectedRetrievalRerankProviderId,
+          initialRetrievalRerankModelId: _selectedRetrievalRerankModelId,
+          onPersistRetrievalConfig: _persistRetrievalStoryConfig,
+          embeddingEmptyHint:
+              '当前没有识别到 embedding 模型。可在模型管理页给模型添加 embedding 能力，或使用名称包含 embedding / bge / e5 / gte 的模型。',
+          rerankEmptyHint:
+              '当前没有识别到 rerank 模型。可在模型管理页给模型添加 rerank / cross_encoder_rerank 能力。',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _refreshCurrentRetrievalMaintenance({
+    bool silent = false,
+  }) async {
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+    await _refreshRetrievalMaintenance(workspace.storyId, silent: silent);
+  }
+
+  Future<void> _refreshRetrievalMaintenance(
+    String storyId, {
+    bool silent = false,
+  }) async {
+    final token = ++_retrievalMaintenanceRequestToken;
+    if (mounted) {
+      setState(() {
+        _isLoadingRetrievalMaintenance = true;
+        if (_retrievalMaintenance?.storyId != storyId) {
+          _retrievalMaintenance = null;
+        }
+        _retrievalMaintenanceError = null;
+      });
+    }
+
+    try {
+      final snapshot = await _retrievalService.getStoryMaintenance(storyId);
+      if (!mounted || token != _retrievalMaintenanceRequestToken) return;
+      setState(() {
+        _retrievalMaintenance = snapshot;
+        _retrievalMaintenanceError = null;
+      });
+    } catch (e) {
+      if (!mounted || token != _retrievalMaintenanceRequestToken) return;
+      setState(() {
+        _retrievalMaintenanceError = e.toString();
+      });
+      if (!silent) {
+        OwuiSnackBars.error(
+          context,
+          message: '加载 retrieval maintenance 失败: $e',
+        );
+      }
+    } finally {
+      if (mounted && token == _retrievalMaintenanceRequestToken) {
+        setState(() {
+          _isLoadingRetrievalMaintenance = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _runRetrievalMaintenanceAction({
+    required String actionLabel,
+    required Future<String> Function() action,
+  }) async {
+    if (_isRunningRetrievalMaintenanceAction) return;
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+
+    setState(() {
+      _isRunningRetrievalMaintenanceAction = true;
+      _retrievalMaintenanceActionLabel = actionLabel;
+    });
+
+    try {
+      final successMessage = await action();
+      if (!mounted) return;
+      OwuiSnackBars.success(context, message: successMessage);
+      await _refreshRetrievalMaintenance(workspace.storyId, silent: true);
+    } catch (e) {
+      if (!mounted) return;
+      OwuiSnackBars.error(context, message: '$actionLabel 失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRunningRetrievalMaintenanceAction = false;
+          _retrievalMaintenanceActionLabel = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _reindexRetrievalStory() async {
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+    await _runRetrievalMaintenanceAction(
+      actionLabel: '提交 story reindex',
+      action: () async {
+        final jobs = await _retrievalService.reindexStory(workspace.storyId);
+        if (jobs.isEmpty) return '没有可重建的 retrieval 资产';
+        return '已提交 ${jobs.length} 个 story reindex job';
+      },
+    );
+  }
+
+  Future<void> _backfillRetrievalStory() async {
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+    await _runRetrievalMaintenanceAction(
+      actionLabel: '提交 story backfill',
+      action: () async {
+        final jobs = await _retrievalService.backfillStoryEmbeddings(
+          workspace.storyId,
+        );
+        if (jobs.isEmpty) return '当前没有需要 backfill 的 embedding';
+        return '已提交 ${jobs.length} 个 story backfill job';
+      },
+    );
+  }
+
+  Future<void> _retryFailedRetrievalStoryJobs() async {
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+    await _runRetrievalMaintenanceAction(
+      actionLabel: '重试 story failed jobs',
+      action: () async {
+        final result = await _retrievalService.retryFailedStoryJobs(
+          workspace.storyId,
+        );
+        if (result.retriedJobs.isEmpty) return '当前没有可重试的 failed jobs';
+        return '已重试 ${result.retriedJobs.length} 个 story failed job';
+      },
+    );
+  }
+
+  Future<void> _reindexRetrievalCollection(
+    RpRetrievalCollectionMaintenanceSnapshot snapshot,
+  ) async {
+    await _runRetrievalMaintenanceAction(
+      actionLabel: '提交 collection reindex',
+      action: () async {
+        final jobs = await _retrievalService.reindexCollection(
+          snapshot.collectionId,
+        );
+        if (jobs.isEmpty) {
+          return 'Collection ${snapshot.collectionKind} 当前没有可重建资产';
+        }
+        return 'Collection ${snapshot.collectionKind} 已提交 ${jobs.length} 个 reindex job';
+      },
+    );
+  }
+
+  Future<void> _backfillRetrievalCollection(
+    RpRetrievalCollectionMaintenanceSnapshot snapshot,
+  ) async {
+    await _runRetrievalMaintenanceAction(
+      actionLabel: '提交 collection backfill',
+      action: () async {
+        final jobs = await _retrievalService.backfillCollectionEmbeddings(
+          snapshot.collectionId,
+        );
+        if (jobs.isEmpty) {
+          return 'Collection ${snapshot.collectionKind} 当前没有需要 backfill 的 embedding';
+        }
+        return 'Collection ${snapshot.collectionKind} 已提交 ${jobs.length} 个 backfill job';
+      },
+    );
+  }
+
+  Future<void> _retryFailedRetrievalCollectionJobs(
+    RpRetrievalCollectionMaintenanceSnapshot snapshot,
+  ) async {
+    await _runRetrievalMaintenanceAction(
+      actionLabel: '重试 collection failed jobs',
+      action: () async {
+        final result = await _retrievalService.retryFailedCollectionJobs(
+          snapshot.collectionId,
+        );
+        if (result.retriedJobs.isEmpty) {
+          return 'Collection ${snapshot.collectionKind} 当前没有可重试的 failed jobs';
+        }
+        return 'Collection ${snapshot.collectionKind} 已重试 ${result.retriedJobs.length} 个 failed job';
+      },
+    );
+  }
+
+  Future<void> _retryRetrievalJob(RpRetrievalIndexJob job) async {
+    await _runRetrievalMaintenanceAction(
+      actionLabel: '重试单个 retrieval job',
+      action: () async {
+        final retried = await _retrievalService.retryJob(job.jobId);
+        return '已重试 ${retried.jobKind} job ${retried.jobId}';
+      },
+    );
+  }
+
   Future<void> _sendTurn() async {
     final workspace = _currentWorkspace;
     final modelId = _selectedModelId;
     final userPrompt = _messageController.text.trim();
-    if (workspace == null || modelId == null || userPrompt.isEmpty || _isSending) {
+    if (workspace == null ||
+        modelId == null ||
+        userPrompt.isEmpty ||
+        _isSending) {
       return;
     }
-    final modelWithProvider = globalModelServiceManager.getModelWithProvider(modelId);
+    final modelWithProvider = globalModelServiceManager.getModelWithProvider(
+      modelId,
+    );
     if (modelWithProvider == null) {
       OwuiSnackBars.warning(context, message: '请先选择可用模型');
       return;
@@ -328,7 +785,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     final workspace = _currentWorkspace;
     if (workspace == null) return;
     try {
-      final result = await _storyService.activateWorkspace(workspace.workspaceId);
+      final result = await _storyService.activateWorkspace(
+        workspace.workspaceId,
+      );
       await _refreshWorkspace(workspace.workspaceId);
       if (!mounted) return;
       await Navigator.push(
@@ -371,7 +830,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
               child: Material(
                 color: dialogContext.owuiColors.surfaceCard,
                 elevation: 10,
-                borderRadius: BorderRadius.circular(dialogContext.owuiRadius.r3xl),
+                borderRadius: BorderRadius.circular(
+                  dialogContext.owuiRadius.r3xl,
+                ),
                 clipBehavior: Clip.antiAlias,
                 child: _buildSidebarContent(
                   isModal: true,
@@ -383,7 +844,10 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         );
       },
       transitionBuilder: (_, animation, __, child) {
-        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
         return SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(1, 0),
@@ -488,7 +952,12 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(spacing.lg, spacing.lg, spacing.lg, spacing.md),
+            padding: EdgeInsets.fromLTRB(
+              spacing.lg,
+              spacing.lg,
+              spacing.lg,
+              spacing.md,
+            ),
             child: Row(
               children: [
                 Expanded(
@@ -512,16 +981,19 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                   ),
                 ),
                 if (workspace != null)
-                  Chip(
-                    label: Text('v${workspace.version}'),
-                  ),
+                  Chip(label: Text('v${workspace.version}')),
               ],
             ),
           ),
           Divider(height: 1, color: colors.borderSubtle),
           Expanded(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(spacing.lg, spacing.lg, spacing.lg, spacing.md),
+              padding: EdgeInsets.fromLTRB(
+                spacing.lg,
+                spacing.lg,
+                spacing.lg,
+                spacing.md,
+              ),
               child: workspace == null
                   ? Center(
                       child: Text(
@@ -531,22 +1003,28 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                       ),
                     )
                   : entries.isEmpty
-                      ? Center(
-                          child: Text(
-                            '当前还没有对话。发送第一条指令开始收敛 ${_selectedStage.label}。',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                            textAlign: TextAlign.center,
-                          ),
-                        )
-                      : ListView.separated(
-                          itemCount: entries.length,
-                          separatorBuilder: (_, __) => SizedBox(height: spacing.md),
-                          itemBuilder: (context, index) => _buildMessage(entries[index]),
-                        ),
+                  ? Center(
+                      child: Text(
+                        '当前还没有对话。发送第一条指令开始收敛 ${_selectedStage.label}。',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: entries.length,
+                      separatorBuilder: (_, __) => SizedBox(height: spacing.md),
+                      itemBuilder: (context, index) =>
+                          _buildMessage(entries[index]),
+                    ),
             ),
           ),
           Padding(
-            padding: EdgeInsets.fromLTRB(spacing.lg, spacing.sm, spacing.lg, spacing.lg),
+            padding: EdgeInsets.fromLTRB(
+              spacing.lg,
+              spacing.sm,
+              spacing.lg,
+              spacing.lg,
+            ),
             child: Container(
               padding: EdgeInsets.all(spacing.sm),
               decoration: BoxDecoration(
@@ -563,16 +1041,14 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                         Expanded(
                           child: Text(
                             'Story: ${workspace.storyId}',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colors.textSecondary,
-                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.textSecondary),
                           ),
                         ),
                         Text(
                           'Mode: ${workspace.mode}',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.textSecondary,
-                          ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.textSecondary),
                         ),
                       ],
                     ),
@@ -595,7 +1071,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                                     child: SizedBox(
                                       width: 16,
                                       height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     ),
                                   )
                                 : null,
@@ -670,18 +1148,22 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     );
   }
 
-  Widget _buildSidebarContent({
-    required bool isModal,
-    VoidCallback? onClose,
-  }) {
+  Widget _buildSidebarContent({required bool isModal, VoidCallback? onClose}) {
     final workspace = _currentWorkspace;
     final spacing = context.owuiSpacing;
     final colors = context.owuiColors;
+    final embeddingProviderIds = _retrievalEmbeddingProviders();
+    final rerankProviderIds = _retrievalRerankProviders();
 
     return Column(
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(spacing.lg, spacing.lg, spacing.lg, spacing.md),
+          padding: EdgeInsets.fromLTRB(
+            spacing.lg,
+            spacing.lg,
+            spacing.lg,
+            spacing.md,
+          ),
           child: Row(
             children: [
               Expanded(
@@ -705,10 +1187,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                 ),
               ),
               if (isModal)
-                IconButton(
-                  onPressed: onClose,
-                  icon: const Icon(Icons.close),
-                ),
+                IconButton(onPressed: onClose, icon: const Icon(Icons.close)),
             ],
           ),
         ),
@@ -722,7 +1201,10 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('入口与模型', style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      '入口与模型',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     SizedBox(height: spacing.md),
                     DropdownButtonFormField<String>(
                       initialValue: workspace?.workspaceId,
@@ -731,7 +1213,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                           .map(
                             (item) => DropdownMenuItem<String>(
                               value: item.workspaceId,
-                              child: Text('${item.storyId} · ${item.currentStep}'),
+                              child: Text(
+                                '${item.storyId} · ${item.currentStep}',
+                              ),
                             ),
                           )
                           .toList(),
@@ -741,59 +1225,78 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                       },
                     ),
                     SizedBox(height: spacing.md),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedProviderId,
-                      decoration: const InputDecoration(labelText: 'Provider'),
-                      items: globalModelServiceManager
-                          .getEnabledProviders()
-                          .map(
-                            (provider) => DropdownMenuItem<String>(
-                              value: provider.id,
-                              child: Text(provider.name),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedProviderId = value;
-                          final models = value == null
-                              ? const []
-                              : globalModelServiceManager
-                                  .getModelsByProvider(value)
-                                  .where((item) => item.isEnabled)
-                                  .toList();
-                          _selectedModelId =
-                              models.isEmpty ? null : models.first.id;
-                        });
-                      },
+                    Text(
+                      '模型配置已移到独立页面。',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      '保留摘要和入口，避免在右侧边栏堆积大块表单。',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
                     ),
                     SizedBox(height: spacing.md),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedModelId,
-                      decoration: const InputDecoration(labelText: 'Model'),
-                      items: globalModelServiceManager
-                          .getModelsByProvider(_selectedProviderId ?? '')
-                          .where((item) => item.isEnabled)
-                          .map(
-                            (model) => DropdownMenuItem<String>(
-                              value: model.id,
-                              child: Text(model.displayName),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedModelId = value;
-                        });
-                      },
+                    Text(
+                      'SetupAgent: ${_formatAgentSelectionSummary(providerId: _selectedProviderId, modelId: _selectedModelId) ?? '未选择'}',
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      'Embedding: ${_formatRetrievalSelectionSummary(providerId: _selectedRetrievalEmbeddingProviderId, modelId: _selectedRetrievalEmbeddingModelId) ?? '未设置'}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      'Rerank: ${_formatRetrievalSelectionSummary(providerId: _selectedRetrievalRerankProviderId, modelId: _selectedRetrievalRerankModelId) ?? '未设置'}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                    SizedBox(height: spacing.md),
+                    OutlinedButton.icon(
+                      onPressed: workspace == null
+                          ? null
+                          : _openModelConfigPage,
+                      icon: const Icon(Icons.tune),
+                      label: const Text('打开模型配置页'),
+                    ),
+                    if (_agentProviders().isEmpty) ...[
+                      SizedBox(height: spacing.sm),
+                      Text(
+                        '当前没有识别到可用于 SetupAgent 的模型。需要模型具备 LiteLLM 模板解析出的 function calling/tool_choice 能力。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                    if (embeddingProviderIds.isEmpty) ...[
+                      SizedBox(height: spacing.sm),
+                      Text(
+                        '当前没有识别到 embedding 模型。可在模型管理页给模型添加 embedding 能力，或使用名称包含 embedding / bge / e5 / gte 的模型。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                    if (rerankProviderIds.isEmpty) ...[
+                      SizedBox(height: spacing.sm),
+                      Text(
+                        '当前没有识别到 rerank 模型。可在模型管理页给模型添加 rerank / cross_encoder_rerank 能力。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
                     if (workspace != null) ...[
                       SizedBox(height: spacing.md),
                       Text(
                         '当前聚焦：${_selectedStage.label}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colors.textSecondary,
-                            ),
+                          color: colors.textSecondary,
+                        ),
                       ),
                     ],
                   ],
@@ -838,14 +1341,11 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            switch (entry.kind) {
-              _SetupChatEntryKind.user => 'You',
-              _SetupChatEntryKind.assistant => 'SetupAgent',
-              _SetupChatEntryKind.system => 'System',
-            },
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          Text(switch (entry.kind) {
+            _SetupChatEntryKind.user => 'You',
+            _SetupChatEntryKind.assistant => 'SetupAgent',
+            _SetupChatEntryKind.system => 'System',
+          }, style: Theme.of(context).textTheme.titleSmall),
           if (entry.thinking.isNotEmpty) ...[
             SizedBox(height: spacing.sm),
             Text(
@@ -867,9 +1367,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                 padding: EdgeInsets.only(top: spacing.xs),
                 child: Text(
                   event,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
                 ),
               ),
             ),
@@ -895,12 +1395,18 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(proposal.reviewMessage, style: Theme.of(context).textTheme.titleSmall),
+          Text(
+            proposal.reviewMessage,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
           SizedBox(height: spacing.sm),
           Text('Step: ${proposal.stepId}'),
-          if ((proposal.reason ?? '').isNotEmpty) Text('Reason: ${proposal.reason}'),
+          if ((proposal.reason ?? '').isNotEmpty)
+            Text('Reason: ${proposal.reason}'),
           if (proposal.unresolvedWarnings.isNotEmpty)
-            ...proposal.unresolvedWarnings.map((warning) => Text('Warning: $warning')),
+            ...proposal.unresolvedWarnings.map(
+              (warning) => Text('Warning: $warning'),
+            ),
           SizedBox(height: spacing.md),
           Row(
             children: [
@@ -936,8 +1442,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
           Text(
             subtitle,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: context.owuiColors.textSecondary,
-                ),
+              color: context.owuiColors.textSecondary,
+            ),
           ),
           SizedBox(height: spacing.md),
           ...children,
@@ -960,7 +1466,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
           children: items
               .map(
                 (item) => ChoiceChip(
-                  label: Text('${item.label} · ${_stageReadyLabel(item, workspace)}'),
+                  label: Text(
+                    '${item.label} · ${_stageReadyLabel(item, workspace)}',
+                  ),
                   selected: _selectedStage == item,
                   onSelected: (_) {
                     setState(() {
@@ -1000,7 +1508,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       case _SetupWizardStage.worldBackground:
         return _worldFoundationEntries(workspace).isNotEmpty ? '已填写' : '待补充';
       case _SetupWizardStage.characterDesign:
-        return _characterFoundationEntries(workspace).isNotEmpty ? '已填写' : '待补充';
+        return _characterFoundationEntries(workspace).isNotEmpty
+            ? '已填写'
+            : '待补充';
       case _SetupWizardStage.plotBlueprint:
         return workspace.longformBlueprintDraft != null ? '已填写' : '待补充';
       case _SetupWizardStage.writerConfig:
@@ -1061,94 +1571,104 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     final spacing = context.owuiSpacing;
     final panel = switch (_selectedStage) {
       _SetupWizardStage.worldBackground => _buildSidebarSectionCard(
-          title: '世界观背景',
-          subtitle: '只看世界规则、背景设定和稳定的环境事实。',
-          children: _buildFoundationEntryWidgets(
-            _worldFoundationEntries(workspace),
-            emptyText: '还没有世界观背景条目。',
-          ),
+        title: '世界观背景',
+        subtitle: '只看世界规则、背景设定和稳定的环境事实。',
+        children: _buildFoundationEntryWidgets(
+          _worldFoundationEntries(workspace),
+          emptyText: '还没有世界观背景条目。',
         ),
+      ),
       _SetupWizardStage.characterDesign => _buildSidebarSectionCard(
-          title: '角色设定',
-          subtitle: '只看人物设定、人物背景和角色 voice seed 相关条目。',
-          children: _buildFoundationEntryWidgets(
-            _characterFoundationEntries(workspace),
-            emptyText: '还没有角色设定条目。',
-          ),
+        title: '角色设定',
+        subtitle: '只看人物设定、人物背景和角色 voice seed 相关条目。',
+        children: _buildFoundationEntryWidgets(
+          _characterFoundationEntries(workspace),
+          emptyText: '还没有角色设定条目。',
         ),
+      ),
       _SetupWizardStage.plotBlueprint => _buildSidebarSectionCard(
-          title: '伏笔 / 剧情设计',
-          subtitle: '只看 premise、冲突、章节推进和伏笔回收方向。',
-          children: _buildBlueprintWidgets(workspace),
-        ),
+        title: '伏笔 / 剧情设计',
+        subtitle: '只看 premise、冲突、章节推进和伏笔回收方向。',
+        children: _buildBlueprintWidgets(workspace),
+      ),
       _SetupWizardStage.writerConfig => _buildSidebarSectionCard(
-          title: '作家配置',
-          subtitle: '只看 POV、风格、写作约束和任务写作规则。',
-          children: _buildWritingContractWidgets(workspace),
-        ),
+        title: '作家配置',
+        subtitle: '只看 POV、风格、写作约束和任务写作规则。',
+        children: _buildWritingContractWidgets(workspace),
+      ),
       _SetupWizardStage.workerConfig => _buildSidebarSectionCard(
-          title: 'Worker 配置',
-          subtitle: '只看模型画像、worker画像和 post-write preset。',
-          children: _buildStoryConfigWidgets(workspace),
-        ),
+        title: 'Worker 配置',
+        subtitle: '只看模型画像、worker画像和 post-write preset。',
+        children: _buildStoryConfigWidgets(workspace),
+      ),
       _SetupWizardStage.overview => _buildSidebarSectionCard(
-          title: '全览 / Review',
-          subtitle: '在这里统一检查 setup 是否已经收敛到可激活状态。',
-          children: [
-            ..._buildOverviewWidgets(workspace),
-            SizedBox(height: spacing.md),
-            Text('待 Review / Commit', style: Theme.of(context).textTheme.titleSmall),
-            SizedBox(height: spacing.sm),
-            if (workspace.pendingCommitProposals.isEmpty)
-              const Text('当前没有待 review proposal')
-            else
-              ...workspace.pendingCommitProposals.map(_buildProposalCard),
-            SizedBox(height: spacing.md),
-            Text('Retrieval Ingestion', style: Theme.of(context).textTheme.titleSmall),
-            SizedBox(height: spacing.sm),
-            ..._buildRetrievalOverviewWidgets(workspace),
-          ],
-        ),
+        title: '全览 / Review',
+        subtitle: '在这里统一检查 setup 是否已经收敛到可激活状态。',
+        children: [
+          ..._buildOverviewWidgets(workspace),
+          SizedBox(height: spacing.md),
+          Text(
+            '待 Review / Commit',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          SizedBox(height: spacing.sm),
+          if (workspace.pendingCommitProposals.isEmpty)
+            const Text('当前没有待 review proposal')
+          else
+            ...workspace.pendingCommitProposals.map(_buildProposalCard),
+          SizedBox(height: spacing.md),
+          _buildRetrievalMaintenancePanel(workspace),
+          SizedBox(height: spacing.md),
+          Text(
+            'Retrieval Ingestion',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          SizedBox(height: spacing.sm),
+          ..._buildRetrievalOverviewWidgets(workspace),
+        ],
+      ),
       _SetupWizardStage.activate => _buildSidebarSectionCard(
-          title: 'Activate',
-          subtitle: '最后一步才显示激活入口。',
-          children: [
-            Row(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _runActivationCheck,
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Run Check'),
-                ),
-                SizedBox(width: spacing.sm),
-                if (_lastActivationCheck?.ready ?? false)
-                  FilledButton.icon(
-                    onPressed: _activateStory,
-                    icon: const Icon(Icons.launch_outlined),
-                    label: const Text('Activate Story'),
-                  ),
-              ],
-            ),
-            SizedBox(height: spacing.md),
-            if (_lastActivationCheck == null)
-              const Text('尚未执行 activation check')
-            else ...[
-              Text(
-                _lastActivationCheck!.ready
-                    ? '当前已满足激活前提。'
-                    : '当前还不能激活，需要先处理阻塞项。',
+        title: 'Activate',
+        subtitle: '最后一步才显示激活入口。',
+        children: [
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _runActivationCheck,
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Run Check'),
               ),
-              if (_lastActivationCheck!.blockingIssues.isNotEmpty) ...[
-                SizedBox(height: spacing.sm),
-                ..._lastActivationCheck!.blockingIssues.map((issue) => Text('Blocking: $issue')),
-              ],
-              if (_lastActivationCheck!.warnings.isNotEmpty) ...[
-                SizedBox(height: spacing.sm),
-                ..._lastActivationCheck!.warnings.map((item) => Text('Warning: $item')),
-              ],
+              SizedBox(width: spacing.sm),
+              if (_lastActivationCheck?.ready ?? false)
+                FilledButton.icon(
+                  onPressed: _activateStory,
+                  icon: const Icon(Icons.launch_outlined),
+                  label: const Text('Activate Story'),
+                ),
+            ],
+          ),
+          SizedBox(height: spacing.md),
+          if (_lastActivationCheck == null)
+            const Text('尚未执行 activation check')
+          else ...[
+            Text(
+              _lastActivationCheck!.ready ? '当前已满足激活前提。' : '当前还不能激活，需要先处理阻塞项。',
+            ),
+            if (_lastActivationCheck!.blockingIssues.isNotEmpty) ...[
+              SizedBox(height: spacing.sm),
+              ..._lastActivationCheck!.blockingIssues.map(
+                (issue) => Text('Blocking: $issue'),
+              ),
+            ],
+            if (_lastActivationCheck!.warnings.isNotEmpty) ...[
+              SizedBox(height: spacing.sm),
+              ..._lastActivationCheck!.warnings.map(
+                (item) => Text('Warning: $item'),
+              ),
             ],
           ],
-        ),
+        ],
+      ),
     };
 
     return Column(
@@ -1165,7 +1685,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     final stages = _SetupWizardStage.values;
     final currentIndex = stages.indexOf(_selectedStage);
     final prevStage = currentIndex > 0 ? stages[currentIndex - 1] : null;
-    final nextStage = currentIndex < stages.length - 1 ? stages[currentIndex + 1] : null;
+    final nextStage = currentIndex < stages.length - 1
+        ? stages[currentIndex + 1]
+        : null;
     return OwuiCard(
       padding: EdgeInsets.all(spacing.md),
       child: Row(
@@ -1212,13 +1734,17 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         .toList();
   }
 
-  List<Map<String, dynamic>> _worldFoundationEntries(RpSetupWorkspace workspace) {
+  List<Map<String, dynamic>> _worldFoundationEntries(
+    RpSetupWorkspace workspace,
+  ) {
     return _foundationEntries(workspace)
         .where((item) => (item['domain']?.toString() ?? '') != 'character')
         .toList();
   }
 
-  List<Map<String, dynamic>> _characterFoundationEntries(RpSetupWorkspace workspace) {
+  List<Map<String, dynamic>> _characterFoundationEntries(
+    RpSetupWorkspace workspace,
+  ) {
     return _foundationEntries(workspace)
         .where((item) => (item['domain']?.toString() ?? '') == 'character')
         .toList();
@@ -1246,15 +1772,17 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                 Text(
                   entry['title']?.toString().isNotEmpty == true
                       ? entry['title'].toString()
-                      : (entry['path']?.toString() ?? entry['entry_id']?.toString() ?? '未命名条目'),
+                      : (entry['path']?.toString() ??
+                            entry['entry_id']?.toString() ??
+                            '未命名条目'),
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
                 SizedBox(height: spacing.xs),
                 Text(
                   '${entry['domain'] ?? 'foundation'} · ${entry['path'] ?? entry['entry_id'] ?? ''}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: context.owuiColors.textSecondary,
-                      ),
+                    color: context.owuiColors.textSecondary,
+                  ),
                 ),
                 SizedBox(height: spacing.sm),
                 Text(_entrySummary(entry)),
@@ -1304,10 +1832,11 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         value: blueprint['ending_direction']?.toString(),
       ),
     ];
-    final chapterBlueprints = (blueprint['chapter_blueprints'] as List? ?? const [])
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList();
+    final chapterBlueprints =
+        (blueprint['chapter_blueprints'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
     if (chapterBlueprints.isNotEmpty) {
       widgets.add(SizedBox(height: spacing.sm));
       widgets.add(Text('章节蓝图', style: Theme.of(context).textTheme.titleSmall));
@@ -1359,9 +1888,20 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         value: config['post_write_policy_preset']?.toString(),
       ),
       ..._buildTextBlock(
-        label: 'Notes',
-        value: config['notes']?.toString(),
+        label: 'Retrieval Embedding',
+        value: _formatRetrievalSelectionSummary(
+          providerId: config['retrieval_embedding_provider_id']?.toString(),
+          modelId: config['retrieval_embedding_model_id']?.toString(),
+        ),
       ),
+      ..._buildTextBlock(
+        label: 'Retrieval Rerank',
+        value: _formatRetrievalSelectionSummary(
+          providerId: config['retrieval_rerank_provider_id']?.toString(),
+          modelId: config['retrieval_rerank_model_id']?.toString(),
+        ),
+      ),
+      ..._buildTextBlock(label: 'Notes', value: config['notes']?.toString()),
     ];
   }
 
@@ -1384,10 +1924,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
             .toList(),
       ),
       SizedBox(height: spacing.md),
-      Text(
-        'Accepted Commits',
-        style: Theme.of(context).textTheme.titleSmall,
-      ),
+      Text('Accepted Commits', style: Theme.of(context).textTheme.titleSmall),
       SizedBox(height: spacing.sm),
       if (workspace.acceptedCommits.isEmpty)
         const Text('当前还没有 accepted commit。')
@@ -1403,6 +1940,354 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     ];
   }
 
+  Widget _buildRetrievalMaintenancePanel(RpSetupWorkspace workspace) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final snapshot = _retrievalMaintenance?.storyId == workspace.storyId
+        ? _retrievalMaintenance
+        : null;
+
+    return OwuiCard(
+      padding: EdgeInsets.all(spacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Retrieval Maintenance',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      '基于 story 维度查看 collection / chunk / embedding / failed job 状态，并触发 reindex、backfill、retry。',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: '刷新 maintenance snapshot',
+                onPressed:
+                    _isLoadingRetrievalMaintenance ||
+                        _isRunningRetrievalMaintenanceAction
+                    ? null
+                    : () => _refreshCurrentRetrievalMaintenance(),
+                icon: _isLoadingRetrievalMaintenance
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          SizedBox(height: spacing.md),
+          if (_retrievalMaintenanceActionLabel != null) ...[
+            Text(
+              '执行中: $_retrievalMaintenanceActionLabel',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+            SizedBox(height: spacing.sm),
+          ],
+          if (snapshot == null && _retrievalMaintenanceError != null)
+            Text(
+              '加载失败: $_retrievalMaintenanceError',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            )
+          else if (snapshot == null)
+            Text(
+              '暂无 maintenance snapshot。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            )
+          else ...[
+            Wrap(
+              spacing: spacing.sm,
+              runSpacing: spacing.sm,
+              children: [
+                _buildMetricChip('Collections', snapshot.collectionCount),
+                _buildMetricChip('Assets', snapshot.assetCount),
+                _buildMetricChip('Chunks', snapshot.activeChunkCount),
+                _buildMetricChip('Embeddings', snapshot.activeEmbeddingCount),
+                _buildMetricChip(
+                  'Backfill',
+                  snapshot.backfillCandidateAssetIds.length,
+                ),
+                _buildMetricChip('Failed', snapshot.failedJobCount),
+                _buildMetricChip('Retryable', snapshot.retryableJobIds.length),
+              ],
+            ),
+            SizedBox(height: spacing.md),
+            Wrap(
+              spacing: spacing.sm,
+              runSpacing: spacing.sm,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _isRunningRetrievalMaintenanceAction
+                      ? null
+                      : _reindexRetrievalStory,
+                  icon: const Icon(Icons.replay_circle_filled_outlined),
+                  label: const Text('Story Reindex'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _isRunningRetrievalMaintenanceAction
+                      ? null
+                      : _backfillRetrievalStory,
+                  icon: const Icon(Icons.data_object_outlined),
+                  label: const Text('Story Backfill'),
+                ),
+                FilledButton.icon(
+                  onPressed: _isRunningRetrievalMaintenanceAction
+                      ? null
+                      : _retryFailedRetrievalStoryJobs,
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('Retry Failed'),
+                ),
+              ],
+            ),
+            if (snapshot.backfillCandidateAssetIds.isNotEmpty) ...[
+              SizedBox(height: spacing.md),
+              Text(
+                'Backfill Candidates',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              SizedBox(height: spacing.xs),
+              _buildStringChipWrap(
+                snapshot.backfillCandidateAssetIds,
+                emptyLabel: '暂无 backfill candidate',
+              ),
+            ],
+            SizedBox(height: spacing.md),
+            Text('Collections', style: Theme.of(context).textTheme.titleSmall),
+            SizedBox(height: spacing.sm),
+            if (snapshot.collections.isEmpty)
+              Text(
+                '当前 story 还没有 retrieval collection。',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              )
+            else
+              ...snapshot.collections.map(_buildRetrievalCollectionCard),
+            SizedBox(height: spacing.md),
+            Text('Recent Jobs', style: Theme.of(context).textTheme.titleSmall),
+            SizedBox(height: spacing.sm),
+            if (snapshot.recentJobs.isEmpty)
+              Text(
+                '暂无 recent jobs。',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              )
+            else
+              ...snapshot.recentJobs.map(_buildRetrievalJobCard),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRetrievalCollectionCard(
+    RpRetrievalCollectionMaintenanceSnapshot snapshot,
+  ) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    return OwuiCard(
+      margin: EdgeInsets.only(bottom: spacing.sm),
+      padding: EdgeInsets.all(spacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${snapshot.collectionKind} · ${_truncateMiddle(snapshot.collectionId)}',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          SizedBox(height: spacing.xs),
+          Wrap(
+            spacing: spacing.sm,
+            runSpacing: spacing.sm,
+            children: [
+              _buildMetricChip('Assets', snapshot.assetCount),
+              _buildMetricChip('Chunks', snapshot.activeChunkCount),
+              _buildMetricChip('Embeddings', snapshot.activeEmbeddingCount),
+              _buildMetricChip(
+                'Backfill',
+                snapshot.backfillCandidateAssetIds.length,
+              ),
+              _buildMetricChip('Failed', snapshot.failedJobCount),
+            ],
+          ),
+          SizedBox(height: spacing.md),
+          Wrap(
+            spacing: spacing.sm,
+            runSpacing: spacing.sm,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _isRunningRetrievalMaintenanceAction
+                    ? null
+                    : () => _reindexRetrievalCollection(snapshot),
+                icon: const Icon(Icons.replay_outlined),
+                label: const Text('Reindex'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _isRunningRetrievalMaintenanceAction
+                    ? null
+                    : () => _backfillRetrievalCollection(snapshot),
+                icon: const Icon(Icons.dataset_linked_outlined),
+                label: const Text('Backfill'),
+              ),
+              FilledButton.icon(
+                onPressed: _isRunningRetrievalMaintenanceAction
+                    ? null
+                    : () => _retryFailedRetrievalCollectionJobs(snapshot),
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Retry Failed'),
+              ),
+            ],
+          ),
+          SizedBox(height: spacing.md),
+          Text(
+            'Asset IDs',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          ),
+          SizedBox(height: spacing.xs),
+          _buildStringChipWrap(
+            snapshot.assetIds,
+            emptyLabel: '暂无资产',
+            maxItems: 8,
+          ),
+          if (snapshot.backfillCandidateAssetIds.isNotEmpty) ...[
+            SizedBox(height: spacing.sm),
+            Text(
+              'Backfill Candidates',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+            SizedBox(height: spacing.xs),
+            _buildStringChipWrap(
+              snapshot.backfillCandidateAssetIds,
+              emptyLabel: '暂无 backfill candidate',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRetrievalJobCard(RpRetrievalIndexJob job) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final scheme = Theme.of(context).colorScheme;
+    final stateColor = job.isFailed
+        ? scheme.error
+        : (job.isCompleted ? scheme.secondary : scheme.tertiary);
+    return OwuiCard(
+      margin: EdgeInsets.only(bottom: spacing.sm),
+      padding: EdgeInsets.all(spacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${job.jobKind} · ${job.assetId ?? job.collectionId ?? job.storyId}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              Chip(
+                label: Text(job.jobState),
+                backgroundColor: stateColor.withValues(alpha: 0.12),
+                side: BorderSide(color: stateColor.withValues(alpha: 0.28)),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          SizedBox(height: spacing.xs),
+          Text(
+            'Job: ${_truncateMiddle(job.jobId)} · Updated: ${_formatDateTime(job.updatedAt)}',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          ),
+          if (job.errorMessage != null &&
+              job.errorMessage!.trim().isNotEmpty) ...[
+            SizedBox(height: spacing.sm),
+            Text(job.errorMessage!, style: TextStyle(color: scheme.error)),
+          ],
+          if (job.warnings.isNotEmpty) ...[
+            SizedBox(height: spacing.sm),
+            Text(
+              'Warnings: ${job.warnings.take(3).join(' | ')}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+          ],
+          if (job.isFailed) ...[
+            SizedBox(height: spacing.sm),
+            OutlinedButton.icon(
+              onPressed: _isRunningRetrievalMaintenanceAction
+                  ? null
+                  : () => _retryRetrievalJob(job),
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Retry This Job'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricChip(String label, int value) {
+    return Chip(
+      label: Text('$label $value'),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  Widget _buildStringChipWrap(
+    List<String> values, {
+    required String emptyLabel,
+    int maxItems = 6,
+  }) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    if (values.isEmpty) {
+      return Text(
+        emptyLabel,
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+      );
+    }
+
+    final visible = values.take(maxItems).toList();
+    final overflow = values.length - visible.length;
+    return Wrap(
+      spacing: spacing.sm,
+      runSpacing: spacing.sm,
+      children: [
+        ...visible.map((item) => Chip(label: Text(_truncateMiddle(item)))),
+        if (overflow > 0) Chip(label: Text('+$overflow')),
+      ],
+    );
+  }
+
   List<Widget> _buildRetrievalOverviewWidgets(RpSetupWorkspace workspace) {
     final spacing = context.owuiSpacing;
     if (workspace.retrievalIngestionJobs.isEmpty) {
@@ -1416,6 +2301,61 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
           ),
         )
         .toList();
+  }
+
+  String _truncateMiddle(String value, {int head = 10, int tail = 8}) {
+    if (value.length <= head + tail + 3) return value;
+    return '${value.substring(0, head)}...${value.substring(value.length - tail)}';
+  }
+
+  String? _formatAgentSelectionSummary({
+    required String? providerId,
+    required String? modelId,
+  }) {
+    if ((providerId == null || providerId.isEmpty) &&
+        (modelId == null || modelId.isEmpty)) {
+      return null;
+    }
+    final providerName = providerId == null
+        ? null
+        : globalModelServiceManager.getProvider(providerId)?.name ?? providerId;
+    final modelName = modelId == null
+        ? null
+        : globalModelServiceManager.getModel(modelId)?.displayName ?? modelId;
+    if (providerName != null && modelName != null) {
+      return '$providerName · $modelName';
+    }
+    return modelName ?? providerName;
+  }
+
+  String? _formatRetrievalSelectionSummary({
+    required String? providerId,
+    required String? modelId,
+  }) {
+    if ((providerId == null || providerId.isEmpty) &&
+        (modelId == null || modelId.isEmpty)) {
+      return null;
+    }
+    final providerName = providerId == null
+        ? null
+        : globalModelServiceManager.getProvider(providerId)?.name ?? providerId;
+    final modelName = modelId == null
+        ? null
+        : globalModelServiceManager.getModel(modelId)?.displayName ?? modelId;
+    if (providerName != null && modelName != null) {
+      return '$providerName · $modelName';
+    }
+    return modelName ?? providerName;
+  }
+
+  String _formatDateTime(DateTime? value) {
+    if (value == null) return 'n/a';
+    final local = value.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '${local.year}-$month-$day $hour:$minute';
   }
 
   List<Widget> _buildTextBlock({
@@ -1449,8 +2389,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
             Text(
               '暂无内容',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: context.owuiColors.textSecondary,
-                  ),
+                color: context.owuiColors.textSecondary,
+              ),
             )
           else
             Wrap(
@@ -1492,17 +2432,17 @@ class _SetupChatEntry {
     required this.content,
     List<String>? toolEvents,
     this.isStreaming = false,
-  })  : thinking = '',
-        toolEvents = toolEvents ?? [];
+  }) : thinking = '',
+       toolEvents = toolEvents ?? [];
 
   factory _SetupChatEntry.user(String content) =>
       _SetupChatEntry(kind: _SetupChatEntryKind.user, content: content);
 
   factory _SetupChatEntry.assistantStreaming() => _SetupChatEntry(
-        kind: _SetupChatEntryKind.assistant,
-        content: '',
-        isStreaming: true,
-      );
+    kind: _SetupChatEntryKind.assistant,
+    content: '',
+    isStreaming: true,
+  );
 
   factory _SetupChatEntry.system(String content) =>
       _SetupChatEntry(kind: _SetupChatEntryKind.system, content: content);

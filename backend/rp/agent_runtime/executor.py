@@ -7,6 +7,7 @@ import uuid
 from typing import Any, AsyncIterator, Callable
 
 from models.chat import ChatCompletionRequest, ChatMessage, ProviderConfig
+from services.langfuse_service import get_langfuse_service
 
 from .contracts import (
     RpAgentTurnInput,
@@ -14,6 +15,8 @@ from .contracts import (
     RuntimeProfile,
     RuntimeToolCall,
     RuntimeToolResult,
+    SetupCognitiveStateSnapshot,
+    SetupCognitiveStateSummary,
     SetupPendingObligation,
     SetupReflectionTicket,
     SetupTurnGoal,
@@ -97,6 +100,7 @@ class _RuntimeRunDriver:
         self._llm_service = llm_service
         self._tool_executor = tool_executor
         self._profile = profile
+        self._langfuse = get_langfuse_service()
         self._event_queue: asyncio.Queue[RuntimeEvent | object] | None = None
         self._event_sequence_no = 0
         self.last_result: RpAgentTurnResult | None = None
@@ -194,6 +198,11 @@ class _RuntimeRunDriver:
             "last_failure": None,
             "reflection_ticket": None,
             "completion_guard": None,
+            "cognitive_state": self._context_bundle(turn_input).get("cognitive_state"),
+            "cognitive_state_summary": self._context_bundle(turn_input).get(
+                "cognitive_state_summary"
+            ),
+            "repair_route": None,
             "next_action": "build_model_request",
             "schema_retry_count": 0,
             "error_event_emitted": False,
@@ -228,6 +237,7 @@ class _RuntimeRunDriver:
         context_bundle = self._context_bundle(turn_input)
         current_step = str(context_bundle.get("current_step") or "unknown_step")
         pending_obligation = self._pending_obligation(state)
+        cognitive_state_summary = self._cognitive_state_summary(state)
         user_prompt = str(turn_input.user_visible_request or "").strip()
         current_snapshot = self._context_packet(state).get("current_draft_snapshot") or {}
 
@@ -254,6 +264,32 @@ class _RuntimeRunDriver:
                         "Do not pretend the step is complete yet.",
                     ],
                 )
+            elif pending_obligation.obligation_type == "reconcile_after_user_edit":
+                goal = SetupTurnGoal(
+                    current_step=current_step,
+                    goal_type="reconcile_after_user_edit",
+                    goal_summary=(
+                        "Reconcile the discussion state against the latest user-edited draft "
+                        "before making more commit-oriented moves."
+                    ),
+                    success_criteria=[
+                        "Refresh the discussion map from the latest draft context.",
+                        "Do not treat stale truth candidates as ready for review.",
+                    ],
+                )
+            elif pending_obligation.obligation_type == "continue_after_tool_failure":
+                goal = SetupTurnGoal(
+                    current_step=current_step,
+                    goal_type="recover_from_tool_failure",
+                    goal_summary=(
+                        "Recover from the most recent tool failure and continue advancing the "
+                        "same setup objective instead of switching to commit preparation."
+                    ),
+                    success_criteria=[
+                        "Address the failed tool outcome in the current topic.",
+                        "Continue discussion, ask the user, or retry with a better action as appropriate.",
+                    ],
+                )
             else:
                 goal = SetupTurnGoal(
                     current_step=current_step,
@@ -264,6 +300,19 @@ class _RuntimeRunDriver:
                         "Continue discussion or ask a targeted question instead of forcing commit.",
                     ],
                 )
+        elif cognitive_state_summary is not None and cognitive_state_summary.invalidated:
+            goal = SetupTurnGoal(
+                current_step=current_step,
+                goal_type="reconcile_after_user_edit",
+                goal_summary=(
+                    "The current discussion state is stale relative to the latest draft or "
+                    "rejection feedback. Reconcile it before proposing commit."
+                ),
+                success_criteria=[
+                    "Update the discussion map or chunk candidates to match the latest draft.",
+                    "Do not call setup.proposal.commit while the cognitive state is invalidated.",
+                ],
+            )
         elif self._user_requests_commit(user_prompt):
             goal = SetupTurnGoal(
                 current_step=current_step,
@@ -284,13 +333,43 @@ class _RuntimeRunDriver:
                     "Either patch the draft or ask the user for the missing inputs.",
                 ],
             )
+        elif (
+            cognitive_state_summary is not None
+            and cognitive_state_summary.candidate_titles
+            and cognitive_state_summary.truth_write_status is None
+        ):
+            goal = SetupTurnGoal(
+                current_step=current_step,
+                goal_type="write_draft_truth",
+                goal_summary=(
+                    "A chunk candidate is emerging; decide whether one candidate should now be "
+                    "written into the draft."
+                ),
+                success_criteria=[
+                    "Only call setup.truth.write when one candidate is stable enough.",
+                    "Keep unresolved issues visible instead of pretending the draft is finalized.",
+                ],
+            )
+        elif (
+            cognitive_state_summary is not None
+            and cognitive_state_summary.candidate_titles
+        ):
+            goal = SetupTurnGoal(
+                current_step=current_step,
+                goal_type="refine_chunk_candidate",
+                goal_summary="Refine the current chunk candidates until they are truly usable.",
+                success_criteria=[
+                    "Clarify open issues on the active chunk candidates.",
+                    "Promote only candidates that are specific enough to support draft writing.",
+                ],
+            )
         else:
             goal = SetupTurnGoal(
                 current_step=current_step,
-                goal_type="patch_draft",
-                goal_summary="Advance the current setup draft toward a more converged state.",
+                goal_type="brainstorm_and_clarify",
+                goal_summary="Advance the current setup discussion toward a more converged state.",
                 success_criteria=[
-                    "Prefer concrete draft progress over vague discussion.",
+                    "Prefer concrete progress over vague discussion.",
                     "Keep the turn aligned with the current setup step.",
                 ],
             )
@@ -306,6 +385,7 @@ class _RuntimeRunDriver:
         context_packet = self._context_packet(state)
         context_bundle = self._context_bundle(self._turn_input(state))
         pending_obligation = self._pending_obligation(state)
+        cognitive_state_summary = self._cognitive_state_summary(state)
 
         missing_information = list(
             pending_obligation.required_fields if pending_obligation is not None else []
@@ -317,14 +397,41 @@ class _RuntimeRunDriver:
             if text and text not in missing_information:
                 missing_information.append(text)
 
+        discussion_actions: list[str] = []
+        if cognitive_state_summary is not None and cognitive_state_summary.invalidated:
+            discussion_actions.append("reconcile_discussion_state_from_latest_draft")
+        if missing_information:
+            discussion_actions.append("resolve_missing_information")
+        if (
+            cognitive_state_summary is not None
+            and cognitive_state_summary.unresolved_conflicts
+        ):
+            discussion_actions.append("resolve_unresolved_conflicts")
+        if not discussion_actions:
+            discussion_actions.append("advance_current_step")
+
         plan = SetupWorkingPlan(
             missing_information=missing_information,
+            discussion_actions=discussion_actions,
+            candidate_targets=(
+                list(cognitive_state_summary.candidate_titles)
+                if cognitive_state_summary is not None
+                else []
+            ),
+            draft_write_targets=(
+                self._patch_targets_for_step(goal.current_step)
+                if (
+                    cognitive_state_summary is not None
+                    and cognitive_state_summary.candidate_titles
+                )
+                else []
+            ),
             patch_targets=self._patch_targets_for_step(goal.current_step),
             question_targets=list(missing_information),
             commit_readiness_checks=self._commit_readiness_checks(goal.current_step),
             current_priority=(
                 goal.goal_summary
-                if goal.goal_type != "patch_draft"
+                if goal.goal_type not in {"patch_draft", "brainstorm_and_clarify"}
                 else f"Advance {goal.current_step} with the highest-value patch."
             ),
         )
@@ -378,7 +485,31 @@ class _RuntimeRunDriver:
         self,
         request: ChatCompletionRequest,
     ) -> RpAgentRunState:
-        response = self._coerce_response_dict(await self._llm_service.chat_completion(request))
+        with self._langfuse.start_as_current_observation(
+            name="rp.runtime.model_call",
+            as_type="generation",
+            model=request.model,
+            input={
+                "messages": request.model_dump(mode="json").get("messages", []),
+                "tool_count": len(request.tools or []),
+                "stream": False,
+            },
+            model_parameters={
+                "stream": False,
+                "tool_choice": request.tool_choice,
+            },
+        ) as generation:
+            response = self._coerce_response_dict(
+                await self._llm_service.chat_completion(request)
+            )
+            generation.update(
+                output=self._extract_message_payload(response),
+                usage_details=(
+                    dict(response.get("usage"))
+                    if isinstance(response.get("usage"), dict)
+                    else None
+                ),
+            )
         return {
             "status": "model_called",
             "latest_response": response,
@@ -392,61 +523,93 @@ class _RuntimeRunDriver:
         accumulated_tool_calls: dict[int, dict[str, Any]] = {}
         accumulated_text = ""
         error_payload: dict[str, Any] | None = None
+        usage_details: dict[str, int] | None = None
         run_id = str(state["run_id"])
+        with self._langfuse.start_as_current_observation(
+            name="rp.runtime.model_call.stream",
+            as_type="generation",
+            model=request.model,
+            input={
+                "messages": request.model_dump(mode="json").get("messages", []),
+                "tool_count": len(request.tools or []),
+                "stream": True,
+            },
+            model_parameters={
+                "stream": True,
+                "tool_choice": request.tool_choice,
+            },
+        ) as generation:
+            async for line in self._llm_service.chat_completion_stream(request):
+                payload = self._parse_sse_payload(line)
+                if payload is None:
+                    continue
 
-        async for line in self._llm_service.chat_completion_stream(request):
-            payload = self._parse_sse_payload(line)
-            if payload is None:
-                continue
+                event_type = str(payload.get("type") or "")
+                if event_type == "done":
+                    break
+                if event_type in {"thinking_delta", "text_delta"}:
+                    if event_type == "text_delta":
+                        accumulated_text += str(payload.get("delta") or "")
+                    await self._emit_event(
+                        run_id=run_id,
+                        event_type=event_type,
+                        payload={"delta": str(payload.get("delta") or "")},
+                    )
+                    continue
+                if event_type == "tool_call":
+                    raw_calls = payload.get("tool_calls", [])
+                    self._merge_stream_tool_calls(accumulated_tool_calls, raw_calls)
+                    await self._emit_event(
+                        run_id=run_id,
+                        event_type="tool_call",
+                        payload={"tool_calls": raw_calls if isinstance(raw_calls, list) else []},
+                    )
+                    continue
+                if event_type == "error":
+                    error_payload = payload.get("error") or {
+                        "message": "model_stream_failed",
+                        "type": "model_stream_failed",
+                    }
+                    await self._emit_event(
+                        run_id=run_id,
+                        event_type="error",
+                        payload={"error": error_payload},
+                    )
+                    break
+                if event_type == "usage":
+                    usage_details = {
+                        "prompt_tokens": int(payload.get("prompt_tokens") or 0),
+                        "completion_tokens": int(payload.get("completion_tokens") or 0),
+                        "total_tokens": int(payload.get("total_tokens") or 0),
+                    }
 
-            event_type = str(payload.get("type") or "")
-            if event_type == "done":
-                break
-            if event_type in {"thinking_delta", "text_delta"}:
-                if event_type == "text_delta":
-                    accumulated_text += str(payload.get("delta") or "")
+                passthrough_payload = dict(payload)
+                passthrough_payload.pop("type", None)
                 await self._emit_event(
                     run_id=run_id,
                     event_type=event_type,
-                    payload={"delta": str(payload.get("delta") or "")},
+                    payload=passthrough_payload,
                 )
-                continue
-            if event_type == "tool_call":
-                raw_calls = payload.get("tool_calls", [])
-                self._merge_stream_tool_calls(accumulated_tool_calls, raw_calls)
-                await self._emit_event(
-                    run_id=run_id,
-                    event_type="tool_call",
-                    payload={"tool_calls": raw_calls if isinstance(raw_calls, list) else []},
-                )
-                continue
-            if event_type == "error":
-                error_payload = payload.get("error") or {
-                    "message": "model_stream_failed",
-                    "type": "model_stream_failed",
-                }
-                await self._emit_event(
-                    run_id=run_id,
-                    event_type="error",
-                    payload={"error": error_payload},
-                )
-                break
 
-            passthrough_payload = dict(payload)
-            passthrough_payload.pop("type", None)
-            await self._emit_event(
-                run_id=run_id,
-                event_type=event_type,
-                payload=passthrough_payload,
+            generation.update(
+                output={
+                    "content": accumulated_text or None,
+                    "tool_calls": self._finalize_stream_tool_calls(accumulated_tool_calls),
+                    "error": error_payload,
+                },
+                usage_details=usage_details,
             )
 
         response_message = {
             "content": accumulated_text or None,
             "tool_calls": self._finalize_stream_tool_calls(accumulated_tool_calls),
         }
+        latest_response: dict[str, Any] = {"message": response_message}
+        if usage_details is not None:
+            latest_response["usage"] = usage_details
         update: RpAgentRunState = {
             "status": "model_called",
-            "latest_response": {"message": response_message},
+            "latest_response": latest_response,
             "assistant_text": accumulated_text,
         }
         if error_payload is not None:
@@ -492,7 +655,8 @@ class _RuntimeRunDriver:
         if runtime_tool_calls and self._contains_blocked_commit_proposal(state, runtime_tool_calls):
             context_bundle = self._context_bundle(self._turn_input(state))
             reflection_ticket = ReflectionTriggerPolicy.blocked_commit_ticket(
-                context_bundle=context_bundle
+                context_bundle=context_bundle,
+                cognitive_state_summary=self._cognitive_state_summary(state),
             )
             update["pending_tool_calls"] = []
             update["pending_obligation"] = SetupPendingObligation(
@@ -515,6 +679,7 @@ class _RuntimeRunDriver:
             assistant_text=assistant_text,
             pending_obligation=self._pending_obligation(state),
             reflection_ticket=self._reflection_ticket(state),
+            cognitive_state_summary=self._cognitive_state_summary(state),
         )
         update["completion_guard"] = decision.get("completion_guard")
         if "pending_obligation" in decision:
@@ -550,10 +715,28 @@ class _RuntimeRunDriver:
                 event_type="tool_started",
                 payload={"call_id": call.call_id, "tool_name": call.tool_name},
             )
-            result = await self._tool_executor.execute_tool_call(
-                call,
-                visible_tool_names=visible_tool_names,
-            )
+            with self._langfuse.start_as_current_observation(
+                name=f"rp.runtime.tool:{call.tool_name}",
+                as_type="tool",
+                input={
+                    "tool_name": call.tool_name,
+                    "arguments": dict(call.arguments),
+                    "visible_tool_names": list(visible_tool_names),
+                },
+            ) as tool_observation:
+                result = await self._tool_executor.execute_tool_call(
+                    call,
+                    visible_tool_names=visible_tool_names,
+                )
+                tool_observation.update(
+                    output={
+                        "success": result.success,
+                        "tool_name": result.tool_name,
+                        "error_code": result.error_code,
+                        "content_text": result.content_text,
+                        "structured_payload": result.structured_payload,
+                    }
+                )
             latest_batch.append(result.model_dump(mode="json", exclude_none=True))
             aggregated_results.append(result.model_dump(mode="json", exclude_none=True))
             if result.success:
@@ -592,6 +775,8 @@ class _RuntimeRunDriver:
             RuntimeToolCall.model_validate(item)
             for item in state.get("pending_tool_calls", [])
         ]
+        cognitive_state = state.get("cognitive_state")
+        cognitive_state_summary = state.get("cognitive_state_summary")
         if tool_calls:
             normalized_messages.append(
                 ChatMessage(
@@ -613,10 +798,22 @@ class _RuntimeRunDriver:
                     content=result.content_text,
                 ).model_dump(mode="json", exclude_none=True)
             )
+            content_payload = (
+                result.structured_payload.get("content_payload")
+                if isinstance(result.structured_payload, dict)
+                else None
+            )
+            if isinstance(content_payload, dict):
+                if isinstance(content_payload.get("cognitive_state_snapshot"), dict):
+                    cognitive_state = content_payload["cognitive_state_snapshot"]
+                if isinstance(content_payload.get("cognitive_state_summary"), dict):
+                    cognitive_state_summary = content_payload["cognitive_state_summary"]
         return {
             "status": "tool_results_applied",
             "normalized_messages": normalized_messages,
             "pending_tool_calls": [],
+            "cognitive_state": cognitive_state,
+            "cognitive_state_summary": cognitive_state_summary,
         }
 
     def _assess_progress(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -629,6 +826,7 @@ class _RuntimeRunDriver:
                 assistant_text=str(state.get("assistant_text") or ""),
                 pending_obligation=self._pending_obligation(state),
                 reflection_ticket=self._reflection_ticket(state),
+                cognitive_state_summary=self._cognitive_state_summary(state),
             )
             update: RpAgentRunState = {
                 "status": "assessed",
@@ -676,6 +874,11 @@ class _RuntimeRunDriver:
                 "pending_obligation": decision.get("pending_obligation"),
                 "reflection_ticket": decision.get("reflection_ticket"),
                 "completion_guard": decision.get("completion_guard"),
+                "repair_route": (
+                    decision.get("last_failure", {}).get("failure_category")
+                    if isinstance(decision.get("last_failure"), dict)
+                    else state.get("repair_route")
+                ),
             }
             if "last_failure" in decision:
                 update["last_failure"] = decision.get("last_failure")
@@ -790,6 +993,8 @@ class _RuntimeRunDriver:
     def _state_to_result(self, state: RpAgentRunState) -> RpAgentTurnResult:
         error = state.get("error")
         status = "failed" if error else "completed"
+        turn_input = self._turn_input(state)
+        context_bundle = self._context_bundle(turn_input)
         return RpAgentTurnResult(
             status=status,
             finish_reason=str(
@@ -817,6 +1022,31 @@ class _RuntimeRunDriver:
                 "round_no": state.get("round_no"),
                 "tool_invocation_count": len(state.get("tool_invocations", [])),
                 "tool_result_count": len(state.get("tool_results", [])),
+                "tool_scope": list(turn_input.tool_scope),
+                "request_metrics": {
+                    "system_prompt_chars": len(
+                        str(context_bundle.get("system_prompt") or "")
+                    ),
+                    "user_prompt_chars": len(
+                        str(turn_input.user_visible_request or "")
+                    ),
+                    "conversation_message_count": len(
+                        turn_input.conversation_messages
+                    ),
+                    "tool_scope_count": len(turn_input.tool_scope),
+                },
+                "request_context": {
+                    "current_step": context_bundle.get("current_step"),
+                    "step_readiness": context_bundle.get("step_readiness"),
+                    "open_question_count": context_bundle.get("open_question_count"),
+                    "blocking_open_question_count": context_bundle.get(
+                        "blocking_open_question_count"
+                    ),
+                    "last_proposal_status": context_bundle.get("last_proposal_status"),
+                    "cognitive_state_invalidated": context_bundle.get(
+                        "cognitive_state_invalidated"
+                    ),
+                },
                 "latest_tool_batch": list(state.get("latest_tool_batch", [])),
                 "latest_response": state.get("latest_response") or {},
                 "turn_goal": state.get("turn_goal"),
@@ -825,6 +1055,9 @@ class _RuntimeRunDriver:
                 "last_failure": state.get("last_failure"),
                 "reflection_ticket": state.get("reflection_ticket"),
                 "completion_guard": state.get("completion_guard"),
+                "cognitive_state": state.get("cognitive_state"),
+                "cognitive_state_summary": state.get("cognitive_state_summary"),
+                "repair_route": state.get("repair_route"),
             },
             error=error,
         )
@@ -855,6 +1088,7 @@ class _RuntimeRunDriver:
             "pending_obligation": state.get("pending_obligation"),
             "last_failure": state.get("last_failure"),
             "reflection_ticket": state.get("reflection_ticket"),
+            "cognitive_state_summary": state.get("cognitive_state_summary"),
         }
         if all(value in (None, {}, []) for value in payload.values()):
             return None
@@ -864,11 +1098,13 @@ class _RuntimeRunDriver:
             content=(
                 "Runtime turn state follows as JSON. Treat it as internal execution guidance.\n"
                 "Use it to decide whether you must repair a tool call, ask the user for missing "
-                "information, continue discussion, or avoid proposing commit yet.\n"
+                "information, continue discussion, reconcile stale setup state, or avoid "
+                "proposing commit yet.\n"
                 "If pending_obligation is repair_tool_call, do not stop with explanation alone.\n"
                 "If pending_obligation is ask_user_for_missing_info, your next visible reply must ask "
                 "the missing question explicitly.\n"
                 "If reflection_ticket says block_commit, do not call setup.proposal.commit in this turn.\n"
+                "If cognitive_state_summary.invalidated is true, refresh discussion/chunk state before commit.\n"
                 f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
             ),
         )
@@ -922,6 +1158,20 @@ class _RuntimeRunDriver:
             return None
         return SetupReflectionTicket.model_validate(payload)
 
+    @staticmethod
+    def _cognitive_state(state: RpAgentRunState) -> SetupCognitiveStateSnapshot | None:
+        payload = state.get("cognitive_state")
+        if not isinstance(payload, dict):
+            return None
+        return SetupCognitiveStateSnapshot.model_validate(payload)
+
+    @staticmethod
+    def _cognitive_state_summary(state: RpAgentRunState) -> SetupCognitiveStateSummary | None:
+        payload = state.get("cognitive_state_summary")
+        if not isinstance(payload, dict):
+            return None
+        return SetupCognitiveStateSummary.model_validate(payload)
+
     def _contains_blocked_commit_proposal(
         self,
         state: RpAgentRunState,
@@ -930,7 +1180,13 @@ class _RuntimeRunDriver:
         if not any(self._is_commit_proposal_tool(call.tool_name) for call in runtime_tool_calls):
             return False
         context_bundle = self._context_bundle(self._turn_input(state))
-        return ReflectionTriggerPolicy.blocked_commit_ticket(context_bundle=context_bundle) is not None
+        return (
+            ReflectionTriggerPolicy.blocked_commit_ticket(
+                context_bundle=context_bundle,
+                cognitive_state_summary=self._cognitive_state_summary(state),
+            )
+            is not None
+        )
 
     @staticmethod
     def _is_commit_proposal_tool(tool_name: str) -> bool:

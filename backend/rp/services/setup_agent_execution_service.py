@@ -19,12 +19,14 @@ from rp.models.setup_handoff import SetupContextBuilderInput
 from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.services.memory_os_service import MemoryOsService
 from rp.services.setup_agent_prompt_service import SetupAgentPromptService
+from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
 from rp.tools.setup_tool_provider import SetupToolProvider
 from services.litellm_service import LiteLLMService, get_litellm_service
+from services.langfuse_service import get_langfuse_service
 from services.mcp_manager import McpManager
 from services.model_registry import get_model_registry_service
 from services.provider_registry import get_provider_registry_service
@@ -67,6 +69,7 @@ class SetupAgentExecutionService:
         llm_service: LiteLLMService | None = None,
         runtime_executor: RpAgentRuntimeExecutor | None = None,
         adapter: SetupRuntimeAdapter | None = None,
+        runtime_state_service: SetupAgentRuntimeStateService | None = None,
         mcp_manager_factory: Callable[[str], McpManager] | None = None,
     ) -> None:
         self._workspace_service = workspace_service
@@ -75,6 +78,7 @@ class SetupAgentExecutionService:
         self._llm_service = llm_service or get_litellm_service()
         self._runtime_executor = runtime_executor
         self._adapter = adapter
+        self._runtime_state_service = runtime_state_service
         self._mcp_manager_factory = (
             mcp_manager_factory
             or (lambda story_id: self._build_setup_mcp_manager(story_id=story_id))
@@ -87,6 +91,7 @@ class SetupAgentExecutionService:
 
     async def run_turn(self, request: SetupAgentTurnRequest) -> SetupAgentTurnResponse:
         workspace = self._require_workspace(request.workspace_id)
+        self._ensure_agent_model_compatible(request.model_id)
         provider = self._resolve_provider(model_id=request.model_id, provider_id=request.provider_id)
         model_name = self._resolve_model_name(model_id=request.model_id, fallback_provider_id=request.provider_id)
         logger.info(
@@ -149,6 +154,7 @@ class SetupAgentExecutionService:
 
     async def run_turn_stream(self, request: SetupAgentTurnRequest) -> AsyncIterator[str]:
         workspace = self._require_workspace(request.workspace_id)
+        self._ensure_agent_model_compatible(request.model_id)
         provider = self._resolve_provider(model_id=request.model_id, provider_id=request.provider_id)
         model_name = self._resolve_model_name(model_id=request.model_id, fallback_provider_id=request.provider_id)
         logger.info(
@@ -220,7 +226,7 @@ class SetupAgentExecutionService:
                 workspace_id=workspace.workspace_id,
                 current_step=(request.target_step or workspace.current_step).value,
                 user_prompt=request.user_prompt,
-                user_edit_delta_ids=[],
+                user_edit_delta_ids=list(request.user_edit_delta_ids),
                 token_budget=None,
             )
         )
@@ -250,6 +256,8 @@ class SetupAgentExecutionService:
         return [ChatMessage(role=item.role, content=item.content) for item in history]
 
     def _build_setup_mcp_manager(self, *, story_id: str) -> McpManager:
+        if self._runtime_state_service is None:
+            raise RuntimeError("SetupAgentExecutionService requires runtime_state_service")
         registry = LocalToolProviderRegistry()
         registry.register(
             MemoryCrudToolProvider(
@@ -265,6 +273,7 @@ class SetupAgentExecutionService:
             SetupToolProvider(
                 workspace_service=self._workspace_service,
                 context_builder=self._context_builder,
+                runtime_state_service=self._runtime_state_service,
             )
         )
         return McpManager(
@@ -284,6 +293,36 @@ class SetupAgentExecutionService:
         if not entry.is_enabled:
             raise ValueError(f"Model is disabled: {model_id}")
         return entry.model_name
+
+    def _ensure_agent_model_compatible(self, model_id: str) -> None:
+        entry = get_model_registry_service().get_entry(model_id)
+        if entry is None:
+            raise ValueError(f"Model not found: {model_id}")
+
+        profile = entry.capability_profile
+        if profile is not None:
+            mode = str(profile.mode or "chat").strip().lower()
+            if mode not in {"chat", "responses"}:
+                raise ValueError(
+                    f"Model {model_id} is not compatible with SetupAgent (mode={mode})"
+                )
+            if profile.supports_function_calling is not True:
+                raise ValueError(
+                    f"Model {model_id} is not compatible with SetupAgent (missing function calling support)"
+                )
+            if profile.supported_openai_params:
+                supported_params = {str(item).strip().lower() for item in profile.supported_openai_params}
+                if not {"tools", "tool_choice"}.issubset(supported_params):
+                    raise ValueError(
+                        f"Model {model_id} is not compatible with SetupAgent (missing tools/tool_choice support)"
+                    )
+            return
+
+        capabilities = {str(item).strip().lower() for item in entry.capabilities}
+        if "tool" not in capabilities:
+            raise ValueError(
+                f"Model {model_id} is not compatible with SetupAgent (missing tool capability)"
+            )
 
     def _resolve_provider(self, *, model_id: str, provider_id: str | None):
         entry = get_model_registry_service().get_entry(model_id)
@@ -311,29 +350,67 @@ class SetupAgentExecutionService:
         model_name: str,
         provider,
     ) -> RpAgentTurnResult:
-        context_packet = self._context_builder.build(
-            SetupContextBuilderInput(
-                mode=workspace.mode.value,
-                workspace_id=workspace.workspace_id,
-                current_step=(request.target_step or workspace.current_step).value,
-                user_prompt=request.user_prompt,
-                user_edit_delta_ids=[],
-                token_budget=None,
+        langfuse = get_langfuse_service()
+        with langfuse.start_as_current_observation(
+            name="rp.setup.runtime_v2",
+            as_type="agent",
+            input={
+                "workspace_id": request.workspace_id,
+                "target_step": (request.target_step or workspace.current_step).value,
+                "model_id": request.model_id,
+                "provider_id": request.provider_id,
+                "history_count": len(request.history),
+                "user_prompt": request.user_prompt,
+            },
+        ) as observation:
+            context_packet = self._context_builder.build(
+                SetupContextBuilderInput(
+                    mode=workspace.mode.value,
+                    workspace_id=workspace.workspace_id,
+                    current_step=(request.target_step or workspace.current_step).value,
+                    user_prompt=request.user_prompt,
+                    user_edit_delta_ids=list(request.user_edit_delta_ids),
+                    token_budget=None,
+                )
             )
-        )
-        turn_input = self._adapter.build_turn_input(
-            request=request,
-            workspace=workspace,
-            context_packet=context_packet,
-            model_name=model_name,
-            provider=provider,
-        )
-        profile = self._adapter.build_runtime_profile()
-        result = await self._runtime_executor.run(
-            turn_input.model_copy(update={"stream": False}),
-            profile,
-            llm_service=self._llm_service,
-        )
+            cognitive_state = (
+                self._runtime_state_service.reconcile_snapshot(
+                    workspace=workspace,
+                    context_packet=context_packet,
+                    step_id=request.target_step or workspace.current_step,
+                )
+                if self._runtime_state_service is not None
+                else None
+            )
+            cognitive_state_summary = (
+                self._runtime_state_service.summarize_for_prompt(cognitive_state)
+                if self._runtime_state_service is not None
+                else None
+            )
+            turn_input = self._adapter.build_turn_input(
+                request=request,
+                workspace=workspace,
+                context_packet=context_packet,
+                model_name=model_name,
+                provider=provider,
+                cognitive_state=cognitive_state,
+                cognitive_state_summary=cognitive_state_summary,
+            )
+            profile = self._adapter.build_runtime_profile()
+            result = await self._runtime_executor.run(
+                turn_input.model_copy(update={"stream": False}),
+                profile,
+                llm_service=self._llm_service,
+            )
+            observation.update(
+                output={
+                    "finish_reason": result.finish_reason,
+                    "assistant_text": result.assistant_text,
+                    "warnings": list(result.warnings),
+                    "tool_invocation_count": len(result.tool_invocations),
+                    "tool_result_count": len(result.tool_results),
+                }
+            )
         self._last_runtime_result = result
         return result
 
@@ -345,28 +422,68 @@ class SetupAgentExecutionService:
         model_name: str,
         provider,
     ) -> AsyncIterator[str]:
-        context_packet = self._context_builder.build(
-            SetupContextBuilderInput(
-                mode=workspace.mode.value,
-                workspace_id=workspace.workspace_id,
-                current_step=(request.target_step or workspace.current_step).value,
-                user_prompt=request.user_prompt,
-                user_edit_delta_ids=[],
-                token_budget=None,
+        langfuse = get_langfuse_service()
+        with langfuse.start_as_current_observation(
+            name="rp.setup.runtime_v2.stream",
+            as_type="agent",
+            input={
+                "workspace_id": request.workspace_id,
+                "target_step": (request.target_step or workspace.current_step).value,
+                "model_id": request.model_id,
+                "provider_id": request.provider_id,
+                "history_count": len(request.history),
+                "user_prompt": request.user_prompt,
+                "stream": True,
+            },
+        ) as observation:
+            context_packet = self._context_builder.build(
+                SetupContextBuilderInput(
+                    mode=workspace.mode.value,
+                    workspace_id=workspace.workspace_id,
+                    current_step=(request.target_step or workspace.current_step).value,
+                    user_prompt=request.user_prompt,
+                    user_edit_delta_ids=list(request.user_edit_delta_ids),
+                    token_budget=None,
+                )
             )
-        )
-        turn_input = self._adapter.build_turn_input(
-            request=request,
-            workspace=workspace,
-            context_packet=context_packet,
-            model_name=model_name,
-            provider=provider,
-        ).model_copy(update={"stream": True})
-        profile = self._adapter.build_runtime_profile()
-        async for chunk in self._runtime_executor.run_stream(
-            turn_input,
-            profile,
-            llm_service=self._llm_service,
-        ):
-            yield chunk
-        self._last_runtime_result = self._runtime_executor.last_result
+            cognitive_state = (
+                self._runtime_state_service.reconcile_snapshot(
+                    workspace=workspace,
+                    context_packet=context_packet,
+                    step_id=request.target_step or workspace.current_step,
+                )
+                if self._runtime_state_service is not None
+                else None
+            )
+            cognitive_state_summary = (
+                self._runtime_state_service.summarize_for_prompt(cognitive_state)
+                if self._runtime_state_service is not None
+                else None
+            )
+            turn_input = self._adapter.build_turn_input(
+                request=request,
+                workspace=workspace,
+                context_packet=context_packet,
+                model_name=model_name,
+                provider=provider,
+                cognitive_state=cognitive_state,
+                cognitive_state_summary=cognitive_state_summary,
+            ).model_copy(update={"stream": True})
+            profile = self._adapter.build_runtime_profile()
+            async for chunk in self._runtime_executor.run_stream(
+                turn_input,
+                profile,
+                llm_service=self._llm_service,
+            ):
+                yield chunk
+            self._last_runtime_result = self._runtime_executor.last_result
+            if self._last_runtime_result is not None:
+                observation.update(
+                    output={
+                        "finish_reason": self._last_runtime_result.finish_reason,
+                        "assistant_text": self._last_runtime_result.assistant_text,
+                        "warnings": list(self._last_runtime_result.warnings),
+                        "tool_invocation_count": len(self._last_runtime_result.tool_invocations),
+                        "tool_result_count": len(self._last_runtime_result.tool_results),
+                    }
+                )

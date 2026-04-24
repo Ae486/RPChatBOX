@@ -15,9 +15,9 @@ class BackendStoryService {
   final String _baseUrl;
 
   BackendStoryService({Dio? dio, String? baseUrl})
-      : _controlDio = dio ?? DioService().controlPlaneDio,
-        _dataDio = dio ?? DioService().dataPlaneDio,
-        _baseUrl = baseUrl ?? defaultBaseUrl;
+    : _controlDio = dio ?? DioService().controlPlaneDio,
+      _dataDio = dio ?? DioService().dataPlaneDio,
+      _baseUrl = baseUrl ?? defaultBaseUrl;
 
   Future<RpStoryActivationResult> activateWorkspace(String workspaceId) async {
     final response = await _controlDio.post(
@@ -50,11 +50,28 @@ class BackendStoryService {
     );
   }
 
-  Future<RpChapterSnapshot> getChapter(String sessionId, int chapterIndex) async {
+  Future<RpChapterSnapshot> getChapter(
+    String sessionId,
+    int chapterIndex,
+  ) async {
     final response = await _controlDio.get(
       '$_baseUrl/api/rp/story-sessions/$sessionId/chapters/$chapterIndex',
     );
     _ensureSuccess(response, action: 'get story chapter');
+    return RpChapterSnapshot.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpChapterSnapshot> updateRuntimeStoryConfig({
+    required String sessionId,
+    required Map<String, dynamic> patch,
+  }) async {
+    final response = await _controlDio.patch(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/runtime-config',
+      data: {'runtime_story_config': Map<String, dynamic>.from(patch)},
+    );
+    _ensureSuccess(response, action: 'update story runtime config');
     return RpChapterSnapshot.fromJson(
       Map<String, dynamic>.from(response.data as Map),
     );
@@ -75,7 +92,8 @@ class BackendStoryService {
         'command_kind': commandKind,
         'model_id': modelId,
         if (providerId != null) 'provider_id': providerId,
-        if (userPrompt != null && userPrompt.isNotEmpty) 'user_prompt': userPrompt,
+        if (userPrompt != null && userPrompt.isNotEmpty)
+          'user_prompt': userPrompt,
         if (targetArtifactId != null) 'target_artifact_id': targetArtifactId,
       },
     );
@@ -100,7 +118,8 @@ class BackendStoryService {
         'command_kind': commandKind,
         'model_id': modelId,
         if (providerId != null) 'provider_id': providerId,
-        if (userPrompt != null && userPrompt.isNotEmpty) 'user_prompt': userPrompt,
+        if (userPrompt != null && userPrompt.isNotEmpty)
+          'user_prompt': userPrompt,
         if (targetArtifactId != null) 'target_artifact_id': targetArtifactId,
       },
       options: Options(responseType: ResponseType.stream),
@@ -153,7 +172,9 @@ class BackendStoryService {
         return delta.isEmpty ? null : AIStreamEvent.thinking(delta);
       case 'text_delta':
         final delta = parsed['delta']?.toString() ?? '';
-        return delta.isEmpty ? null : AIStreamEvent.text(delta, isTypedSemantic: true);
+        return delta.isEmpty
+            ? null
+            : AIStreamEvent.text(delta, isTypedSemantic: true);
       case 'tool_call':
         final rawToolCalls = parsed['tool_calls'] as List? ?? const [];
         final toolCalls = rawToolCalls
@@ -185,7 +206,8 @@ class BackendStoryService {
             : AIStreamEvent.toolError(
                 callId: callId,
                 toolName: parsed['tool_name']?.toString(),
-                errorMessage: parsed['error']?.toString() ?? 'Unknown tool error',
+                errorMessage:
+                    parsed['error']?.toString() ?? 'Unknown tool error',
               );
       case 'usage':
         return AIStreamEvent.usage(

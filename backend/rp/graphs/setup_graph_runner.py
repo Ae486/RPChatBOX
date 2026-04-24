@@ -6,6 +6,7 @@ from typing import AsyncIterator
 
 from langgraph.graph import END, START, StateGraph
 
+from rp.agent_runtime.contracts import RpAgentTurnResult
 from rp.models.setup_agent import SetupAgentTurnRequest, SetupAgentTurnResponse
 from rp.services.setup_agent_execution_service import SetupAgentExecutionService
 
@@ -33,6 +34,11 @@ class SetupGraphRunner:
     ) -> None:
         self._nodes = nodes
         self._execution_service = execution_service
+
+    @property
+    def last_runtime_result(self) -> RpAgentTurnResult | None:
+        """Expose the latest runtime result without leaking runner internals."""
+        return self._execution_service.last_runtime_result
 
     async def run_turn(self, request: SetupAgentTurnRequest) -> SetupAgentTurnResponse:
         initial_state = self._initial_state(request=request, stream_mode=False)
@@ -158,6 +164,7 @@ class SetupGraphRunner:
             "provider_id": request.provider_id,
             "user_prompt": request.user_prompt,
             "history": [item.model_dump(mode="json") for item in request.history],
+            "user_edit_delta_ids": list(request.user_edit_delta_ids),
             "stream_mode": stream_mode,
             "context_packet": {},
             "assistant_text": "",
@@ -221,11 +228,17 @@ class SetupGraphRunner:
 
     @staticmethod
     def _snapshot_detail(snapshot) -> dict:
+        values = dict(snapshot.values or {})
+        response_payload = values.get("response_payload")
+        if not isinstance(response_payload, dict):
+            response_payload = {}
         return {
             "checkpoint_id": snapshot_checkpoint_id(snapshot),
             "parent_checkpoint_id": snapshot_parent_checkpoint_id(snapshot),
-            "status": (snapshot.values or {}).get("status"),
-            "state": dict(snapshot.values or {}),
+            "status": values.get("status"),
+            "state": values,
+            "cognitive_state_summary": response_payload.get("cognitive_state_summary"),
+            "repair_route": response_payload.get("repair_route"),
             "summary": SetupGraphRunner._snapshot_summary(snapshot),
         }
 

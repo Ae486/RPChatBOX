@@ -1,0 +1,117 @@
+{
+  "case_id": "retrieval.ingestion.commit_ingestion_no_chunks_failed.v1",
+  "title": "Retrieval ingestion should surface failed jobs when no chunks are generated",
+  "scope": "retrieval",
+  "category": "ingestion_complete",
+  "tags": ["mvp", "deterministic", "retrieval-core", "failure-path"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-no-chunks-001"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-no-chunks-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "empty_archive_rule",
+              "domain": "world",
+              "path": "world.empty_archive_rule",
+              "title": "Empty Archive Rule",
+              "tags": ["archive"],
+              "source_refs": [],
+              "content": {
+                "summary": "This entry will be forced into a no-chunk failure path."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:empty_archive_rule"],
+          "reason": "freeze foundation"
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "index_job_exists",
+        "source": "retrieval_truth",
+        "type": "count_gte",
+        "path": "index_jobs",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "index_job_failed",
+        "source": "retrieval_truth",
+        "type": "equals",
+        "path": "index_jobs[0].job_state",
+        "expected": "failed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "index_job_error_mentions_no_chunks",
+        "source": "retrieval_truth",
+        "type": "contains",
+        "path": "index_jobs[0].error_message",
+        "expected": "No chunks generated",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "source_asset_marked_failed",
+        "source": "retrieval_truth",
+        "type": "equals",
+        "path": "source_assets[0].ingestion_status",
+        "expected": "failed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "no_chunks_persisted",
+        "source": "retrieval_truth",
+        "type": "exists",
+        "path": "chunks[0]",
+        "expected": false,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

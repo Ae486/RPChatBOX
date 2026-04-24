@@ -11,7 +11,6 @@ import '../chat_ui/owui/components/owui_scaffold.dart';
 import '../chat_ui/owui/components/owui_snack_bar.dart';
 import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
-import '../data/model_capability_presets.dart';
 import '../adapters/ai_provider.dart';
 import '../models/model_config.dart';
 import '../models/provider_config.dart';
@@ -65,33 +64,6 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
     if (provider != null) {
       _models = widget.serviceManager.getModelsByProvider(provider.id);
-      _refreshBackendProviderStateIfNeeded(provider.id);
-    }
-  }
-
-  Future<void> _refreshBackendProviderStateIfNeeded(String providerId) async {
-    if (!ProviderFactory.pythonBackendEnabled) return;
-
-    try {
-      await widget.serviceManager.refreshBackendMirrors(sync: false);
-      if (!mounted) return;
-      final refreshedProvider = widget.serviceManager.getProvider(providerId);
-      setState(() {
-        if (refreshedProvider != null) {
-          _nameController.text = refreshedProvider.name;
-          _apiUrlController.text = refreshedProvider.apiUrl;
-          if (refreshedProvider.apiKey.isNotEmpty) {
-            _apiKeyController.text = refreshedProvider.apiKey;
-          }
-          _selectedType = refreshedProvider.type;
-          _isEnabled = refreshedProvider.isEnabled;
-        }
-        _models = widget.serviceManager.getModelsByProvider(providerId);
-      });
-    } catch (e) {
-      if (mounted) {
-        debugPrint('[ProviderDetailPage] backend mirror refresh failed: $e');
-      }
     }
   }
 
@@ -209,7 +181,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       // 🔧 修复：使用所选模型进行测试，而不是只检测 Provider 连接
       final result = await widget.serviceManager.testProviderWithModel(
         tempProvider,
-        model.modelName,
+        model,
       );
 
       if (mounted) {
@@ -264,17 +236,10 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       if (modelIds.isEmpty) return;
 
       for (final modelId in modelIds) {
-        // 🆕 使用预设能力数据库自动识别模型能力
-        final presetCapabilities = ModelCapabilityPresets.getCapabilities(
-          modelId,
-        );
-
-        final newModel = ModelConfig(
-          id: widget.serviceManager.generateId(),
-          providerId: provider.id,
+        final newModel = await widget.serviceManager.buildSuggestedModel(
+          provider: provider,
           modelName: modelId,
-          displayName: modelId,
-          capabilities: presetCapabilities,
+          modelId: widget.serviceManager.generateId(),
         );
 
         await widget.serviceManager.addModel(newModel);
@@ -717,49 +682,44 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                     Wrap(
                       spacing: spacing.sm,
                       runSpacing: spacing.xs,
-                      children: model.capabilities
-                          .where((cap) => cap != ModelCapability.text)
-                          .map((cap) {
-                            return Tooltip(
-                              message: cap.displayName,
-                              child: Container(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: spacing.sm,
-                                  vertical: spacing.xs,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: cap.color.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(
-                                    context.owuiRadius.rLg / 2,
-                                  ),
-                                  border: Border.all(
-                                    color: cap.color.withValues(alpha: 0.3),
-                                    width: 0.5,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(cap.icon, size: 14, color: cap.color),
-                                    SizedBox(width: spacing.xs),
-                                    Text(
-                                      cap.displayName,
-                                      style:
-                                          (Theme.of(
-                                                    context,
-                                                  ).textTheme.bodySmall ??
-                                                  const TextStyle())
-                                              .copyWith(
-                                                color: cap.color,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                    ),
-                                  ],
-                                ),
+                      children: model.capabilities.map((cap) {
+                        return Tooltip(
+                          message: cap.displayName,
+                          child: Container(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: spacing.sm,
+                              vertical: spacing.xs,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cap.color.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(
+                                context.owuiRadius.rLg / 2,
                               ),
-                            );
-                          })
-                          .toList(),
+                              border: Border.all(
+                                color: cap.color.withValues(alpha: 0.3),
+                                width: 0.5,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(cap.icon, size: 14, color: cap.color),
+                                SizedBox(width: spacing.xs),
+                                Text(
+                                  cap.displayName,
+                                  style:
+                                      (Theme.of(context).textTheme.bodySmall ??
+                                              const TextStyle())
+                                          .copyWith(
+                                            color: cap.color,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
                     ),
                   ],
                 ),

@@ -309,9 +309,7 @@ mixin _ConversationViewV2StreamingMixin on _ConversationViewV2StateBase {
       if (provider is HybridLangChainProvider &&
           _conversationSettings.enableTools &&
           globalMcpClientService.hasConnectedServer) {
-        final supportsTools = modelWithProvider.model.hasCapability(
-          ModelCapability.tool,
-        );
+        final supportsTools = modelWithProvider.model.supportsFunctionCalling;
         if (supportsTools) {
           final mcpAdapter = McpToolAdapter(globalMcpClientService);
           provider.setMcpAdapter(mcpAdapter, supportsTools: true);

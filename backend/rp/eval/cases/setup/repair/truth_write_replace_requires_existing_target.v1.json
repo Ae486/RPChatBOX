@@ -1,0 +1,82 @@
+{
+  "case_id": "setup.repair.truth_write_replace_requires_existing_target.v1",
+  "title": "Truth write replace should require an existing foundation target",
+  "scope": "setup",
+  "category": "repair",
+  "tags": ["mvp", "deterministic", "setup-v2", "cognitive-runtime"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-truth-write-replace-missing-001",
+      "target_step": "foundation",
+      "user_prompt": "Replace the missing foundation entry if it already exists.",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-truth-write-replace-missing-001",
+      "mode": "longform",
+      "current_step": "foundation"
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_awaiting_user_input",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "awaiting_user_input",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "repair_route_is_continue_discussion",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "structured_payload.repair_route",
+        "expected": "continue_discussion",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "warning_marks_continue_discussion",
+        "source": "runtime_result",
+        "type": "contains",
+        "path": "warnings",
+        "expected": "tool_failure_continue_discussion",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "foundation_entry_not_created",
+        "source": "workspace_truth",
+        "type": "exists",
+        "path": "foundation_draft.entries[0]",
+        "expected": false,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

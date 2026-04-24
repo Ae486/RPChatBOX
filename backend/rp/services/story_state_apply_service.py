@@ -1,4 +1,4 @@
-"""Apply specialist patch proposals into StorySession.current_state_json."""
+"""Apply specialist patch proposals into the authoritative state map."""
 
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ class StoryStateApplyService:
     def apply(
         self,
         *,
-        current_state_json: dict[str, Any],
+        state_map: dict[str, Any],
         patch: dict[str, Any],
     ) -> dict[str, Any]:
-        merged = dict(current_state_json)
+        merged = dict(state_map)
         for key, value in patch.items():
             if key not in self._ALLOWED_KEYS:
                 continue

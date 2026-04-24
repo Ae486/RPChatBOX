@@ -46,7 +46,7 @@ class HybridLangChainProvider extends AIProvider {
 
   /// 设置 MCP 工具适配器
   /// [adapter] MCP 适配器实例
-  /// [supportsTools] 当前模型是否支持工具调用（基于 ModelCapability.tool）
+  /// [supportsTools] 当前模型是否支持工具调用（优先基于 LiteLLM capability profile）
   void setMcpAdapter(McpToolAdapter? adapter, {bool supportsTools = false}) {
     _mcpAdapter = adapter;
     modelSupportsTools = supportsTools;

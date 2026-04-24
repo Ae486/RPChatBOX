@@ -58,6 +58,10 @@ class RuntimeStoryConfigSeed(BaseModel):
     model_profile_ref: str | None = None
     worker_profile_ref: str | None = None
     post_write_policy_preset: str | None = None
+    retrieval_embedding_model_id: str | None = None
+    retrieval_embedding_provider_id: str | None = None
+    retrieval_rerank_model_id: str | None = None
+    retrieval_rerank_provider_id: str | None = None
 
 
 class WriterContractSeed(BaseModel):
@@ -98,4 +102,3 @@ class ActivationCheckResult(BaseModel):
     blocking_issues: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     handoff: ActivationHandoff | None = None
-

@@ -1,0 +1,156 @@
+{
+  "case_id": "activation.bootstrap.ready_workspace_activation.v1",
+  "title": "Ready workspace should activate into a story session",
+  "scope": "activation",
+  "category": "session_created",
+  "tags": ["mvp", "deterministic", "activation"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "activation_graph_runner.activate_workspace",
+    "graph_id": "activation_v1",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-activation-001"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-activation-001",
+      "mode": "longform",
+      "current_step": "longform_blueprint",
+      "drafts": {
+        "story_config": {
+          "model_profile_ref": "model.default",
+          "worker_profile_ref": "worker.default",
+          "post_write_policy_preset": "balanced"
+        },
+        "writing_contract": {
+          "pov_rules": ["third_person_limited"],
+          "style_rules": ["restrained"],
+          "writing_constraints": ["avoid exposition dumps"]
+        },
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "foundation_char_1",
+              "domain": "character",
+              "path": "cast.courier",
+              "title": "Courier",
+              "tags": ["protagonist"],
+              "source_refs": [],
+              "content": {
+                "summary": "The courier remembers every lock pattern after one glance."
+              }
+            }
+          ]
+        },
+        "longform_blueprint": {
+          "premise": "A courier discovers the city archive is a prison key registry.",
+          "central_conflict": "The courier must expose the registry before the purge.",
+          "chapter_blueprints": [
+            {
+              "chapter_id": "ch1",
+              "title": "The Ledger",
+              "purpose": "Reveal the first key.",
+              "major_beats": ["Discovery", "Escape"],
+              "setup_payoff_targets": ["archive key"]
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "story_config",
+          "target_draft_refs": ["draft:story_config"],
+          "reason": "freeze story_config"
+        },
+        {
+          "step_id": "writing_contract",
+          "target_draft_refs": ["draft:writing_contract"],
+          "reason": "freeze writing_contract"
+        },
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:foundation_char_1"],
+          "reason": "freeze foundation"
+        },
+        {
+          "step_id": "longform_blueprint",
+          "target_draft_refs": ["draft:longform_blueprint"],
+          "reason": "freeze blueprint"
+        }
+      ]
+    },
+    "env_overrides": {
+      "run_pending_retrieval_ingestion_for_all_commits": true
+    }
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_activation_completed",
+        "source": "activation_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "activation_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "activation_ready_true",
+        "source": "activation_result",
+        "type": "equals",
+        "path": "activation_check.ready",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "session_created",
+        "source": "activation_result",
+        "type": "exists",
+        "path": "activation_result.session_id",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "session_is_active",
+        "source": "session_truth",
+        "type": "equals",
+        "path": "session.session_state",
+        "expected": "active",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "chapter_exists",
+        "source": "session_truth",
+        "type": "exists",
+        "path": "chapter.chapter_workspace_id",
+        "expected": true,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": [
+      {
+        "hook_id": "activation_handoff_quality",
+        "judge_family": "llm_judge",
+        "rubric_ref": "activation/handoff-quality/v1",
+        "target": "activation_handoff"
+      }
+    ]
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

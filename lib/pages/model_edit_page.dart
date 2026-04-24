@@ -1,7 +1,3 @@
-/// INPUT: ModelConfig + ModelServiceManager
-/// OUTPUT: ModelEditPage - 编辑模型能力/参数（capabilities presets 等）
-/// POS: UI 层 / Pages - 模型编辑页
-
 import 'package:flutter/material.dart';
 
 import '../chat_ui/owui/components/owui_app_bar.dart';
@@ -9,7 +5,6 @@ import '../chat_ui/owui/components/owui_card.dart';
 import '../chat_ui/owui/components/owui_scaffold.dart';
 import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
-import '../data/model_capability_presets.dart';
 import '../models/model_config.dart';
 import '../services/model_service_manager.dart';
 import '../utils/global_toast.dart';
@@ -32,19 +27,22 @@ class ModelEditPage extends StatefulWidget {
 
 class _ModelEditPageState extends State<ModelEditPage> {
   late Set<ModelCapability> _selectedCapabilities;
-  late Set<ModelCapability> _presetCapabilities;
+  String? _editedCapabilitySource;
+  ModelCapabilityProfile? _editedCapabilityProfile;
+  bool _manualOverrideEnabled = false;
   bool _hasModifications = false;
 
   @override
   void initState() {
     super.initState();
     _selectedCapabilities = Set.from(widget.model.capabilities);
-    _presetCapabilities = ModelCapabilityPresets.getCapabilities(
-      widget.model.modelName,
-    );
+    _editedCapabilitySource = widget.model.capabilitySource;
+    _editedCapabilityProfile = widget.model.capabilityProfile;
+    _manualOverrideEnabled = widget.model.capabilitySource == 'user_declared';
   }
 
   void _toggleCapability(ModelCapability capability) {
+    if (!_manualOverrideEnabled) return;
     setState(() {
       if (_selectedCapabilities.contains(capability)) {
         _selectedCapabilities.remove(capability);
@@ -53,15 +51,55 @@ class _ModelEditPageState extends State<ModelEditPage> {
         _selectedCapabilities.add(capability);
         _hasModifications = true;
       }
-
-      // 🔧 确保始终包含文本能力（不显示但必须有）
-      _selectedCapabilities.add(ModelCapability.text);
     });
+  }
+
+  void _enableManualOverride() {
+    setState(() {
+      _manualOverrideEnabled = true;
+      _editedCapabilitySource = 'user_declared';
+      _editedCapabilityProfile = null;
+      _hasModifications = true;
+    });
+  }
+
+  Future<void> _restoreTemplate() async {
+    final provider = widget.serviceManager.getProvider(widget.model.providerId);
+    if (provider == null) {
+      GlobalToast.showError(context, 'Provider 不存在，无法恢复模板能力');
+      return;
+    }
+
+    try {
+      final suggested = await widget.serviceManager.buildSuggestedModel(
+        provider: provider,
+        modelName: widget.model.modelName,
+        modelId: widget.model.id,
+      );
+      setState(() {
+        _selectedCapabilities = Set<ModelCapability>.from(
+          suggested.capabilities,
+        );
+        _editedCapabilitySource = suggested.capabilitySource;
+        _editedCapabilityProfile = suggested.capabilityProfile;
+        _manualOverrideEnabled = false;
+        _hasModifications = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      GlobalToast.showError(context, '恢复模板能力失败: $e');
+    }
   }
 
   Future<void> _save() async {
     final updatedModel = widget.model.copyWith(
       capabilities: _selectedCapabilities,
+      capabilitySource: _manualOverrideEnabled
+          ? 'user_declared'
+          : _editedCapabilitySource,
+      capabilityProfile: _manualOverrideEnabled
+          ? null
+          : _editedCapabilityProfile,
     );
 
     await widget.serviceManager.updateModel(updatedModel);
@@ -106,34 +144,71 @@ class _ModelEditPageState extends State<ModelEditPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!ModelCapabilityPresets.isKnownModel(
-                  widget.model.modelName,
-                ))
+                if (_effectiveCapabilityProfile != null) ...[
+                  _buildNativeCapabilitySummary(_effectiveCapabilityProfile!),
+                  SizedBox(height: spacing.lg),
+                ],
+                if ((_effectiveCapabilityProfile?.known ?? false) == false)
                   _UnknownModelCallout(),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '兼容标签 Override',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                    ),
+                    if (!_manualOverrideEnabled)
+                      OutlinedButton(
+                        onPressed: _enableManualOverride,
+                        child: const Text('启用 Override'),
+                      ),
+                    if (_manualOverrideEnabled)
+                      OutlinedButton(
+                        onPressed: _restoreTemplate,
+                        child: const Text('恢复模板'),
+                      ),
+                  ],
+                ),
+                SizedBox(height: spacing.sm),
+                if (_manualOverrideEnabled)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: spacing.sm),
+                    child: Text(
+                      '当前为手工 override 模式。保存后将以 user_declared 写入，覆盖模板能力。',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: EdgeInsets.only(bottom: spacing.sm),
+                    child: Text(
+                      '默认使用 LiteLLM 模板能力；只有启用 Override 后，下面的兼容标签才会生效。',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ),
                 Wrap(
                   spacing: spacing.md,
                   runSpacing: spacing.md,
-                  children: ModelCapability.values
-                      .where((cap) => cap != ModelCapability.text)
-                      .map((capability) {
+                  children: ModelCapability.values.map((capability) {
                         final isSelected = _selectedCapabilities.contains(
-                          capability,
-                        );
-                        final isPreset = _presetCapabilities.contains(
                           capability,
                         );
 
                         return _buildCapabilityChip(
                           capability: capability,
                           isSelected: isSelected,
-                          isPreset: isPreset,
+                          enabled: _manualOverrideEnabled,
                         );
-                      })
-                      .toList(),
+                      }).toList(),
                 ),
                 SizedBox(height: spacing.lg),
                 Text(
-                  '请慎重更改模型类型，选择错误的类型会导致模型无法正常使用！',
+                  '上方原生能力来自 LiteLLM 模板；下方兼容标签仅用于当前项目过渡期兼容。',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
@@ -141,6 +216,97 @@ class _ModelEditPageState extends State<ModelEditPage> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  ModelCapabilityProfile? get _effectiveCapabilityProfile =>
+      _editedCapabilityProfile ?? widget.model.capabilityProfile;
+
+  Widget _buildNativeCapabilitySummary(ModelCapabilityProfile profile) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final rows = <String>[
+      '来源: ${profile.capabilitySource}',
+      if (profile.mode != null) '模式: ${profile.mode}',
+      '模板命中: ${profile.known ? '是' : '否'}',
+      '传输 Provider: ${profile.transportProviderType ?? 'unknown'}',
+      if (profile.semanticProviderType != null)
+        '语义 Provider: ${profile.semanticProviderType}',
+      if (profile.semanticLookupModel != null)
+        '模板键: ${profile.semanticLookupModel}',
+      if (profile.maxInputTokens != null)
+        'Max Input: ${profile.maxInputTokens}',
+      if (profile.maxOutputTokens != null)
+        'Max Output: ${profile.maxOutputTokens}',
+    ];
+    final nativeFlags = <String>[
+      if (profile.supportsFunctionCalling == true) 'supports_function_calling',
+      if (profile.supportsToolChoice == true) 'supports_tool_choice',
+      if (profile.supportsResponseSchema == true) 'supports_response_schema',
+      if (profile.supportsReasoning == true) 'supports_reasoning',
+      if (profile.supportsVision == true) 'supports_vision',
+      if (profile.supportsPdfInput == true) 'supports_pdf_input',
+      if (profile.supportsWebSearch == true) 'supports_web_search',
+      if (profile.supportsAudioInput == true) 'supports_audio_input',
+      if (profile.supportsAudioOutput == true) 'supports_audio_output',
+      if (profile.supportsSystemMessages == true) 'supports_system_messages',
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('LiteLLM 原生能力', style: Theme.of(context).textTheme.labelLarge),
+          SizedBox(height: spacing.sm),
+          ...rows.map(
+            (row) => Padding(
+              padding: EdgeInsets.only(bottom: spacing.xs),
+              child: Text(
+                row,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+            ),
+          ),
+          if (nativeFlags.isNotEmpty) ...[
+            SizedBox(height: spacing.sm),
+            Wrap(
+              spacing: spacing.sm,
+              runSpacing: spacing.sm,
+              children: nativeFlags
+                  .map(
+                    (flag) => Chip(
+                      label: Text(flag),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+          if (profile.supportedOpenaiParams.isNotEmpty) ...[
+            SizedBox(height: spacing.sm),
+            Text(
+              'Supported OpenAI Params',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+            SizedBox(height: spacing.xs),
+            Text(
+              profile.supportedOpenaiParams.join(', '),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+          ],
         ],
       ),
     );
@@ -194,7 +360,7 @@ class _ModelEditPageState extends State<ModelEditPage> {
   Widget _buildCapabilityChip({
     required ModelCapability capability,
     required bool isSelected,
-    required bool isPreset,
+    required bool enabled,
   }) {
     final colors = context.owuiColors;
     final spacing = context.owuiSpacing;
@@ -204,15 +370,14 @@ class _ModelEditPageState extends State<ModelEditPage> {
     final borderColor = isSelected
         ? capability.color.withValues(alpha: 0.55)
         : colors.borderSubtle;
-
-    final chipBg = isPreset ? colors.surface2 : colors.surfaceCard;
+    final chipBg = enabled ? colors.surfaceCard : colors.surface2;
 
     final iconSize = 20 * context.owui.uiScale;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => _toggleCapability(capability),
+        onTap: enabled ? () => _toggleCapability(capability) : null,
         borderRadius: BorderRadius.circular(radius.rXl),
         child: Container(
           padding: EdgeInsets.symmetric(
@@ -269,7 +434,7 @@ class _UnknownModelCallout extends StatelessWidget {
           SizedBox(width: spacing.md),
           Expanded(
             child: Text(
-              '未识别的模型，请根据实际情况手动配置能力',
+              'LiteLLM 模板未命中该模型，或当前正在使用手工 override。请谨慎维护兼容标签。',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

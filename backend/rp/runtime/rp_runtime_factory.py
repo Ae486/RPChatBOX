@@ -13,23 +13,46 @@ from rp.graphs.setup_graph_nodes import SetupGraphNodes
 from rp.graphs.setup_graph_runner import SetupGraphRunner
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.graphs.story_graph_runner import StoryGraphRunner
+from rp.services.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
+from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
 from rp.services.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.longform_specialist_service import LongformSpecialistService
+from rp.services.builder_projection_context_service import BuilderProjectionContextService
+from rp.services.chapter_workspace_projection_adapter import ChapterWorkspaceProjectionAdapter
+from rp.services.core_state_dual_write_service import CoreStateDualWriteService
+from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
 from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
+from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.memory_os_service import MemoryOsService
 from rp.services.minimal_retrieval_ingestion_service import MinimalRetrievalIngestionService
+from rp.services.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.projection_compatibility_mirror_service import (
+    ProjectionCompatibilityMirrorService,
+)
+from rp.services.projection_state_service import ProjectionStateService
+from rp.services.projection_refresh_service import ProjectionRefreshService
+from rp.services.provenance_read_service import ProvenanceReadService
+from rp.services.proposal_apply_service import ProposalApplyService
+from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal_workflow_service import ProposalWorkflowService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.setup_agent_execution_service import SetupAgentExecutionService
+from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
 from rp.services.setup_runtime_controller import SetupRuntimeController
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.services.story_activation_service import StoryActivationService
 from rp.services.story_runtime_controller import StoryRuntimeController
+from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.version_history_read_service import VersionHistoryReadService
 from rp.services.writing_packet_builder import WritingPacketBuilder
 from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
@@ -52,6 +75,9 @@ class RpRuntimeFactory:
         workspace_service: SetupWorkspaceService,
     ) -> SetupContextBuilder:
         return SetupContextBuilder(workspace_service)
+
+    def _build_setup_runtime_state_service(self) -> SetupAgentRuntimeStateService:
+        return SetupAgentRuntimeStateService(self._session)
 
     def _build_setup_runtime_controller(
         self,
@@ -80,6 +106,7 @@ class RpRuntimeFactory:
         context_builder = self._build_setup_context_builder(
             workspace_service=workspace_service
         )
+        runtime_state_service = self._build_setup_runtime_state_service()
         registry = LocalToolProviderRegistry()
         registry.register(
             MemoryCrudToolProvider(
@@ -95,6 +122,7 @@ class RpRuntimeFactory:
             SetupToolProvider(
                 workspace_service=workspace_service,
                 context_builder=context_builder,
+                runtime_state_service=runtime_state_service,
             )
         )
         return McpManager(
@@ -116,11 +144,53 @@ class RpRuntimeFactory:
     def _use_setup_runtime_v2() -> bool:
         return bool(get_settings().rp_setup_agent_runtime_v2_enabled)
 
+    @staticmethod
+    def _use_core_state_store_write() -> bool:
+        return bool(get_settings().rp_memory_core_state_store_write_enabled)
+
+    @staticmethod
+    def _use_core_state_store_read() -> bool:
+        return bool(get_settings().rp_memory_core_state_store_read_enabled)
+
+    @classmethod
+    def _use_core_state_store_write_switch(cls) -> bool:
+        settings = get_settings()
+        return bool(
+            settings.rp_memory_core_state_store_write_enabled
+            and settings.rp_memory_core_state_store_write_switch_enabled
+        )
+
+    def _build_core_state_dual_write_service(self) -> CoreStateDualWriteService | None:
+        if not self._use_core_state_store_write():
+            return None
+        return CoreStateDualWriteService(
+            repository=CoreStateStoreRepository(self._session)
+        )
+
+    @staticmethod
+    def _build_authoritative_compatibility_mirror_service(
+        *,
+        story_session_service: StorySessionService,
+    ) -> AuthoritativeCompatibilityMirrorService:
+        return AuthoritativeCompatibilityMirrorService(
+            story_session_service=story_session_service
+        )
+
+    @staticmethod
+    def _build_projection_compatibility_mirror_service(
+        *,
+        story_session_service: StorySessionService,
+    ) -> ProjectionCompatibilityMirrorService:
+        return ProjectionCompatibilityMirrorService(
+            story_session_service=story_session_service
+        )
+
     def build_setup_agent_execution_service(self) -> SetupAgentExecutionService:
         workspace_service = self._build_setup_workspace_service()
         context_builder = self._build_setup_context_builder(
             workspace_service=workspace_service
         )
+        runtime_state_service = self._build_setup_runtime_state_service()
         runtime_executor = self._build_setup_runtime_executor() if self._use_setup_runtime_v2() else None
         adapter = SetupRuntimeAdapter() if runtime_executor is not None else None
         return SetupAgentExecutionService(
@@ -128,6 +198,7 @@ class RpRuntimeFactory:
             context_builder=context_builder,
             runtime_executor=runtime_executor,
             adapter=adapter,
+            runtime_state_service=runtime_state_service,
             mcp_manager_factory=lambda story_id: self._build_setup_mcp_manager(
                 story_id=story_id
             ),
@@ -138,6 +209,7 @@ class RpRuntimeFactory:
         context_builder = self._build_setup_context_builder(
             workspace_service=workspace_service
         )
+        runtime_state_service = self._build_setup_runtime_state_service()
         runtime_executor = self._build_setup_runtime_executor() if self._use_setup_runtime_v2() else None
         adapter = SetupRuntimeAdapter() if runtime_executor is not None else None
         execution_service = SetupAgentExecutionService(
@@ -145,6 +217,7 @@ class RpRuntimeFactory:
             context_builder=context_builder,
             runtime_executor=runtime_executor,
             adapter=adapter,
+            runtime_state_service=runtime_state_service,
             mcp_manager_factory=lambda story_id: self._build_setup_mcp_manager(
                 story_id=story_id
             ),
@@ -178,21 +251,78 @@ class RpRuntimeFactory:
 
     def build_story_turn_domain_service(self) -> StoryTurnDomainService:
         story_session_service = StorySessionService(self._session)
-        orchestrator_service = LongformOrchestratorService()
-        specialist_service = LongformSpecialistService()
+        authoritative_mirror_service = self._build_authoritative_compatibility_mirror_service(
+            story_session_service=story_session_service
+        )
+        projection_mirror_service = self._build_projection_compatibility_mirror_service(
+            story_session_service=story_session_service
+        )
+        core_state_dual_write_service = self._build_core_state_dual_write_service()
+        core_state_store_repository = CoreStateStoreRepository(self._session)
+        store_read_enabled = self._use_core_state_store_read()
+        store_write_switch_enabled = self._use_core_state_store_write_switch()
+        authoritative_state_view_service = AuthoritativeStateViewService(
+            adapter=StorySessionCoreStateAdapter(story_session_service),
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+        )
+        projection_state_service = ProjectionStateService(
+            story_session_service=story_session_service,
+            adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
+            core_state_dual_write_service=core_state_dual_write_service,
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+            core_state_store_write_switch_enabled=store_write_switch_enabled,
+            projection_compatibility_mirror_service=projection_mirror_service,
+        )
+        orchestrator_service = LongformOrchestratorService(
+            authoritative_state_view_service=authoritative_state_view_service,
+            projection_state_service=projection_state_service,
+        )
+        specialist_service = LongformSpecialistService(
+            authoritative_state_view_service=authoritative_state_view_service,
+            projection_state_service=projection_state_service,
+        )
+        proposal_repository = ProposalRepository(self._session)
+        proposal_apply_service = ProposalApplyService(
+            story_session_service=story_session_service,
+            proposal_repository=proposal_repository,
+            story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=core_state_dual_write_service,
+            core_state_store_write_switch_enabled=store_write_switch_enabled,
+            authoritative_compatibility_mirror_service=authoritative_mirror_service,
+        )
+        proposal_workflow_service = ProposalWorkflowService(
+            proposal_repository=proposal_repository,
+            proposal_apply_service=proposal_apply_service,
+            post_write_apply_handler=PostWriteApplyHandler(),
+        )
+        projection_refresh_service = ProjectionRefreshService(
+            story_session_service,
+            core_state_dual_write_service=core_state_dual_write_service,
+            core_state_store_write_switch_enabled=store_write_switch_enabled,
+            projection_compatibility_mirror_service=projection_mirror_service,
+        )
         regression_service = LongformRegressionService(
             story_session_service=story_session_service,
             orchestrator_service=orchestrator_service,
             specialist_service=specialist_service,
-            story_state_apply_service=StoryStateApplyService(),
+            proposal_workflow_service=proposal_workflow_service,
+            legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
+            projection_refresh_service=projection_refresh_service,
             recall_summary_ingestion_service=RecallSummaryIngestionService(self._session),
         )
         writing_packet_builder = WritingPacketBuilder()
+        builder_projection_context_service = BuilderProjectionContextService(
+            projection_state_service
+        )
         writing_worker_execution_service = WritingWorkerExecutionService()
         turn_domain_service = StoryTurnDomainService(
             story_session_service=story_session_service,
             orchestrator_service=orchestrator_service,
             specialist_service=specialist_service,
+            builder_projection_context_service=builder_projection_context_service,
+            projection_state_service=projection_state_service,
             writing_packet_builder=writing_packet_builder,
             writing_worker_execution_service=writing_worker_execution_service,
             regression_service=regression_service,
@@ -212,15 +342,58 @@ class RpRuntimeFactory:
             setup_controller=setup_controller,
             workspace_service=workspace_service,
             story_session_service=StorySessionService(self._session),
+            core_state_dual_write_service=self._build_core_state_dual_write_service(),
         )
         return story_activation_service
 
     def build_story_runtime_controller(self) -> StoryRuntimeController:
         story_session_service = StorySessionService(self._session)
         story_activation_service = self._build_story_activation_service()
+        proposal_repository = ProposalRepository(self._session)
+        core_state_adapter = StorySessionCoreStateAdapter(story_session_service)
+        projection_mirror_service = self._build_projection_compatibility_mirror_service(
+            story_session_service=story_session_service
+        )
+        core_state_store_repository = CoreStateStoreRepository(self._session)
+        store_read_enabled = self._use_core_state_store_read()
+        store_write_switch_enabled = self._use_core_state_store_write_switch()
+        projection_state_service = ProjectionStateService(
+            story_session_service=story_session_service,
+            adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
+            core_state_dual_write_service=self._build_core_state_dual_write_service(),
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+            core_state_store_write_switch_enabled=store_write_switch_enabled,
+            projection_compatibility_mirror_service=projection_mirror_service,
+        )
+        version_history_read_service = VersionHistoryReadService(
+            adapter=core_state_adapter,
+            proposal_repository=proposal_repository,
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+        )
+        provenance_read_service = ProvenanceReadService(
+            adapter=core_state_adapter,
+            proposal_repository=proposal_repository,
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+        )
+        memory_inspection_read_service = MemoryInspectionReadService(
+            story_session_service=story_session_service,
+            builder_projection_context_service=BuilderProjectionContextService(
+                projection_state_service
+            ),
+            proposal_repository=proposal_repository,
+            version_history_read_service=version_history_read_service,
+            core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+        )
         return StoryRuntimeController(
             story_session_service=story_session_service,
             story_activation_service=story_activation_service,
+            version_history_read_service=version_history_read_service,
+            provenance_read_service=provenance_read_service,
+            memory_inspection_read_service=memory_inspection_read_service,
         )
 
     def build_story_graph_runner(self) -> StoryGraphRunner:

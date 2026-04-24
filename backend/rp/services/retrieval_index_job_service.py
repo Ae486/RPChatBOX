@@ -78,8 +78,21 @@ class RetrievalIndexJobService:
         record = self._session.get(IndexJobRecord, job_id)
         return self._record_to_model(record) if record is not None else None
 
-    def list_story_jobs(self, story_id: str) -> list[IndexJob]:
+    def list_story_jobs(
+        self,
+        story_id: str,
+        *,
+        job_state: str | None = None,
+        collection_id: str | None = None,
+        asset_id: str | None = None,
+    ) -> list[IndexJob]:
         stmt = select(IndexJobRecord).where(IndexJobRecord.story_id == story_id)
+        if job_state is not None:
+            stmt = stmt.where(IndexJobRecord.job_state == job_state)
+        if collection_id is not None:
+            stmt = stmt.where(IndexJobRecord.collection_id == collection_id)
+        if asset_id is not None:
+            stmt = stmt.where(IndexJobRecord.asset_id == asset_id)
         return [self._record_to_model(record) for record in self._session.exec(stmt).all()]
 
     def update_job_state(
@@ -96,7 +109,8 @@ class RetrievalIndexJobService:
         if record is None:
             raise ValueError(f"IndexJob not found: {job_id}")
         record.job_state = state
-        record.warnings_json = list(warnings or [])
+        if warnings is not None:
+            record.warnings_json = list(warnings)
         record.error_message = error_message
         record.updated_at = _utcnow()
         if started_at is not None:

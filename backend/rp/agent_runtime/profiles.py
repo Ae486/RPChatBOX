@@ -13,6 +13,9 @@ SETUP_READ_ONLY_MEMORY_TOOLS: tuple[str, ...] = (
 )
 
 SETUP_PRIVATE_TOOLS: tuple[str, ...] = (
+    "setup.discussion.update_state",
+    "setup.chunk.upsert",
+    "setup.truth.write",
     "setup.patch.story_config",
     "setup.patch.writing_contract",
     "setup.patch.foundation_entry",
@@ -42,4 +45,3 @@ def build_setup_agent_profile() -> RuntimeProfile:
         recovery_policy="setup_agent_v1",
         finish_policy="assistant_text_or_failure",
     )
-

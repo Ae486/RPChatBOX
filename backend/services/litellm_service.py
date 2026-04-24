@@ -6,6 +6,7 @@ from typing import AsyncIterator
 from collections.abc import Mapping, Sequence
 
 import litellm
+import httpx
 
 from config import get_settings
 from models.chat import ChatCompletionRequest, ProviderConfig
@@ -24,9 +25,16 @@ class LiteLLMService:
         "gemini": "gemini",
         "claude": "anthropic",
     }
+    _KNOWN_MODEL_PREFIXES = {
+        "openai",
+        "anthropic",
+        "deepseek",
+        "gemini",
+        "text-completion-openai",
+    }
 
     # Endpoint paths that LiteLLM appends automatically
-    _ENDPOINT_SUFFIXES = ["/chat/completions", "/completions", "/messages", "/embeddings"]
+    _ENDPOINT_SUFFIXES = ["/chat/completions", "/completions", "/messages", "/embeddings", "/rerank"]
 
     def __init__(self):
         self.settings = get_settings()
@@ -40,7 +48,9 @@ class LiteLLMService:
     def _get_litellm_model(self, provider: ProviderConfig, model: str) -> str:
         """Convert model name to LiteLLM format: provider/model."""
         if "/" in model:
-            return model
+            first_segment = model.split("/", 1)[0].strip().lower()
+            if first_segment in self._KNOWN_MODEL_PREFIXES:
+                return model
         prefix = self.PROVIDER_PREFIX.get(provider.type, "openai")
         return f"{prefix}/{model}"
 
@@ -146,6 +156,8 @@ class LiteLLMService:
         provider: ProviderConfig,
         model: str,
         input_texts: list[str] | str,
+        encoding_format: str | None = None,
+        dimensions: int | None = None,
     ) -> dict:
         """Build kwargs for LiteLLM embedding requests."""
         kwargs = {
@@ -154,6 +166,10 @@ class LiteLLMService:
             "api_key": provider.api_key,
             "timeout": self.settings.llm_request_timeout,
         }
+        if encoding_format is not None:
+            kwargs["encoding_format"] = encoding_format
+        if dimensions is not None:
+            kwargs["dimensions"] = dimensions
         api_base = self._get_api_base(provider)
         if api_base:
             kwargs["api_base"] = api_base
@@ -161,19 +177,148 @@ class LiteLLMService:
             kwargs["extra_headers"] = provider.custom_headers
         return kwargs
 
+    def _build_direct_embedding_kwargs(
+        self,
+        *,
+        provider: ProviderConfig,
+        model: str,
+        input_texts: list[str] | str,
+        encoding_format: str | None = None,
+        dimensions: int | None = None,
+    ) -> tuple[str, dict[str, str], dict]:
+        api_base = self._get_api_base(provider)
+        if not api_base:
+            raise ValueError("Provider api_url is required for embeddings")
+        url = f"{api_base.rstrip('/')}/embeddings"
+        headers = {"Authorization": f"Bearer {provider.api_key}"}
+        headers.update(provider.custom_headers)
+        payload: dict[str, object] = {
+            "model": model,
+            "input": input_texts,
+            "encoding_format": encoding_format or "float",
+        }
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        return url, headers, payload
+
     def embedding(
         self,
         *,
         provider: ProviderConfig,
         model: str,
         input_texts: list[str] | str,
+        encoding_format: str | None = None,
+        dimensions: int | None = None,
     ) -> dict:
         """Handle synchronous embedding calls via LiteLLM."""
+        if provider.type == "openai":
+            url, headers, payload = self._build_direct_embedding_kwargs(
+                provider=provider,
+                model=model,
+                input_texts=input_texts,
+                encoding_format=encoding_format,
+                dimensions=dimensions,
+            )
+            with httpx.Client(timeout=self.settings.llm_request_timeout, proxy=None) as client:
+                response = client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                return response.json()
+
         response = litellm.embedding(
             **self.build_embedding_kwargs(
                 provider=provider,
                 model=model,
                 input_texts=input_texts,
+                encoding_format=encoding_format,
+                dimensions=dimensions,
+            )
+        )
+        return response.model_dump() if hasattr(response, "model_dump") else dict(response)
+
+    def build_rerank_kwargs(
+        self,
+        *,
+        provider: ProviderConfig,
+        model: str,
+        query: str,
+        documents: list[str],
+        top_n: int | None = None,
+    ) -> dict:
+        """Build kwargs for LiteLLM rerank requests."""
+        kwargs = {
+            "model": model,
+            "query": query,
+            "documents": documents,
+            "api_key": provider.api_key,
+            "timeout": self.settings.llm_request_timeout,
+            "return_documents": False,
+        }
+        api_base = self._get_api_base(provider)
+        if api_base:
+            kwargs["api_base"] = api_base
+        if provider.custom_headers:
+            kwargs["extra_headers"] = provider.custom_headers
+        if provider.type:
+            kwargs["custom_llm_provider"] = provider.type
+        if top_n is not None:
+            kwargs["top_n"] = top_n
+        return kwargs
+
+    def _build_direct_rerank_kwargs(
+        self,
+        *,
+        provider: ProviderConfig,
+        model: str,
+        query: str,
+        documents: list[str],
+        top_n: int | None = None,
+    ) -> tuple[str, dict[str, str], dict]:
+        api_base = self._get_api_base(provider)
+        if not api_base:
+            raise ValueError("Provider api_url is required for rerank")
+        url = f"{api_base.rstrip('/')}/rerank"
+        headers = {"Authorization": f"Bearer {provider.api_key}"}
+        headers.update(provider.custom_headers)
+        payload: dict[str, object] = {
+            "model": model,
+            "query": query,
+            "documents": documents,
+            "return_documents": False,
+        }
+        if top_n is not None:
+            payload["top_n"] = top_n
+        return url, headers, payload
+
+    def rerank(
+        self,
+        *,
+        provider: ProviderConfig,
+        model: str,
+        query: str,
+        documents: list[str],
+        top_n: int | None = None,
+    ) -> dict:
+        """Handle synchronous rerank calls via LiteLLM."""
+        if provider.type == "openai":
+            url, headers, payload = self._build_direct_rerank_kwargs(
+                provider=provider,
+                model=model,
+                query=query,
+                documents=documents,
+                top_n=top_n,
+            )
+            with httpx.Client(timeout=self.settings.llm_request_timeout, proxy=None) as client:
+                response = client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                return response.json()
+
+        response = litellm.rerank(
+            **self.build_rerank_kwargs(
+                provider=provider,
+                model=model,
+                query=query,
+                documents=documents,
+                top_n=top_n,
             )
         )
         return response.model_dump() if hasattr(response, "model_dump") else dict(response)

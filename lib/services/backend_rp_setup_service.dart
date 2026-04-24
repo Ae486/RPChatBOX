@@ -26,7 +26,9 @@ class BackendRpSetupService {
     final items = payload['data'] as List? ?? const [];
     return items
         .whereType<Map>()
-        .map((item) => RpSetupWorkspace.fromJson(Map<String, dynamic>.from(item)))
+        .map(
+          (item) => RpSetupWorkspace.fromJson(Map<String, dynamic>.from(item)),
+        )
         .toList();
   }
 
@@ -39,7 +41,9 @@ class BackendRpSetupService {
       data: {'story_id': storyId, 'mode': mode},
     );
     _ensureSuccess(response, action: 'create setup workspace');
-    return RpSetupWorkspace.fromJson(Map<String, dynamic>.from(response.data as Map));
+    return RpSetupWorkspace.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
   }
 
   Future<RpSetupWorkspace> getWorkspace(String workspaceId) async {
@@ -47,7 +51,20 @@ class BackendRpSetupService {
       '$_baseUrl/api/rp/setup/workspaces/$workspaceId',
     );
     _ensureSuccess(response, action: 'get setup workspace');
-    return RpSetupWorkspace.fromJson(Map<String, dynamic>.from(response.data as Map));
+    return RpSetupWorkspace.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<void> patchStoryConfig({
+    required String workspaceId,
+    required Map<String, dynamic> patch,
+  }) async {
+    final response = await _controlDio.patch(
+      '$_baseUrl/api/rp/setup/workspaces/$workspaceId/story-config',
+      data: patch,
+    );
+    _ensureSuccess(response, action: 'patch setup story config');
   }
 
   Future<void> acceptCommitProposal({
@@ -172,7 +189,9 @@ class BackendRpSetupService {
         return delta.isEmpty ? null : AIStreamEvent.thinking(delta);
       case 'text_delta':
         final delta = parsed['delta']?.toString() ?? '';
-        return delta.isEmpty ? null : AIStreamEvent.text(delta, isTypedSemantic: true);
+        return delta.isEmpty
+            ? null
+            : AIStreamEvent.text(delta, isTypedSemantic: true);
       case 'tool_call':
         final rawToolCalls = parsed['tool_calls'] as List? ?? const [];
         final toolCalls = rawToolCalls
@@ -204,7 +223,8 @@ class BackendRpSetupService {
             : AIStreamEvent.toolError(
                 callId: callId,
                 toolName: parsed['tool_name']?.toString(),
-                errorMessage: parsed['error']?.toString() ?? 'Unknown tool error',
+                errorMessage:
+                    parsed['error']?.toString() ?? 'Unknown tool error',
               );
       case 'usage':
         return AIStreamEvent.usage(

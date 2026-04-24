@@ -1,0 +1,163 @@
+{
+  "case_id": "retrieval.search.query_trace_and_provenance.v1",
+  "title": "Retrieval query should expose stable trace fields and provenance-rich hits",
+  "scope": "retrieval",
+  "category": "retrieval_ready",
+  "tags": ["mvp", "deterministic", "retrieval-core"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-trace-001",
+      "query": {
+        "query_kind": "archival",
+        "text_query": "archive sunrise ledger",
+        "domains": ["world_rule"],
+        "top_k": 2,
+        "filters": {},
+        "search_kind": "chunks",
+        "rerank": true
+      }
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-trace-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "archive_rule_a",
+              "domain": "world",
+              "path": "world.archive_rule_a",
+              "title": "Archive Rule A",
+              "tags": ["archive"],
+              "source_refs": [],
+              "content": {
+                "summary": "The archive ledger is sealed before sunrise."
+              }
+            },
+            {
+              "entry_id": "archive_rule_b",
+              "domain": "world",
+              "path": "world.archive_rule_b",
+              "title": "Archive Rule B",
+              "tags": ["ledger"],
+              "source_refs": [],
+              "content": {
+                "summary": "The ledger room opens only after dawn inventory."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": [
+            "foundation:archive_rule_a",
+            "foundation:archive_rule_b"
+          ],
+          "reason": "freeze foundation"
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_trace_id_exists",
+        "source": "retrieval_result",
+        "type": "exists",
+        "path": "query_result.trace.trace_id",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_route_exists",
+        "source": "retrieval_result",
+        "type": "exists",
+        "path": "query_result.trace.route",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "retriever_routes_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.trace.retriever_routes",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "pipeline_stages_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.trace.pipeline_stages",
+        "expected": 2,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_hits_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.hits",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "hit_provenance_exists",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.hits[0].provenance_refs",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "hit_asset_id_exists",
+        "source": "retrieval_result",
+        "type": "exists",
+        "path": "query_result.hits[0].metadata.asset_id",
+        "expected": true,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": [
+      {
+        "hook_id": "retrieval_query_quality",
+        "judge_family": "llm_judge",
+        "rubric_ref": "retrieval/query-quality/v1",
+        "target": "query_text"
+      }
+    ]
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
+

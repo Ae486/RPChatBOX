@@ -55,7 +55,7 @@ class SetupGraphNodes:
                 workspace_id=state["workspace_id"],
                 current_step=target_step,
                 user_prompt=str(state.get("user_prompt") or ""),
-                user_edit_delta_ids=[],
+                user_edit_delta_ids=list(state.get("user_edit_delta_ids") or []),
                 token_budget=None,
             )
         )
@@ -108,5 +108,6 @@ class SetupGraphNodes:
                 SetupAgentDialogueMessage.model_validate(item)
                 for item in state.get("history", [])
             ],
+            user_edit_delta_ids=list(state.get("user_edit_delta_ids") or []),
             user_prompt=str(state.get("user_prompt") or ""),
         )

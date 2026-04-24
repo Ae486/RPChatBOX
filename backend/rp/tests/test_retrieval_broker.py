@@ -10,9 +10,13 @@ from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
+    MemoryListVersionsInput,
     MemoryReadProvenanceInput,
     MemorySearchArchivalInput,
     MemorySearchRecallInput,
+    RetrievalHit,
+    RetrievalSearchResult,
+    RetrievalTrace,
 )
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
@@ -21,30 +25,147 @@ from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
+from rp.services.story_session_service import StorySessionService
+from rp.models.story_runtime import LongformChapterPhase
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@pytest.mark.asyncio
-async def test_get_state_returns_stable_items():
-    broker = RetrievalBroker()
-    result = await broker.get_state(
-        MemoryGetStateInput(
-            refs=[
-                ObjectRef(
-                    object_id="scene.current",
-                    layer=Layer.CORE_STATE_AUTHORITATIVE,
-                    domain=Domain.SCENE,
-                    domain_path="scene.current",
-                )
-            ]
+class _FakeLangfuseObservation:
+    def __init__(self, *, sink: list[dict], name: str) -> None:
+        self._sink = sink
+        self._name = name
+
+    def __enter__(self):
+        self._sink.append({"kind": "observation_enter", "name": self._name})
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._sink.append({"kind": "observation_exit", "name": self._name})
+        return False
+
+    def update(self, **kwargs):
+        self._sink.append({"kind": "observation_update", "name": self._name, "payload": kwargs})
+
+    def score(self, **kwargs):
+        self._sink.append({"kind": "score", "name": self._name, "payload": kwargs})
+
+    def score_trace(self, **kwargs):
+        self._sink.append({"kind": "score_trace", "name": self._name, "payload": kwargs})
+
+    def start_as_current_observation(self, **kwargs):
+        return _FakeLangfuseObservation(
+            sink=self._sink,
+            name=str(kwargs.get("name") or "unknown"),
         )
+
+
+class _FakeLangfuseService:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def start_as_current_observation(self, **kwargs):
+        return _FakeLangfuseObservation(
+            sink=self.events,
+            name=str(kwargs.get("name") or "unknown"),
+        )
+
+
+def _seed_story_runtime(retrieval_session) -> None:
+    service = StorySessionService(retrieval_session)
+    session = service.create_session(
+        story_id="story-1",
+        source_workspace_id="workspace-1",
+        mode="longform",
+        runtime_story_config={},
+        writer_contract={"style_rules": ["Keep continuity"]},
+        current_state_json={
+            "chapter_digest": {"current_chapter": 1, "title": "Chapter One"},
+            "narrative_progress": {"current_phase": "outline_drafting", "accepted_segments": 0},
+            "timeline_spine": [{"event": "opening"}],
+            "active_threads": [{"thread_id": "t-1", "summary": "Open thread"}],
+            "foreshadow_registry": [{"foreshadow_id": "f-1", "summary": "Hidden clue"}],
+            "character_state_digest": {"hero": {"mood": "alert"}},
+        },
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    service.create_chapter_workspace(
+        session_id=session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.OUTLINE_DRAFTING,
+        chapter_goal="Open strong",
+        builder_snapshot_json={
+            "foundation_digest": ["Found A", "Found B"],
+            "blueprint_digest": ["Blueprint A"],
+            "current_outline_digest": ["Outline A"],
+            "recent_segment_digest": ["Segment A"],
+            "current_state_digest": ["State A", "State B"],
+            "writer_hints": ["Hint A"],
+        },
+    )
+    service.commit()
+
+
+@pytest.mark.asyncio
+async def test_get_state_reads_materialized_authoritative_domain(retrieval_session):
+    _seed_story_runtime(retrieval_session)
+    broker = RetrievalBroker(default_story_id="story-1")
+    result = await broker.get_state(
+        MemoryGetStateInput(domain=Domain.CHAPTER)
     )
 
+    assert result.items[0].object_ref.object_id == "chapter.current"
+    assert result.items[0].data["current_chapter"] == 1
+    assert result.items[0].data["title"] == "Chapter One"
+    assert result.items[0].warnings == []
+
+
+@pytest.mark.asyncio
+async def test_get_state_returns_warning_for_unmaterialized_domain(retrieval_session):
+    _seed_story_runtime(retrieval_session)
+    broker = RetrievalBroker(default_story_id="story-1")
+
+    result = await broker.get_state(MemoryGetStateInput(domain=Domain.SCENE))
+
     assert result.items[0].object_ref.object_id == "scene.current"
-    assert result.items[0].data["domain"] == "scene"
+    assert result.items[0].data == {}
+    assert "phase_e_authoritative_ref_not_materialized:scene.current" in result.items[0].warnings
+
+
+@pytest.mark.asyncio
+async def test_get_summary_reads_projection_slots_and_aliases(retrieval_session):
+    _seed_story_runtime(retrieval_session)
+    broker = RetrievalBroker(default_story_id="story-1")
+
+    result = await broker.get_summary(
+        MemoryGetSummaryInput(summary_ids=["foundation_digest", "projection.current_state_digest"])
+    )
+
+    assert [item.summary_id for item in result.items] == [
+        "projection.foundation_digest",
+        "projection.current_state_digest",
+    ]
+    assert result.items[0].summary_text == "Found A\nFound B"
+    assert result.items[1].summary_text == "State A\nState B"
+
+
+@pytest.mark.asyncio
+async def test_get_summary_domain_fallback_excludes_writer_hints(retrieval_session):
+    _seed_story_runtime(retrieval_session)
+    broker = RetrievalBroker(default_story_id="story-1")
+
+    result = await broker.get_summary(
+        MemoryGetSummaryInput(domains=[Domain.CHAPTER, Domain.NARRATIVE_PROGRESS])
+    )
+
+    assert {item.summary_id for item in result.items} == {
+        "projection.current_outline_digest",
+        "projection.recent_segment_digest",
+        "projection.current_state_digest",
+    }
+    assert all(item.summary_id != "writer_hints" for item in result.items)
 
 
 @pytest.mark.asyncio
@@ -68,6 +189,7 @@ async def test_memory_os_service_is_a_pure_facade(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_and_provenance_surfaces_are_stable(retrieval_session):
+    _seed_story_runtime(retrieval_session)
     collection_service = RetrievalCollectionService(retrieval_session)
     document_service = RetrievalDocumentService(retrieval_session)
     ingestion_service = RetrievalIngestionService(retrieval_session)
@@ -143,6 +265,15 @@ async def test_search_and_provenance_surfaces_are_stable(retrieval_session):
             )
         )
     )
+    versions = await broker.list_versions(
+        MemoryListVersionsInput(
+            target_ref=ObjectRef(
+                object_id="scene.current",
+                layer=Layer.CORE_STATE_AUTHORITATIVE,
+                domain=Domain.SCENE,
+            )
+        )
+    )
 
     assert recall.hits == []
     assert recall.trace is not None
@@ -153,4 +284,85 @@ async def test_search_and_provenance_surfaces_are_stable(retrieval_session):
     assert archival.hits[0].knowledge_ref is not None
     assert "forbids open spell rituals" in archival.hits[0].excerpt_text
     assert archival.trace.route.startswith("retrieval.")
-    assert provenance.source_refs
+    assert provenance.source_refs == ["compatibility_mirror:story_session.current_state_json"]
+    assert versions.current_ref == "scene.current@1"
+
+
+@pytest.mark.asyncio
+async def test_retrieval_broker_emits_langfuse_observation(retrieval_session):
+    class StubRetrievalService:
+        async def search_chunks(self, query):
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[
+                    RetrievalHit(
+                        hit_id="chunk-broker",
+                        query_id=query.query_id,
+                        layer="archival",
+                        domain=Domain.WORLD_RULE,
+                        domain_path="foundation.world.broker",
+                        excerpt_text="Broker observation excerpt",
+                        score=0.81,
+                        rank=1,
+                        metadata={
+                            "asset_id": "asset-broker",
+                            "title": "Broker Rule",
+                            "section_id": "broker-1",
+                            "section_part": 0,
+                            "contextual_text_version": "v2",
+                        },
+                    )
+                ],
+                trace=RetrievalTrace(
+                    trace_id="trace-broker",
+                    query_id=query.query_id,
+                    route="retrieval.hybrid.stub",
+                    result_kind="chunk",
+                    retriever_routes=["retrieval.keyword.stub", "retrieval.semantic.stub"],
+                    pipeline_stages=["retrieve", "fusion", "chunk_result_builder"],
+                    candidate_count=2,
+                    returned_count=1,
+                    timings={"keyword_ms": 1.0, "semantic_ms": 2.0},
+                    warnings=["rerank_backend_failed:TimeoutError"],
+                ),
+                warnings=["rerank_backend_failed:TimeoutError"],
+            )
+
+    fake_langfuse = _FakeLangfuseService()
+    broker = RetrievalBroker(
+        default_story_id="story-1",
+        retrieval_service_factory=lambda session: StubRetrievalService(),
+        langfuse_service=fake_langfuse,
+    )
+
+    result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="broker observation",
+            domains=[Domain.WORLD_RULE],
+            top_k=1,
+        )
+    )
+
+    assert result.hits[0].hit_id == "chunk-broker"
+    observation_names = [item["name"] for item in fake_langfuse.events if item["kind"] == "observation_enter"]
+    assert "rp.retrieval.search_archival" in observation_names
+    updates = [
+        item["payload"]["output"]
+        for item in fake_langfuse.events
+        if item["kind"] == "observation_update" and item["name"] == "rp.retrieval.search_archival"
+    ]
+    assert updates
+    observability = updates[-1]["observability"]
+    assert updates[-1]["status"] == "ok"
+    assert updates[-1]["search_kind"] == "chunks"
+    assert observability["route"] == "retrieval.hybrid.stub"
+    assert observability["returned_count"] == 1
+    assert observability["maintenance"] is None
+    score_names = {
+        item["payload"]["name"]
+        for item in fake_langfuse.events
+        if item["kind"] == "score_trace" and item["name"] == "rp.retrieval.search_archival"
+    }
+    assert "retrieval.execution_status" in score_names
+    assert "retrieval.metric.returned_count" in score_names
+    assert "retrieval.warning_categories" in score_names

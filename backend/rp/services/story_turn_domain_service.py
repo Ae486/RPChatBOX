@@ -21,6 +21,8 @@ from rp.models.writing_runtime import WritingPacket
 from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_regression_service import LongformRegressionService
 from .longform_specialist_service import LongformSpecialistService
+from .builder_projection_context_service import BuilderProjectionContextService
+from .projection_state_service import ProjectionStateService
 from .story_session_service import StorySessionService
 from .writing_packet_builder import WritingPacketBuilder
 from .writing_worker_execution_service import WritingWorkerExecutionService
@@ -35,6 +37,8 @@ class StoryTurnDomainService:
         story_session_service: StorySessionService,
         orchestrator_service: LongformOrchestratorService,
         specialist_service: LongformSpecialistService,
+        builder_projection_context_service: BuilderProjectionContextService,
+        projection_state_service: ProjectionStateService,
         writing_packet_builder: WritingPacketBuilder,
         writing_worker_execution_service: WritingWorkerExecutionService,
         regression_service: LongformRegressionService,
@@ -42,6 +46,8 @@ class StoryTurnDomainService:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
         self._specialist_service = specialist_service
+        self._builder_projection_context_service = builder_projection_context_service
+        self._projection_state_service = projection_state_service
         self._writing_packet_builder = writing_packet_builder
         self._writing_worker_execution_service = writing_worker_execution_service
         self._regression_service = regression_service
@@ -144,7 +150,10 @@ class StoryTurnDomainService:
             session=session,
             chapter=chapter,
             plan=plan,
-            specialist_bundle=specialist_bundle,
+            projection_context_sections=self._builder_projection_context_service.build_context_sections(
+                session_id=session_id,
+            ),
+            runtime_writer_hints=list(specialist_bundle.writer_hints),
             user_instruction=plan.writer_instruction,
         )
 
@@ -226,8 +235,6 @@ class StoryTurnDomainService:
             artifact_id=artifact.artifact_id,
             status=StoryArtifactStatus.ACCEPTED,
         )
-        builder_snapshot = dict(chapter.builder_snapshot_json)
-        builder_snapshot["current_outline_digest"] = [artifact.content_text[:400]]
         next_phase = LongformChapterPhase.SEGMENT_DRAFTING
         self._story_session_service.update_chapter_workspace(
             chapter_workspace_id=chapter.chapter_workspace_id,
@@ -243,11 +250,14 @@ class StoryTurnDomainService:
                 "content_text": artifact.content_text,
                 "metadata": artifact.metadata,
             },
-            builder_snapshot_json=builder_snapshot,
         )
         self._story_session_service.update_session(
             session_id=session.session_id,
             current_phase=next_phase,
+        )
+        self._projection_state_service.set_current_outline(
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            outline_text=artifact.content_text,
         )
         self._story_session_service.commit()
         return LongformTurnResponse(
@@ -326,13 +336,11 @@ class StoryTurnDomainService:
             chapter_index=next_chapter_index,
             phase=LongformChapterPhase.OUTLINE_DRAFTING,
             chapter_goal=f"Chapter {next_chapter_index}",
-            builder_snapshot_json={
-                **updated_chapter.builder_snapshot_json,
-                "chapter_index": next_chapter_index,
-                "phase": LongformChapterPhase.OUTLINE_DRAFTING.value,
-                "current_outline_digest": [],
-                "recent_segment_digest": [],
-            },
+        )
+        self._projection_state_service.seed_next_chapter(
+            previous_chapter_workspace_id=updated_chapter.chapter_workspace_id,
+            next_chapter_workspace_id=next_chapter.chapter_workspace_id,
+            next_chapter_index=next_chapter_index,
         )
         self._story_session_service.update_session(
             session_id=updated_session.session_id,
@@ -460,7 +468,6 @@ class StoryTurnDomainService:
         next_phase = chapter.phase
         outline_draft = chapter.outline_draft_json
         accepted_outline = chapter.accepted_outline_json
-        builder_snapshot = dict(chapter.builder_snapshot_json)
         pending_segment_artifact_id = chapter.pending_segment_artifact_id
 
         if artifact.artifact_kind == StoryArtifactKind.CHAPTER_OUTLINE:
@@ -469,7 +476,6 @@ class StoryTurnDomainService:
                 "content_text": artifact.content_text,
                 "metadata": artifact.metadata,
             }
-            builder_snapshot["current_outline_digest"] = [artifact.content_text[:400]]
             next_phase = LongformChapterPhase.OUTLINE_REVIEW
             self._story_session_service.update_session(
                 session_id=session.session_id,
@@ -477,10 +483,6 @@ class StoryTurnDomainService:
             )
         elif artifact.artifact_kind == StoryArtifactKind.STORY_SEGMENT:
             pending_segment_artifact_id = artifact.artifact_id
-            builder_snapshot["recent_segment_digest"] = [
-                *list(builder_snapshot.get("recent_segment_digest", []))[-2:],
-                artifact.content_text[:400],
-            ]
             next_phase = LongformChapterPhase.SEGMENT_REVIEW
             self._story_session_service.update_session(
                 session_id=session.session_id,
@@ -500,9 +502,20 @@ class StoryTurnDomainService:
             phase=next_phase,
             outline_draft_json=outline_draft or {},
             accepted_outline_json=accepted_outline or {},
-            builder_snapshot_json=builder_snapshot,
             pending_segment_artifact_id=pending_segment_artifact_id,
         )
+        if artifact.artifact_kind == StoryArtifactKind.CHAPTER_OUTLINE:
+            self._projection_state_service.set_current_outline(
+                chapter_workspace_id=chapter.chapter_workspace_id,
+                outline_text=artifact.content_text,
+            )
+        elif artifact.artifact_kind == StoryArtifactKind.STORY_SEGMENT:
+            self._projection_state_service.append_recent_segment(
+                chapter_workspace_id=chapter.chapter_workspace_id,
+                excerpt=artifact.content_text,
+            )
         self._story_session_service.commit()
-        return artifact, next_chapter
-
+        refreshed_chapter = self._story_session_service.get_chapter_workspace(
+            next_chapter.chapter_workspace_id
+        )
+        return artifact, refreshed_chapter or next_chapter
