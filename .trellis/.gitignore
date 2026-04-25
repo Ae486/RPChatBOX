@@ -3,6 +3,7 @@
 
 # Current task pointer (each dev works on different task)
 .current-task
+.session-tasks/
 
 # Ralph Loop state file
 .ralph-state.json

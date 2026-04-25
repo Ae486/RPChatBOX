@@ -84,6 +84,29 @@ class EvalExpected(BaseModel):
 
     deterministic_assertions: list[EvalAssertionSpec] = Field(default_factory=list)
     subjective_hooks: list[EvalSubjectiveHook] = Field(default_factory=list)
+    expected_reason_codes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Stable diagnostic reason codes that must be present in the generated "
+            "setup diagnostics for this case."
+        ),
+    )
+    expected_primary_suspects: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Primary attribution suspects that must be present in diagnostics."
+        ),
+    )
+    expected_outcome_chain: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Expected setup outcome-chain stage statuses, keyed by stage name."
+        ),
+    )
+    expected_recommended_next_action: str | None = Field(
+        default=None,
+        description="Expected diagnostics remediation action when the case asserts one.",
+    )
 
 
 class EvalTraceHooks(BaseModel):

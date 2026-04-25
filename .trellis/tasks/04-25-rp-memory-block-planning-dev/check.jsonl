@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared Trellis thinking guide index for quality review."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check layer boundaries, data shape preservation, and fallback routes for memory Block envelope work."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check implementation reuses existing Core State mappings and avoids parallel identity systems."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend code-spec index for RP memory quality checks."}
+{"file": ".trellis/spec/backend/rp-core-state-block-envelope.md", "reason": "Quality check contract for Block envelope identity, payload, source metadata, API route, and out-of-scope boundaries."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/current-memory-context.md", "reason": "Review against task-specific Memory OS/Core State/Block boundaries and out-of-scope decisions."}

@@ -311,6 +311,8 @@ def test_eval_cli_compare_reports_changed_cases(tmp_path, capsys):
                             "failure_layer": None,
                             "hard_failures": [],
                             "assertion_summary": {"pass": 1, "fail": 0, "warn": 0, "skip": 0},
+                            "reason_codes": ["prompt.missing_step_targeting"],
+                            "outcome_chain": {"transcript_status": "pass"},
                         },
                     }
                 ],
@@ -331,8 +333,24 @@ def test_eval_cli_compare_reports_changed_cases(tmp_path, capsys):
                             "status": "completed",
                             "finish_reason": "awaiting_user_input",
                             "failure_layer": None,
-                            "hard_failures": ["finish_reason_changed"],
-                            "assertion_summary": {"pass": 0, "fail": 1, "warn": 0, "skip": 0},
+                            "hard_failures": [
+                                "finish_reason_changed",
+                                "diagnostic.reason_code_presence",
+                            ],
+                            "assertion_summary": {"pass": 0, "fail": 2, "warn": 0, "skip": 0},
+                            "reason_codes": [
+                                "prompt.missing_step_targeting",
+                                "controller.commit_proposal_blocked",
+                            ],
+                            "outcome_chain": {"transcript_status": "warn"},
+                            "diagnostic_expectation_results": [
+                                {
+                                    "score_name": "diagnostic.reason_code_presence",
+                                    "status": "fail",
+                                    "expected": ["readiness.blocked_by_open_setup_prerequisites"],
+                                    "actual": ["prompt.missing_step_targeting"],
+                                }
+                            ],
                         },
                     }
                 ],
@@ -348,6 +366,11 @@ def test_eval_cli_compare_reports_changed_cases(tmp_path, capsys):
     payload = json.loads(captured.out)
     assert payload["changed_cases"][0]["case_id"] == "setup.case.a"
     assert payload["drift_summary"]["changed_finish_reason_case_ids"] == ["setup.case.a"]
+    assert payload["drift_summary"]["changed_reason_code_case_ids"] == ["setup.case.a"]
+    assert payload["drift_summary"]["changed_outcome_chain_case_ids"] == ["setup.case.a"]
+    assert payload["drift_summary"]["changed_diagnostic_expectation_case_ids"] == [
+        "setup.case.a"
+    ]
 
 
 def test_eval_cli_run_suite_writes_comparison_markdown(

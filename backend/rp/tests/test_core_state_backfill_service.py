@@ -35,7 +35,10 @@ async def _seed_session_with_apply(retrieval_session):
         writer_contract={},
         current_state_json={
             "chapter_digest": {"current_chapter": 1, "title": "Chapter One"},
-            "narrative_progress": {"current_phase": "outline_drafting", "accepted_segments": 0},
+            "narrative_progress": {
+                "current_phase": "outline_drafting",
+                "accepted_segments": 0,
+            },
             "timeline_spine": [],
             "active_threads": [],
             "foreshadow_registry": [],
@@ -94,17 +97,31 @@ async def _seed_session_with_apply(retrieval_session):
     )
     story_session_service.commit()
     refreshed_session = story_session_service.get_session(session.session_id)
-    refreshed_chapter = story_session_service.get_chapter_workspace(chapter.chapter_workspace_id)
+    refreshed_chapter = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    )
     assert refreshed_session is not None
     assert refreshed_chapter is not None
-    return refreshed_session, refreshed_chapter, story_session_service, repository, proposal_receipt
+    return (
+        refreshed_session,
+        refreshed_chapter,
+        story_session_service,
+        repository,
+        proposal_receipt,
+    )
 
 
 @pytest.mark.asyncio
-async def test_core_state_backfill_reconstructs_current_rows_revisions_and_links(retrieval_session):
-    session, chapter, story_session_service, repository, proposal_receipt = await _seed_session_with_apply(
-        retrieval_session
-    )
+async def test_core_state_backfill_reconstructs_current_rows_revisions_and_links(
+    retrieval_session,
+):
+    (
+        session,
+        chapter,
+        story_session_service,
+        repository,
+        proposal_receipt,
+    ) = await _seed_session_with_apply(retrieval_session)
     backfill_service = CoreStateBackfillService(
         story_session_service=story_session_service,
         proposal_repository=repository,
@@ -122,22 +139,28 @@ async def test_core_state_backfill_reconstructs_current_rows_revisions_and_links
         )
     ).one()
     revisions = retrieval_session.exec(
-        select(CoreStateAuthoritativeRevisionRecord).where(
+        select(CoreStateAuthoritativeRevisionRecord)
+        .where(
             CoreStateAuthoritativeRevisionRecord.session_id == session.session_id,
             CoreStateAuthoritativeRevisionRecord.object_id == "chapter.current",
-        ).order_by(CoreStateAuthoritativeRevisionRecord.revision.asc())
+        )
+        .order_by(CoreStateAuthoritativeRevisionRecord.revision.asc())
     ).all()
     projection_rows = retrieval_session.exec(
         select(CoreStateProjectionSlotRecord).where(
-            CoreStateProjectionSlotRecord.chapter_workspace_id == chapter.chapter_workspace_id
+            CoreStateProjectionSlotRecord.chapter_workspace_id
+            == chapter.chapter_workspace_id
         )
     ).all()
     projection_revisions = retrieval_session.exec(
         select(CoreStateProjectionSlotRevisionRecord).where(
-            CoreStateProjectionSlotRevisionRecord.chapter_workspace_id == chapter.chapter_workspace_id
+            CoreStateProjectionSlotRevisionRecord.chapter_workspace_id
+            == chapter.chapter_workspace_id
         )
     ).all()
-    apply_receipt = repository.list_apply_receipts_for_proposal(proposal_receipt.proposal_id)[0]
+    apply_receipt = repository.list_apply_receipts_for_proposal(
+        proposal_receipt.proposal_id
+    )[0]
     apply_links = repository.list_apply_target_links_for_apply(apply_receipt.apply_id)
 
     assert current_row.current_revision == 2
@@ -149,16 +172,23 @@ async def test_core_state_backfill_reconstructs_current_rows_revisions_and_links
     assert revisions[1].source_apply_id == apply_receipt.apply_id
     assert revisions[1].source_proposal_id == proposal_receipt.proposal_id
     assert len(apply_links) == 1
-    assert apply_links[0].authoritative_revision_id == revisions[1].authoritative_revision_id
+    assert (
+        apply_links[0].authoritative_revision_id
+        == revisions[1].authoritative_revision_id
+    )
     assert len(projection_rows) == 5
     assert len(projection_revisions) == 5
 
 
 @pytest.mark.asyncio
 async def test_core_state_backfill_is_idempotent_for_same_session(retrieval_session):
-    session, chapter, story_session_service, repository, _ = await _seed_session_with_apply(
-        retrieval_session
-    )
+    (
+        session,
+        chapter,
+        story_session_service,
+        repository,
+        _,
+    ) = await _seed_session_with_apply(retrieval_session)
     backfill_service = CoreStateBackfillService(
         story_session_service=story_session_service,
         proposal_repository=repository,
@@ -180,12 +210,14 @@ async def test_core_state_backfill_is_idempotent_for_same_session(retrieval_sess
     ).all()
     projection_rows = retrieval_session.exec(
         select(CoreStateProjectionSlotRecord).where(
-            CoreStateProjectionSlotRecord.chapter_workspace_id == chapter.chapter_workspace_id
+            CoreStateProjectionSlotRecord.chapter_workspace_id
+            == chapter.chapter_workspace_id
         )
     ).all()
     projection_revisions = retrieval_session.exec(
         select(CoreStateProjectionSlotRevisionRecord).where(
-            CoreStateProjectionSlotRevisionRecord.chapter_workspace_id == chapter.chapter_workspace_id
+            CoreStateProjectionSlotRevisionRecord.chapter_workspace_id
+            == chapter.chapter_workspace_id
         )
     ).all()
 
@@ -193,3 +225,67 @@ async def test_core_state_backfill_is_idempotent_for_same_session(retrieval_sess
     assert len(authoritative_revisions) == 7
     assert len(projection_rows) == 5
     assert len(projection_revisions) == 5
+
+
+@pytest.mark.asyncio
+async def test_projection_backfill_does_not_overwrite_existing_formal_slot(
+    retrieval_session,
+):
+    (
+        session,
+        chapter,
+        story_session_service,
+        repository,
+        _,
+    ) = await _seed_session_with_apply(retrieval_session)
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    existing_row = core_repo.upsert_projection_slot(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        layer=Layer.CORE_STATE_PROJECTION.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="projection.current_outline_digest",
+        summary_id="projection.current_outline_digest",
+        slot_name="current_outline_digest",
+        scope="chapter",
+        current_revision=3,
+        items_json=["Formal Outline Rev3"],
+        metadata_json={"source": "test_existing_formal_store"},
+        last_refresh_kind="lifecycle_write",
+    )
+    core_repo.upsert_projection_slot_revision(
+        projection_slot_id=existing_row.projection_slot_id,
+        story_id=session.story_id,
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        layer=Layer.CORE_STATE_PROJECTION.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="projection.current_outline_digest",
+        summary_id="projection.current_outline_digest",
+        slot_name="current_outline_digest",
+        scope="chapter",
+        revision=3,
+        items_json=["Formal Outline Rev3"],
+        refresh_source_kind="lifecycle_write",
+        metadata_json={"source": "test_existing_formal_store"},
+    )
+    backfill_service = CoreStateBackfillService(
+        story_session_service=story_session_service,
+        proposal_repository=repository,
+        core_state_store_repository=core_repo,
+    )
+
+    result = backfill_service.backfill_projection_for_chapter(
+        chapter_workspace_id=chapter.chapter_workspace_id
+    )
+    outline_row = core_repo.get_projection_slot(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        summary_id="projection.current_outline_digest",
+    )
+
+    assert result == 4
+    assert outline_row is not None
+    assert outline_row.current_revision == 3
+    assert outline_row.items_json == ["Formal Outline Rev3"]
+    assert outline_row.last_refresh_kind == "lifecycle_write"

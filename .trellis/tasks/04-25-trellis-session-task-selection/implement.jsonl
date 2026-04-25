@@ -1,0 +1,2 @@
+{"file": ".trellis\\spec\\guides\\code-reuse-thinking-guide.md", "reason": "Changing shared Trellis scripts/hooks requires search-first reuse checks"}
+{"file": ".trellis\\spec\\guides\\cross-layer-thinking-guide.md", "reason": "Session task selection crosses CLI scripts and hook surfaces"}

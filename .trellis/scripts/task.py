@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
+r"""
 Task Management Script.
 
 Usage:
-    python .\.trellis\scripts\task.py create "<title>" [--slug <name>] [--assignee <dev>] [--priority P0|P1|P2|P3] [--parent <dir>] [--package <pkg>]
+    python .\.trellis\scripts\task.py create "<title>" [--slug <name>] [--assignee <dev>] [--priority P0|P1|P2|P3] [--parent <dir>] [--package <pkg>] [--start-session]
     python .\.trellis\scripts\task.py add-context <dir> <file> <path> [reason] # Add jsonl entry
     python .\.trellis\scripts\task.py validate <dir>              # Validate jsonl files
     python .\.trellis\scripts\task.py list-context <dir>          # List jsonl entries
     python .\.trellis\scripts\task.py start <dir>                 # Set as current task
+    python .\.trellis\scripts\task.py start <dir> --session       # Set as current task for this session only
     python .\.trellis\scripts\task.py finish                      # Clear current task
+    python .\.trellis\scripts\task.py current                     # Show effective current task
     python .\.trellis\scripts\task.py set-branch <dir> <branch>   # Set git branch
     python .\.trellis\scripts\task.py set-base-branch <dir> <branch>  # Set PR target branch
     python .\.trellis\scripts\task.py set-scope <dir> <scope>     # Set scope for PR title
@@ -34,8 +36,13 @@ from common.paths import (
     get_developer,
     get_tasks_dir,
     get_current_task,
+    get_session_current_task,
+    get_current_task_with_source,
     set_current_task,
+    set_session_current_task,
     clear_current_task,
+    clear_session_current_task,
+    get_session_id_from_env,
 )
 from common.io import read_json, write_json
 from common.task_utils import resolve_task_dir, run_task_hooks
@@ -63,7 +70,7 @@ from common.task_context import (
 # =============================================================================
 
 def cmd_start(args: argparse.Namespace) -> int:
-    """Set current task."""
+    """Set repository or session current task."""
     repo_root = get_repo_root()
     task_input = args.dir
 
@@ -85,8 +92,26 @@ def cmd_start(args: argparse.Namespace) -> int:
     except ValueError:
         task_dir = str(full_path)
 
-    if set_current_task(task_dir, repo_root):
-        print(colored(f"✓ Current task set to: {task_dir}", Colors.GREEN))
+    if args.session:
+        session_id = args.session_id or get_session_id_from_env()
+        if not session_id:
+            print(
+                colored(
+                    "Error: No session id found. Pass --session-id <id> or set TRELLIS_SESSION_ID / CODEX_THREAD_ID.",
+                    Colors.RED,
+                )
+            )
+            return 1
+        did_set = set_session_current_task(task_dir, session_id, repo_root)
+        success_label = f"✓ Session task set to: {task_dir} (session: {session_id})"
+        hook_label = "The hook will now prefer this session task when the same session id is present."
+    else:
+        did_set = set_current_task(task_dir, repo_root)
+        success_label = f"✓ Current task set to: {task_dir}"
+        hook_label = "The hook will now inject context from this task's jsonl files."
+
+    if did_set:
+        print(colored(success_label, Colors.GREEN))
 
         task_json_path = full_path / FILE_TASK_JSON
         if task_json_path.is_file():
@@ -97,7 +122,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     print(colored("✓ Status: planning → in_progress", Colors.GREEN))
 
         print()
-        print(colored("The hook will now inject context from this task's jsonl files.", Colors.BLUE))
+        print(colored(hook_label, Colors.BLUE))
 
         run_task_hooks("after_start", task_json_path, repo_root)
         return 0
@@ -107,9 +132,33 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 
 def cmd_finish(args: argparse.Namespace) -> int:
-    """Clear current task."""
-    _ = args  # signature required by argparse dispatcher
+    """Clear repository or session current task."""
     repo_root = get_repo_root()
+
+    if args.session:
+        session_id = args.session_id or get_session_id_from_env()
+        if not session_id:
+            print(
+                colored(
+                    "Error: No session id found. Pass --session-id <id> or set TRELLIS_SESSION_ID / CODEX_THREAD_ID.",
+                    Colors.RED,
+                )
+            )
+            return 1
+
+        current = get_session_current_task(session_id, repo_root)
+        if not current:
+            print(colored(f"No session task set (session: {session_id})", Colors.YELLOW))
+            return 0
+
+        task_json_path = repo_root / current / FILE_TASK_JSON
+        clear_session_current_task(session_id, repo_root)
+        print(colored(f"✓ Cleared session task (was: {current}, session: {session_id})", Colors.GREEN))
+
+        if task_json_path.is_file():
+            run_task_hooks("after_finish", task_json_path, repo_root)
+        return 0
+
     current = get_current_task(repo_root)
 
     if not current:
@@ -127,6 +176,30 @@ def cmd_finish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_current(args: argparse.Namespace) -> int:
+    """Print the effective current task for this session/repo."""
+    repo_root = get_repo_root()
+    session_id = args.session_id or get_session_id_from_env()
+    effective, source = get_current_task_with_source(session_id, repo_root)
+
+    if args.path_only:
+        if effective:
+            print(effective)
+            return 0
+        return 1
+
+    session_task = get_session_current_task(session_id, repo_root) if session_id else None
+    repo_task = get_current_task(repo_root)
+
+    print(colored("Current task resolution:", Colors.BLUE))
+    print(f"  Session id: {session_id or '(none)'}")
+    print(f"  Session task: {session_task or '(none)'}")
+    print(f"  Repo task: {repo_task or '(none)'}")
+    print(f"  Effective task: {effective or '(none)'}")
+    print(f"  Source: {source}")
+    return 0 if effective else 1
+
+
 # =============================================================================
 # Command: list
 # =============================================================================
@@ -135,7 +208,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     """List active tasks."""
     repo_root = get_repo_root()
     tasks_dir = get_tasks_dir(repo_root)
-    current_task = get_current_task(repo_root)
+    current_task, current_source = get_current_task_with_source(repo_root=repo_root)
     developer = get_developer(repo_root)
     filter_mine = args.mine
     filter_status = args.status
@@ -171,7 +244,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         relative_path = f"{DIR_WORKFLOW}/{DIR_TASKS}/{dir_name}"
         marker = ""
         if relative_path == current_task:
-            marker = f" {colored('<- current', Colors.GREEN)}"
+            label = "session" if current_source == "session" else "current"
+            marker = f" {colored(f'<- {label}', Colors.GREEN)}"
 
         # Children progress
         progress = children_progress(t.children, all_statuses)
@@ -248,17 +322,21 @@ def cmd_list_archive(args: argparse.Namespace) -> int:
 
 def show_usage() -> None:
     """Show usage help."""
-    print("""Task Management Script
+    print(r"""Task Management Script
 
 Usage:
   python .\.trellis\scripts\task.py create <title>                     Create new task directory
   python .\.trellis\scripts\task.py create <title> --package <pkg>     Create task for a specific package
+  python .\.trellis\scripts\task.py create <title> --start-session     Create and bind task to this session
   python .\.trellis\scripts\task.py create <title> --parent <dir>      Create task as child of parent
   python .\.trellis\scripts\task.py add-context <dir> <jsonl> <path> [reason]  Add entry to jsonl
   python .\.trellis\scripts\task.py validate <dir>                     Validate jsonl files
   python .\.trellis\scripts\task.py list-context <dir>                 List jsonl entries
   python .\.trellis\scripts\task.py start <dir>                        Set as current task
+  python .\.trellis\scripts\task.py start <dir> --session              Set as current task for this session only
   python .\.trellis\scripts\task.py finish                             Clear current task
+  python .\.trellis\scripts\task.py finish --session                   Clear this session's current task
+  python .\.trellis\scripts\task.py current                            Show effective current task resolution
   python .\.trellis\scripts\task.py set-branch <dir> <branch>          Set git branch
   python .\.trellis\scripts\task.py set-base-branch <dir> <branch>     Set PR target branch
   python .\.trellis\scripts\task.py set-scope <dir> <scope>            Set scope for PR title
@@ -282,6 +360,7 @@ Examples:
   python .\.trellis\scripts\task.py add-context <dir> implement .trellis/spec/cli/backend/auth.md "Auth guidelines"
   python .\.trellis\scripts\task.py set-branch <dir> task/add-login
   python .\.trellis\scripts\task.py start .trellis\tasks\01-21-add-login
+  python .\.trellis\scripts\task.py start .trellis\tasks\01-21-add-login --session --session-id my-session
   python .\.trellis\scripts\task.py finish
   python .\.trellis\scripts\task.py archive add-login
   python .\.trellis\scripts\task.py add-subtask parent-task child-task  # Link existing tasks
@@ -343,6 +422,9 @@ def main() -> int:
     p_create.add_argument("--description", "-d", help="Task description")
     p_create.add_argument("--parent", help="Parent task directory (establishes subtask link)")
     p_create.add_argument("--package", help="Package name for monorepo projects")
+    p_create.add_argument("--start-session", action="store_true", help="Set the new task for this session only")
+    p_create.add_argument("--start-repo", action="store_true", help="Set the new task as repository default")
+    p_create.add_argument("--session-id", help="Session id for --start-session")
 
     # add-context
     p_add = subparsers.add_parser("add-context", help="Add context entry")
@@ -362,9 +444,18 @@ def main() -> int:
     # start
     p_start = subparsers.add_parser("start", help="Set current task")
     p_start.add_argument("dir", help="Task directory")
+    p_start.add_argument("--session", action="store_true", help="Set task for this session only")
+    p_start.add_argument("--session-id", help="Session id (defaults to TRELLIS_SESSION_ID/CODEX_SESSION_ID/CODEX_THREAD_ID/etc.)")
 
     # finish
-    subparsers.add_parser("finish", help="Clear current task")
+    p_finish = subparsers.add_parser("finish", help="Clear current task")
+    p_finish.add_argument("--session", action="store_true", help="Clear this session's task only")
+    p_finish.add_argument("--session-id", help="Session id (defaults to TRELLIS_SESSION_ID/CODEX_SESSION_ID/CODEX_THREAD_ID/etc.)")
+
+    # current
+    p_current = subparsers.add_parser("current", help="Show effective current task")
+    p_current.add_argument("--session-id", help="Session id (defaults to TRELLIS_SESSION_ID/CODEX_SESSION_ID/CODEX_THREAD_ID/etc.)")
+    p_current.add_argument("--path-only", action="store_true", help="Print only the effective task path")
 
     # set-branch
     p_branch = subparsers.add_parser("set-branch", help="Set git branch")
@@ -418,6 +509,7 @@ def main() -> int:
         "list-context": cmd_list_context,
         "start": cmd_start,
         "finish": cmd_finish,
+        "current": cmd_current,
         "set-branch": cmd_set_branch,
         "set-base-branch": cmd_set_base_branch,
         "set-scope": cmd_set_scope,

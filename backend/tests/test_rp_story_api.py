@@ -82,8 +82,14 @@ class _MockStoryLLMService:
                     "notes": ["mock_orchestrator"],
                 }
             return {
-                "choices": [{"message": {"role": "assistant", "content": json.dumps(content)}}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "choices": [
+                    {"message": {"role": "assistant", "content": json.dumps(content)}}
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
             }
 
         if "longform_specialist" in system_prompt:
@@ -112,8 +118,12 @@ class _MockStoryLLMService:
                 recall_summary = "Chapter 1: the courier steals the ledger and survives the archive pursuit."
             content = {
                 "foundation_digest": ["Rivergate forbids open ritual fire."],
-                "blueprint_digest": ["Chapter one reveals the ledger and forces an escape."],
-                "current_outline_digest": ["Open at the archive; end with a narrow escape."],
+                "blueprint_digest": [
+                    "Chapter one reveals the ledger and forces an escape."
+                ],
+                "current_outline_digest": [
+                    "Open at the archive; end with a narrow escape."
+                ],
                 "recent_segment_digest": ["The courier slips into the archive vault."],
                 "current_state_digest": ["chapter=1", "phase=segment_drafting"],
                 "writer_hints": ["Keep tension immediate.", "Stay concrete and lean."],
@@ -123,8 +133,14 @@ class _MockStoryLLMService:
                 "recall_summary_text": recall_summary,
             }
             return {
-                "choices": [{"message": {"role": "assistant", "content": json.dumps(content)}}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "choices": [
+                    {"message": {"role": "assistant", "content": json.dumps(content)}}
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
             }
 
         content = "Writer fallback output."
@@ -141,8 +157,8 @@ class _MockStoryLLMService:
             text = "The courier eased the ledger free, heard the ward-chimes flare, and ran before the archive doors sealed shut."
         else:
             text = "The outline should lean harder on the ledger's cost."
-        yield f'data: {json.dumps({"type": "text_delta", "delta": text})}\n\n'
-        yield f'data: {json.dumps({"type": "done"})}\n\n'
+        yield f"data: {json.dumps({'type': 'text_delta', 'delta': text})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
 class _RecoverableStoryLLMService(_MockStoryLLMService):
@@ -153,8 +169,8 @@ class _RecoverableStoryLLMService(_MockStoryLLMService):
     async def chat_completion_stream(self, request):
         self._stream_calls += 1
         if self._stream_calls == 1:
-            yield f'data: {json.dumps({"type": "error", "error": {"message": "writer stream timeout", "type": "timeout"}})}\n\n'
-            yield f'data: {json.dumps({"type": "done"})}\n\n'
+            yield f"data: {json.dumps({'type': 'error', 'error': {'message': 'writer stream timeout', 'type': 'timeout'}})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
             return
         async for chunk in super().chat_completion_stream(request):
             yield chunk
@@ -174,10 +190,14 @@ class _FakeLangfuseObservation:
         return False
 
     def update(self, **kwargs):
-        self._sink.append({"kind": "observation_update", "name": self._name, "payload": kwargs})
+        self._sink.append(
+            {"kind": "observation_update", "name": self._name, "payload": kwargs}
+        )
 
     def score_trace(self, **kwargs):
-        self._sink.append({"kind": "score_trace", "name": self._name, "payload": kwargs})
+        self._sink.append(
+            {"kind": "score_trace", "name": self._name, "payload": kwargs}
+        )
 
     def score(self, **kwargs):
         self._sink.append({"kind": "score", "name": self._name, "payload": kwargs})
@@ -225,58 +245,77 @@ def _create_ready_workspace(client) -> str:
     assert workspace.status_code == 201
     workspace_id = workspace.json()["workspace_id"]
 
-    assert client.patch(
-        f"/api/rp/setup/workspaces/{workspace_id}/story-config",
-        json={
-            "model_profile_ref": "model.default",
-            "worker_profile_ref": "worker.longform",
-            "post_write_policy_preset": "balanced",
-            "retrieval_embedding_model_id": "embedding-model-story",
-            "retrieval_embedding_provider_id": "provider-story",
-            "retrieval_rerank_model_id": "rerank-model-story",
-            "retrieval_rerank_provider_id": "provider-story",
-            "notes": "Longform active story test",
-        },
-    ).status_code == 200
-    assert client.patch(
-        f"/api/rp/setup/workspaces/{workspace_id}/writing-contract",
-        json={
-            "pov_rules": ["third_person_limited"],
-            "style_rules": ["restrained", "lean"],
-            "writing_constraints": ["avoid exposition dumps"],
-            "task_writing_rules": ["keep scene motion visible"],
-        },
-    ).status_code == 200
-    assert client.patch(
-        f"/api/rp/setup/workspaces/{workspace_id}/longform-blueprint",
-        json={
-            "premise": "A courier discovers the archive ledger is a prison key registry.",
-            "central_conflict": "The courier must escape with proof before dawn.",
-            "chapter_blueprints": [
-                {
-                    "chapter_id": "ch1",
-                    "title": "The Ledger",
-                    "purpose": "Discover the registry and escape alive.",
-                    "major_beats": ["Infiltration", "Discovery", "Escape"],
-                    "setup_payoff_targets": ["prison key registry"],
-                }
-            ],
-        },
-    ).status_code == 200
-    assert client.post(
-        f"/api/rp/setup/workspaces/{workspace_id}/foundation/entries",
-        json={
-            "entry_id": "world_rule_fire",
-            "domain": "world",
-            "path": "law.fire_rituals",
-            "title": "Fire Ritual Ban",
-            "tags": ["law"],
-            "source_refs": [],
-            "content": {"summary": "Rivergate forbids open ritual fire inside the archive district."},
-        },
-    ).status_code == 200
+    assert (
+        client.patch(
+            f"/api/rp/setup/workspaces/{workspace_id}/story-config",
+            json={
+                "model_profile_ref": "model.default",
+                "worker_profile_ref": "worker.longform",
+                "post_write_policy_preset": "balanced",
+                "retrieval_embedding_model_id": "embedding-model-story",
+                "retrieval_embedding_provider_id": "provider-story",
+                "retrieval_rerank_model_id": "rerank-model-story",
+                "retrieval_rerank_provider_id": "provider-story",
+                "notes": "Longform active story test",
+            },
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            f"/api/rp/setup/workspaces/{workspace_id}/writing-contract",
+            json={
+                "pov_rules": ["third_person_limited"],
+                "style_rules": ["restrained", "lean"],
+                "writing_constraints": ["avoid exposition dumps"],
+                "task_writing_rules": ["keep scene motion visible"],
+            },
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            f"/api/rp/setup/workspaces/{workspace_id}/longform-blueprint",
+            json={
+                "premise": "A courier discovers the archive ledger is a prison key registry.",
+                "central_conflict": "The courier must escape with proof before dawn.",
+                "chapter_blueprints": [
+                    {
+                        "chapter_id": "ch1",
+                        "title": "The Ledger",
+                        "purpose": "Discover the registry and escape alive.",
+                        "major_beats": ["Infiltration", "Discovery", "Escape"],
+                        "setup_payoff_targets": ["prison key registry"],
+                    }
+                ],
+            },
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/rp/setup/workspaces/{workspace_id}/foundation/entries",
+            json={
+                "entry_id": "world_rule_fire",
+                "domain": "world",
+                "path": "law.fire_rituals",
+                "title": "Fire Ritual Ban",
+                "tags": ["law"],
+                "source_refs": [],
+                "content": {
+                    "summary": "Rivergate forbids open ritual fire inside the archive district."
+                },
+            },
+        ).status_code
+        == 200
+    )
 
-    for step_id in ("story_config", "writing_contract", "foundation", "longform_blueprint"):
+    for step_id in (
+        "story_config",
+        "writing_contract",
+        "foundation",
+        "longform_blueprint",
+    ):
         proposal = client.post(
             f"/api/rp/setup/workspaces/{workspace_id}/commit-proposals",
             json={
@@ -322,8 +361,14 @@ def test_story_activation_bootstraps_session(client, monkeypatch):
     assert session_snapshot.status_code == 200
     snapshot = session_snapshot.json()
     assert snapshot["session"]["story_id"] == "story_active_mvp"
-    assert snapshot["session"]["runtime_story_config"]["retrieval_embedding_model_id"] == "embedding-model-story"
-    assert snapshot["session"]["runtime_story_config"]["retrieval_rerank_model_id"] == "rerank-model-story"
+    assert (
+        snapshot["session"]["runtime_story_config"]["retrieval_embedding_model_id"]
+        == "embedding-model-story"
+    )
+    assert (
+        snapshot["session"]["runtime_story_config"]["retrieval_rerank_model_id"]
+        == "rerank-model-story"
+    )
     assert snapshot["chapter"]["chapter_index"] == 1
     assert snapshot["chapter"]["phase"] == "outline_drafting"
     assert snapshot["memory_backend"]["phase"] == "phase_g4c_cleanup_prep"
@@ -334,8 +379,13 @@ def test_story_activation_bootstraps_session(client, monkeypatch):
     assert snapshot["memory_backend"]["mirror_sync_enabled"] is True
     assert snapshot["memory_backend"]["hard_cleanup_enabled"] is False
     if snapshot["memory_backend"]["flags"]["core_state_store_write_switch_enabled"]:
-        assert snapshot["memory_backend"]["authoritative_truth_source"] == "core_state_store"
-        assert snapshot["memory_backend"]["projection_truth_source"] == "core_state_store"
+        assert (
+            snapshot["memory_backend"]["authoritative_truth_source"]
+            == "core_state_store"
+        )
+        assert (
+            snapshot["memory_backend"]["projection_truth_source"] == "core_state_store"
+        )
 
 
 def test_activation_check_emits_langfuse_scores(client, monkeypatch):
@@ -482,14 +532,23 @@ def test_story_runtime_config_patch_updates_session_snapshot(client, monkeypatch
     assert refreshed.status_code == 200
     refreshed_snapshot = refreshed.json()
     assert (
-        refreshed_snapshot["session"]["runtime_story_config"]["retrieval_embedding_model_id"]
+        refreshed_snapshot["session"]["runtime_story_config"][
+            "retrieval_embedding_model_id"
+        ]
         == "embedding-model-session"
     )
     assert (
-        refreshed_snapshot["session"]["runtime_story_config"]["retrieval_rerank_model_id"]
+        refreshed_snapshot["session"]["runtime_story_config"][
+            "retrieval_rerank_model_id"
+        ]
         == "rerank-model-session"
     )
-    assert refreshed_snapshot["memory_backend"]["legacy_fields"]["session.current_state_json"] == "compatibility_mirror"
+    assert (
+        refreshed_snapshot["memory_backend"]["legacy_fields"][
+            "session.current_state_json"
+        ]
+        == "compatibility_mirror"
+    )
 
 
 def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch):
@@ -522,7 +581,9 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     outline_artifact = next(
-        item for item in snapshot["artifacts"] if item["artifact_kind"] == "chapter_outline"
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "chapter_outline"
     )
     assert snapshot["chapter"]["phase"] == "outline_review"
 
@@ -573,7 +634,12 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     assert snapshot["chapter"]["phase"] == "segment_drafting"
-    assert snapshot["session"]["current_state_json"]["narrative_progress"]["accepted_segments"] >= 1
+    assert (
+        snapshot["session"]["current_state_json"]["narrative_progress"][
+            "accepted_segments"
+        ]
+        >= 1
+    )
 
     completed = client.post(
         f"/api/rp/story-sessions/{session_id}/turn",
@@ -619,9 +685,7 @@ def test_story_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
         assert stream_response.status_code == 200
         _ = "".join(stream_response.iter_text())
 
-    debug_response = client.get(
-        f"/api/rp/story-sessions/{session_id}/runtime/debug"
-    )
+    debug_response = client.get(f"/api/rp/story-sessions/{session_id}/runtime/debug")
     assert debug_response.status_code == 200
     payload = debug_response.json()
     assert payload["namespace"] == "rp_story"
@@ -658,7 +722,10 @@ def test_story_turn_rejects_command_not_allowed_for_phase(client):
     assert response.status_code == 400
     payload = response.json()
     assert payload["detail"]["error"]["code"] == "story_turn_failed"
-    assert "not allowed during phase outline_drafting" in payload["detail"]["error"]["message"]
+    assert (
+        "not allowed during phase outline_drafting"
+        in payload["detail"]["error"]["message"]
+    )
 
 
 def test_story_turn_recovers_after_failed_stream_on_same_thread(client, monkeypatch):
@@ -735,7 +802,9 @@ def test_story_memory_read_only_routes_expose_session_scoped_views(client, monke
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     outline_artifact = next(
-        item for item in snapshot["artifacts"] if item["artifact_kind"] == "chapter_outline"
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "chapter_outline"
     )
     accepted_outline = client.post(
         f"/api/rp/story-sessions/{session_id}/turn",
@@ -781,9 +850,8 @@ def test_story_memory_read_only_routes_expose_session_scoped_views(client, monke
     authoritative = client.get(
         f"/api/rp/story-sessions/{session_id}/memory/authoritative"
     )
-    projection = client.get(
-        f"/api/rp/story-sessions/{session_id}/memory/projection"
-    )
+    projection = client.get(f"/api/rp/story-sessions/{session_id}/memory/projection")
+    blocks = client.get(f"/api/rp/story-sessions/{session_id}/memory/blocks")
     proposals = client.get(
         f"/api/rp/story-sessions/{session_id}/memory/proposals",
         params={"status": "applied"},
@@ -807,6 +875,7 @@ def test_story_memory_read_only_routes_expose_session_scoped_views(client, monke
 
     assert authoritative.status_code == 200
     assert projection.status_code == 200
+    assert blocks.status_code == 200
     assert proposals.status_code == 200
     assert versions.status_code == 200
     assert provenance.status_code == 200
@@ -815,7 +884,30 @@ def test_story_memory_read_only_routes_expose_session_scoped_views(client, monke
         for item in authoritative.json()["items"]
     )
     assert any(
-        item["slot_name"] == "current_outline_digest" for item in projection.json()["items"]
+        item["slot_name"] == "current_outline_digest"
+        for item in projection.json()["items"]
+    )
+    assert blocks.json()["session_id"] == session_id
+    assert any(
+        item["label"] == "narrative_progress.current"
+        and item["layer"] == "core_state.authoritative"
+        and item["domain"] == "narrative_progress"
+        and item["domain_path"] == "narrative_progress.current"
+        and isinstance(item["data_json"], dict)
+        and item["source"] in {"core_state_store", "compatibility_mirror"}
+        and item["metadata"]["route"]
+        in {"core_state_store", "story_session.current_state_json"}
+        for item in blocks.json()["items"]
+    )
+    assert any(
+        item["label"] == "projection.current_outline_digest"
+        and item["layer"] == "core_state.projection"
+        and item["domain_path"] == "projection.current_outline_digest"
+        and isinstance(item["items_json"], list)
+        and item["source"] in {"core_state_store", "compatibility_mirror"}
+        and item["metadata"]["route"]
+        in {"core_state_store", "chapter_workspace.builder_snapshot_json"}
+        for item in blocks.json()["items"]
     )
     assert proposals.json()["items"]
     assert versions.json()["current_ref"] == "narrative_progress.current@2"
@@ -826,6 +918,7 @@ def test_story_memory_routes_return_404_for_missing_session(client):
     routes = [
         ("/api/rp/story-sessions/missing-session/memory/authoritative", None),
         ("/api/rp/story-sessions/missing-session/memory/projection", None),
+        ("/api/rp/story-sessions/missing-session/memory/blocks", None),
         ("/api/rp/story-sessions/missing-session/memory/proposals", None),
         (
             "/api/rp/story-sessions/missing-session/memory/versions",
@@ -852,7 +945,9 @@ def test_story_memory_routes_return_404_for_missing_session(client):
         assert payload["detail"]["error"]["code"] == "story_session_not_found"
 
 
-def test_story_memory_routes_do_not_fall_back_to_story_latest_session(client, monkeypatch):
+def test_story_memory_routes_do_not_fall_back_to_story_latest_session(
+    client, monkeypatch
+):
     client.put("/api/providers/provider-story", json=_provider_payload())
     client.put(
         "/api/providers/provider-story/models/model-story",
@@ -882,7 +977,9 @@ def test_story_memory_routes_do_not_fall_back_to_story_latest_session(client, mo
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     outline_artifact = next(
-        item for item in snapshot["artifacts"] if item["artifact_kind"] == "chapter_outline"
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "chapter_outline"
     )
     accepted_outline = client.post(
         f"/api/rp/story-sessions/{session_id}/turn",

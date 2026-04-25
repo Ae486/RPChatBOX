@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Trellis UserPromptSubmit hook: inject per-turn workflow breadcrumb.
 
-Runs on every user prompt. Reads the active task (.trellis/.current-task)
+Runs on every user prompt. Resolves the effective active task pointer
+(session override first, repository default second)
 and emits a short <workflow-state> block reminding the main AI what task
 is active and its expected flow. Breadcrumb text is pulled from
 workflow.md [workflow-state:STATUS] tag blocks (single source of truth
@@ -15,7 +16,7 @@ writeSharedHooks() at init time.
 
 Silent exit 0 cases (no output):
   - No .trellis/ directory found (not a Trellis project)
-  - No .current-task file, or it's empty
+  - No effective task pointer, or it resolves empty
   - task.json malformed or missing status
 
 Unknown status (no tag + no hardcoded fallback) emits a generic
@@ -76,21 +77,86 @@ def _normalize_task_ref(task_ref: str) -> str:
     return normalized
 
 
-def get_active_task(root: Path) -> Optional[Tuple[str, str]]:
+def _sanitize_session_id(session_id: object) -> str:
+    if session_id is None:
+        return ""
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(session_id).strip())
+    return sanitized.strip(".-")[:120]
+
+
+def _extract_session_id(data: dict) -> str | None:
+    """Best-effort session id extraction across hook payload variants."""
+    for key in (
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+    ):
+        value = _sanitize_session_id(data.get(key))
+        if value:
+            return value
+
+    for container_key in ("session", "conversation", "thread"):
+        container = data.get(container_key)
+        if isinstance(container, dict):
+            value = _sanitize_session_id(container.get("id"))
+            if value:
+                return value
+
+    for key in ("transcript_path", "transcriptPath", "log_path", "logPath"):
+        raw_path = data.get(key)
+        if raw_path:
+            value = _sanitize_session_id(Path(str(raw_path)).stem)
+            if value:
+                return value
+
+    for env_key in (
+        "TRELLIS_SESSION_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "CLAUDE_SESSION_ID",
+        "CURSOR_SESSION_ID",
+        "GEMINI_SESSION_ID",
+        "QODER_SESSION_ID",
+    ):
+        value = _sanitize_session_id(os.environ.get(env_key))
+        if value:
+            return value
+
+    return None
+
+
+def _read_task_ref_file(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        return _normalize_task_ref(path.read_text(encoding="utf-8").strip())
+    except OSError:
+        return ""
+
+
+def _get_task_ref(root: Path, session_id: str | None) -> tuple[str, str]:
+    if session_id:
+        session_file = root / ".trellis" / ".session-tasks" / f"{session_id}.current-task"
+        task_ref = _read_task_ref_file(session_file)
+        if task_ref:
+            return task_ref, "session"
+
+    task_ref = _read_task_ref_file(root / ".trellis" / ".current-task")
+    if task_ref:
+        return task_ref, "repo"
+
+    return "", "none"
+
+
+def get_active_task(root: Path, session_id: str | None = None) -> Optional[Tuple[str, str, str]]:
     """Return (task_id, status) from the current active task, else None.
 
-    Reads .trellis/.current-task (a path relative to root, e.g.
-    ".trellis/tasks/04-17-foo") then that task's task.json.
-    Normalizes backslashes so Windows paths work on Unix and vice versa.
+    Session-scoped task pointers override the repository default pointer.
     """
-    ref_file = root / ".trellis" / ".current-task"
-    if not ref_file.is_file():
-        return None
-    try:
-        raw = ref_file.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    task_ref = _normalize_task_ref(raw)
+    task_ref, source = _get_task_ref(root, session_id)
     if not task_ref:
         return None
 
@@ -108,7 +174,7 @@ def get_active_task(root: Path) -> Optional[Tuple[str, str]]:
     status = data.get("status", "")
     if not isinstance(status, str) or not status:
         return None
-    return task_id, status
+    return task_id, status, source
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +255,10 @@ def load_breadcrumbs(root: Path) -> dict[str, str]:
 
 
 def build_breadcrumb(
-    task_id: Optional[str], status: str, templates: dict[str, str]
+    task_id: Optional[str],
+    status: str,
+    templates: dict[str, str],
+    source: str | None = None,
 ) -> str:
     """Build the <workflow-state>...</workflow-state> block.
 
@@ -201,6 +270,8 @@ def build_breadcrumb(
     if body is None:
         body = "Refer to workflow.md for current step."
     header = f"Status: {status}" if task_id is None else f"Task: {task_id} ({status})"
+    if source and source != "none":
+        header += f"\nScope: {source}"
     return f"<workflow-state>\n{header}\n{body}\n</workflow-state>"
 
 
@@ -222,13 +293,15 @@ def main() -> int:
         return 0  # not a Trellis project
 
     templates = load_breadcrumbs(root)
-    task = get_active_task(root)
+    session_id = _extract_session_id(data)
+    task = get_active_task(root, session_id)
     if task is None:
         # No active task — still emit a breadcrumb nudging AI toward
         # trellis-brainstorm + task.py create when user describes real work.
         breadcrumb = build_breadcrumb(None, "no_task", templates)
     else:
-        breadcrumb = build_breadcrumb(*task, templates=templates)
+        task_id, status, source = task
+        breadcrumb = build_breadcrumb(task_id, status, templates=templates, source=source)
 
     output = {
         "hookSpecificOutput": {

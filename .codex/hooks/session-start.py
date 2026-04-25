@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import warnings
@@ -54,10 +55,12 @@ def read_file(path: Path, fallback: str = "") -> str:
         return fallback
 
 
-def run_script(script_path: Path) -> str:
+def run_script(script_path: Path, session_id: str | None = None) -> str:
     try:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
+        if session_id:
+            env["TRELLIS_SESSION_ID"] = session_id
         cmd = [sys.executable, "-W", "ignore", str(script_path)]
         result = subprocess.run(
             cmd,
@@ -103,18 +106,88 @@ def _resolve_task_dir(trellis_dir: Path, task_ref: str) -> Path:
     return trellis_dir / "tasks" / path_obj
 
 
-def _get_task_status(trellis_dir: Path) -> str:
-    current_task_file = trellis_dir / ".current-task"
-    if not current_task_file.is_file():
-        return "Status: NO ACTIVE TASK\nNext: Describe what you want to work on"
+def _sanitize_session_id(session_id: object) -> str:
+    if session_id is None:
+        return ""
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(session_id).strip())
+    return sanitized.strip(".-")[:120]
 
-    task_ref = _normalize_task_ref(current_task_file.read_text(encoding="utf-8").strip())
+
+def _extract_session_id(data: dict) -> str | None:
+    for key in (
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+    ):
+        value = _sanitize_session_id(data.get(key))
+        if value:
+            return value
+
+    for container_key in ("session", "conversation", "thread"):
+        container = data.get(container_key)
+        if isinstance(container, dict):
+            value = _sanitize_session_id(container.get("id"))
+            if value:
+                return value
+
+    for key in ("transcript_path", "transcriptPath", "log_path", "logPath"):
+        raw_path = data.get(key)
+        if raw_path:
+            value = _sanitize_session_id(Path(str(raw_path)).stem)
+            if value:
+                return value
+
+    for env_key in (
+        "TRELLIS_SESSION_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "CLAUDE_SESSION_ID",
+        "CURSOR_SESSION_ID",
+        "GEMINI_SESSION_ID",
+        "QODER_SESSION_ID",
+    ):
+        value = _sanitize_session_id(os.environ.get(env_key))
+        if value:
+            return value
+
+    return None
+
+
+def _read_task_ref_file(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        return _normalize_task_ref(path.read_text(encoding="utf-8").strip())
+    except OSError:
+        return ""
+
+
+def _get_task_ref(trellis_dir: Path, session_id: str | None) -> tuple[str, str]:
+    if session_id:
+        session_file = trellis_dir / ".session-tasks" / f"{session_id}.current-task"
+        task_ref = _read_task_ref_file(session_file)
+        if task_ref:
+            return task_ref, "session"
+
+    task_ref = _read_task_ref_file(trellis_dir / ".current-task")
+    if task_ref:
+        return task_ref, "repo"
+
+    return "", "none"
+
+
+def _get_task_status(trellis_dir: Path, session_id: str | None = None) -> str:
+    task_ref, source = _get_task_ref(trellis_dir, session_id)
     if not task_ref:
         return "Status: NO ACTIVE TASK\nNext: Describe what you want to work on"
 
     task_dir = _resolve_task_dir(trellis_dir, task_ref)
     if not task_dir.is_dir():
-        return f"Status: STALE POINTER\nTask: {task_ref}\nNext: Task directory not found. Run: python .\\.trellis\\scripts\\task.py finish"
+        finish_cmd = "python .\\.trellis\\scripts\\task.py finish --session" if source == "session" else "python .\\.trellis\\scripts\\task.py finish"
+        return f"Status: STALE POINTER\nScope: {source}\nTask: {task_ref}\nNext: Task directory not found. Run: {finish_cmd}"
 
     task_json_path = task_dir / "task.json"
     task_data: dict = {}
@@ -128,7 +201,7 @@ def _get_task_status(trellis_dir: Path) -> str:
     task_status = task_data.get("status", "unknown")
 
     if task_status == "completed":
-        return f"Status: COMPLETED\nTask: {task_title}\nNext: Archive with `python .\\.trellis\\scripts\\task.py archive {task_dir.name}` or start a new task"
+        return f"Status: COMPLETED\nScope: {source}\nTask: {task_title}\nNext: Archive with `python .\\.trellis\\scripts\\task.py archive {task_dir.name}` or start a new task"
 
     has_context = False
     for jsonl_name in ("implement.jsonl", "check.jsonl", "spec.jsonl"):
@@ -140,12 +213,12 @@ def _get_task_status(trellis_dir: Path) -> str:
     has_prd = (task_dir / "prd.md").is_file()
 
     if not has_prd:
-        return f"Status: NOT READY\nTask: {task_title}\nMissing: prd.md not created\nNext: Write PRD (see workflow.md Phase 1.1) then curate implement.jsonl per Phase 1.3"
+        return f"Status: NOT READY\nScope: {source}\nTask: {task_title}\nMissing: prd.md not created\nNext: Write PRD (see workflow.md Phase 1.1) then curate implement.jsonl per Phase 1.3"
 
     if not has_context:
-        return f"Status: NOT READY\nTask: {task_title}\nMissing: implement.jsonl / check.jsonl missing or empty\nNext: Curate entries per workflow.md Phase 1.3 (spec + research files only), then `task.py start`"
+        return f"Status: NOT READY\nScope: {source}\nTask: {task_title}\nMissing: implement.jsonl / check.jsonl missing or empty\nNext: Curate entries per workflow.md Phase 1.3 (spec + research files only), then `task.py start`"
 
-    return f"Status: READY\nTask: {task_title}\nNext: Continue with implement or check"
+    return f"Status: READY\nScope: {source}\nTask: {task_title}\nNext: Continue with implement or check"
 
 
 def _extract_range(content: str, start_header: str, end_header: str) -> str:
@@ -197,6 +270,7 @@ def main() -> None:
         sys.exit(0)
 
     # Read hook input from stdin
+    hook_input: dict = {}
     try:
         hook_input = json.loads(sys.stdin.read())
         project_dir = Path(hook_input.get("cwd", ".")).resolve()
@@ -204,6 +278,7 @@ def main() -> None:
         project_dir = Path(".").resolve()
 
     trellis_dir = project_dir / ".trellis"
+    session_id = _extract_session_id(hook_input)
 
     output = StringIO()
 
@@ -216,7 +291,7 @@ Read and follow all instructions below carefully.
 
     output.write("<current-state>\n")
     context_script = trellis_dir / "scripts" / "get_context.py"
-    output.write(run_script(context_script))
+    output.write(run_script(context_script, session_id=session_id))
     output.write("\n</current-state>\n\n")
 
     output.write("<workflow>\n")
@@ -276,7 +351,7 @@ Read and follow all instructions below carefully.
     )
     output.write("</guidelines>\n\n")
 
-    task_status = _get_task_status(trellis_dir)
+    task_status = _get_task_status(trellis_dir, session_id=session_id)
     output.write(f"<task-status>\n{task_status}\n</task-status>\n\n")
 
     output.write("""<ready>
@@ -295,7 +370,10 @@ If there is an active task, ask whether to continue it.
         },
     }
 
-    print(json.dumps(result, ensure_ascii=False), flush=True)
+    # Codex may run hooks from a Windows console using a non-UTF-8 code page.
+    # Escaping non-ASCII keeps stdout JSON valid even when context contains
+    # symbols from Trellis docs, without changing the decoded hook payload.
+    print(json.dumps(result, ensure_ascii=True), flush=True)
 
 
 if __name__ == "__main__":

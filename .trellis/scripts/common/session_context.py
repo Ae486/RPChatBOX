@@ -28,7 +28,7 @@ from .paths import (
     DIR_WORKSPACE,
     count_lines,
     get_active_journal_file,
-    get_current_task,
+    get_current_task_with_source,
     get_developer,
     get_repo_root,
     get_tasks_dir,
@@ -233,7 +233,7 @@ def get_context_text(repo_root: Path | None = None) -> str:
     lines.append("## DEVELOPER")
     if not developer:
         lines.append(
-            f"ERROR: Not initialized. Run: python3 ./{DIR_WORKFLOW}/{DIR_SCRIPTS}/init_developer.py <name>"
+            f"ERROR: Not initialized. Run: python .\\{DIR_WORKFLOW}\\{DIR_SCRIPTS}\\init_developer.py <name>"
         )
         return "\n".join(lines)
 
@@ -276,10 +276,11 @@ def get_context_text(repo_root: Path | None = None) -> str:
 
     # Current task
     lines.append("## CURRENT TASK")
-    current_task = get_current_task(repo_root)
+    current_task, current_task_source = get_current_task_with_source(repo_root=repo_root)
     if current_task:
         current_task_dir = repo_root / current_task
         lines.append(f"Path: {current_task}")
+        lines.append(f"Source: {current_task_source}")
 
         ct = load_task(current_task_dir)
         if ct:
@@ -427,7 +428,7 @@ def get_context_record_json(repo_root: Path | None = None) -> dict:
 
     # Current task
     current_task_info = None
-    current_task = get_current_task(repo_root)
+    current_task, current_task_source = get_current_task_with_source(repo_root=repo_root)
     if current_task:
         ct = load_task(repo_root / current_task)
         if ct:
@@ -435,6 +436,7 @@ def get_context_record_json(repo_root: Path | None = None) -> dict:
                 "path": current_task,
                 "name": ct.name,
                 "status": ct.status,
+                "source": current_task_source,
             }
 
     # Package git repos
@@ -476,7 +478,7 @@ def get_context_text_record(repo_root: Path | None = None) -> str:
     developer = get_developer(repo_root)
     if not developer:
         lines.append(
-            f"ERROR: Not initialized. Run: python3 ./{DIR_WORKFLOW}/{DIR_SCRIPTS}/init_developer.py <name>"
+            f"ERROR: Not initialized. Run: python .\\{DIR_WORKFLOW}\\{DIR_SCRIPTS}\\init_developer.py <name>"
         )
         return "\n".join(lines)
 
@@ -537,9 +539,10 @@ def get_context_text_record(repo_root: Path | None = None) -> str:
 
     # CURRENT TASK
     lines.append("## CURRENT TASK")
-    current_task = get_current_task(repo_root)
+    current_task, current_task_source = get_current_task_with_source(repo_root=repo_root)
     if current_task:
         lines.append(f"Path: {current_task}")
+        lines.append(f"Source: {current_task_source}")
         ct = load_task(repo_root / current_task)
         if ct:
             lines.append(f"Name: {ct.name}")

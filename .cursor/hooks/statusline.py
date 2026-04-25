@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -81,9 +82,77 @@ def _find_trellis_dir() -> Path | None:
     return None
 
 
-def _get_current_task(trellis_dir: Path) -> dict | None:
+def _sanitize_session_id(session_id: object) -> str:
+    if session_id is None:
+        return ""
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(session_id).strip())
+    return sanitized.strip(".-")[:120]
+
+
+def _extract_session_id(data: dict) -> str | None:
+    for key in (
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+    ):
+        value = _sanitize_session_id(data.get(key))
+        if value:
+            return value
+
+    for container_key in ("session", "conversation", "thread"):
+        container = data.get(container_key)
+        if isinstance(container, dict):
+            value = _sanitize_session_id(container.get("id"))
+            if value:
+                return value
+
+    for key in ("transcript_path", "transcriptPath", "log_path", "logPath"):
+        raw_path = data.get(key)
+        if raw_path:
+            value = _sanitize_session_id(Path(str(raw_path)).stem)
+            if value:
+                return value
+
+    for env_key in (
+        "TRELLIS_SESSION_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "CLAUDE_SESSION_ID",
+        "CURSOR_SESSION_ID",
+        "GEMINI_SESSION_ID",
+        "QODER_SESSION_ID",
+    ):
+        value = _sanitize_session_id(os.environ.get(env_key))
+        if value:
+            return value
+
+    return None
+
+
+def _read_task_ref_file(path: Path) -> str:
+    return _normalize_task_ref(_read_text(path))
+
+
+def _get_task_ref(trellis_dir: Path, session_id: str | None) -> tuple[str, str]:
+    if session_id:
+        session_file = trellis_dir / ".session-tasks" / f"{session_id}.current-task"
+        task_ref = _read_task_ref_file(session_file)
+        if task_ref:
+            return task_ref, "session"
+
+    task_ref = _read_task_ref_file(trellis_dir / ".current-task")
+    if task_ref:
+        return task_ref, "repo"
+
+    return "", "none"
+
+
+def _get_current_task(trellis_dir: Path, session_id: str | None = None) -> dict | None:
     """Load current task info. Returns dict with title/status/priority or None."""
-    task_ref = _normalize_task_ref(_read_text(trellis_dir / ".current-task"))
+    task_ref, source = _get_task_ref(trellis_dir, session_id)
     if not task_ref:
         return None
 
@@ -97,6 +166,7 @@ def _get_current_task(trellis_dir: Path) -> dict | None:
         "title": task_data.get("title") or task_data.get("name") or "unknown",
         "status": task_data.get("status", "unknown"),
         "priority": task_data.get("priority", "P2"),
+        "source": source,
     }
 
 
@@ -161,7 +231,8 @@ def main() -> None:
     SEP = " \033[90m·\033[0m "
 
     # --- Trellis data ---
-    task = _get_current_task(trellis_dir) if trellis_dir else None
+    session_id = _extract_session_id(cc_data)
+    task = _get_current_task(trellis_dir, session_id) if trellis_dir else None
     dev = _get_developer(trellis_dir) if trellis_dir else ""
     task_count = _count_active_tasks(trellis_dir) if trellis_dir else 0
 
@@ -210,7 +281,8 @@ def main() -> None:
 
     # Output: task line (only if active) + info line
     if task:
-        print(f"\033[36m[{task['priority']}]\033[0m {task['title']} \033[33m({task['status']})\033[0m")
+        source_suffix = " session" if task.get("source") == "session" else ""
+        print(f"\033[36m[{task['priority']}]\033[0m {task['title']} \033[33m({task['status']}{source_suffix})\033[0m")
     print(info_line)
 
 

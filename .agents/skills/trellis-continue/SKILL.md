@@ -13,9 +13,16 @@ Resume work on the current task — pick up at the right phase/step in `.trellis
 
 ```powershell
 python .\.trellis\scripts\get_context.py
+python .\.trellis\scripts\task.py current
 ```
 
-Confirms: current task, git state, recent commits.
+Confirms: effective current task (`session > repo`), git state, recent commits.
+
+If the session should use a different task, bind it without changing the repo default:
+
+```powershell
+python .\.trellis\scripts\task.py start <task> --session --session-id <id>
+```
 
 ## Step 2: Load the Phase Index
 

@@ -28,9 +28,13 @@ class CoreStateBackfillService:
         self._core_state_store_repository = core_state_store_repository
 
     def backfill_story_session(self, *, session_id: str) -> dict[str, int]:
-        authoritative_objects = self.backfill_authoritative_for_session(session_id=session_id)
+        authoritative_objects = self.backfill_authoritative_for_session(
+            session_id=session_id
+        )
         projection_slots = 0
-        for chapter in self._story_session_service.list_chapter_workspaces(session_id=session_id):
+        for chapter in self._story_session_service.list_chapter_workspaces(
+            session_id=session_id
+        ):
             projection_slots += self.backfill_projection_for_chapter(
                 chapter_workspace_id=chapter.chapter_workspace_id
             )
@@ -61,7 +65,9 @@ class CoreStateBackfillService:
                 target_ref=target_ref,
                 session_id=session.session_id,
             )
-            revisions: list[tuple[int, Any, str, str | None, str | None, dict[str, Any]]] = []
+            revisions: list[
+                tuple[int, Any, str, str | None, str | None, dict[str, Any]]
+            ] = []
             if apply_receipts:
                 initial_value = self._extract_backfill_value(
                     snapshot=apply_receipts[0].before_snapshot_json,
@@ -79,7 +85,9 @@ class CoreStateBackfillService:
                     )
                 )
                 for receipt in apply_receipts:
-                    revision = int(receipt.revision_after_json.get(binding.object_id) or 1)
+                    revision = int(
+                        receipt.revision_after_json.get(binding.object_id) or 1
+                    )
                     after_value = self._extract_backfill_value(
                         snapshot=receipt.after_snapshot_json,
                         backend_field=binding.backend_field,
@@ -109,22 +117,8 @@ class CoreStateBackfillService:
 
             latest_revision = max(revision for revision, *_ in revisions)
             latest_apply_id = apply_receipts[-1].apply_id if apply_receipts else None
-            current_record = self._core_state_store_repository.upsert_authoritative_object(
-                story_id=session.story_id,
-                session_id=session.session_id,
-                layer=Layer.CORE_STATE_AUTHORITATIVE.value,
-                domain=binding.domain.value,
-                domain_path=binding.domain_path,
-                object_id=binding.object_id,
-                scope="story",
-                current_revision=latest_revision,
-                data_json=self._normalize_authoritative_payload(current_value),
-                metadata_json={"backfilled_from": binding.backend_field},
-                latest_apply_id=latest_apply_id,
-            )
-            for revision, data_json, source_kind, source_apply_id, source_proposal_id, metadata in revisions:
-                revision_record = self._core_state_store_repository.upsert_authoritative_revision(
-                    authoritative_object_id=current_record.authoritative_object_id,
+            current_record = (
+                self._core_state_store_repository.upsert_authoritative_object(
                     story_id=session.story_id,
                     session_id=session.session_id,
                     layer=Layer.CORE_STATE_AUTHORITATIVE.value,
@@ -132,12 +126,37 @@ class CoreStateBackfillService:
                     domain_path=binding.domain_path,
                     object_id=binding.object_id,
                     scope="story",
-                    revision=revision,
-                    data_json=self._normalize_authoritative_payload(data_json),
-                    revision_source_kind=source_kind,
-                    source_apply_id=source_apply_id,
-                    source_proposal_id=source_proposal_id,
-                    metadata_json=metadata,
+                    current_revision=latest_revision,
+                    data_json=self._normalize_authoritative_payload(current_value),
+                    metadata_json={"backfilled_from": binding.backend_field},
+                    latest_apply_id=latest_apply_id,
+                )
+            )
+            for (
+                revision,
+                data_json,
+                source_kind,
+                source_apply_id,
+                source_proposal_id,
+                metadata,
+            ) in revisions:
+                revision_record = (
+                    self._core_state_store_repository.upsert_authoritative_revision(
+                        authoritative_object_id=current_record.authoritative_object_id,
+                        story_id=session.story_id,
+                        session_id=session.session_id,
+                        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+                        domain=binding.domain.value,
+                        domain_path=binding.domain_path,
+                        object_id=binding.object_id,
+                        scope="story",
+                        revision=revision,
+                        data_json=self._normalize_authoritative_payload(data_json),
+                        revision_source_kind=source_kind,
+                        source_apply_id=source_apply_id,
+                        source_proposal_id=source_proposal_id,
+                        metadata_json=metadata,
+                    )
                 )
                 if source_apply_id is not None and source_proposal_id is not None:
                     self._proposal_repository.create_apply_target_link(
@@ -157,7 +176,9 @@ class CoreStateBackfillService:
         return count
 
     def backfill_projection_for_chapter(self, *, chapter_workspace_id: str) -> int:
-        chapter = self._story_session_service.get_chapter_workspace(chapter_workspace_id)
+        chapter = self._story_session_service.get_chapter_workspace(
+            chapter_workspace_id
+        )
         if chapter is None:
             raise ValueError(f"ChapterWorkspace not found: {chapter_workspace_id}")
         session = self._story_session_service.get_session(chapter.session_id)
@@ -166,7 +187,17 @@ class CoreStateBackfillService:
         snapshot = dict(chapter.builder_snapshot_json or {})
         count = 0
         for binding in projection_bindings():
-            items = [str(item) for item in snapshot.get(binding.slot_name, []) if item is not None]
+            existing = self._core_state_store_repository.get_projection_slot(
+                chapter_workspace_id=chapter.chapter_workspace_id,
+                summary_id=binding.summary_id,
+            )
+            if existing is not None:
+                continue
+            items = [
+                str(item)
+                for item in snapshot.get(binding.slot_name, [])
+                if item is not None
+            ]
             current_record = self._core_state_store_repository.upsert_projection_slot(
                 story_id=session.story_id,
                 session_id=session.session_id,
@@ -179,7 +210,9 @@ class CoreStateBackfillService:
                 scope="chapter",
                 current_revision=1,
                 items_json=items,
-                metadata_json={"backfilled_from": "chapter_workspace.builder_snapshot_json"},
+                metadata_json={
+                    "backfilled_from": "chapter_workspace.builder_snapshot_json"
+                },
                 last_refresh_kind="migration_backfill",
             )
             self._core_state_store_repository.upsert_projection_slot_revision(
@@ -196,7 +229,9 @@ class CoreStateBackfillService:
                 revision=1,
                 items_json=items,
                 refresh_source_kind="migration_backfill",
-                metadata_json={"backfilled_from": "chapter_workspace.builder_snapshot_json"},
+                metadata_json={
+                    "backfilled_from": "chapter_workspace.builder_snapshot_json"
+                },
             )
             count += 1
         return count
@@ -209,7 +244,9 @@ class CoreStateBackfillService:
         fallback: Any,
     ) -> Any:
         if snapshot and backend_field in snapshot:
-            return CoreStateBackfillService._clone_json_value(snapshot.get(backend_field))
+            return CoreStateBackfillService._clone_json_value(
+                snapshot.get(backend_field)
+            )
         return CoreStateBackfillService._clone_json_value(fallback)
 
     @staticmethod

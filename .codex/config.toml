@@ -13,3 +13,7 @@ project_doc_fallback_filenames = ["AGENTS.md"]
 #
 # Without this flag, hooks.json is ignored and Trellis context won't
 # be injected into Codex sessions.
+
+# Trellis command mirrors live under `.codex/commands/trellis/` for local
+# discoverability, but the repository's authoritative Codex entrypoints remain
+# the shared skills under `.agents/skills/trellis-*`.

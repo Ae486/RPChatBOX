@@ -81,7 +81,7 @@
     "stop_on_first_hard_failure": false
   },
   "baseline": {
-    "compare_by": ["finish_reason", "warnings", "assertion_pass_rate"],
+    "compare_by": ["finish_reason", "warnings", "assertion_pass_rate", "reason_codes", "outcome_chain"],
     "baseline_tags": ["main"]
   },
   "metadata": {}

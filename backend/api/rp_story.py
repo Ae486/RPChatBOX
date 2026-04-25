@@ -20,7 +20,9 @@ from services.database import get_session
 router = APIRouter()
 
 
-def _story_controller(session: Session = Depends(get_session)) -> StoryRuntimeController:
+def _story_controller(
+    session: Session = Depends(get_session),
+) -> StoryRuntimeController:
     return RpRuntimeFactory(session).build_story_runtime_controller()
 
 
@@ -33,15 +35,18 @@ def _memory_backend_metadata() -> dict[str, object]:
     store_write_enabled = bool(settings.rp_memory_core_state_store_write_enabled)
     store_read_enabled = bool(settings.rp_memory_core_state_store_read_enabled)
     write_switch_enabled = bool(
-        store_write_enabled
-        and settings.rp_memory_core_state_store_write_switch_enabled
+        store_write_enabled and settings.rp_memory_core_state_store_write_switch_enabled
     )
-    truth_source = "core_state_store" if write_switch_enabled else "compatibility_mirror"
+    truth_source = (
+        "core_state_store" if write_switch_enabled else "compatibility_mirror"
+    )
     return {
         "phase": "phase_g4c_cleanup_prep",
         "authoritative_truth_source": truth_source,
         "projection_truth_source": truth_source,
-        "read_surface": "core_state_store" if store_read_enabled else "compatibility_mirror",
+        "read_surface": "core_state_store"
+        if store_read_enabled
+        else "compatibility_mirror",
         "legacy_fields": {
             "session.current_state_json": "compatibility_mirror",
             "chapter.builder_snapshot_json": "compatibility_mirror",
@@ -163,6 +168,21 @@ async def get_story_memory_projection(
 ):
     try:
         items = controller.list_memory_projection(session_id=session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    return {"session_id": session_id, "items": items}
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/blocks")
+async def get_story_memory_blocks(
+    session_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        items = controller.list_memory_blocks(session_id=session_id)
     except ValueError as exc:
         raise HTTPException(
             status_code=404,

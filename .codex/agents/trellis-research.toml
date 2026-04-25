@@ -1,5 +1,6 @@
 name = "trellis-research"
 description = "Trellis researcher for specs, code patterns, and affected files. Writes findings into {TASK_DIR}/research/ — read-only elsewhere."
+model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
@@ -13,7 +14,7 @@ through the chat reply is a failure.
 
 ## Workflow
 
-1. Read `.trellis/.current-task` to get the task directory. If empty,
+1. Run `python .\\.trellis\\scripts\\task.py current --path-only` to get the effective task directory, or fall back to `.trellis/.current-task`. If empty,
    ask the user where to write output; do not guess.
 2. Run `New-Item -ItemType Directory -Force -Path <TASK_DIR>\\research | Out-Null` to ensure the directory exists.
 3. Read `.trellis/workflow.md`, relevant `.trellis/spec/` files, and

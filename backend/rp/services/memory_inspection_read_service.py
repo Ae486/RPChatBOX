@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 from .core_state_store_repository import CoreStateStoreRepository
 from rp.models.dsl import Layer, ObjectRef
@@ -71,10 +72,20 @@ class MemoryInspectionReadService:
                         "domain": binding.domain.value,
                         "domain_path": binding.domain_path,
                         "scope": "story",
-                        "revision": int((version_result.current_ref or f"{binding.object_id}@1").rsplit("@", 1)[1]),
+                        "revision": int(
+                            (
+                                version_result.current_ref or f"{binding.object_id}@1"
+                            ).rsplit("@", 1)[1]
+                        ),
                     },
-                    "data": deepcopy(store_row.data_json if store_row is not None else payload[binding.backend_field]),
-                    "updated_at": store_row.updated_at if store_row is not None else session.updated_at,
+                    "data": deepcopy(
+                        store_row.data_json
+                        if store_row is not None
+                        else payload[binding.backend_field]
+                    ),
+                    "updated_at": store_row.updated_at
+                    if store_row is not None
+                    else session.updated_at,
                 }
             )
         return items
@@ -87,31 +98,67 @@ class MemoryInspectionReadService:
             and self._core_state_store_repository is not None
             and chapter is not None
         ):
-            return [
-                {
+            rows = self._core_state_store_repository.list_projection_slots_for_chapter(
+                chapter_workspace_id=chapter.chapter_workspace_id
+            )
+            items_by_slot_name = {
+                row.slot_name: {
                     "summary_id": row.summary_id,
                     "slot_name": row.slot_name,
                     "items": list(row.items_json),
                     "session_id": session.session_id if session is not None else None,
                     "chapter_workspace_id": chapter.chapter_workspace_id,
                     "updated_at": row.updated_at,
+                    "backend": "core_state_store",
                 }
-                for row in self._core_state_store_repository.list_projection_slots_for_chapter(
-                    chapter_workspace_id=chapter.chapter_workspace_id
-                )
+                for row in rows
+            }
+            sections = self._builder_projection_context_service.build_context_sections(
+                session_id=session_id
+            )
+            for section in sections:
+                slot_name = str(section["label"])
+                if slot_name in items_by_slot_name:
+                    continue
+                items_by_slot_name[slot_name] = {
+                    "summary_id": f"projection.{slot_name}",
+                    "slot_name": slot_name,
+                    "items": self._section_items(section),
+                    "session_id": session.session_id if session is not None else None,
+                    "chapter_workspace_id": chapter.chapter_workspace_id,
+                    "updated_at": chapter.updated_at,
+                    "backend": "compatibility_mirror",
+                }
+            return [
+                items_by_slot_name[slot_name]
+                for slot_name in sorted(items_by_slot_name)
             ]
-        sections = self._builder_projection_context_service.build_context_sections(session_id=session_id)
+        sections = self._builder_projection_context_service.build_context_sections(
+            session_id=session_id
+        )
         return [
             {
                 "summary_id": f"projection.{section['label']}",
                 "slot_name": section["label"],
-                "items": list(section["items"]),
+                "items": self._section_items(section),
                 "session_id": session.session_id if session is not None else None,
-                "chapter_workspace_id": chapter.chapter_workspace_id if chapter is not None else None,
+                "chapter_workspace_id": chapter.chapter_workspace_id
+                if chapter is not None
+                else None,
                 "updated_at": chapter.updated_at if chapter is not None else None,
+                "backend": "compatibility_mirror",
             }
             for section in sections
         ]
+
+    @staticmethod
+    def _section_items(section: dict[str, object]) -> list[Any]:
+        raw_items = section.get("items")
+        if isinstance(raw_items, list):
+            return deepcopy(raw_items)
+        if isinstance(raw_items, tuple):
+            return list(raw_items)
+        return []
 
     def list_proposals(
         self,
@@ -134,7 +181,9 @@ class MemoryInspectionReadService:
                     "policy_decision": record.policy_decision,
                     "domain": record.domain,
                     "domain_path": record.domain_path,
-                    "operation_kinds": [item.get("kind", "") for item in record.operations_json],
+                    "operation_kinds": [
+                        item.get("kind", "") for item in record.operations_json
+                    ],
                     "created_at": record.created_at,
                     "applied_at": record.applied_at,
                 }

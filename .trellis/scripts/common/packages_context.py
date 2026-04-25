@@ -17,7 +17,7 @@ from .config import _is_true_config_value, get_default_package, get_packages, ge
 from .paths import (
     DIR_SPEC,
     DIR_WORKFLOW,
-    get_current_task,
+    get_effective_current_task,
     get_repo_root,
 )
 from .tasks import load_task
@@ -43,7 +43,7 @@ def _scan_spec_layers(spec_dir: Path, package: str | None = None) -> list[str]:
 
 def _get_active_task_package(repo_root: Path) -> str | None:
     """Get the package field from the active task's task.json."""
-    current = get_current_task(repo_root)
+    current = get_effective_current_task(repo_root=repo_root)
     if not current:
         return None
     ct = load_task(repo_root / current)

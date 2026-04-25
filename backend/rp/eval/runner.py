@@ -46,7 +46,10 @@ from rp.observability.langfuse_scores import emit_ragas_metric_scores
 from services.langfuse_service import get_langfuse_service
 
 from .fixtures import ensure_registry_fixtures, normalize_story_mode
-from .graders.deterministic import evaluate_deterministic_scores
+from .graders.deterministic import (
+    evaluate_deterministic_scores,
+    evaluate_diagnostic_expectation_scores,
+)
 from .graders.subjective import (
     build_subjective_hook_artifacts,
     evaluate_subjective_hook_scores,
@@ -63,7 +66,7 @@ from .ragas_reporting import build_ragas_artifacts, build_ragas_report
 from .ragas_runtime import resolve_ragas_runtime_bindings
 from .ragas_samples import build_ragas_sample_from_eval_result
 from .replay import save_replay
-from .reporting import build_report
+from .reporting import attach_diagnostic_expectation_results, build_report
 from .trace_capture import (
     build_activation_trace,
     build_retrieval_trace,
@@ -320,7 +323,7 @@ class EvalRunner:
             scores=scores,
             runtime_result=runtime_result_payload,
         )
-        result.report = build_report(result)
+        self._finalize_report(result)
         replay_path = self._maybe_save_replay(case=case, result=result)
         if replay_path is not None:
             result.run.metadata["replay_path"] = replay_path.as_posix()
@@ -350,7 +353,7 @@ class EvalRunner:
             workspace_id=workspace.workspace_id,
             commit_id=commit_id,
         )
-        workspace_after = self._workspace_service.refresh_readiness(workspace.workspace_id)
+        self._workspace_service.refresh_readiness(workspace.workspace_id)
         maintenance_payload: dict | None = None
 
         if bool(case.input.env_overrides.get("force_stub_embeddings_for_story")):
@@ -503,7 +506,7 @@ class EvalRunner:
             runtime_result=retrieval_result_payload,
         )
         result.artifacts.extend(self._maybe_build_ragas_artifacts(case=case, result=result))
-        result.report = build_report(result)
+        self._finalize_report(result)
         if isinstance(result.report.get("ragas"), dict):
             result.run.metadata["ragas_status"] = result.report["ragas"].get("status")
         replay_path = self._maybe_save_replay(case=case, result=result)
@@ -666,12 +669,24 @@ class EvalRunner:
             scores=scores,
             runtime_result=activation_result_payload,
         )
-        result.report = build_report(result)
+        self._finalize_report(result)
         replay_path = self._maybe_save_replay(case=case, result=result)
         if replay_path is not None:
             result.run.metadata["replay_path"] = replay_path.as_posix()
             result.report["replay_path"] = replay_path.as_posix()
         return result
+
+    def _finalize_report(self, result: EvalRunResult) -> None:
+        result.report = build_report(result)
+        diagnostic_scores = evaluate_diagnostic_expectation_scores(
+            case=result.case,
+            run_id=result.run.run_id,
+            root_span_id=result.trace.spans[0].span_id if result.trace.spans else None,
+            report=result.report,
+        )
+        if diagnostic_scores:
+            result.scores.extend(diagnostic_scores)
+            attach_diagnostic_expectation_results(result.report, diagnostic_scores)
 
     def _prepare_setup_workspace(
         self,

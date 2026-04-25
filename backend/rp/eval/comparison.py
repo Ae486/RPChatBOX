@@ -70,6 +70,8 @@ def summarize_suite(path_or_payload: str | Path | dict[str, Any]) -> dict[str, A
     rubric_summaries: dict[str, dict[str, Any]] = {}
     primary_suspect_counts: dict[str, int] = defaultdict(int)
     reason_code_counts: dict[str, int] = defaultdict(int)
+    recommended_next_action_counts: dict[str, int] = defaultdict(int)
+    diagnostic_expectation_failure_counts: dict[str, int] = defaultdict(int)
     outcome_chain_status_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     ragas_status_counts: dict[str, int] = defaultdict(int)
     ragas_metric_values: dict[str, list[float]] = defaultdict(list)
@@ -104,10 +106,28 @@ def summarize_suite(path_or_payload: str | Path | dict[str, Any]) -> dict[str, A
                 primary_suspect_counts[str(suspect)] += 1
         for reason_code in report.get("reason_codes") or diagnostics.get("reason_codes") or []:
             reason_code_counts[str(reason_code)] += 1
+        recommended_next_action = (
+            report.get("recommended_next_action")
+            or diagnostics.get("recommended_next_action")
+            or (
+                attribution.get("recommended_next_action")
+                if isinstance(attribution, dict)
+                else None
+            )
+        )
+        if recommended_next_action:
+            recommended_next_action_counts[str(recommended_next_action)] += 1
         outcome_chain = report.get("outcome_chain") or diagnostics.get("outcome_chain") or {}
         if isinstance(outcome_chain, dict):
             for stage, status in outcome_chain.items():
                 outcome_chain_status_counts[str(stage)][str(status or "unknown")] += 1
+        for expectation in report.get("diagnostic_expectation_results") or []:
+            if not isinstance(expectation, dict):
+                continue
+            if str(expectation.get("status") or "") == "fail":
+                diagnostic_expectation_failure_counts[
+                    str(expectation.get("score_name") or "unknown")
+                ] += 1
         ragas = report.get("ragas") or {}
         if isinstance(ragas, dict):
             ragas_status = ragas.get("status")
@@ -177,6 +197,12 @@ def summarize_suite(path_or_payload: str | Path | dict[str, Any]) -> dict[str, A
         "diagnostic_summary": {
             "primary_suspects": dict(sorted(primary_suspect_counts.items())),
             "reason_codes": dict(sorted(reason_code_counts.items())),
+            "recommended_next_actions": dict(
+                sorted(recommended_next_action_counts.items())
+            ),
+            "diagnostic_expectation_failures": dict(
+                sorted(diagnostic_expectation_failure_counts.items())
+            ),
             "outcome_chain": {
                 stage: dict(sorted(statuses.items()))
                 for stage, statuses in sorted(outcome_chain_status_counts.items())
@@ -248,6 +274,14 @@ def compare_suite_outputs(
                         current_signature.get("outcome_chain"),
                         baseline_signature.get("outcome_chain"),
                     ),
+                    "recommended_next_action_deltas": _list_membership_delta(
+                        current_signature.get("recommended_next_actions"),
+                        baseline_signature.get("recommended_next_actions"),
+                    ),
+                    "diagnostic_expectation_failure_deltas": _list_membership_delta(
+                        current_signature.get("diagnostic_expectation_failures"),
+                        baseline_signature.get("diagnostic_expectation_failures"),
+                    ),
                     "ragas_metric_deltas": _delta_metric_map(
                         current_signature.get("ragas_metric_averages"),
                         baseline_signature.get("ragas_metric_averages"),
@@ -318,6 +352,18 @@ def compare_suite_outputs(
         for item in changed_cases
         if item["current"]["outcome_chain"] != item["baseline"]["outcome_chain"]
     )
+    changed_recommended_next_action_case_ids = sorted(
+        item["case_id"]
+        for item in changed_cases
+        if item["current"]["recommended_next_actions"]
+        != item["baseline"]["recommended_next_actions"]
+    )
+    changed_diagnostic_expectation_case_ids = sorted(
+        item["case_id"]
+        for item in changed_cases
+        if item["current"]["diagnostic_expectation_failures"]
+        != item["baseline"]["diagnostic_expectation_failures"]
+    )
 
     return {
         "current": summarize_suite(current_payload),
@@ -339,6 +385,8 @@ def compare_suite_outputs(
             "changed_reason_code_case_ids": changed_reason_code_case_ids,
             "changed_primary_suspect_case_ids": changed_primary_suspect_case_ids,
             "changed_outcome_chain_case_ids": changed_outcome_chain_case_ids,
+            "changed_recommended_next_action_case_ids": changed_recommended_next_action_case_ids,
+            "changed_diagnostic_expectation_case_ids": changed_diagnostic_expectation_case_ids,
         },
     }
 
@@ -429,7 +477,9 @@ def _aggregate_cases(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
         )
         primary_suspects: set[str] = set()
         reason_codes: set[str] = set()
+        recommended_next_actions: set[str] = set()
         outcome_chain_values: dict[str, set[str]] = defaultdict(set)
+        diagnostic_expectation_failures: set[str] = set()
         subjective_hook_statuses: dict[str, set[str]] = defaultdict(set)
         subjective_hook_scores: dict[str, list[float]] = defaultdict(list)
         subjective_rubric_scores: dict[str, list[float]] = defaultdict(list)
@@ -444,12 +494,30 @@ def _aggregate_cases(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
             attribution = diagnostics.get("attribution") if isinstance(diagnostics, dict) else {}
             if isinstance(attribution, dict):
                 primary_suspects.update(str(item) for item in attribution.get("primary_suspects") or [])
-            for reason_code in report.get("reason_codes") or []:
+            for reason_code in report.get("reason_codes") or diagnostics.get("reason_codes") or []:
                 reason_codes.add(str(reason_code))
-            outcome_chain = report.get("outcome_chain") or {}
+            recommended_next_action = (
+                report.get("recommended_next_action")
+                or diagnostics.get("recommended_next_action")
+                or (
+                    attribution.get("recommended_next_action")
+                    if isinstance(attribution, dict)
+                    else None
+                )
+            )
+            if recommended_next_action:
+                recommended_next_actions.add(str(recommended_next_action))
+            outcome_chain = report.get("outcome_chain") or diagnostics.get("outcome_chain") or {}
             if isinstance(outcome_chain, dict):
                 for stage, status in outcome_chain.items():
                     outcome_chain_values[str(stage)].add(str(status or "unknown"))
+            for expectation in report.get("diagnostic_expectation_results") or []:
+                if not isinstance(expectation, dict):
+                    continue
+                if str(expectation.get("status") or "") == "fail":
+                    diagnostic_expectation_failures.add(
+                        str(expectation.get("score_name") or "unknown")
+                    )
             ragas = report.get("ragas") or {}
             if isinstance(ragas, dict):
                 if ragas.get("status"):
@@ -508,10 +576,12 @@ def _aggregate_cases(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "subjective_average_score": _average(all_subjective_scores),
             "primary_suspects": sorted(primary_suspects),
             "reason_codes": sorted(reason_codes),
+            "recommended_next_actions": sorted(recommended_next_actions),
             "outcome_chain": {
                 stage: sorted(statuses)
                 for stage, statuses in sorted(outcome_chain_values.items())
             },
+            "diagnostic_expectation_failures": sorted(diagnostic_expectation_failures),
             "ragas_statuses": sorted(ragas_statuses),
             "ragas_metric_averages": {
                 metric_name: _average(values)

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared Trellis thinking guide index; backend memory task must use available real specs rather than invented backend specs."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Memory Block envelope spans model/service/store/API/test boundaries; use for data-flow and contract checks."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Block work must reuse existing Core State mappings/store services instead of duplicating identity logic."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend code-spec index now includes the RP Core State Block envelope contract for implementation work."}
+{"file": ".trellis/spec/backend/rp-core-state-block-envelope.md", "reason": "Executable backend contract for read-only Block envelope model/service/API behavior over Core State."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/current-memory-context.md", "reason": "Task-specific Memory OS/Core State/Block alignment context required before implementation."}

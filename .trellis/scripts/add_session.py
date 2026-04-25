@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
+r"""
 Add a new session to journal file and update index.md.
 
 Usage:
-    python3 add_session.py --title "Title" --commit "hash" --summary "Summary" [--package cli]
-    python3 add_session.py --title "Title" --branch "feat/my-branch"
+    python .\.trellis\scripts\add_session.py --title "Title" --commit "hash" --summary "Summary" [--package cli]
+    python .\.trellis\scripts\add_session.py --title "Title" --branch "feat/my-branch"
 
     # Pipe detailed content via stdin (use --stdin to opt in):
-    cat << 'EOF' | python3 add_session.py --stdin --title "Title" --summary "Summary"
+    @'
     <session content here>
-    EOF
+    '@ | python .\.trellis\scripts\add_session.py --stdin --title "Title" --summary "Summary"
 
 Branch resolution order:
     1. --branch CLI arg (explicit)
@@ -31,7 +31,7 @@ from pathlib import Path
 from common.paths import (
     FILE_JOURNAL_PREFIX,
     get_repo_root,
-    get_current_task,
+    get_effective_current_task,
     get_developer,
     get_workspace_dir,
 )
@@ -478,7 +478,7 @@ def main() -> int:
 
     # Load active task once — shared by package and branch resolution
     repo_root = get_repo_root()
-    current = get_current_task(repo_root)
+    current = get_effective_current_task(repo_root=repo_root)
     task_data = load_task(repo_root / current) if current else None
 
     package = args.package

@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore")
 
 import json
 import os
+import re
 import subprocess
 import sys
 from io import StringIO
@@ -72,12 +73,14 @@ def read_file(path: Path, fallback: str = "") -> str:
         return fallback
 
 
-def run_script(script_path: Path) -> str:
+def run_script(script_path: Path, session_id: str | None = None) -> str:
     try:
         if script_path.suffix == ".py":
             # Add PYTHONIOENCODING to force UTF-8 in subprocess
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
+            if session_id:
+                env["TRELLIS_SESSION_ID"] = session_id
             cmd = [sys.executable, "-W", "ignore", str(script_path)]
         else:
             env = os.environ
@@ -127,7 +130,80 @@ def _resolve_task_dir(trellis_dir: Path, task_ref: str) -> Path:
     return trellis_dir / "tasks" / path_obj
 
 
-def _get_task_status(trellis_dir: Path) -> str:
+def _sanitize_session_id(session_id: object) -> str:
+    if session_id is None:
+        return ""
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(session_id).strip())
+    return sanitized.strip(".-")[:120]
+
+
+def _extract_session_id(data: dict) -> str | None:
+    for key in (
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+    ):
+        value = _sanitize_session_id(data.get(key))
+        if value:
+            return value
+
+    for container_key in ("session", "conversation", "thread"):
+        container = data.get(container_key)
+        if isinstance(container, dict):
+            value = _sanitize_session_id(container.get("id"))
+            if value:
+                return value
+
+    for key in ("transcript_path", "transcriptPath", "log_path", "logPath"):
+        raw_path = data.get(key)
+        if raw_path:
+            value = _sanitize_session_id(Path(str(raw_path)).stem)
+            if value:
+                return value
+
+    for env_key in (
+        "TRELLIS_SESSION_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "CLAUDE_SESSION_ID",
+        "CURSOR_SESSION_ID",
+        "GEMINI_SESSION_ID",
+        "QODER_SESSION_ID",
+    ):
+        value = _sanitize_session_id(os.environ.get(env_key))
+        if value:
+            return value
+
+    return None
+
+
+def _read_task_ref_file(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        return _normalize_task_ref(path.read_text(encoding="utf-8").strip())
+    except OSError:
+        return ""
+
+
+def _get_task_ref(trellis_dir: Path, session_id: str | None) -> tuple[str, str]:
+    if session_id:
+        session_file = trellis_dir / ".session-tasks" / f"{session_id}.current-task"
+        task_ref = _read_task_ref_file(session_file)
+        if task_ref:
+            return task_ref, "session"
+
+    task_ref = _read_task_ref_file(trellis_dir / ".current-task")
+    if task_ref:
+        return task_ref, "repo"
+
+    return "", "none"
+
+
+def _get_task_status(trellis_dir: Path, session_id: str | None = None) -> str:
     """Check current task status and return structured status string with explicit next action.
 
     Returns a block with three fields:
@@ -135,10 +211,10 @@ def _get_task_status(trellis_dir: Path) -> str:
     - Task: task identifier (when applicable)
     - Next-Action: explicit skill/command/tool call the AI should invoke
     """
-    current_task_file = trellis_dir / ".current-task"
+    task_ref, source = _get_task_ref(trellis_dir, session_id)
 
     # Case 1: No active task — waiting for user to describe intent
-    if not current_task_file.is_file() or not current_task_file.read_text(encoding="utf-8").strip():
+    if not task_ref:
         return (
             "Status: NO ACTIVE TASK\n"
             "Next-Action: After the user describes their intent, load skill `trellis-brainstorm` "
@@ -149,14 +225,13 @@ def _get_task_status(trellis_dir: Path) -> str:
             "Do NOT do 10+ inline WebFetch/WebSearch in the main conversation."
         )
 
-    task_ref = _normalize_task_ref(current_task_file.read_text(encoding="utf-8").strip())
-
     # Case 2: Stale pointer — task dir was deleted
     task_dir = _resolve_task_dir(trellis_dir, task_ref)
     if not task_dir.is_dir():
+        finish_cmd = "python .\\.trellis\\scripts\\task.py finish --session" if source == "session" else "python .\\.trellis\\scripts\\task.py finish"
         return (
-            f"Status: STALE POINTER\nTask: {task_ref}\n"
-            f"Next-Action: Run `python .\\.trellis\\scripts\\task.py finish` to clear the stale pointer, "
+            f"Status: STALE POINTER\nScope: {source}\nTask: {task_ref}\n"
+            f"Next-Action: Run `{finish_cmd}` to clear the stale pointer, "
             "then ask the user what to work on next."
         )
 
@@ -175,7 +250,7 @@ def _get_task_status(trellis_dir: Path) -> str:
     # Case 3: Task completed — time to archive
     if task_status == "completed":
         return (
-            f"Status: COMPLETED\nTask: {task_title}\n"
+            f"Status: COMPLETED\nScope: {source}\nTask: {task_title}\n"
             f"Next-Action: Load skill `trellis-update-spec` to capture learnings, "
             f"then archive with `python .\\.trellis\\scripts\\task.py archive {task_dir.name}`."
         )
@@ -185,7 +260,7 @@ def _get_task_status(trellis_dir: Path) -> str:
     # Case 4: No PRD — still in Plan phase
     if not has_prd:
         return (
-            f"Status: PLANNING\nTask: {task_title}\n"
+            f"Status: PLANNING\nScope: {source}\nTask: {task_title}\n"
             "Next-Action: Load skill `trellis-brainstorm` to clarify requirements with the user "
             "and produce prd.md in the task directory.\n"
             "Research reminder: when the task needs external research (tool comparison, docs, "
@@ -197,7 +272,7 @@ def _get_task_status(trellis_dir: Path) -> str:
     implement_jsonl = task_dir / "implement.jsonl"
     if implement_jsonl.is_file() and not _has_curated_jsonl_entry(implement_jsonl):
         return (
-            f"Status: PLANNING (Phase 1.3)\nTask: {task_title}\n"
+            f"Status: PLANNING (Phase 1.3)\nScope: {source}\nTask: {task_title}\n"
             "Next-Action: Curate `implement.jsonl` and `check.jsonl` with the spec + research files "
             "the Phase 2 sub-agents will need. Only spec paths (`.trellis/spec/**/*.md`) and research "
             "files (`{TASK_DIR}/research/*.md`) — no code paths. Run "
@@ -208,7 +283,7 @@ def _get_task_status(trellis_dir: Path) -> str:
 
     # Case 5: PRD + curated jsonl (or agent-less platform with no jsonl) — enter Execute phase
     return (
-        f"Status: READY\nTask: {task_title}\n"
+        f"Status: READY\nScope: {source}\nTask: {task_title}\n"
         "Next-Action: Follow Phase 2.1 for your platform. For agent-capable platforms, "
         "spawn `trellis-implement` via the Task tool; if you stay in the main session, "
         "load `trellis-before-dev` before writing code. "
@@ -231,7 +306,7 @@ def _load_trellis_config(trellis_dir: Path) -> tuple:
 
     try:
         from common.config import get_default_package, get_packages, get_spec_scope, is_monorepo  # type: ignore[import-not-found]
-        from common.paths import get_current_task  # type: ignore[import-not-found]
+        from common.paths import get_effective_current_task  # type: ignore[import-not-found]
 
         repo_root = trellis_dir.parent
         is_mono = is_monorepo(repo_root)
@@ -240,7 +315,7 @@ def _load_trellis_config(trellis_dir: Path) -> tuple:
 
         # Get active task's package
         task_pkg = None
-        current = get_current_task(repo_root)
+        current = get_effective_current_task(repo_root=repo_root)
         if current:
             task_json = repo_root / current / "task.json"
             if task_json.is_file():
@@ -435,6 +510,14 @@ def main():
     if should_skip_injection():
         sys.exit(0)
 
+    hook_input: dict = {}
+    try:
+        raw_input = sys.stdin.read()
+        if raw_input.strip():
+            hook_input = json.loads(raw_input)
+    except (json.JSONDecodeError, ValueError):
+        hook_input = {}
+
     # Try platform-specific env vars, fallback to cwd
     project_dir_env_vars = [
         "CLAUDE_PROJECT_DIR",
@@ -453,9 +536,12 @@ def main():
             project_dir = Path(val).resolve()
             break
     if project_dir is None:
-        project_dir = Path(".").resolve()
+        project_dir = Path(hook_input.get("cwd", ".")).resolve()
 
     trellis_dir = project_dir / ".trellis"
+    session_id = _extract_session_id(hook_input)
+    if session_id:
+        os.environ["TRELLIS_SESSION_ID"] = session_id
 
     # Load config for scope filtering and legacy detection
     is_mono, packages, scope_config, task_pkg, default_pkg = _load_trellis_config(trellis_dir)
@@ -477,7 +563,7 @@ Read and follow all instructions below carefully.
 
     output.write("<current-state>\n")
     context_script = trellis_dir / "scripts" / "get_context.py"
-    output.write(run_script(context_script))
+    output.write(run_script(context_script, session_id=session_id))
     output.write("\n</current-state>\n\n")
 
     output.write("<workflow>\n")
@@ -545,7 +631,7 @@ Read and follow all instructions below carefully.
     output.write("</guidelines>\n\n")
 
     # Check task status and inject structured tag
-    task_status = _get_task_status(trellis_dir)
+    task_status = _get_task_status(trellis_dir, session_id=session_id)
     output.write(f"<task-status>\n{task_status}\n</task-status>\n\n")
 
     output.write("""<ready>

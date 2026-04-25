@@ -12,6 +12,7 @@ Provides:
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -28,12 +29,23 @@ DIR_TASKS = "tasks"
 DIR_ARCHIVE = "archive"
 DIR_SPEC = "spec"
 DIR_SCRIPTS = "scripts"
+DIR_SESSION_TASKS = ".session-tasks"
 
 # File names
 FILE_DEVELOPER = ".developer"
 FILE_CURRENT_TASK = ".current-task"
 FILE_TASK_JSON = "task.json"
 FILE_JOURNAL_PREFIX = "journal-"
+
+SESSION_ID_ENV_VARS = (
+    "TRELLIS_SESSION_ID",
+    "CODEX_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "CLAUDE_SESSION_ID",
+    "CURSOR_SESSION_ID",
+    "GEMINI_SESSION_ID",
+    "QODER_SESSION_ID",
+)
 
 
 # =============================================================================
@@ -221,6 +233,42 @@ def _get_current_task_file(repo_root: Path | None = None) -> Path:
     return repo_root / DIR_WORKFLOW / FILE_CURRENT_TASK
 
 
+def _get_session_tasks_dir(repo_root: Path | None = None) -> Path:
+    """Get the local-only session task pointer directory."""
+    if repo_root is None:
+        repo_root = get_repo_root()
+    return repo_root / DIR_WORKFLOW / DIR_SESSION_TASKS
+
+
+def sanitize_session_id(session_id: str | None) -> str:
+    """Return a filesystem-safe session id, or an empty string if absent."""
+    if not session_id:
+        return ""
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(session_id).strip())
+    sanitized = sanitized.strip(".-")
+    return sanitized[:120]
+
+
+def get_session_id_from_env() -> str | None:
+    """Return the first session id exposed through known AI-tool env vars."""
+    for key in SESSION_ID_ENV_VARS:
+        value = sanitize_session_id(os.environ.get(key))
+        if value:
+            return value
+    return None
+
+
+def _get_session_task_file(
+    session_id: str | None = None,
+    repo_root: Path | None = None,
+) -> Path | None:
+    """Get the session-scoped task pointer file for a session id."""
+    sanitized = sanitize_session_id(session_id) or get_session_id_from_env()
+    if not sanitized:
+        return None
+    return _get_session_tasks_dir(repo_root) / f"{sanitized}.current-task"
+
+
 def normalize_task_ref(task_ref: str) -> str:
     """Normalize a task ref for stable storage in .current-task.
 
@@ -263,6 +311,22 @@ def resolve_task_ref(task_ref: str, repo_root: Path | None = None) -> Path | Non
         return repo_root / path_obj
 
     return repo_root / DIR_WORKFLOW / DIR_TASKS / path_obj
+
+
+def _stored_task_ref(task_path: str, repo_root: Path) -> str | None:
+    """Validate a task path and convert it to the stable stored ref."""
+    normalized = normalize_task_ref(task_path)
+    if not normalized:
+        return None
+
+    full_path = resolve_task_ref(normalized, repo_root)
+    if full_path is None or not full_path.is_dir():
+        return None
+
+    try:
+        return full_path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return str(full_path)
 
 
 def get_current_task(repo_root: Path | None = None) -> str | None:
@@ -317,19 +381,9 @@ def set_current_task(task_path: str, repo_root: Path | None = None) -> bool:
     if repo_root is None:
         repo_root = get_repo_root()
 
-    normalized = normalize_task_ref(task_path)
+    normalized = _stored_task_ref(task_path, repo_root)
     if not normalized:
         return False
-
-    # Verify task directory exists
-    full_path = resolve_task_ref(normalized, repo_root)
-    if full_path is None or not full_path.is_dir():
-        return False
-
-    try:
-        normalized = full_path.relative_to(repo_root).as_posix()
-    except ValueError:
-        normalized = str(full_path)
 
     current_file = _get_current_task_file(repo_root)
 
@@ -357,6 +411,120 @@ def clear_current_task(repo_root: Path | None = None) -> bool:
         return True
     except (OSError, IOError):
         return False
+
+
+def get_session_current_task(
+    session_id: str | None = None,
+    repo_root: Path | None = None,
+) -> str | None:
+    """Get the current task for one AI session, if set."""
+    session_file = _get_session_task_file(session_id, repo_root)
+    if session_file is None or not session_file.is_file():
+        return None
+
+    try:
+        content = session_file.read_text(encoding="utf-8").strip()
+        return normalize_task_ref(content) if content else None
+    except (OSError, IOError):
+        return None
+
+
+def set_session_current_task(
+    task_path: str,
+    session_id: str | None = None,
+    repo_root: Path | None = None,
+) -> bool:
+    """Set the current task for one AI session without touching repo default."""
+    if repo_root is None:
+        repo_root = get_repo_root()
+
+    session_file = _get_session_task_file(session_id, repo_root)
+    if session_file is None:
+        return False
+
+    normalized = _stored_task_ref(task_path, repo_root)
+    if not normalized:
+        return False
+
+    try:
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        session_file.write_text(normalized, encoding="utf-8")
+        return True
+    except (OSError, IOError):
+        return False
+
+
+def clear_session_current_task(
+    session_id: str | None = None,
+    repo_root: Path | None = None,
+) -> bool:
+    """Clear the session-scoped task pointer for one AI session."""
+    session_file = _get_session_task_file(session_id, repo_root)
+    if session_file is None:
+        return False
+
+    try:
+        if session_file.is_file():
+            session_file.unlink()
+        return True
+    except (OSError, IOError):
+        return False
+
+
+def get_effective_current_task(
+    session_id: str | None = None,
+    repo_root: Path | None = None,
+) -> str | None:
+    """Return session task if set, otherwise the repository default task."""
+    session_task = get_session_current_task(session_id, repo_root)
+    return session_task or get_current_task(repo_root)
+
+
+def get_current_task_with_source(
+    session_id: str | None = None,
+    repo_root: Path | None = None,
+) -> tuple[str | None, str]:
+    """Return the effective current task and whether it came from session/repo."""
+    session_task = get_session_current_task(session_id, repo_root)
+    if session_task:
+        return session_task, "session"
+
+    repo_task = get_current_task(repo_root)
+    if repo_task:
+        return repo_task, "repo"
+
+    return None, "none"
+
+
+def clear_session_task_refs_for_task(
+    task_path: str,
+    repo_root: Path | None = None,
+) -> int:
+    """Remove local session pointers that reference a task being archived."""
+    if repo_root is None:
+        repo_root = get_repo_root()
+
+    normalized = normalize_task_ref(task_path)
+    if not normalized:
+        return 0
+
+    session_dir = _get_session_tasks_dir(repo_root)
+    if not session_dir.is_dir():
+        return 0
+
+    cleared = 0
+    for session_file in session_dir.glob("*.current-task"):
+        try:
+            content = normalize_task_ref(session_file.read_text(encoding="utf-8").strip())
+        except (OSError, IOError):
+            continue
+        if content == normalized or content.endswith(f"/{Path(normalized).name}"):
+            try:
+                session_file.unlink()
+                cleared += 1
+            except (OSError, IOError):
+                pass
+    return cleared
 
 
 def has_current_task(repo_root: Path | None = None) -> bool:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .diagnostics import build_diagnostics
-from .models import EvalRunResult
+from .models import EvalRunResult, EvalScore
 from .ragas_reporting import extract_ragas_report
 
 
@@ -197,6 +197,16 @@ def build_report(result: EvalRunResult) -> dict:
 
 def render_text_summary(result: EvalRunResult) -> str:
     summary = result.report or build_report(result)
+    expectation_summary = dict(summary.get("diagnostic_expectation_summary") or {})
+    expectation_suffix = ""
+    if expectation_summary:
+        expectation_suffix = (
+            " "
+            f"diagnostic_expectations="
+            f"{expectation_summary.get('pass', 0)}/"
+            f"{expectation_summary.get('total', 0)}"
+            f" fail={expectation_summary.get('fail', 0)}"
+        )
     return (
         f"[{summary['status']}] {summary['case_id']} "
         f"pass={summary['assertion_summary']['pass']} "
@@ -205,7 +215,48 @@ def render_text_summary(result: EvalRunResult) -> str:
         f"finish_reason={summary.get('finish_reason') or 'n/a'} "
         f"repair_route={summary.get('repair_route') or 'n/a'} "
         f"end_reason={summary.get('end_reason_summary') or 'n/a'}"
+        f"{expectation_suffix}"
     )
+
+
+def attach_diagnostic_expectation_results(
+    report: dict[str, Any],
+    scores: list[EvalScore],
+) -> None:
+    if not scores:
+        report.setdefault("diagnostic_expectation_results", [])
+        report.setdefault(
+            "diagnostic_expectation_summary",
+            {"total": 0, "pass": 0, "fail": 0, "warn": 0, "skip": 0},
+        )
+        return
+
+    counts = report.setdefault(
+        "assertion_summary",
+        {"pass": 0, "fail": 0, "warn": 0, "skip": 0},
+    )
+    hard_failures = report.setdefault("hard_failures", [])
+    results = report.setdefault("diagnostic_expectation_results", [])
+    expectation_counts = {"total": 0, "pass": 0, "fail": 0, "warn": 0, "skip": 0}
+    for score in scores:
+        counts[score.status] = int(counts.get(score.status, 0) or 0) + 1
+        expectation_counts["total"] += 1
+        expectation_counts[score.status] = int(expectation_counts.get(score.status, 0)) + 1
+        if score.status == "fail" and score.severity == "error":
+            hard_failures.append(score.name)
+        results.append(
+            {
+                "score_name": score.name,
+                "status": score.status,
+                "expected": score.metadata.get("expected"),
+                "actual": score.metadata.get("actual"),
+                "missing": score.metadata.get("missing"),
+                "mismatches": score.metadata.get("mismatches"),
+                "source": score.metadata.get("source"),
+                "explanation": score.explanation,
+            }
+        )
+    report["diagnostic_expectation_summary"] = expectation_counts
 
 
 def render_suite_markdown(
@@ -284,6 +335,35 @@ def render_suite_markdown(
         lines.append(f"- primary_suspects: {', '.join(primary_suspects)}")
     else:
         lines.append("- primary_suspects: none")
+    reason_codes = dict(diagnostics.get("reason_codes") or {})
+    if reason_codes:
+        lines.append(
+            "- reason_codes: "
+            + ", ".join(f"{code}={count}" for code, count in reason_codes.items())
+        )
+    else:
+        lines.append("- reason_codes: none")
+    expectation_failures = dict(diagnostics.get("diagnostic_expectation_failures") or {})
+    if expectation_failures:
+        lines.append(
+            "- diagnostic_expectation_failures: "
+            + ", ".join(
+                f"{name}={count}" for name, count in expectation_failures.items()
+            )
+        )
+    else:
+        lines.append("- diagnostic_expectation_failures: none")
+    outcome_chain = dict(diagnostics.get("outcome_chain") or {})
+    if outcome_chain:
+        rendered_chain = []
+        for stage, statuses in outcome_chain.items():
+            status_counts = ", ".join(
+                f"{status}={count}" for status, count in dict(statuses).items()
+            )
+            rendered_chain.append(f"{stage}({status_counts})")
+        lines.append("- outcome_chain: " + "; ".join(rendered_chain))
+    else:
+        lines.append("- outcome_chain: none")
 
     ragas_status_counts = dict(summary.get("ragas_status_counts") or {})
     lines.extend(["", "## RAGAS", ""])
@@ -378,6 +458,11 @@ def render_comparison_markdown(*, comparison: dict[str, Any]) -> str:
         ("executed_judge_drifts", "changed_executed_judge_case_ids"),
         ("subjective_status_drifts", "changed_subjective_status_case_ids"),
         ("subjective_score_drifts", "changed_subjective_score_case_ids"),
+        ("reason_code_drifts", "changed_reason_code_case_ids"),
+        ("primary_suspect_drifts", "changed_primary_suspect_case_ids"),
+        ("outcome_chain_drifts", "changed_outcome_chain_case_ids"),
+        ("recommended_next_action_drifts", "changed_recommended_next_action_case_ids"),
+        ("diagnostic_expectation_drifts", "changed_diagnostic_expectation_case_ids"),
         ("ragas_drifts", "changed_ragas_case_ids"),
     ):
         values = list(drift.get(key) or [])
@@ -414,6 +499,15 @@ def render_comparison_markdown(*, comparison: dict[str, Any]) -> str:
         for item in changed_cases[:20]:
             deltas = dict(item.get("deltas") or {})
             ragas_metric_deltas = dict(deltas.get("ragas_metric_deltas") or {})
+            diagnostic_expectation_deltas = dict(
+                deltas.get("diagnostic_expectation_failure_deltas") or {}
+            )
+            reason_code_deltas = dict(deltas.get("reason_code_deltas") or {})
+            primary_suspect_deltas = dict(deltas.get("primary_suspect_deltas") or {})
+            outcome_chain_deltas = dict(deltas.get("outcome_chain_deltas") or {})
+            recommended_next_action_deltas = dict(
+                deltas.get("recommended_next_action_deltas") or {}
+            )
             lines.append(
                 "- "
                 f"{item.get('case_id')}: "
@@ -424,6 +518,11 @@ def render_comparison_markdown(*, comparison: dict[str, Any]) -> str:
                 f"pending_judge_delta={deltas.get('pending_judge_hook_count', 0)} "
                 f"executed_judge_delta={deltas.get('executed_judge_hook_count', 0)} "
                 f"subjective_score_delta={deltas.get('subjective_average_score')} "
+                f"reason_code_deltas={reason_code_deltas or {}} "
+                f"primary_suspect_deltas={primary_suspect_deltas or {}} "
+                f"outcome_chain_deltas={outcome_chain_deltas or {}} "
+                f"recommended_next_action_deltas={recommended_next_action_deltas or {}} "
+                f"diagnostic_expectation_deltas={diagnostic_expectation_deltas or {}} "
                 f"ragas_metric_deltas={ragas_metric_deltas or {}}"
             )
     else:

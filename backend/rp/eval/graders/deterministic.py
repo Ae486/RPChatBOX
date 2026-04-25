@@ -40,6 +40,70 @@ def evaluate_deterministic_scores(
     ]
 
 
+def evaluate_diagnostic_expectation_scores(
+    *,
+    case: EvalCase,
+    run_id: str,
+    root_span_id: str | None,
+    report: dict[str, Any],
+) -> list[EvalScore]:
+    diagnostics = report.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+    attribution = diagnostics.get("attribution")
+    if not isinstance(attribution, dict):
+        attribution = {}
+
+    scores: list[EvalScore] = []
+    if case.expected.expected_reason_codes:
+        scores.append(
+            _evaluate_expected_list_subset(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.reason_code_presence",
+                expected=case.expected.expected_reason_codes,
+                actual=diagnostics.get("reason_codes") or report.get("reason_codes") or [],
+                source="diagnostics.reason_codes",
+            )
+        )
+    if case.expected.expected_primary_suspects:
+        scores.append(
+            _evaluate_expected_list_subset(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.attribution_primary_suspect_alignment",
+                expected=case.expected.expected_primary_suspects,
+                actual=attribution.get("primary_suspects") or [],
+                source="diagnostics.attribution.primary_suspects",
+            )
+        )
+    if case.expected.expected_outcome_chain:
+        scores.append(
+            _evaluate_expected_mapping_entries(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.outcome_chain_alignment",
+                expected=case.expected.expected_outcome_chain,
+                actual=diagnostics.get("outcome_chain") or report.get("outcome_chain") or {},
+                source="diagnostics.outcome_chain",
+            )
+        )
+    if case.expected.expected_recommended_next_action is not None:
+        scores.append(
+            _evaluate_expected_value(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.recommended_next_action_alignment",
+                expected=case.expected.expected_recommended_next_action,
+                actual=diagnostics.get("recommended_next_action")
+                or attribution.get("recommended_next_action")
+                or report.get("recommended_next_action"),
+                source="diagnostics.recommended_next_action",
+            )
+        )
+    return scores
+
+
 def _evaluate_assertion(
     *,
     run_id: str,
@@ -70,6 +134,135 @@ def _evaluate_assertion(
             "actual": value,
         },
     )
+
+
+def _evaluate_expected_list_subset(
+    *,
+    run_id: str,
+    span_id: str | None,
+    name: str,
+    expected: list[str],
+    actual: Any,
+    source: str,
+) -> EvalScore:
+    expected_values = _normalize_string_list(expected)
+    actual_values = _normalize_string_list(actual)
+    missing = [item for item in expected_values if item not in actual_values]
+    passed = not missing
+    explanation = (
+        f"expected_present={expected_values!r} actual={actual_values!r} "
+        f"missing={missing!r}"
+    )
+    return _diagnostic_score(
+        run_id=run_id,
+        span_id=span_id,
+        name=name,
+        passed=passed,
+        explanation=explanation,
+        metadata={
+            "source": source,
+            "expected": expected_values,
+            "actual": actual_values,
+            "missing": missing,
+        },
+    )
+
+
+def _evaluate_expected_mapping_entries(
+    *,
+    run_id: str,
+    span_id: str | None,
+    name: str,
+    expected: dict[str, str],
+    actual: Any,
+    source: str,
+) -> EvalScore:
+    expected_values = {str(key): str(value) for key, value in expected.items()}
+    actual_values = (
+        {str(key): str(value) for key, value in actual.items()}
+        if isinstance(actual, dict)
+        else {}
+    )
+    mismatches = {
+        key: {"expected": expected_value, "actual": actual_values.get(key)}
+        for key, expected_value in expected_values.items()
+        if actual_values.get(key) != expected_value
+    }
+    passed = not mismatches
+    explanation = (
+        f"expected_entries={expected_values!r} actual={actual_values!r} "
+        f"mismatches={mismatches!r}"
+    )
+    return _diagnostic_score(
+        run_id=run_id,
+        span_id=span_id,
+        name=name,
+        passed=passed,
+        explanation=explanation,
+        metadata={
+            "source": source,
+            "expected": expected_values,
+            "actual": actual_values,
+            "mismatches": mismatches,
+        },
+    )
+
+
+def _evaluate_expected_value(
+    *,
+    run_id: str,
+    span_id: str | None,
+    name: str,
+    expected: str,
+    actual: Any,
+    source: str,
+) -> EvalScore:
+    actual_value = None if actual is None else str(actual)
+    expected_value = str(expected)
+    passed = actual_value == expected_value
+    return _diagnostic_score(
+        run_id=run_id,
+        span_id=span_id,
+        name=name,
+        passed=passed,
+        explanation=f"expected={expected_value!r} actual={actual_value!r}",
+        metadata={
+            "source": source,
+            "expected": expected_value,
+            "actual": actual_value,
+        },
+    )
+
+
+def _diagnostic_score(
+    *,
+    run_id: str,
+    span_id: str | None,
+    name: str,
+    passed: bool,
+    explanation: str,
+    metadata: dict[str, Any],
+) -> EvalScore:
+    return EvalScore(
+        score_id=f"{run_id}:score:{name}",
+        run_id=run_id,
+        span_id=span_id,
+        name=name,
+        kind="code",
+        status="pass" if passed else "fail",
+        value_type="boolean",
+        value=passed,
+        label="pass" if passed else "fail",
+        explanation=explanation,
+        severity="error",
+        metadata=metadata,
+    )
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
 
 
 def _apply_assertion(

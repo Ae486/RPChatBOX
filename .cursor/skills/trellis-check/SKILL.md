@@ -7,6 +7,13 @@ description: "Comprehensive quality verification: spec compliance, lint, type-ch
 
 Comprehensive quality verification for recently written code. Combines spec compliance, cross-layer safety, and pre-commit checks.
 
+Granularity rule:
+
+- Use this after one coherent **spec slice** is implemented and reviewable.
+- A spec slice means one requirement/contract/behavior slice that can be validated end-to-end.
+- Do not interrupt every tiny edit with a full `trellis-check`.
+- Do run it before starting the next spec slice, and again before finishing the task.
+
 ---
 
 ## Step 1: Identify What Changed

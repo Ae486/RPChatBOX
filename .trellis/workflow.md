@@ -11,6 +11,7 @@
 3. **Persist everything** — research, decisions, and lessons all go to files; conversations get compacted, files don't
 4. **Incremental development** — one task at a time
 5. **Capture learnings** — after each task, review and write new knowledge back to spec
+6. **Check at spec granularity** — batch related edits until one coherent spec/contract slice is complete, then run `trellis-check`; do not interrupt every micro-step with a full quality pass
 
 ---
 
@@ -47,7 +48,10 @@ Every task has its own directory under `.trellis/tasks/{MM-DD-name}/` holding `p
 # Task lifecycle
 python .\.trellis\scripts\task.py create "<title>" [--slug <name>] [--parent <dir>]
 python .\.trellis\scripts\task.py start <name>          # set as current (writes .current-task, triggers after_start hooks)
+python .\.trellis\scripts\task.py start <name> --session # set current only for this AI session
+python .\.trellis\scripts\task.py current               # show session/repo/effective task resolution
 python .\.trellis\scripts\task.py finish                # clear current task (triggers after_finish hooks)
+python .\.trellis\scripts\task.py finish --session      # clear this session's task override
 python .\.trellis\scripts\task.py archive <name>        # move to archive/{year-month}/
 python .\.trellis\scripts\task.py list [--mine] [--status <s>]
 python .\.trellis\scripts\task.py list-archive
@@ -74,7 +78,22 @@ python .\.trellis\scripts\task.py create-pr [name] [--dry-run]
 
 > Run `python .\.trellis\scripts\task.py --help` to see the authoritative, up-to-date list.
 
-**Current-task mechanism**: `task.py start` writes the task path into `.trellis/.current-task`. Hook-capable platforms auto-inject this at session start, so the AI knows what you're working on without being told.
+**Current-task mechanism**: `task.py start` writes the task path into `.trellis/.current-task` as the repository default. For parallel sessions in the same repo, use `task.py start <task> --session`; hooks resolve tasks as `session override > repository default > no task`.
+
+**Session assignment entrypoints**:
+- Cursor: `/trellis-assign-task`
+- Claude Code: `/trellis:assign-task`
+- Codex: `trellis-assign-task` (authoritative skill) and mirrored docs under `.codex/commands/trellis/`
+
+Session-scoped commands need a session id. Hooks pass one automatically when the platform exposes it. Manual commands can use:
+
+```powershell
+$env:TRELLIS_SESSION_ID = "my-session"
+python .\.trellis\scripts\task.py start <task> --session
+python .\.trellis\scripts\task.py current
+```
+
+For Codex in this repo, the current shell may already expose `CODEX_THREAD_ID`, so `task.py start <task> --session` can usually work without an explicit `--session-id`.
 
 ### Workspace System
 
@@ -129,6 +148,10 @@ Phase 3: Finish  → distill lessons + wrap-up
 2. Run steps in order inside each Phase; `[required]` steps can't be skipped
 3. Phases can roll back (e.g., Execute reveals a prd defect → return to Plan to fix, then re-enter Execute)
 4. Steps tagged `[once]` are skipped if already done; don't re-run
+5. In Execute, the expected batch size is one **spec slice**:
+   - a coherent requirement / contract / behavior slice that can be verified end-to-end
+   - not every tiny edit, rename, or helper extraction
+   - after one spec slice lands, run `trellis-check` before starting the next slice or finishing the task
 
 ### Skill Routing
 
@@ -206,9 +229,10 @@ Create the task directory and set it as current:
 ```powershell
 python .\.trellis\scripts\task.py create "<task title>" --slug <name>
 python .\.trellis\scripts\task.py start <task-dir>
+python .\.trellis\scripts\task.py start <task-dir> --session
 ```
 
-Skip when: `.trellis/.current-task` already points to a task.
+Skip when: `python .\.trellis\scripts\task.py current --path-only` already points to the intended task.
 
 #### 1.1 Requirement exploration `[required · repeatable]`
 
@@ -325,6 +349,13 @@ Goal: turn the prd into code that passes quality checks.
 
 #### 2.1 Implement `[required · repeatable]`
 
+Implementation granularity:
+
+- Finish one coherent **spec slice** before handing off to `trellis-check`
+- A spec slice can include multiple related file edits if they together implement one requirement/contract
+- Do **not** trigger `trellis-check` after every micro-step inside the same spec slice
+- Do trigger `trellis-check` once the slice is runnable/reviewable, before starting the next slice
+
 [Claude Code, Cursor, OpenCode, Gemini, Qoder, CodeBuddy, Copilot, Droid]
 
 Spawn the implement sub-agent:
@@ -346,7 +377,7 @@ Spawn the implement sub-agent:
 - **Task description**: Implement the requirements per prd.md, consulting materials under `{TASK_DIR}/research/`; finish by running project lint and type-check
 
 The Codex sub-agent definition auto-handles the context load requirement:
-- Reads `.trellis/.current-task`, `prd.md`, and `info.md` if present
+- Resolves the effective task via `python .\.trellis\scripts\task.py current --path-only`, then reads `prd.md` and `info.md` if present
 - Reads `implement.jsonl` and requires the agent to load each referenced spec file before coding
 
 [/Codex]
@@ -375,6 +406,12 @@ The platform prelude auto-handles the context load requirement:
 [/Kilo, Antigravity, Windsurf]
 
 #### 2.2 Quality check `[required · repeatable]`
+
+Quality-check granularity:
+
+- Run after completing one coherent **spec slice**
+- Run again at phase exit / final verification
+- Do **not** use it as a per-edit reflex after every tiny change
 
 [Claude Code, Cursor, OpenCode, Codex, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid]
 
@@ -474,6 +511,7 @@ Research belongs in `{task_dir}/research/*.md`, written by `trellis-research` su
 [workflow-state:in_progress]
 Flow: trellis-implement → trellis-check → trellis-update-spec → finish
 Check conversation history + git status to determine current step; do NOT skip trellis-check.
+Granularity rule: batch work until one coherent spec slice is complete, then run trellis-check. Do not full-check after every tiny edit.
 [/workflow-state:in_progress]
 
 [workflow-state:completed]

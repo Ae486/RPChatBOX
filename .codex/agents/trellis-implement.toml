@@ -7,7 +7,8 @@ developer_instructions = """
 
 This platform does NOT auto-inject task context via hook. Before doing anything else, you MUST load context yourself:
 
-1. Read `.trellis/.current-task` to find the current task path (e.g. `.trellis/tasks/04-17-foo/`).
+0. Prefer `python .\\.trellis\\scripts\\task.py current --path-only` to find the effective task. It honors `TRELLIS_SESSION_ID` session overrides and falls back to `.trellis/.current-task`.
+1. If the command is unavailable, read `.trellis/.current-task` to find the repository default task path (e.g. `.trellis/tasks/04-17-foo/`).
 2. Read the task's `prd.md` (requirements) and `info.md` if it exists (technical design).
 3. Read `<task-path>/implement.jsonl` — JSONL list of dev spec files relevant to this agent.
 4. For each entry in the JSONL, Read its `file` path — these are the dev specs you must follow.
@@ -23,7 +24,8 @@ If `.current-task` is missing or the task has no `prd.md`, ask the user what to 
 
 This platform does NOT auto-inject task context via hook. Before doing anything else, you MUST load context yourself:
 
-1. Read `.trellis/.current-task` to find the current task path (e.g. `.trellis/tasks/04-17-foo/`).
+0. Prefer `python .\\.trellis\\scripts\\task.py current --path-only` to find the effective task. It honors `TRELLIS_SESSION_ID` session overrides and falls back to `.trellis/.current-task`.
+1. If the command is unavailable, read `.trellis/.current-task` to find the repository default task path (e.g. `.trellis/tasks/04-17-foo/`).
 2. Read the task's `prd.md` (requirements) and `info.md` if it exists (technical design).
 3. Read `<task-path>/implement.jsonl` — JSONL list of dev spec files relevant to this agent.
 4. For each entry in the JSONL, Read its `file` path — these are the dev specs you must follow.
@@ -40,6 +42,8 @@ You are the Trellis implementer agent.
 Rules:
 - Read before write. Follow `.trellis/spec/` guidance relevant to the task.
 - Keep changes focused on the requested scope.
+- Work in **spec slices**, not single-edit slices: finish one coherent requirement/contract/behavior slice before handing off to `trellis-check`.
+- Do not bounce to `trellis-check` after every tiny edit inside the same spec slice.
 - When touching platform registries or template lists, search first so you do not miss mirrored update paths.
 - If you modify `.trellis/scripts/`, keep `packages/cli/src/templates/trellis/scripts/` in sync.
 - Do not make destructive git changes unless explicitly asked.

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from sqlmodel import select
 
+from models.rp_core_state_store import CoreStateProjectionSlotRecord
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_crud import (
     MemoryGetStateInput,
@@ -12,8 +14,12 @@ from rp.models.memory_crud import (
     MemoryReadProvenanceInput,
 )
 from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
-from rp.services.builder_projection_context_service import BuilderProjectionContextService
-from rp.services.chapter_workspace_projection_adapter import ChapterWorkspaceProjectionAdapter
+from rp.services.builder_projection_context_service import (
+    BuilderProjectionContextService,
+)
+from rp.services.chapter_workspace_projection_adapter import (
+    ChapterWorkspaceProjectionAdapter,
+)
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_read_service import CoreStateReadService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
@@ -44,7 +50,10 @@ async def _seed_dual_written_runtime(retrieval_session):
         writer_contract={},
         current_state_json={
             "chapter_digest": {"current_chapter": 1, "title": "Chapter One"},
-            "narrative_progress": {"current_phase": "outline_drafting", "accepted_segments": 0},
+            "narrative_progress": {
+                "current_phase": "outline_drafting",
+                "accepted_segments": 0,
+            },
             "timeline_spine": [],
             "active_threads": [],
             "foreshadow_registry": [],
@@ -109,14 +118,18 @@ async def _seed_dual_written_runtime(retrieval_session):
     )
     story_session_service.commit()
     refreshed_session = story_session_service.get_session(session.session_id)
-    refreshed_chapter = story_session_service.get_chapter_workspace(chapter.chapter_workspace_id)
+    refreshed_chapter = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    )
     assert refreshed_session is not None
     assert refreshed_chapter is not None
     return refreshed_session, refreshed_chapter, story_session_service, repository
 
 
 @pytest.mark.asyncio
-async def test_core_state_and_projection_read_services_can_read_formal_store(retrieval_session):
+async def test_core_state_and_projection_read_services_can_read_formal_store(
+    retrieval_session,
+):
     session, _, story_session_service, repository = await _seed_dual_written_runtime(
         retrieval_session
     )
@@ -154,7 +167,9 @@ async def test_core_state_and_projection_read_services_can_read_formal_store(ret
         store_read_enabled=True,
     )
 
-    state = await core_read_service.get_state(MemoryGetStateInput(domain=Domain.CHAPTER))
+    state = await core_read_service.get_state(
+        MemoryGetStateInput(domain=Domain.CHAPTER)
+    )
     summary = await projection_read_service.get_summary(
         MemoryGetSummaryInput(summary_ids=["projection.current_outline_digest"])
     )
@@ -189,7 +204,9 @@ async def test_core_state_and_projection_read_services_can_read_formal_store(ret
 
 
 @pytest.mark.asyncio
-async def test_store_backed_view_and_inspection_services_read_formal_store(retrieval_session):
+async def test_store_backed_view_and_inspection_services_read_formal_store(
+    retrieval_session,
+):
     session, _, story_session_service, repository = await _seed_dual_written_runtime(
         retrieval_session
     )
@@ -226,14 +243,93 @@ async def test_store_backed_view_and_inspection_services_read_formal_store(retri
     chapter_digest = authoritative_state_view_service.get_chapter_digest(
         session_id=session.session_id
     )
-    projection_map = projection_state_service.get_slot_map(session_id=session.session_id)
-    authoritative_items = inspection_service.list_authoritative_objects(session_id=session.session_id)
-    projection_items = inspection_service.list_projection_slots(session_id=session.session_id)
+    projection_map = projection_state_service.get_slot_map(
+        session_id=session.session_id
+    )
+    authoritative_items = inspection_service.list_authoritative_objects(
+        session_id=session.session_id
+    )
+    projection_items = inspection_service.list_projection_slots(
+        session_id=session.session_id
+    )
 
     assert chapter_digest["title"] == "Chapter Two"
     assert projection_map["current_outline_digest"] == ["Outline A"]
     chapter_item = next(
-        item for item in authoritative_items if item["object_ref"]["object_id"] == "chapter.current"
+        item
+        for item in authoritative_items
+        if item["object_ref"]["object_id"] == "chapter.current"
     )
     assert chapter_item["data"]["title"] == "Chapter Two"
-    assert any(item["summary_id"] == "projection.current_outline_digest" for item in projection_items)
+    assert any(
+        item["summary_id"] == "projection.current_outline_digest"
+        for item in projection_items
+    )
+
+
+@pytest.mark.asyncio
+async def test_inspection_projection_includes_mirror_only_slots_during_partial_store_cutover(
+    retrieval_session,
+):
+    (
+        session,
+        chapter,
+        story_session_service,
+        repository,
+    ) = await _seed_dual_written_runtime(retrieval_session)
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    outline_row = core_repo.get_projection_slot(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        summary_id="projection.current_outline_digest",
+    )
+    assert outline_row is not None
+    for revision_row in core_repo.list_projection_slot_revisions(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        summary_id="projection.current_outline_digest",
+    ):
+        retrieval_session.delete(revision_row)
+    retrieval_session.delete(outline_row)
+    retrieval_session.flush()
+    assert not retrieval_session.exec(
+        select(CoreStateProjectionSlotRecord).where(
+            CoreStateProjectionSlotRecord.chapter_workspace_id
+            == chapter.chapter_workspace_id,
+            CoreStateProjectionSlotRecord.summary_id
+            == "projection.current_outline_digest",
+        )
+    ).first()
+
+    projection_state_service = ProjectionStateService(
+        story_session_service=story_session_service,
+        adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
+        core_state_store_repository=core_repo,
+        store_read_enabled=True,
+    )
+    inspection_service = MemoryInspectionReadService(
+        story_session_service=story_session_service,
+        builder_projection_context_service=BuilderProjectionContextService(
+            projection_state_service
+        ),
+        proposal_repository=repository,
+        version_history_read_service=VersionHistoryReadService(
+            adapter=StorySessionCoreStateAdapter(story_session_service),
+            proposal_repository=repository,
+            core_state_store_repository=core_repo,
+            store_read_enabled=True,
+        ),
+        core_state_store_repository=core_repo,
+        store_read_enabled=True,
+    )
+
+    projection_items = inspection_service.list_projection_slots(
+        session_id=session.session_id
+    )
+    outline_item = next(
+        item
+        for item in projection_items
+        if item["summary_id"] == "projection.current_outline_digest"
+    )
+
+    assert outline_item["slot_name"] == "current_outline_digest"
+    assert outline_item["items"] == ["Outline A"]
+    assert outline_item["backend"] == "compatibility_mirror"

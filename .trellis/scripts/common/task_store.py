@@ -37,11 +37,15 @@ from .paths import (
     DIR_WORKFLOW,
     FILE_TASK_JSON,
     clear_current_task,
+    clear_session_task_refs_for_task,
     generate_task_date_prefix,
     get_current_task,
     get_developer,
     get_repo_root,
+    get_session_id_from_env,
     get_tasks_dir,
+    set_current_task,
+    set_session_current_task,
 )
 from .task_utils import (
     archive_task_complete,
@@ -104,7 +108,7 @@ _SUBAGENT_CONFIG_DIRS: tuple[str, ...] = (
 _SEED_EXAMPLE = (
     "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. "
     "Put spec/research files only — no code paths. "
-    "Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. "
+    "Run `python .\\.trellis\\scripts\\get_context.py --mode packages` to list available specs. "
     "Delete this line once real entries are added."
 )
 
@@ -144,6 +148,25 @@ def cmd_create(args: argparse.Namespace) -> int:
     if not args.title:
         print(colored("Error: title is required", Colors.RED), file=sys.stderr)
         return 1
+
+    if getattr(args, "start_session", False) and getattr(args, "start_repo", False):
+        print(
+            colored("Error: choose only one of --start-session or --start-repo", Colors.RED),
+            file=sys.stderr,
+        )
+        return 1
+
+    if getattr(args, "start_session", False):
+        session_id = getattr(args, "session_id", None) or get_session_id_from_env()
+        if not session_id:
+            print(
+                colored(
+                    "Error: --start-session requires --session-id <id> or TRELLIS_SESSION_ID / CODEX_THREAD_ID.",
+                    Colors.RED,
+                ),
+                file=sys.stderr,
+            )
+            return 1
 
     # Validate --package (CLI source: fail-fast)
     package: str | None = getattr(args, "package", None)
@@ -262,23 +285,60 @@ def cmd_create(args: argparse.Namespace) -> int:
 
                 print(colored(f"Linked as child of: {parent_dir.name}", Colors.GREEN), file=sys.stderr)
 
-    print(colored(f"Created task: {dir_name}", Colors.GREEN), file=sys.stderr)
+    relative_task_path = f"{DIR_WORKFLOW}/{DIR_TASKS}/{dir_name}"
+
+    if getattr(args, "start_session", False):
+        session_id = getattr(args, "session_id", None) or get_session_id_from_env()
+        if set_session_current_task(relative_task_path, session_id, repo_root):
+            task_data["status"] = "in_progress"
+            write_json(task_json_path, task_data)
+            print(
+                colored(
+                    f"Created task and set session task: {dir_name} (session: {session_id})",
+                    Colors.GREEN,
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(colored(f"Created task: {dir_name}", Colors.GREEN), file=sys.stderr)
+            print(
+                colored("Warning: failed to set session current task", Colors.YELLOW),
+                file=sys.stderr,
+            )
+    elif getattr(args, "start_repo", False):
+        if set_current_task(relative_task_path, repo_root):
+            task_data["status"] = "in_progress"
+            write_json(task_json_path, task_data)
+            print(colored(f"Created task and set repo task: {dir_name}", Colors.GREEN), file=sys.stderr)
+        else:
+            print(colored(f"Created task: {dir_name}", Colors.GREEN), file=sys.stderr)
+            print(
+                colored("Warning: failed to set repo current task", Colors.YELLOW),
+                file=sys.stderr,
+            )
+    else:
+        print(colored(f"Created task: {dir_name}", Colors.GREEN), file=sys.stderr)
     print("", file=sys.stderr)
     print(colored("Next steps:", Colors.BLUE), file=sys.stderr)
-    print("  1. Create prd.md with requirements", file=sys.stderr)
-    if seeded_jsonl:
+    if getattr(args, "start_session", False) or getattr(args, "start_repo", False):
+        print("  1. Create prd.md with requirements", file=sys.stderr)
+        if seeded_jsonl:
+            print("  2. Curate implement.jsonl / check.jsonl", file=sys.stderr)
+    elif seeded_jsonl:
+        print("  1. Create prd.md with requirements", file=sys.stderr)
         print(
             "  2. Curate implement.jsonl / check.jsonl (spec + research files only — "
             "see .trellis/workflow.md Phase 1.3)",
             file=sys.stderr,
         )
-        print("  3. Run: python3 task.py start <dir>", file=sys.stderr)
+        print("  3. Run: python .\\.trellis\\scripts\\task.py start <dir>", file=sys.stderr)
     else:
-        print("  2. Run: python3 task.py start <dir>", file=sys.stderr)
+        print("  1. Create prd.md with requirements", file=sys.stderr)
+        print("  2. Run: python .\\.trellis\\scripts\\task.py start <dir>", file=sys.stderr)
     print("", file=sys.stderr)
 
     # Output relative path for script chaining
-    print(f"{DIR_WORKFLOW}/{DIR_TASKS}/{dir_name}")
+    print(relative_task_path)
 
     run_task_hooks("after_create", task_json_path, repo_root)
     return 0
@@ -357,6 +417,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     current = get_current_task(repo_root)
     if current and dir_name in current:
         clear_current_task(repo_root)
+    clear_session_task_refs_for_task(f"{DIR_WORKFLOW}/{DIR_TASKS}/{dir_name}", repo_root)
 
     # Archive
     result = archive_task_complete(task_dir, repo_root)
@@ -513,7 +574,7 @@ def cmd_set_branch(args: argparse.Namespace) -> int:
 
     if not branch:
         print(colored("Error: Missing arguments", Colors.RED))
-        print("Usage: python3 task.py set-branch <task-dir> <branch-name>")
+        print("Usage: python .\\.trellis\\scripts\\task.py set-branch <task-dir> <branch-name>")
         return 1
 
     task_json = target_dir / FILE_TASK_JSON
@@ -544,8 +605,8 @@ def cmd_set_base_branch(args: argparse.Namespace) -> int:
 
     if not base_branch:
         print(colored("Error: Missing arguments", Colors.RED))
-        print("Usage: python3 task.py set-base-branch <task-dir> <base-branch>")
-        print("Example: python3 task.py set-base-branch <dir> develop")
+        print("Usage: python .\\.trellis\\scripts\\task.py set-base-branch <task-dir> <base-branch>")
+        print("Example: python .\\.trellis\\scripts\\task.py set-base-branch <dir> develop")
         print()
         print("This sets the target branch for PR (the branch your feature will merge into).")
         return 1
@@ -579,7 +640,7 @@ def cmd_set_scope(args: argparse.Namespace) -> int:
 
     if not scope:
         print(colored("Error: Missing arguments", Colors.RED))
-        print("Usage: python3 task.py set-scope <task-dir> <scope>")
+        print("Usage: python .\\.trellis\\scripts\\task.py set-scope <task-dir> <scope>")
         return 1
 
     task_json = target_dir / FILE_TASK_JSON

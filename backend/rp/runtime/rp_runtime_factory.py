@@ -1,4 +1,5 @@
 """Shared dependency factory for RP runtime entrypoints."""
+
 from __future__ import annotations
 
 from config import get_settings
@@ -20,15 +21,23 @@ from rp.services.authoritative_state_view_service import AuthoritativeStateViewS
 from rp.services.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.longform_specialist_service import LongformSpecialistService
-from rp.services.builder_projection_context_service import BuilderProjectionContextService
-from rp.services.chapter_workspace_projection_adapter import ChapterWorkspaceProjectionAdapter
+from rp.services.builder_projection_context_service import (
+    BuilderProjectionContextService,
+)
+from rp.services.chapter_workspace_projection_adapter import (
+    ChapterWorkspaceProjectionAdapter,
+)
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
-from rp.services.legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
+from rp.services.legacy_state_patch_proposal_builder import (
+    LegacyStatePatchProposalBuilder,
+)
 from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.memory_os_service import MemoryOsService
-from rp.services.minimal_retrieval_ingestion_service import MinimalRetrievalIngestionService
+from rp.services.minimal_retrieval_ingestion_service import (
+    MinimalRetrievalIngestionService,
+)
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection_compatibility_mirror_service import (
     ProjectionCompatibilityMirrorService,
@@ -41,6 +50,7 @@ from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
+from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.setup_agent_execution_service import SetupAgentExecutionService
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
@@ -191,7 +201,11 @@ class RpRuntimeFactory:
             workspace_service=workspace_service
         )
         runtime_state_service = self._build_setup_runtime_state_service()
-        runtime_executor = self._build_setup_runtime_executor() if self._use_setup_runtime_v2() else None
+        runtime_executor = (
+            self._build_setup_runtime_executor()
+            if self._use_setup_runtime_v2()
+            else None
+        )
         adapter = SetupRuntimeAdapter() if runtime_executor is not None else None
         return SetupAgentExecutionService(
             workspace_service=workspace_service,
@@ -210,7 +224,11 @@ class RpRuntimeFactory:
             workspace_service=workspace_service
         )
         runtime_state_service = self._build_setup_runtime_state_service()
-        runtime_executor = self._build_setup_runtime_executor() if self._use_setup_runtime_v2() else None
+        runtime_executor = (
+            self._build_setup_runtime_executor()
+            if self._use_setup_runtime_v2()
+            else None
+        )
         adapter = SetupRuntimeAdapter() if runtime_executor is not None else None
         execution_service = SetupAgentExecutionService(
             workspace_service=workspace_service,
@@ -251,8 +269,10 @@ class RpRuntimeFactory:
 
     def build_story_turn_domain_service(self) -> StoryTurnDomainService:
         story_session_service = StorySessionService(self._session)
-        authoritative_mirror_service = self._build_authoritative_compatibility_mirror_service(
-            story_session_service=story_session_service
+        authoritative_mirror_service = (
+            self._build_authoritative_compatibility_mirror_service(
+                story_session_service=story_session_service
+            )
         )
         projection_mirror_service = self._build_projection_compatibility_mirror_service(
             story_session_service=story_session_service
@@ -310,7 +330,9 @@ class RpRuntimeFactory:
             proposal_workflow_service=proposal_workflow_service,
             legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
             projection_refresh_service=projection_refresh_service,
-            recall_summary_ingestion_service=RecallSummaryIngestionService(self._session),
+            recall_summary_ingestion_service=RecallSummaryIngestionService(
+                self._session
+            ),
         )
         writing_packet_builder = WritingPacketBuilder()
         builder_projection_context_service = BuilderProjectionContextService(
@@ -366,6 +388,9 @@ class RpRuntimeFactory:
             core_state_store_write_switch_enabled=store_write_switch_enabled,
             projection_compatibility_mirror_service=projection_mirror_service,
         )
+        builder_projection_context_service = BuilderProjectionContextService(
+            projection_state_service
+        )
         version_history_read_service = VersionHistoryReadService(
             adapter=core_state_adapter,
             proposal_repository=proposal_repository,
@@ -380,12 +405,17 @@ class RpRuntimeFactory:
         )
         memory_inspection_read_service = MemoryInspectionReadService(
             story_session_service=story_session_service,
-            builder_projection_context_service=BuilderProjectionContextService(
-                projection_state_service
-            ),
+            builder_projection_context_service=builder_projection_context_service,
             proposal_repository=proposal_repository,
             version_history_read_service=version_history_read_service,
             core_state_store_repository=core_state_store_repository,
+            store_read_enabled=store_read_enabled,
+        )
+        rp_block_read_service = RpBlockReadService(
+            story_session_service=story_session_service,
+            builder_projection_context_service=builder_projection_context_service,
+            core_state_store_repository=core_state_store_repository,
+            memory_inspection_read_service=memory_inspection_read_service,
             store_read_enabled=store_read_enabled,
         )
         return StoryRuntimeController(
@@ -394,6 +424,7 @@ class RpRuntimeFactory:
             version_history_read_service=version_history_read_service,
             provenance_read_service=provenance_read_service,
             memory_inspection_read_service=memory_inspection_read_service,
+            rp_block_read_service=rp_block_read_service,
         )
 
     def build_story_graph_runner(self) -> StoryGraphRunner:

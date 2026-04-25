@@ -12,7 +12,8 @@ Core Design Philosophy:
 
 Trigger: PreToolUse (before Task tool call)
 
-Context Source: .trellis/.current-task points to task directory
+Context Source: effective task pointer resolves to a task directory
+(session override first, repository default second)
 - implement.jsonl - Implement agent dedicated context
 - check.jsonl     - Check agent dedicated context
 - prd.md          - Requirements document
@@ -78,20 +79,57 @@ def find_repo_root(start_path: str) -> str | None:
     return None
 
 
-def get_current_task(repo_root: str) -> str | None:
-    """
-    Read current task directory path from .trellis/.current-task
+def _sanitize_session_id(session_id: object) -> str:
+    if session_id is None:
+        return ""
+    sanitized = "".join(
+        c if c.isalnum() or c in "_.-" else "-"
+        for c in str(session_id).strip()
+    )
+    return sanitized.strip(".-")[:120]
 
-    Returns:
-        Task directory relative path (relative to repo_root)
-        None if not set
-    """
-    current_task_file = os.path.join(repo_root, DIR_WORKFLOW, FILE_CURRENT_TASK)
-    if not os.path.exists(current_task_file):
+
+def _extract_session_id(input_data: dict) -> str | None:
+    for key in (
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+    ):
+        value = _sanitize_session_id(input_data.get(key))
+        if value:
+            return value
+
+    for container_key in ("session", "conversation", "thread"):
+        container = input_data.get(container_key)
+        if isinstance(container, dict):
+            value = _sanitize_session_id(container.get("id"))
+            if value:
+                return value
+
+    for env_key in (
+        "TRELLIS_SESSION_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "CLAUDE_SESSION_ID",
+        "CURSOR_SESSION_ID",
+        "GEMINI_SESSION_ID",
+        "QODER_SESSION_ID",
+    ):
+        value = _sanitize_session_id(os.environ.get(env_key))
+        if value:
+            return value
+
+    return None
+
+
+def _read_current_task_file(path: str) -> str | None:
+    if not os.path.exists(path):
         return None
-
     try:
-        with open(current_task_file, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read().strip()
             if not content:
                 return None
@@ -103,6 +141,29 @@ def get_current_task(repo_root: str) -> str | None:
             return normalized
     except Exception:
         return None
+
+
+def get_current_task(repo_root: str, session_id: str | None = None) -> str | None:
+    """
+    Read session task first, then repository current task.
+
+    Returns:
+        Task directory relative path (relative to repo_root)
+        None if not set
+    """
+    if session_id:
+        session_task_file = os.path.join(
+            repo_root,
+            DIR_WORKFLOW,
+            ".session-tasks",
+            f"{session_id}.current-task",
+        )
+        session_task = _read_current_task_file(session_task_file)
+        if session_task:
+            return session_task
+
+    current_task_file = os.path.join(repo_root, DIR_WORKFLOW, FILE_CURRENT_TASK)
+    return _read_current_task_file(current_task_file)
 
 
 def read_file_content(base_path: str, file_path: str) -> str | None:
@@ -444,7 +505,7 @@ def get_research_context(repo_root: str, task_dir: str | None) -> str:
 {spec_tree}
 ```
 
-To get structured package info, run: `python3 ./{DIR_WORKFLOW}/scripts/get_context.py --mode packages`
+To get structured package info, run: `python .\\.trellis\\scripts\\get_context.py --mode packages`
 
 ## Search Tips
 
@@ -576,7 +637,8 @@ def main():
         sys.exit(0)
 
     # Get current task directory (research doesn't require it)
-    task_dir = get_current_task(repo_root)
+    session_id = _extract_session_id(input_data)
+    task_dir = get_current_task(repo_root, session_id)
 
     # implement/check need task directory
     if subagent_type in AGENTS_REQUIRE_TASK:

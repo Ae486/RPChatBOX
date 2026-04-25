@@ -32,6 +32,7 @@ def test_compare_suite_outputs_detects_added_removed_and_changed_cases(tmp_path)
                             "assertion_summary": {"pass": 2, "fail": 0, "warn": 0, "skip": 0},
                             "reason_codes": ["prompt.missing_step_targeting"],
                             "outcome_chain": {"transcript_status": "pass"},
+                            "recommended_next_action": "ask_for_missing_setup_inputs",
                         },
                     },
                     {
@@ -71,6 +72,15 @@ def test_compare_suite_outputs_detects_added_removed_and_changed_cases(tmp_path)
                                 "controller.commit_proposal_blocked",
                             ],
                             "outcome_chain": {"transcript_status": "warn"},
+                            "recommended_next_action": "tighten_commit_readiness_checks_and_review_block_messages",
+                            "diagnostic_expectation_results": [
+                                {
+                                    "score_name": "diagnostic.reason_code_presence",
+                                    "status": "fail",
+                                    "expected": ["readiness.blocked_by_open_setup_prerequisites"],
+                                    "actual": ["prompt.missing_step_targeting"],
+                                }
+                            ],
                         },
                     },
                     {
@@ -101,9 +111,24 @@ def test_compare_suite_outputs_detects_added_removed_and_changed_cases(tmp_path)
     assert comparison["changed_cases"][0]["deltas"]["reason_code_deltas"]["added"] == [
         "controller.commit_proposal_blocked"
     ]
+    assert comparison["changed_cases"][0]["deltas"][
+        "diagnostic_expectation_failure_deltas"
+    ]["added"] == ["diagnostic.reason_code_presence"]
+    assert comparison["changed_cases"][0]["deltas"][
+        "recommended_next_action_deltas"
+    ] == {
+        "added": ["tighten_commit_readiness_checks_and_review_block_messages"],
+        "removed": ["ask_for_missing_setup_inputs"],
+    }
     assert comparison["drift_summary"]["changed_case_count"] == 1
     assert comparison["drift_summary"]["changed_finish_reason_case_ids"] == ["setup.case.a"]
     assert comparison["drift_summary"]["changed_reason_code_case_ids"] == ["setup.case.a"]
+    assert comparison["drift_summary"]["changed_recommended_next_action_case_ids"] == [
+        "setup.case.a"
+    ]
+    assert comparison["drift_summary"]["changed_diagnostic_expectation_case_ids"] == [
+        "setup.case.a"
+    ]
 
 
 def test_summarize_suite_and_thresholds_support_repeat_runs_and_soft_fail(tmp_path):

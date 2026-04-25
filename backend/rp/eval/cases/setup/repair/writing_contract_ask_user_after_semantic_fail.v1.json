@@ -69,7 +69,12 @@
         "rubric_ref": "setup/clarification-quality/v1",
         "target": "assistant_text"
       }
-    ]
+    ],
+    "expected_reason_codes": ["tool_execution.provider_execution_failed"],
+    "expected_primary_suspects": ["tool_contract_execution"],
+    "expected_outcome_chain": {
+      "transcript_status": "pass"
+    }
   },
   "trace_hooks": {
     "capture_runtime_events": true,
@@ -81,7 +86,7 @@
     "stop_on_first_hard_failure": false
   },
   "baseline": {
-    "compare_by": ["finish_reason", "warnings", "assertion_pass_rate"],
+    "compare_by": ["finish_reason", "warnings", "assertion_pass_rate", "reason_codes", "outcome_chain"],
     "baseline_tags": ["main"]
   },
   "metadata": {}
