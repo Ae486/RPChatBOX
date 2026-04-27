@@ -40,7 +40,10 @@ def normalize_registry_capabilities(capabilities: list[str] | None) -> list[str]
     seen: set[str] = set()
     for raw in capabilities or []:
         raw_capability = str(raw or "").strip().lower()
-        capability = _LEGACY_CAPABILITY_ALIASES.get(raw_capability, raw_capability)
+        capability: str | None = _LEGACY_CAPABILITY_ALIASES.get(
+            raw_capability,
+            raw_capability,
+        )
         if (
             not capability
             or capability not in _CANONICAL_CAPABILITIES
@@ -62,14 +65,14 @@ def get_litellm_model_name(provider_type: str, model: str) -> str:
 
 def _resolve_lookup_model(provider_type: str, model: str) -> str | None:
     if "/" in model:
-        prefix = model.split("/", 1)[0].strip().lower()
-        if prefix in set(_PROVIDER_PREFIX.values()):
+        existing_prefix = model.split("/", 1)[0].strip().lower()
+        if existing_prefix in set(_PROVIDER_PREFIX.values()):
             return model
         return None
-    prefix = _PROVIDER_PREFIX.get(provider_type)
-    if prefix is None:
+    provider_prefix = _PROVIDER_PREFIX.get(provider_type)
+    if provider_prefix is None:
         return None
-    return f"{prefix}/{model}"
+    return f"{provider_prefix}/{model}"
 
 
 def _recommended_capabilities_from_info(info: dict[str, Any]) -> list[str]:
@@ -91,6 +94,44 @@ def _recommended_capabilities_from_info(info: dict[str, Any]) -> list[str]:
     return normalize_registry_capabilities(capabilities)
 
 
+def _infer_function_calling_from_supported_params(
+    supported_openai_params: list[str],
+) -> bool | None:
+    """Infer tool-call support when LiteLLM omits the boolean flag.
+
+    Some OpenAI-compatible transports expose `tools` / `tool_choice` in the
+    supported param list while returning `supports_function_calling=None` from
+    `get_model_info(...)`. Treat that as tool-capable instead of degrading to an
+    empty capability profile.
+    """
+
+    supported = {
+        str(item or "").strip().lower()
+        for item in supported_openai_params
+        if str(item or "").strip()
+    }
+    if {"tools", "tool_choice"}.issubset(supported):
+        return True
+    if {"functions", "function_call"}.issubset(supported):
+        return True
+    return None
+
+
+def _infer_tool_choice_from_supported_params(
+    supported_openai_params: list[str],
+) -> bool | None:
+    """Infer tool-choice support from transport params when metadata is sparse."""
+
+    supported = {
+        str(item or "").strip().lower()
+        for item in supported_openai_params
+        if str(item or "").strip()
+    }
+    if "tool_choice" in supported or "function_call" in supported:
+        return True
+    return None
+
+
 def _try_get_model_info(
     *,
     model: str,
@@ -106,13 +147,14 @@ def _try_get_model_info(
     except Exception:
         return None
 
-    if hasattr(info, "model_dump"):
-        dumped = info.model_dump(exclude_none=False)
+    model_dump = getattr(info, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(exclude_none=False)
         return dumped if isinstance(dumped, dict) else None
     if isinstance(info, dict):
         return info
     try:
-        return dict(info)
+        return {str(key): value for key, value in dict(info).items()}
     except Exception:
         return None
 
@@ -238,11 +280,7 @@ def resolve_model_capability_profile(
         "max_input_tokens": info.get("max_input_tokens"),
         "max_output_tokens": info.get("max_output_tokens"),
         "output_vector_size": info.get("output_vector_size"),
-        "supports_function_calling": (
-            bool(info.get("supports_function_calling"))
-            if info.get("supports_function_calling") is not None
-            else None
-        ),
+        "supports_function_calling": None,
         "supports_parallel_function_calling": _supports_parallel_function_calling(
             model=model,
             custom_llm_provider=transport_provider or None,
@@ -257,11 +295,7 @@ def resolve_model_capability_profile(
             if info.get("supports_response_schema") is not None
             else None
         ),
-        "supports_tool_choice": (
-            bool(info.get("supports_tool_choice"))
-            if info.get("supports_tool_choice") is not None
-            else None
-        ),
+        "supports_tool_choice": None,
         "supports_reasoning": (
             bool(info.get("supports_reasoning"))
             if info.get("supports_reasoning") is not None
@@ -294,6 +328,16 @@ def resolve_model_capability_profile(
         ),
         "supported_openai_params": supported_openai_params,
     }
+    payload["supports_function_calling"] = (
+        bool(info.get("supports_function_calling"))
+        if info.get("supports_function_calling") is not None
+        else _infer_function_calling_from_supported_params(supported_openai_params)
+    )
+    payload["supports_tool_choice"] = (
+        bool(info.get("supports_tool_choice"))
+        if info.get("supports_tool_choice") is not None
+        else _infer_tool_choice_from_supported_params(supported_openai_params)
+    )
     payload["recommended_capabilities"] = _recommended_capabilities_from_info(
         {
             "mode": mode,

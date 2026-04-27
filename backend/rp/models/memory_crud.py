@@ -247,6 +247,15 @@ class ProposalSubmitInput(BaseModel):
         return self
 
 
+class MemoryBlockProposalSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operations: list[StatePatchOperation]
+    base_refs: list[ObjectRef] = Field(default_factory=list)
+    reason: str | None = None
+    trace_id: str | None = None
+
+
 class ProposalReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

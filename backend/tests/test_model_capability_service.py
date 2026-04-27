@@ -57,6 +57,35 @@ def test_resolve_profile_prefers_global_template_for_openai_transport_gemini_mod
     assert "tools" in profile.supported_openai_params
 
 
+def test_resolve_profile_infers_tool_support_from_supported_params_when_flag_missing(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "services.model_capability_service._try_get_model_info",
+        lambda **kwargs: {
+            "key": "openai/gemini-2.5-flash",
+            "litellm_provider": "openai",
+            "mode": None,
+            "supports_function_calling": None,
+            "supports_tool_choice": None,
+        },
+    )
+    monkeypatch.setattr(
+        "services.model_capability_service._get_supported_openai_params",
+        lambda **kwargs: ["temperature", "tools", "tool_choice"],
+    )
+    monkeypatch.setattr(
+        "services.model_capability_service._supports_parallel_function_calling",
+        lambda **kwargs: False,
+    )
+
+    profile = resolve_model_capability_profile("openai", "gemini-2.5-flash")
+
+    assert profile.supports_function_calling is True
+    assert profile.supports_tool_choice is True
+    assert "tool" in profile.recommended_capabilities
+
+
 def test_query_capabilities_returns_default_for_unsupported_provider_type():
     caps = query_model_capabilities("local", "cross-encoder/ms-marco")
 

@@ -1,0 +1,76 @@
+{
+  "case_id": "setup.infra.provider_request_failed_during_turn.v1",
+  "title": "Provider failure during setup turn should surface infra diagnostics and preserve activation evidence",
+  "scope": "setup",
+  "category": "infra",
+  "tags": ["mvp", "deterministic", "setup-v2", "cognitive-runtime", "infra"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-infra-provider-failure-001",
+      "target_step": "story_config",
+      "user_prompt": "继续整理 story config。",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-infra-provider-failure-001",
+      "mode": "longform",
+      "current_step": "story_config"
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "activation_check_ready_is_false",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "activation_check.ready",
+        "expected": false,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "activation_check_has_blocking_issues",
+        "source": "runtime_result",
+        "type": "count_gte",
+        "path": "activation_check.blocking_issues",
+        "expected": 1,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": [],
+    "expected_reason_codes": [
+      "infra.provider_request_failed"
+    ],
+    "expected_primary_suspects": [
+      "infra_model_provider"
+    ],
+    "expected_outcome_chain": {
+      "transcript_status": "not_applicable",
+      "readiness_status": "warn"
+    },
+    "expected_recommended_next_action": "fix_provider_model_config_and_runtime_connectivity"
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["failure_layer", "reason_codes", "outcome_chain", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}

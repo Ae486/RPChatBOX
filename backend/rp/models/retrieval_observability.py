@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from rp.models.block_view import RpBlockView
 
 
 class RetrievalWarningBucket(BaseModel):
@@ -32,6 +33,7 @@ class RetrievalObservabilityHitView(BaseModel):
     image_caption: str | None = None
     contextual_text_version: str | None = None
     excerpt_preview: str
+    block_view: RpBlockView | None = None
 
 
 class RetrievalObservabilityMaintenanceView(BaseModel):

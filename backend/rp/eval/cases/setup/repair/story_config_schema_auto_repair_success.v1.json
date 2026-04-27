@@ -70,7 +70,18 @@
         "severity": "error"
       }
     ],
-    "subjective_hooks": []
+    "subjective_hooks": [],
+    "expected_reason_codes": [
+      "tool_execution.schema_validation_failed"
+    ],
+    "expected_primary_suspects": [
+      "tool_contract_execution"
+    ],
+    "expected_outcome_chain": {
+      "transcript_status": "not_applicable",
+      "readiness_status": "warn"
+    },
+    "expected_recommended_next_action": "strengthen_tool_argument_schema_repair_and_retry_policy"
   },
   "trace_hooks": {
     "capture_runtime_events": true,

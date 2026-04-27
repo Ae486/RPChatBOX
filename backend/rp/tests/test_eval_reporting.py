@@ -33,6 +33,17 @@ def test_render_suite_markdown_includes_core_sections():
             "repeat_case_ids": ["setup.case.repeat"],
             "finish_reason_counts": {"completed_text": 2, "activation_failed": 1},
             "failure_layer_counts": {"deterministic": 1},
+            "diagnostic_summary": {
+                "primary_suspects": {"decision_policy": 1},
+                "reason_codes": {"controller.commit_proposal_blocked": 1},
+                "recommended_next_actions": {
+                    "tighten_commit_readiness_checks_and_review_block_messages": 1
+                },
+                "outcome_chain": {
+                    "readiness_status": {"warn": 1},
+                    "activation_handoff_status": {"fail": 1},
+                },
+            },
             "case_summaries": {
                 "setup.case.repeat": {
                     "run_count": 2,
@@ -59,6 +70,13 @@ def test_render_suite_markdown_includes_core_sections():
     assert "metric context_precision: 0.81" in markdown
     assert "pass: 1" in markdown
     assert "setup/clarification-quality/v1" in markdown
+    assert "primary_suspects: decision_policy" in markdown
+    assert "controller.commit_proposal_blocked=1" in markdown
+    assert "readiness_status: warn=1" in markdown
+    assert (
+        "tighten_commit_readiness_checks_and_review_block_messages=1"
+        in markdown
+    )
 
 
 def test_render_comparison_markdown_includes_drift_summary():
@@ -87,6 +105,26 @@ def test_render_comparison_markdown_includes_drift_summary():
                         "pending_judge_hook_count": -1,
                         "executed_judge_hook_count": 1,
                         "subjective_average_score": -0.17,
+                        "reason_code_deltas": {
+                            "added": ["controller.commit_proposal_blocked"],
+                            "removed": ["prompt.missing_step_targeting"],
+                        },
+                        "primary_suspect_deltas": {
+                            "added": ["decision_policy"],
+                            "removed": ["instruction_prompt_skill"],
+                        },
+                        "outcome_chain_deltas": {
+                            "readiness_status": {
+                                "added": ["warn"],
+                                "removed": ["pass"],
+                            }
+                        },
+                        "recommended_next_action_deltas": {
+                            "added": [
+                                "tighten_commit_readiness_checks_and_review_block_messages"
+                            ],
+                            "removed": ["ask_for_missing_setup_inputs"],
+                        },
                         "ragas_metric_deltas": {"context_precision": 0.12},
                     },
                 }
@@ -114,3 +152,9 @@ def test_render_comparison_markdown_includes_drift_summary():
     assert "subjective_status_drifts: setup.case.changed" in markdown
     assert "ragas_drifts: setup.case.changed" in markdown
     assert "executed_hooks current=2 baseline=1" in markdown
+    assert (
+        "reason_code_deltas=added=controller.commit_proposal_blocked;"
+        "removed=prompt.missing_step_targeting"
+    ) in markdown
+    assert "diagnostic_drift:" in markdown
+    assert "outcome chain readiness_status(added=warn;removed=pass)" in markdown

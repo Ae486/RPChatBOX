@@ -1,6 +1,7 @@
 """Runtime-internal contracts for RP agent execution."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -162,6 +163,55 @@ class SetupCognitiveSourceBasis(BaseModel):
     current_step: str
 
 
+class SetupWorkingDigest(BaseModel):
+    """Thin stage-local control state carried across setup turns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_goal: str | None = None
+    next_focus: str | None = None
+    open_questions: list[str] = Field(default_factory=list)
+    rejected_directions: list[str] = Field(default_factory=list)
+    draft_refs: list[str] = Field(default_factory=list)
+    pending_obligation: str | None = None
+    commit_blockers: list[str] = Field(default_factory=list)
+
+
+class SetupToolOutcome(BaseModel):
+    """Final tool outcome retained as thin cross-turn context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: str
+    success: bool
+    summary: str
+    updated_refs: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+    relevance: Literal[
+        "cognitive",
+        "draft",
+        "question",
+        "proposal",
+        "read",
+        "asset",
+        "failure",
+        "other",
+    ] = "other"
+    recorded_at: datetime
+
+
+class SetupContextCompactSummary(BaseModel):
+    """Compacted carry-forward summary for trimmed older current-step history."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_fingerprint: str
+    source_message_count: int = 0
+    summary_lines: list[str] = Field(default_factory=list)
+    open_threads: list[str] = Field(default_factory=list)
+    draft_refs: list[str] = Field(default_factory=list)
+
+
 class SetupCognitiveStateSnapshot(BaseModel):
     """Cross-turn runtime-private cognitive snapshot for one setup step."""
 
@@ -173,6 +223,9 @@ class SetupCognitiveStateSnapshot(BaseModel):
     discussion_state: DiscussionState | None = None
     chunk_candidates: list[ChunkCandidate] = Field(default_factory=list)
     active_truth_write: DraftTruthWrite | None = None
+    working_digest: SetupWorkingDigest | None = None
+    tool_outcomes: list[SetupToolOutcome] = Field(default_factory=list)
+    compact_summary: SetupContextCompactSummary | None = None
     invalidated: bool = False
     invalidation_reasons: list[str] = Field(default_factory=list)
     source_basis: SetupCognitiveSourceBasis
@@ -194,6 +247,9 @@ class SetupCognitiveStateSummary(BaseModel):
     truth_write_status: str | None = None
     ready_for_review: bool = False
     remaining_open_issues: list[str] = Field(default_factory=list)
+    working_digest: SetupWorkingDigest | None = None
+    tool_outcomes: list[SetupToolOutcome] = Field(default_factory=list)
+    compact_summary: SetupContextCompactSummary | None = None
 
 
 class SetupTurnGoal(BaseModel):

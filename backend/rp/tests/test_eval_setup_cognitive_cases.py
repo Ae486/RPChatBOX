@@ -20,6 +20,10 @@ def _case_path(*parts: str) -> Path:
     )
 
 
+def _all_setup_case_paths() -> list[Path]:
+    return sorted(_case_path().rglob("*.json"))
+
+
 def _extract_workspace_id(request) -> str:
     system_prompt = request.messages[0].content or ""
     return system_prompt.split('"workspace_id": "')[1].split('"')[0]
@@ -306,6 +310,14 @@ class _TruthWriteReplaceMissingLLMService:
         )
 
 
+class _ProviderFailureSetupLLMService:
+    async def chat_completion_stream(self, request):
+        raise AssertionError("stream path not expected")
+
+    async def chat_completion(self, request):
+        raise RuntimeError("provider upstream unavailable")
+
+
 def _tool_call_response(*, call_id: str, tool_name: str, arguments: dict):
     return {
         "choices": [
@@ -403,6 +415,17 @@ def _text_response(text: str):
             _TruthWriteReplaceMissingLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": "continue_discussion", "commit_blocked": False},
         ),
+        (
+            _case_path("infra", "provider_request_failed_during_turn.v1.json"),
+            _ProviderFailureSetupLLMService,
+            {
+                "finish_reason": None,
+                "repair_route": None,
+                "commit_blocked": False,
+                "run_status": "failed",
+                "failure_layer": "infra",
+            },
+        ),
     ],
 )
 async def test_eval_setup_cognitive_cases_from_files(
@@ -425,10 +448,12 @@ async def test_eval_setup_cognitive_cases_from_files(
     runner = EvalRunner(retrieval_session)
     result = await runner.run_case(case)
 
-    assert result.run.status == "completed" or result.run.status == "failed"
+    assert result.run.status == expected_report.get("run_status", result.run.status)
     assert result.report["finish_reason"] == expected_report["finish_reason"]
     assert result.report["repair_route"] == expected_report["repair_route"]
     assert result.report["commit_blocked"] == expected_report["commit_blocked"]
+    if "failure_layer" in expected_report:
+        assert result.report["failure_layer"] == expected_report["failure_layer"]
     assert result.report["assertion_summary"]["fail"] == 0
 
     if case.case_id == "setup.repair.story_config.schema_auto_repair_success.v1":
@@ -436,3 +461,22 @@ async def test_eval_setup_cognitive_cases_from_files(
         assert replay_path is not None
         replay_payload = load_replay(replay_path)
         assert replay_payload["case"]["case_id"] == case.case_id
+
+
+def test_all_setup_case_files_define_diagnostic_expectations():
+    missing_reason_codes: list[str] = []
+    missing_outcome_chain: list[str] = []
+    missing_next_actions: list[str] = []
+
+    for case_path in _all_setup_case_paths():
+        case = load_case(case_path)
+        if not case.expected.expected_reason_codes:
+            missing_reason_codes.append(case.case_id)
+        if not case.expected.expected_outcome_chain:
+            missing_outcome_chain.append(case.case_id)
+        if not case.expected.expected_recommended_next_action:
+            missing_next_actions.append(case.case_id)
+
+    assert not missing_reason_codes, missing_reason_codes
+    assert not missing_outcome_chain, missing_outcome_chain
+    assert not missing_next_actions, missing_next_actions

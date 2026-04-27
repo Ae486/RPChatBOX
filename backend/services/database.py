@@ -80,6 +80,7 @@ def create_db_and_tables() -> None:
     from models.rp_story_store import (
         ChapterWorkspaceRecord,
         StoryArtifactRecord,
+        StoryBlockConsumerStateRecord,
         StoryDiscussionEntryRecord,
         StorySessionRecord,
         ensure_story_store_compatible_schema,
@@ -107,6 +108,7 @@ def create_db_and_tables() -> None:
         StorySessionRecord,
         ChapterWorkspaceRecord,
         StoryArtifactRecord,
+        StoryBlockConsumerStateRecord,
         StoryDiscussionEntryRecord,
         MemoryProposalRecord,
         MemoryApplyReceiptRecord,

@@ -9,7 +9,7 @@ from .core_state_store_repository import CoreStateStoreRepository
 from rp.models.dsl import Layer, ObjectRef
 
 from .builder_projection_context_service import BuilderProjectionContextService
-from .memory_object_mapper import authoritative_bindings
+from .memory_object_mapper import authoritative_bindings, normalize_authoritative_ref
 from .proposal_repository import ProposalRepository
 from .story_session_service import StorySessionService
 from .version_history_read_service import VersionHistoryReadService
@@ -174,18 +174,133 @@ class MemoryInspectionReadService:
                 continue
             if status is not None and record.status != status:
                 continue
-            items.append(
-                {
-                    "proposal_id": record.proposal_id,
-                    "status": record.status,
-                    "policy_decision": record.policy_decision,
-                    "domain": record.domain,
-                    "domain_path": record.domain_path,
-                    "operation_kinds": [
-                        item.get("kind", "") for item in record.operations_json
-                    ],
-                    "created_at": record.created_at,
-                    "applied_at": record.applied_at,
-                }
-            )
+            items.append(self._proposal_item(record))
         return items
+
+    def list_proposals_for_authoritative_ref(
+        self,
+        *,
+        story_id: str,
+        target_ref: ObjectRef,
+        session_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict]:
+        """List proposals whose operations target one authoritative Core State ref."""
+
+        target_identity = self._authoritative_ref_identity(target_ref)
+        records = self._proposal_repository.list_proposals_for_story(story_id)
+        items: list[dict] = []
+        for record in records:
+            if session_id is not None and record.session_id != session_id:
+                continue
+            if status is not None and record.status != status:
+                continue
+            if not self._proposal_targets_authoritative_ref(
+                record.operations_json,
+                target_identity=target_identity,
+            ):
+                continue
+            items.append(self._proposal_item(record))
+        return items
+
+    def get_proposal_for_authoritative_ref(
+        self,
+        *,
+        story_id: str,
+        target_ref: ObjectRef,
+        proposal_id: str,
+        session_id: str | None = None,
+    ) -> dict | None:
+        """Return one exact-target authoritative proposal detail when it belongs here."""
+
+        record = self._proposal_repository.get_proposal_record(proposal_id)
+        if record is None:
+            return None
+        if record.story_id != story_id:
+            return None
+        if session_id is not None and record.session_id != session_id:
+            return None
+        if not self._proposal_targets_authoritative_ref(
+            record.operations_json,
+            target_identity=self._authoritative_ref_identity(target_ref),
+        ):
+            return None
+        return self._proposal_detail_item(record)
+
+    @staticmethod
+    def _proposal_item(record) -> dict:
+        return {
+            "proposal_id": record.proposal_id,
+            "status": record.status,
+            "policy_decision": record.policy_decision,
+            "domain": record.domain,
+            "domain_path": record.domain_path,
+            "operation_kinds": [
+                item.get("kind", "") for item in record.operations_json
+            ],
+            "created_at": record.created_at,
+            "applied_at": record.applied_at,
+        }
+
+    def _proposal_detail_item(self, record) -> dict:
+        return {
+            **self._proposal_item(record),
+            "reason": record.reason,
+            "trace_id": record.trace_id,
+            "error_message": record.error_message,
+            "operations": deepcopy(record.operations_json),
+            "base_refs": deepcopy(record.base_refs_json),
+            "apply_receipts": [
+                self._apply_receipt_item(item)
+                for item in self._proposal_repository.list_apply_receipts_for_proposal(
+                    record.proposal_id
+                )
+            ],
+        }
+
+    @staticmethod
+    def _apply_receipt_item(record) -> dict:
+        return {
+            "apply_id": record.apply_id,
+            "session_id": record.session_id,
+            "chapter_workspace_id": record.chapter_workspace_id,
+            "target_refs": deepcopy(record.target_refs_json),
+            "revision_after": deepcopy(record.revision_after_json),
+            "warnings": list(record.warnings_json),
+            "apply_backend": record.apply_backend,
+            "created_at": record.created_at,
+        }
+
+    @classmethod
+    def _proposal_targets_authoritative_ref(
+        cls,
+        operations: list[dict[str, Any]],
+        *,
+        target_identity: tuple[str, str, str, str, str],
+    ) -> bool:
+        for operation in operations:
+            raw_ref = operation.get("target_ref")
+            if not isinstance(raw_ref, dict):
+                continue
+            try:
+                operation_ref = normalize_authoritative_ref(
+                    ObjectRef.model_validate(raw_ref)
+                )
+            except ValueError:
+                continue
+            if operation_ref.layer != Layer.CORE_STATE_AUTHORITATIVE:
+                continue
+            if cls._authoritative_ref_identity(operation_ref) == target_identity:
+                return True
+        return False
+
+    @staticmethod
+    def _authoritative_ref_identity(ref: ObjectRef) -> tuple[str, str, str, str, str]:
+        normalized = normalize_authoritative_ref(ref)
+        return (
+            normalized.object_id,
+            normalized.layer.value,
+            normalized.domain.value,
+            normalized.domain_path or normalized.object_id,
+            normalized.scope or "story",
+        )

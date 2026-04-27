@@ -1,0 +1,99 @@
+{
+  "case_id": "setup.real_provider_smoke.gemini_flash.stream.tmp",
+  "title": "Real-provider setup stream smoke with Mint Gemini 2.5 Flash",
+  "scope": "setup",
+  "category": "real_provider_smoke",
+  "tags": [
+    "smoke",
+    "real-provider",
+    "setup-v2"
+  ],
+  "runtime_target": {
+    "mode": "http",
+    "entrypoint": "/api/rp/setup/workspaces/{workspace_id}/turn/stream",
+    "graph_id": "setup_v2",
+    "stream": true
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-real-gemini-setup-001",
+      "target_step": "writing_contract",
+      "user_prompt": "我想写一篇偏克制、第三人称限知视角的悬疑长篇。当前信息还不完整，请先帮我收敛写作契约，并告诉我下一步最需要补充什么。",
+      "history": [],
+      "model_id": "45776d28-7975-4a4b-8fb3-4cca18daeb02",
+      "provider_id": "39a5de23-0c64-4711-87bc-d69667e53f0d"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-real-gemini-setup-001",
+      "mode": "longform",
+      "current_step": "writing_contract"
+    },
+    "env_overrides": {
+      "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+      "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+      "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+      "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422"
+    }
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_reason_exists",
+        "source": "runtime_result",
+        "type": "exists",
+        "path": "finish_reason",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "assistant_text_exists",
+        "source": "runtime_result",
+        "type": "exists",
+        "path": "assistant_text",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "round_no_exists",
+        "source": "runtime_result",
+        "type": "exists",
+        "path": "structured_payload.round_no",
+        "expected": true,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "activation_check_ready_exists",
+        "source": "runtime_result",
+        "type": "exists",
+        "path": "activation_check.ready",
+        "expected": true,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true,
+    "capture_activation_snapshot": true,
+    "capture_tool_sequence": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": [
+      "finish_reason",
+      "assertion_pass_rate"
+    ],
+    "baseline_tags": [
+      "real-provider"
+    ]
+  },
+  "metadata": {
+    "purpose": "One-off real provider smoke suite"
+  }
+}

@@ -3,4 +3,16 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check implementation reuses existing Core State mappings and avoids parallel identity systems."}
 {"file": ".trellis/spec/backend/index.md", "reason": "Backend code-spec index for RP memory quality checks."}
 {"file": ".trellis/spec/backend/rp-core-state-block-envelope.md", "reason": "Quality check contract for Block envelope identity, payload, source metadata, API route, and out-of-scope boundaries."}
+{"file": ".trellis/spec/backend/rp-authoritative-block-governed-mutation.md", "reason": "Quality check contract for block-addressed authoritative mutation, target validation, and proposal/apply preservation."}
+{"file": ".trellis/spec/backend/rp-authoritative-block-proposal-review-apply-visibility.md", "reason": "Quality check contract for block-scoped proposal detail, exact-target visibility, and manual apply continuation over existing persistence."}
+{"file": ".trellis/spec/backend/rp-block-consumer-registry.md", "reason": "Quality check contract for active-story block consumer attachment, lazy dirty evaluation, and non-intrusion into writer/setup boundaries."}
+{"file": ".trellis/spec/backend/rp-active-story-block-prompt-context.md", "reason": "Quality check contract for orchestrator/specialist Block-backed internal compile and writer boundary preservation."}
+{"file": ".trellis/spec/backend/rp-active-story-block-prompt-rendering.md", "reason": "Quality check contract for deterministic Block overlay rendering and retrieval separation."}
+{"file": ".trellis/spec/backend/rp-active-story-block-lazy-rebuild.md", "reason": "Quality check contract for cached Block prompt compile, reuse, and rebuild behavior."}
+{"file": ".trellis/spec/backend/rp-memory-get-state-summary-block-read-surface.md", "reason": "Quality check contract for RetrievalBroker-backed memory.get_state/get_summary Block fallback and metadata enrichment."}
+{"file": ".trellis/spec/backend/rp-memory-os-block-rollout.md", "reason": "Quality check contract for rollout sequencing and boundary preservation."}
+{"file": ".trellis/spec/backend/rp-memory-tool-chain-block-compatibility.md", "reason": "Quality check contract for public memory tool/provider compatibility after Block integration."}
+{"file": ".trellis/spec/backend/rp-recall-detail-retention.md", "reason": "Quality check contract for accepted-prose recall retention, deterministic asset identity, and heavy-regression trigger boundaries."}
+{"file": ".trellis/spec/backend/rp-memory-temporal-materialization.md", "reason": "Quality check contract for RP-specific memory layer ownership and temporal materialization boundaries."}
 {"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/current-memory-context.md", "reason": "Review against task-specific Memory OS/Core State/Block boundaries and out-of-scope decisions."}
+{"file": ".trellis/spec/backend/rp-runtime-workspace-block-views.md", "reason": "Quality check contract for Runtime Workspace Block read views, filter behavior, and unsupported history/provenance semantics."}

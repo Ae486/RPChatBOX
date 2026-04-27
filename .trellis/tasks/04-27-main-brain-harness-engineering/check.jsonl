@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/04-27-main-brain-harness-engineering/research/harness-engineering-openai-anthropic.md", "reason": "Use the same harness-engineering framing when reviewing future main-brain outputs"}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-local-context-governance.md", "reason": "Review implementation against the stage-local context governance contract"}
+{"file": ".trellis/spec/backend/rp-setup-agent-prior-stage-handoff-context.md", "reason": "Verify the new slice does not leak raw prior-stage discussion into later-stage handoffs"}

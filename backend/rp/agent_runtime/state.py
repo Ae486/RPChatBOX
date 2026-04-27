@@ -32,6 +32,9 @@ class RpAgentRunState(TypedDict, total=False):
     completion_guard: dict[str, Any] | None
     cognitive_state: dict[str, Any] | None
     cognitive_state_summary: dict[str, Any] | None
+    working_digest: dict[str, Any] | None
+    tool_outcomes: list[dict[str, Any]]
+    compact_summary: dict[str, Any] | None
     repair_route: str | None
     next_action: str
     schema_retry_count: int

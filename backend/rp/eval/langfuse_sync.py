@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from rp.observability.langfuse_scores import (
@@ -13,6 +14,8 @@ from rp.observability.langfuse_scores import (
     emit_suite_summary_scores,
 )
 from services.langfuse_service import get_langfuse_service
+
+from .replay import load_replay
 
 
 def sync_suite_summary_to_langfuse(
@@ -113,14 +116,25 @@ def sync_replay_to_langfuse(*, replay_payload: dict[str, Any]) -> None:
         or "offline-replay"
     )
     scope = str(case.get("scope") or run.get("scope") or "unknown")
+    replay_metadata = {
+        "case_id": case.get("case_id"),
+        "run_id": run.get("run_id"),
+        "trace_id": run.get("trace_id"),
+        "scope": scope,
+        "workspace_id": metadata.get("workspace_id"),
+        "story_id": metadata.get("story_id"),
+        "source_session_id": metadata.get("session_id"),
+        "setup_step": metadata.get("setup_step"),
+        "model_id": metadata.get("model_id"),
+        "provider_id": metadata.get("provider_id"),
+    }
+    replay_metadata = {
+        key: value for key, value in replay_metadata.items() if value is not None
+    }
     with langfuse.propagate_attributes(
         session_id=session_id,
         tags=["rp", "eval", "replay", scope],
-        metadata={
-            "case_id": case.get("case_id"),
-            "run_id": run.get("run_id"),
-            "scope": scope,
-        },
+        metadata=replay_metadata,
         trace_name="rp.eval.replay",
     ):
         with langfuse.start_as_current_observation(
@@ -129,6 +143,7 @@ def sync_replay_to_langfuse(*, replay_payload: dict[str, Any]) -> None:
             input={
                 "case_id": case.get("case_id"),
                 "run_id": run.get("run_id"),
+                "trace_id": run.get("trace_id"),
                 "scope": scope,
             },
         ) as observation:
@@ -138,19 +153,13 @@ def sync_replay_to_langfuse(*, replay_payload: dict[str, Any]) -> None:
                 else None
             )
             observation.update(
-                output={
-                    "status": run.get("status"),
-                    "finish_reason": report.get("finish_reason"),
-                    "retrieval": (
-                        {
-                            "query_kind": retrieval_sync_payload["query_payload"].get("query_kind"),
-                            "route": retrieval_sync_payload["observability_payload"].get("route"),
-                            "returned_count": retrieval_sync_payload["observability_payload"].get("returned_count"),
-                        }
-                        if isinstance(retrieval_sync_payload, dict)
-                        else None
-                    ),
-                },
+                output=_build_replay_output(
+                    scope=scope,
+                    run=run,
+                    metadata=metadata,
+                    report=report,
+                    retrieval_sync_payload=retrieval_sync_payload,
+                ),
             )
             failure_layer = (
                 str(failure.get("layer"))
@@ -164,6 +173,7 @@ def sync_replay_to_langfuse(*, replay_payload: dict[str, Any]) -> None:
                     runtime_result=runtime_result,
                     failure_layer=failure_layer,
                     error_code=error_code,
+                    report=report,
                 )
             elif scope == "activation":
                 emit_activation_trace_scores(
@@ -184,6 +194,118 @@ def sync_replay_to_langfuse(*, replay_payload: dict[str, Any]) -> None:
             ragas = report.get("ragas")
             if isinstance(ragas, dict):
                 emit_ragas_metric_scores(observation, report=ragas)
+
+
+def sync_suite_bundle_to_langfuse(
+    *,
+    suite_payload: dict[str, Any],
+    summary: dict[str, Any],
+    thresholds: dict[str, Any],
+    comparison: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Sync the full suite bundle to Langfuse for WebUI drill-down."""
+    sync_suite_summary_to_langfuse(
+        suite_payload=suite_payload,
+        summary=summary,
+        thresholds=thresholds,
+    )
+    replay_payloads = _load_suite_replay_payloads(suite_payload)
+    for replay_payload in replay_payloads:
+        sync_replay_to_langfuse(replay_payload=replay_payload)
+    comparison_synced = isinstance(comparison, dict)
+    if isinstance(comparison, dict):
+        sync_comparison_to_langfuse(comparison=comparison)
+    return {
+        "suite_summary_synced": True,
+        "suite_replay_sync_count": len(replay_payloads),
+        "comparison_synced": comparison_synced,
+    }
+
+
+def _build_replay_output(
+    *,
+    scope: str,
+    run: dict[str, Any],
+    metadata: dict[str, Any],
+    report: dict[str, Any],
+    retrieval_sync_payload: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    return {
+        "status": run.get("status"),
+        "finish_reason": report.get("finish_reason"),
+        "identifiers": {
+            "run_id": run.get("run_id"),
+            "trace_id": run.get("trace_id"),
+            "workspace_id": metadata.get("workspace_id"),
+            "story_id": metadata.get("story_id"),
+            "session_id": metadata.get("session_id"),
+        },
+        "diagnostics": _build_replay_diagnostics_output(scope=scope, report=report),
+        "retrieval": (
+            {
+                "query_kind": retrieval_sync_payload["query_payload"].get("query_kind"),
+                "route": retrieval_sync_payload["observability_payload"].get("route"),
+                "returned_count": retrieval_sync_payload["observability_payload"].get("returned_count"),
+            }
+            if isinstance(retrieval_sync_payload, dict)
+            else None
+        ),
+    }
+
+
+def _build_replay_diagnostics_output(
+    *,
+    scope: str,
+    report: dict[str, Any],
+) -> dict[str, Any] | None:
+    diagnostics = {
+        "scope": scope,
+        "failure_layer": report.get("failure_layer"),
+        "reason_codes": list(report.get("reason_codes") or []),
+        "primary_suspects": list(report.get("primary_suspects") or []),
+        "secondary_suspects": list(report.get("secondary_suspects") or []),
+        "recommended_next_action": report.get("recommended_next_action"),
+        "outcome_chain": dict(report.get("outcome_chain") or {}),
+        "evidence_refs": list(report.get("evidence_refs") or []),
+    }
+    if any(
+        value
+        for key, value in diagnostics.items()
+        if key not in {"scope", "failure_layer", "recommended_next_action"}
+    ):
+        return diagnostics
+    if diagnostics["failure_layer"] is not None or diagnostics["recommended_next_action"] is not None:
+        return diagnostics
+    return None
+
+
+def _load_suite_replay_payloads(suite_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    items = suite_payload.get("items")
+    if not isinstance(items, list):
+        return []
+    replay_payloads: list[dict[str, Any]] = []
+    missing_case_ids: list[str] = []
+    seen_paths: set[str] = set()
+    for raw_item in items:
+        if not isinstance(raw_item, dict):
+            continue
+        case_id = str(raw_item.get("case_id") or "unknown")
+        replay_path = raw_item.get("replay_path")
+        if not isinstance(replay_path, str) or not replay_path.strip():
+            missing_case_ids.append(case_id)
+            continue
+        normalized_path = str(Path(replay_path).resolve())
+        if normalized_path in seen_paths:
+            continue
+        seen_paths.add(normalized_path)
+        replay_payloads.append(load_replay(normalized_path))
+    if missing_case_ids:
+        missing_text = ", ".join(sorted(missing_case_ids))
+        raise ValueError(
+            "Suite replay sync requires replay bundles for every suite item. "
+            f"Missing replay_path for: {missing_text}"
+        )
+    return replay_payloads
 
 
 def _extract_retrieval_sync_payload(

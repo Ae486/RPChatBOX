@@ -1,0 +1,116 @@
+{
+  "suite_id": "6e2b113064cf4474851fe000cc0477c0",
+  "case_count": 1,
+  "run_count": 1,
+  "failed_run_count": 1,
+  "assertion_fail_total": 1,
+  "assertion_warn_total": 0,
+  "hard_failure_total": 1,
+  "repeat_case_ids": [],
+  "finish_reason_counts": {
+    "runtime_execution_failed": 1
+  },
+  "failure_layer_counts": {
+    "infra": 1
+  },
+  "pending_judge_hook_total": 0,
+  "executed_judge_hook_total": 0,
+  "judge_family_counts": {},
+  "subjective_status_counts": {},
+  "subjective_average_score": null,
+  "rubric_summaries": {},
+  "ragas_status_counts": {},
+  "ragas_metric_averages": {},
+  "diagnostic_summary": {
+    "primary_suspects": {
+      "infra_model_provider": 1
+    },
+    "reason_codes": {
+      "infra.provider_request_failed": 1,
+      "readiness.blocked_by_open_setup_prerequisites": 1
+    },
+    "recommended_next_actions": {
+      "fix_provider_model_config_and_runtime_connectivity": 1
+    },
+    "diagnostic_expectation_failures": {},
+    "outcome_chain": {
+      "activation_handoff_status": {
+        "fail": 1
+      },
+      "cognition_status": {
+        "not_applicable": 1
+      },
+      "readiness_status": {
+        "warn": 1
+      },
+      "runtime_bootstrap_readiness_status": {
+        "warn": 1
+      },
+      "transcript_status": {
+        "not_applicable": 1
+      },
+      "truth_status": {
+        "not_applicable": 1
+      }
+    }
+  },
+  "case_summaries": {
+    "setup.real_provider_smoke.gemini_flash.stream.tmp": {
+      "run_count": 1,
+      "statuses": [
+        "failed"
+      ],
+      "finish_reasons": [
+        "runtime_execution_failed"
+      ],
+      "failure_layers": [
+        "infra"
+      ],
+      "assertion_fail_total": 1,
+      "assertion_warn_total": 0,
+      "hard_failure_total": 1,
+      "hard_failures": [
+        "round_no_exists"
+      ],
+      "pending_judge_hook_count": 0,
+      "executed_judge_hook_count": 0,
+      "subjective_hook_statuses": {},
+      "subjective_hook_score_averages": {},
+      "subjective_rubric_scores": {},
+      "subjective_average_score": null,
+      "primary_suspects": [
+        "infra_model_provider"
+      ],
+      "reason_codes": [
+        "infra.provider_request_failed",
+        "readiness.blocked_by_open_setup_prerequisites"
+      ],
+      "recommended_next_actions": [
+        "fix_provider_model_config_and_runtime_connectivity"
+      ],
+      "outcome_chain": {
+        "activation_handoff_status": [
+          "fail"
+        ],
+        "cognition_status": [
+          "not_applicable"
+        ],
+        "readiness_status": [
+          "warn"
+        ],
+        "runtime_bootstrap_readiness_status": [
+          "warn"
+        ],
+        "transcript_status": [
+          "not_applicable"
+        ],
+        "truth_status": [
+          "not_applicable"
+        ]
+      },
+      "diagnostic_expectation_failures": [],
+      "ragas_statuses": [],
+      "ragas_metric_averages": {}
+    }
+  }
+}

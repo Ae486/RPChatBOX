@@ -9,7 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from rp.models.dsl import Domain, Layer
 
 
-BlockSource = Literal["core_state_store", "compatibility_mirror"]
+BlockSource = Literal[
+    "core_state_store",
+    "compatibility_mirror",
+    "retrieval_store",
+    "runtime_workspace_store",
+]
 
 
 class RpBlockView(BaseModel):

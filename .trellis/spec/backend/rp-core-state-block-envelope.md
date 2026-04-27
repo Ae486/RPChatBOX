@@ -13,6 +13,14 @@
 Model:
 
 ```python
+BlockSource = Literal[
+    "core_state_store",
+    "compatibility_mirror",
+    "retrieval_store",
+    "runtime_workspace_store",
+]
+
+
 class RpBlockView(BaseModel):
     block_id: str
     label: str
@@ -21,7 +29,12 @@ class RpBlockView(BaseModel):
     domain_path: str
     scope: str
     revision: int = 1
-    source: Literal["core_state_store", "compatibility_mirror"]
+    source: Literal[
+        "core_state_store",
+        "compatibility_mirror",
+        "retrieval_store",
+        "runtime_workspace_store",
+    ]
     payload_schema_ref: str | None = None
     data_json: Any = None
     items_json: list[Any] | None = None
@@ -32,7 +45,13 @@ Service:
 
 ```python
 class RpBlockReadService:
-    def list_blocks(self, *, session_id: str) -> list[RpBlockView]: ...
+    def list_blocks(
+        self,
+        *,
+        session_id: str,
+        layer: Layer | None = None,
+        source: BlockSource | None = None,
+    ) -> list[RpBlockView]: ...
     def get_block(self, *, session_id: str, block_id: str) -> RpBlockView | None: ...
     def list_authoritative_blocks(self, *, session_id: str) -> list[RpBlockView]: ...
     def list_projection_blocks(self, *, session_id: str) -> list[RpBlockView]: ...
@@ -42,9 +61,18 @@ API:
 
 ```http
 GET /api/rp/story-sessions/{session_id}/memory/blocks
+GET /api/rp/story-sessions/{session_id}/memory/blocks/{block_id}
+GET /api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/versions
+GET /api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/provenance
+GET /api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/proposals
 ```
 
-Response:
+List query params:
+
+- `layer`: optional `Layer` enum value such as `core_state.authoritative` or `core_state.projection`.
+- `source`: optional Block source value. Core State Block envelopes use `core_state_store` or `compatibility_mirror`; the shared API may also emit `runtime_workspace_store` from the Runtime Workspace slice, while `retrieval_store` remains outside this route in the current rollout.
+
+List response:
 
 ```python
 {
@@ -52,6 +80,54 @@ Response:
     "items": list[RpBlockView],
 }
 ```
+
+Single-block response:
+
+```python
+{
+    "session_id": str,
+    "item": RpBlockView,
+}
+```
+
+Block-addressed version response:
+
+```python
+{
+    "session_id": str,
+    "block_id": str,
+    "versions": list[str],
+    "current_ref": str | None,
+}
+```
+
+Block-addressed provenance response:
+
+```python
+{
+    "session_id": str,
+    "block_id": str,
+    "target_ref": ObjectRef,
+    "source_refs": list[str],
+    "proposal_refs": list[str],
+    "ingestion_refs": list[str],
+}
+```
+
+Block-addressed proposal response:
+
+```python
+{
+    "session_id": str,
+    "block_id": str,
+    "items": list[dict],
+}
+```
+
+Block-addressed proposal query params:
+
+- `status`: optional proposal status filter aligned with
+  `/memory/proposals?status=...`.
 
 ### 3. Contracts
 
@@ -76,6 +152,17 @@ Response:
   - authoritative payload goes to `data_json`
   - projection payload goes to `items_json`
 - `source` and `metadata.route` must show whether the envelope came from formal store or compatibility mirror.
+- `retrieval_store` and `runtime_workspace_store` are part of the shared `BlockSource` type for non-Core-State Block-compatible views, but they do not change the Core State payload identity rules in this slice.
+- List filters are read-only view filters. They must not mutate storage, normalize payloads, or strip raw `data_json` / `items_json` / metadata.
+- `get_block` must resolve one Block envelope by exact `block_id` within the explicit `session_id` scope.
+- Block-addressed history/provenance routes must first resolve `{block_id}` through `RpBlockReadService.get_block(session_id=..., block_id=...)`, not by re-querying Core State storage directly.
+- Block-addressed proposal routes must also first resolve `{block_id}` through `RpBlockReadService.get_block(session_id=..., block_id=...)`.
+- Authoritative Block history/provenance must delegate to `VersionHistoryReadService` / `ProvenanceReadService` using the Block identity fields as the target `ObjectRef`: `label` as `object_id`, plus `layer`, `domain`, `domain_path`, `scope`, and `revision`.
+- Projection Block history/provenance must delegate to existing projection read-side support when available. The current supported path is `ProjectionReadService.list_versions(..., session_id=...)` and `ProjectionReadService.read_provenance(..., session_id=...)`, using the same Block-derived `ObjectRef`.
+- If a future Block layer has no read-only history/provenance backend, the API must return HTTP 400 with error code `memory_block_history_unsupported` instead of inventing ad hoc storage reads or mutating state.
+- Authoritative Block proposals must be read-only visibility over existing proposal records in the same story/session. Match operations by the authoritative target-ref identity derived from the Block (`label`/`layer`/`domain`/`domain_path`/`scope`), not by a loose domain-only check.
+- Proposal target matching does not create or mutate apply receipts, revisions, Block storage, or proposal storage. It only filters existing proposal `operations_json`.
+- Projection Block proposals are conservative for this stage. Until a direct projection proposal model exists, the route returns an empty `items` list instead of inventing projection proposal semantics.
 - Compatibility mirror IDs must be deterministic, stable within the owning session/chapter, and namespaced with `compatibility_mirror:`.
 
 ### 4. Validation & Error Matrix
@@ -84,6 +171,15 @@ Response:
 |---|---|
 | Unknown `session_id` | Return an empty list or `None` for `get_block` |
 | Unknown API `session_id` | Return HTTP 404 with `story_session_not_found` |
+| Unknown API `block_id` for an existing session | Return HTTP 404 with `memory_block_not_found` |
+| Unknown API `block_id` on `/versions` or `/provenance` | Return HTTP 404 with `memory_block_not_found` |
+| Unknown API `block_id` on `/proposals` | Return HTTP 404 with `memory_block_not_found` |
+| Unsupported Block layer on `/versions` or `/provenance` | Return HTTP 400 with `memory_block_history_unsupported` |
+| Authoritative Block `/proposals` | Return same-session proposal items whose operations target the exact authoritative ref identity |
+| Authoritative Block `/proposals?status=...` | Apply the same status filter as `/memory/proposals` after exact target matching |
+| Projection Block `/proposals` | Return HTTP 200 with an empty `items` list |
+| List `layer` filter is provided | Return only blocks whose `layer` equals the requested `Layer` enum value |
+| List `source` filter is provided | Return only blocks whose source matches the requested Block source; the current `/memory/blocks` route may emit `core_state_store`, `compatibility_mirror`, or `runtime_workspace_store`, while `retrieval_store` stays outside this route |
 | Formal store enabled and row exists | Return `source="core_state_store"` for every session row, including unmapped authoritative rows |
 | Formal store enabled but a mapped row is missing | Include the mapped mirror item as `source="compatibility_mirror"` |
 | Formal store disabled | Ignore existing formal rows and return mirror-backed envelopes |
@@ -115,7 +211,15 @@ Response:
   - asserts `source="compatibility_mirror"` and correct mirror route
 - API visibility:
   - asserts `/memory/blocks` returns `session_id` and serialized Block items
+  - asserts `/memory/blocks?layer=...` and `/memory/blocks?source=...` filter without changing payload shape
+  - asserts `/memory/blocks/{block_id}` returns the exact serialized Block item for a formal row
+  - asserts `/memory/blocks/{block_id}/versions` returns authoritative and projection versions from existing read services
+  - asserts `/memory/blocks/{block_id}/provenance` returns authoritative and projection provenance from existing read services
+  - asserts `/memory/blocks/{block_id}/proposals` resolves the Block first, returns authoritative proposals that target the exact Block ref identity, and does not include same-domain proposals for other object identities
+  - asserts `/memory/blocks/{block_id}/proposals?status=...` applies the same status filtering behavior as `/memory/proposals`
+  - asserts projection Block `/proposals` returns an empty list
   - asserts missing session returns the same 404 shape as other memory read routes
+  - asserts missing block under an existing session returns `memory_block_not_found`
 - Store read switch:
   - when disabled, existing formal rows must not override mirror output
 - Boundary regression:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .contracts import (
@@ -12,6 +13,8 @@ from .contracts import (
     SetupLastFailure,
     SetupPendingObligation,
     SetupReflectionTicket,
+    SetupToolOutcome,
+    SetupWorkingDigest,
 )
 
 
@@ -56,7 +59,8 @@ class ToolFailureClassifier:
             return "unrecoverable"
 
         payload = cls.error_payload(result)
-        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        raw_details = payload.get("details")
+        details = raw_details if isinstance(raw_details, dict) else {}
 
         if result.error_code == "SCHEMA_VALIDATION_FAILED":
             if details.get("ask_user") is True or details.get("repair_strategy") == "ask_user":
@@ -86,7 +90,7 @@ class ToolFailureClassifier:
             else {}
         )
         if isinstance(structured_payload.get("error_payload"), dict):
-            payload = structured_payload["error_payload"]
+            payload = dict(structured_payload["error_payload"])
             return {
                 "code": payload.get("code") or result.error_code,
                 "message": payload.get("message") or result.content_text,
@@ -110,7 +114,7 @@ class ToolFailureClassifier:
             }
 
         if isinstance(payload.get("error"), dict):
-            nested = payload["error"]
+            nested = dict(payload["error"])
             return {
                 "code": nested.get("code") or result.error_code,
                 "message": nested.get("message") or result.content_text,
@@ -126,7 +130,8 @@ class ToolFailureClassifier:
     @classmethod
     def missing_required_fields(cls, result: RuntimeToolResult) -> list[str]:
         payload = cls.error_payload(result)
-        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        raw_details = payload.get("details")
+        details = raw_details if isinstance(raw_details, dict) else {}
         if isinstance(details.get("required_fields"), list):
             return [str(item) for item in details["required_fields"] if item]
 
@@ -173,6 +178,7 @@ class RepairDecisionPolicy:
         *,
         profile: RuntimeProfile,
         tool_results: list[RuntimeToolResult],
+        prior_tool_outcomes: list[SetupToolOutcome] | None = None,
         schema_retry_count: int,
         round_no: int,
     ) -> dict[str, Any]:
@@ -191,6 +197,10 @@ class RepairDecisionPolicy:
         failure = failures[0]
         failure_state = ToolFailureClassifier.build_failure_state(failure)
         category = failure_state.failure_category
+        repeated_failure = cls._is_repeated_failure(
+            failure_state=failure_state,
+            prior_tool_outcomes=prior_tool_outcomes or [],
+        )
 
         if category == "unrecoverable":
             return {
@@ -222,10 +232,14 @@ class RepairDecisionPolicy:
                 tool_name=failure.tool_name,
                 required_fields=ToolFailureClassifier.missing_required_fields(failure),
             )
+            warnings = ["tool_schema_validation_retry"]
+            if repeated_failure:
+                warnings.append("repeated_tool_failure")
             return {
                 "action": "continue",
                 "schema_retry_count": schema_retry_count + 1,
                 "warning": "tool_schema_validation_retry",
+                "warnings": warnings,
                 "pending_obligation": obligation.model_dump(mode="json", exclude_none=True),
                 "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
                 "reflection_ticket": None,
@@ -239,9 +253,13 @@ class RepairDecisionPolicy:
                 tool_name=failure.tool_name,
                 required_fields=ToolFailureClassifier.missing_required_fields(failure),
             )
+            warnings = ["tool_failure_requires_user_input"]
+            if repeated_failure:
+                warnings.append("repeated_tool_failure")
             return {
                 "action": "continue",
                 "warning": "tool_failure_requires_user_input",
+                "warnings": warnings,
                 "pending_obligation": obligation.model_dump(mode="json", exclude_none=True),
                 "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
                 "reflection_ticket": None,
@@ -254,9 +272,13 @@ class RepairDecisionPolicy:
                 reason=failure_state.message,
                 tool_name=failure.tool_name,
             )
+            warnings = ["commit_reflection_required"]
+            if repeated_failure:
+                warnings.append("repeated_tool_failure")
             return {
                 "action": "continue",
                 "warning": "commit_reflection_required",
+                "warnings": warnings,
                 "pending_obligation": obligation.model_dump(mode="json", exclude_none=True),
                 "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
                 "reflection_ticket": SetupReflectionTicket(
@@ -272,14 +294,35 @@ class RepairDecisionPolicy:
             reason=failure_state.message,
             tool_name=failure.tool_name,
         )
+        warnings = ["tool_failure_continue_discussion"]
+        if repeated_failure:
+            warnings.append("repeated_tool_failure")
         return {
             "action": "continue",
             "warning": "tool_failure_continue_discussion",
+            "warnings": warnings,
             "pending_obligation": obligation.model_dump(mode="json", exclude_none=True),
             "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
             "reflection_ticket": None,
             "completion_guard": None,
         }
+
+    @staticmethod
+    def _is_repeated_failure(
+        *,
+        failure_state: SetupLastFailure,
+        prior_tool_outcomes: list[SetupToolOutcome],
+    ) -> bool:
+        for item in prior_tool_outcomes:
+            if item.success:
+                continue
+            if item.tool_name != (failure_state.tool_name or item.tool_name):
+                continue
+            if (item.error_code or "") != (failure_state.error_code or ""):
+                continue
+            if item.summary == failure_state.message:
+                return True
+        return False
 
     @staticmethod
     def _max_rounds_failure(profile: RuntimeProfile) -> dict[str, Any]:
@@ -304,6 +347,8 @@ class CompletionGuardPolicy:
         pending_obligation: SetupPendingObligation | None,
         reflection_ticket: SetupReflectionTicket | None,
         cognitive_state_summary: SetupCognitiveStateSummary | None = None,
+        prior_assistant_questions: list[str] | None = None,
+        working_digest: SetupWorkingDigest | None = None,
     ) -> dict[str, Any]:
         if reflection_ticket is not None:
             guard = SetupCompletionGuard(
@@ -317,6 +362,35 @@ class CompletionGuardPolicy:
             }
 
         terminal_kind = FinishPolicy.terminal_output_kind(assistant_text)
+        if terminal_kind == "ask_user" and prior_assistant_questions:
+            normalized_current = cls._normalize_question(assistant_text)
+            repeated_question = bool(normalized_current) and any(
+                normalized_current == cls._normalize_question(item)
+                for item in prior_assistant_questions
+            )
+            if repeated_question:
+                follow_up = (
+                    working_digest.open_questions[0]
+                    if working_digest is not None and working_digest.open_questions
+                    else "Reframe the missing question or make concrete draft progress before asking again."
+                )
+                guard = SetupCompletionGuard(
+                    allow_finalize=False,
+                    reason="repeated_question_without_progress",
+                    required_action="retry",
+                )
+                return {
+                    "allow_finalize": False,
+                    "completion_guard": guard.model_dump(mode="json", exclude_none=True),
+                    "reflection_ticket": SetupReflectionTicket(
+                        trigger="tool_failure",
+                        summary=(
+                            "The assistant repeated a recent question without new progress. "
+                            f"Next attempt should target: {follow_up}"
+                        ),
+                        required_decision="retry",
+                    ).model_dump(mode="json", exclude_none=True),
+                }
         if pending_obligation is None or not pending_obligation.unresolved:
             if terminal_kind == "empty":
                 guard = SetupCompletionGuard(
@@ -463,6 +537,12 @@ class CompletionGuardPolicy:
             "pending_obligation": None,
             "reflection_ticket": None,
         }
+
+    @staticmethod
+    def _normalize_question(text: str) -> str:
+        lowered = str(text or "").strip().lower()
+        lowered = re.sub(r"[\s\?\!？！，。,.]+", " ", lowered)
+        return lowered.strip()
 
 
 class ReflectionTriggerPolicy:

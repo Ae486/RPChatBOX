@@ -11,6 +11,7 @@ from rp.models.retrieval_observability import (
     RetrievalObservabilityView,
     RetrievalWarningBucket,
 )
+from .retrieval_block_adapter_service import RetrievalBlockAdapterService
 from .retrieval_maintenance_service import RetrievalMaintenanceService
 
 _EXCERPT_PREVIEW_CHARS = 240
@@ -24,11 +25,14 @@ class RetrievalObservabilityService:
         session=None,
         *,
         maintenance_service: RetrievalMaintenanceService | None = None,
+        retrieval_block_adapter_service: RetrievalBlockAdapterService | None = None,
     ) -> None:
         self._session = session
-        self._maintenance_service = (
-            maintenance_service
-            or (RetrievalMaintenanceService(session) if session is not None else None)
+        self._maintenance_service = maintenance_service or (
+            RetrievalMaintenanceService(session) if session is not None else None
+        )
+        self._retrieval_block_adapter_service = (
+            retrieval_block_adapter_service or RetrievalBlockAdapterService()
         )
 
     def build_view(
@@ -55,18 +59,26 @@ class RetrievalObservabilityService:
             retriever_routes=list(trace.retriever_routes if trace is not None else []),
             pipeline_stages=list(trace.pipeline_stages if trace is not None else []),
             reranker_name=trace.reranker_name if trace is not None else None,
-            candidate_count=trace.candidate_count if trace is not None else len(result.hits),
-            returned_count=trace.returned_count if trace is not None else len(result.hits),
+            candidate_count=trace.candidate_count
+            if trace is not None
+            else len(result.hits),
+            returned_count=trace.returned_count
+            if trace is not None
+            else len(result.hits),
             filters_applied=dict(trace.filters_applied if trace is not None else {}),
             timings=dict(trace.timings if trace is not None else {}),
             warnings=warnings,
             warning_buckets=self._build_warning_buckets(warnings),
             details=dict(trace.details if trace is not None else {}),
             top_hits=self._build_hit_views(result=result, max_hits=max_hits),
-            maintenance=self._build_maintenance_view(query=query) if include_story_snapshot else None,
+            maintenance=self._build_maintenance_view(query=query)
+            if include_story_snapshot
+            else None,
         )
 
-    def _build_warning_buckets(self, warnings: list[str]) -> list[RetrievalWarningBucket]:
+    def _build_warning_buckets(
+        self, warnings: list[str]
+    ) -> list[RetrievalWarningBucket]:
         buckets: OrderedDict[str, list[str]] = OrderedDict()
         for warning in warnings:
             category = self._warning_category(warning)
@@ -94,9 +106,12 @@ class RetrievalObservabilityService:
         max_hits: int,
     ) -> list[RetrievalObservabilityHitView]:
         views: list[RetrievalObservabilityHitView] = []
-        for hit in result.hits[:max_hits]:
+        hits = list(result.hits[:max_hits])
+        blocks = self._retrieval_block_adapter_service.build_block_views(hits=hits)
+        for hit, block in zip(hits, blocks):
             metadata = dict(hit.metadata)
             page_no = metadata.get("page_no")
+            page_no_value = int(str(page_no)) if page_no not in (None, "") else None
             views.append(
                 RetrievalObservabilityHitView(
                     hit_id=hit.hit_id,
@@ -107,12 +122,16 @@ class RetrievalObservabilityService:
                     asset_id=str(metadata.get("asset_id") or "") or None,
                     collection_id=str(metadata.get("collection_id") or "") or None,
                     title=str(metadata.get("title") or "") or None,
-                    page_no=int(page_no) if page_no not in (None, "") else None,
+                    page_no=page_no_value,
                     page_label=str(metadata.get("page_label") or "") or None,
                     page_ref=str(metadata.get("page_ref") or "") or None,
                     image_caption=str(metadata.get("image_caption") or "") or None,
-                    contextual_text_version=str(metadata.get("contextual_text_version") or "") or None,
+                    contextual_text_version=str(
+                        metadata.get("contextual_text_version") or ""
+                    )
+                    or None,
                     excerpt_preview=hit.excerpt_text[:_EXCERPT_PREVIEW_CHARS],
+                    block_view=block,
                 )
             )
         return views

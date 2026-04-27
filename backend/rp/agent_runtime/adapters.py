@@ -1,4 +1,5 @@
 """Project-layer adapters for the RP agent runtime."""
+
 from __future__ import annotations
 
 from models.chat import ProviderConfig
@@ -6,13 +7,27 @@ from rp.agent_runtime.contracts import (
     RpAgentTurnInput,
     RpAgentTurnResult,
     RuntimeProfile,
+    SetupContextCompactSummary,
     SetupCognitiveStateSnapshot,
     SetupCognitiveStateSummary,
+    SetupToolOutcome,
+    SetupWorkingDigest,
 )
-from rp.agent_runtime.profiles import SETUP_AGENT_VISIBLE_TOOLS, build_setup_agent_profile
-from rp.models.setup_agent import SetupAgentTurnRequest, SetupAgentTurnResponse
+from rp.agent_runtime.profiles import (
+    SETUP_AGENT_VISIBLE_TOOLS,
+    build_setup_agent_profile,
+)
+from rp.models.setup_agent import (
+    SetupAgentDialogueMessage,
+    SetupAgentTurnRequest,
+    SetupAgentTurnResponse,
+)
 from rp.models.setup_handoff import SetupContextPacket
-from rp.models.setup_workspace import CommitProposalStatus, QuestionSeverity, QuestionStatus
+from rp.models.setup_workspace import (
+    CommitProposalStatus,
+    QuestionSeverity,
+    QuestionStatus,
+)
 from rp.services.setup_agent_prompt_service import SetupAgentPromptService
 
 
@@ -34,6 +49,11 @@ class SetupRuntimeAdapter:
         context_packet: SetupContextPacket,
         model_name: str,
         provider: ProviderConfig,
+        governed_history: list[SetupAgentDialogueMessage] | None = None,
+        working_digest: SetupWorkingDigest | None = None,
+        tool_outcomes: list[SetupToolOutcome] | None = None,
+        compact_summary: SetupContextCompactSummary | None = None,
+        governance_metadata: dict[str, int] | None = None,
         cognitive_state: SetupCognitiveStateSnapshot | None = None,
         cognitive_state_summary: SetupCognitiveStateSummary | None = None,
     ) -> RpAgentTurnInput:
@@ -46,14 +66,17 @@ class SetupRuntimeAdapter:
         open_questions = [
             question
             for question in workspace.open_questions
-            if question.step_id == current_step and question.status == QuestionStatus.OPEN
+            if question.step_id == current_step
+            and question.status == QuestionStatus.OPEN
         ]
         blocking_open_questions = [
             question
             for question in open_questions
             if question.severity == QuestionSeverity.BLOCKING
         ]
-        latest_proposal = self._latest_step_proposal(workspace=workspace, current_step=current_step)
+        latest_proposal = self._latest_step_proposal(
+            workspace=workspace, current_step=current_step
+        )
         step_state = next(
             (item for item in workspace.step_states if item.step_id == current_step),
             None,
@@ -67,10 +90,15 @@ class SetupRuntimeAdapter:
             provider_id=request.provider_id,
             stream=False,
             user_visible_request=request.user_prompt,
-            conversation_messages=[item.model_dump(mode="json") for item in request.history],
+            conversation_messages=[
+                item.model_dump(mode="json")
+                for item in (governed_history if governed_history is not None else request.history)
+            ],
             context_bundle={
                 "system_prompt": system_prompt,
-                "context_packet": context_packet.model_dump(mode="json", exclude_none=True),
+                "context_packet": context_packet.model_dump(
+                    mode="json", exclude_none=True
+                ),
                 "mode": workspace.mode.value,
                 "current_step": current_step.value,
                 "step_state": (
@@ -78,13 +106,25 @@ class SetupRuntimeAdapter:
                     if step_state is not None
                     else None
                 ),
-                "step_readiness": workspace.readiness_status.step_readiness.get(current_step.value),
+                "step_readiness": workspace.readiness_status.step_readiness.get(
+                    current_step.value
+                ),
                 "open_question_count": len(open_questions),
                 "blocking_open_question_count": len(blocking_open_questions),
-                "open_question_texts": [question.text for question in open_questions[:5]],
+                "open_question_texts": [
+                    question.text for question in open_questions[:5]
+                ],
                 "has_user_edit_deltas": bool(context_packet.user_edit_deltas),
+                "has_prior_stage_handoffs": bool(context_packet.prior_stage_handoffs),
+                "prior_stage_handoff_count": len(context_packet.prior_stage_handoffs),
+                "prior_stage_handoff_steps": [
+                    handoff.step_id.value
+                    for handoff in context_packet.prior_stage_handoffs
+                ],
                 "last_proposal_status": (
-                    latest_proposal.status.value if latest_proposal is not None else None
+                    latest_proposal.status.value
+                    if latest_proposal is not None
+                    else None
                 ),
                 "has_rejected_commit_proposal": bool(
                     latest_proposal is not None
@@ -101,8 +141,24 @@ class SetupRuntimeAdapter:
                     else None
                 ),
                 "cognitive_state_invalidated": bool(
-                    cognitive_state_summary is not None and cognitive_state_summary.invalidated
+                    cognitive_state_summary is not None
+                    and cognitive_state_summary.invalidated
                 ),
+                "working_digest": (
+                    working_digest.model_dump(mode="json", exclude_none=True)
+                    if working_digest is not None
+                    else None
+                ),
+                "tool_outcomes": [
+                    item.model_dump(mode="json", exclude_none=True)
+                    for item in (tool_outcomes or [])
+                ],
+                "compact_summary": (
+                    compact_summary.model_dump(mode="json", exclude_none=True)
+                    if compact_summary is not None
+                    else None
+                ),
+                "governance_metadata": dict(governance_metadata or {}),
             },
             tool_scope=list(SETUP_AGENT_VISIBLE_TOOLS),
             metadata={

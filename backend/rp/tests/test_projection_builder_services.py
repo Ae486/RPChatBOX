@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from types import SimpleNamespace
 
+import pytest
+
+from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.memory_crud import RetrievalHit
 from rp.models.story_runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -15,14 +20,35 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
 )
 from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
-from rp.services.builder_projection_context_service import BuilderProjectionContextService
-from rp.services.chapter_workspace_projection_adapter import ChapterWorkspaceProjectionAdapter
+from rp.services.builder_projection_context_service import (
+    BuilderProjectionContextService,
+)
+from rp.services.chapter_workspace_projection_adapter import (
+    ChapterWorkspaceProjectionAdapter,
+)
 from rp.services.longform_orchestrator_service import LongformOrchestratorService
+from rp.services.longform_specialist_service import LongformSpecialistService
+from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.projection_state_service import ProjectionStateService
 from rp.services.projection_refresh_service import ProjectionRefreshService
+from rp.services.proposal_repository import ProposalRepository
+from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.story_block_consumer_state_service import (
+    StoryBlockConsumerStateService,
+)
+from rp.services.story_block_prompt_compile_service import (
+    StoryBlockPromptCompileService,
+)
+from rp.services.story_block_prompt_context_service import (
+    StoryBlockPromptContextService,
+)
+from rp.services.story_block_prompt_render_service import (
+    StoryBlockPromptRenderService,
+)
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.version_history_read_service import VersionHistoryReadService
 from rp.services.writing_packet_builder import WritingPacketBuilder
 
 
@@ -40,7 +66,10 @@ def _seed_story_runtime(retrieval_session):
         writer_contract={"style_rules": ["Lean"]},
         current_state_json={
             "chapter_digest": {"current_chapter": 1, "title": "Chapter One"},
-            "narrative_progress": {"current_phase": "outline_drafting", "accepted_segments": 0},
+            "narrative_progress": {
+                "current_phase": "outline_drafting",
+                "accepted_segments": 0,
+            },
             "timeline_spine": [],
             "active_threads": [],
             "foreshadow_registry": [],
@@ -48,7 +77,7 @@ def _seed_story_runtime(retrieval_session):
         },
         initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
     )
-    chapter = service.create_chapter_workspace(
+    service.create_chapter_workspace(
         session_id=session.session_id,
         chapter_index=1,
         phase=LongformChapterPhase.OUTLINE_DRAFTING,
@@ -62,13 +91,19 @@ def _seed_story_runtime(retrieval_session):
         },
     )
     service.commit()
-    return service.get_session(session.session_id), service.get_chapter_by_index(
-        session_id=session.session_id,
-        chapter_index=1,
-    ), service
+    return (
+        service.get_session(session.session_id),
+        service.get_chapter_by_index(
+            session_id=session.session_id,
+            chapter_index=1,
+        ),
+        service,
+    )
 
 
-def _build_boundary_services(service: StorySessionService) -> tuple[
+def _build_boundary_services(
+    service: StorySessionService,
+) -> tuple[
     AuthoritativeStateViewService,
     ProjectionStateService,
 ]:
@@ -83,28 +118,83 @@ def _build_boundary_services(service: StorySessionService) -> tuple[
 
 
 class _NoopRegressionService:
-    async def run_light_regression(self, *, session, chapter, accepted_artifact, model_id, provider_id):
+    async def run_light_regression(
+        self, *, session, chapter, accepted_artifact, model_id, provider_id
+    ):
         return session, chapter
 
     async def run_heavy_regression(self, *, session, chapter, model_id, provider_id):
         return session, chapter
 
 
-def _build_turn_domain_service(service: StorySessionService) -> StoryTurnDomainService:
-    authoritative_state_view_service, projection_state_service = _build_boundary_services(service)
+class _RecordingBlockConsumerStateService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def mark_consumer_synced(self, *, session_id: str, consumer_key: str):
+        self.calls.append((session_id, consumer_key))
+        return None
+
+
+class _RecordingStoryLlmGateway:
+    def __init__(self, response_text: str) -> None:
+        self._response_text = response_text
+        self.calls: list[dict] = []
+
+    async def complete_text(self, **kwargs) -> str:
+        self.calls.append(kwargs)
+        return self._response_text
+
+    @staticmethod
+    def extract_json_object(raw: str) -> dict:
+        return json.loads(raw)
+
+
+class _StubMemoryOsService:
+    def __init__(
+        self,
+        *,
+        archival_hits: list[RetrievalHit] | None = None,
+        recall_hits: list[RetrievalHit] | None = None,
+    ) -> None:
+        self._archival_hits = list(archival_hits or [])
+        self._recall_hits = list(recall_hits or [])
+
+    async def search_archival(self, *_args, **_kwargs):
+        return SimpleNamespace(hits=list(self._archival_hits))
+
+    async def search_recall(self, *_args, **_kwargs):
+        return SimpleNamespace(hits=list(self._recall_hits))
+
+
+def _build_turn_domain_service(
+    service: StorySessionService,
+    *,
+    orchestrator_service=None,
+    specialist_service=None,
+    block_consumer_state_service=None,
+) -> StoryTurnDomainService:
+    authoritative_state_view_service, projection_state_service = (
+        _build_boundary_services(service)
+    )
     return StoryTurnDomainService(
         story_session_service=service,
-        orchestrator_service=SimpleNamespace(),
-        specialist_service=SimpleNamespace(),
-        builder_projection_context_service=BuilderProjectionContextService(projection_state_service),
+        orchestrator_service=orchestrator_service or SimpleNamespace(),
+        specialist_service=specialist_service or SimpleNamespace(),
+        builder_projection_context_service=BuilderProjectionContextService(
+            projection_state_service
+        ),
         projection_state_service=projection_state_service,
         writing_packet_builder=WritingPacketBuilder(),
         writing_worker_execution_service=SimpleNamespace(),
         regression_service=_NoopRegressionService(),
+        block_consumer_state_service=block_consumer_state_service,
     )
 
 
-def test_authoritative_state_view_service_reads_session_scoped_objects(retrieval_session):
+def test_authoritative_state_view_service_reads_session_scoped_objects(
+    retrieval_session,
+):
     session, _, service = _seed_story_runtime(retrieval_session)
     authoritative_state_view_service, _ = _build_boundary_services(service)
 
@@ -116,7 +206,10 @@ def test_authoritative_state_view_service_reads_session_scoped_objects(retrieval
     )
 
     assert chapter_digest == {"current_chapter": 1, "title": "Chapter One"}
-    assert narrative_progress["current_phase"] == LongformChapterPhase.OUTLINE_DRAFTING.value
+    assert (
+        narrative_progress["current_phase"]
+        == LongformChapterPhase.OUTLINE_DRAFTING.value
+    )
 
 
 def test_projection_state_service_updates_slots_and_rollover(retrieval_session):
@@ -148,7 +241,9 @@ def test_projection_state_service_updates_slots_and_rollover(retrieval_session):
 
     assert updated_chapter is not None
     assert seeded_chapter is not None
-    assert updated_chapter.builder_snapshot_json["current_outline_digest"] == ["Fresh Outline"]
+    assert updated_chapter.builder_snapshot_json["current_outline_digest"] == [
+        "Fresh Outline"
+    ]
     assert updated_chapter.builder_snapshot_json["recent_segment_digest"] == [
         "Segment A",
         "Segment B",
@@ -164,7 +259,9 @@ def test_builder_projection_context_service_ignores_writer_hints(retrieval_sessi
     _, projection_state_service = _build_boundary_services(service)
     context_service = BuilderProjectionContextService(projection_state_service)
 
-    context_sections = context_service.build_context_sections(session_id=session.session_id)
+    context_sections = context_service.build_context_sections(
+        session_id=session.session_id
+    )
 
     assert [section["label"] for section in context_sections] == [
         "foundation_digest",
@@ -175,7 +272,9 @@ def test_builder_projection_context_service_ignores_writer_hints(retrieval_sessi
     ]
 
 
-def test_writing_packet_builder_uses_projection_sections_and_runtime_hints(retrieval_session):
+def test_writing_packet_builder_uses_projection_sections_and_runtime_hints(
+    retrieval_session,
+):
     session, chapter, service = _seed_story_runtime(retrieval_session)
     _, projection_state_service = _build_boundary_services(service)
     context_service = BuilderProjectionContextService(projection_state_service)
@@ -188,7 +287,9 @@ def test_writing_packet_builder_uses_projection_sections_and_runtime_hints(retri
             output_kind=StoryArtifactKind.STORY_SEGMENT,
             writer_instruction="Write the next segment.",
         ),
-        projection_context_sections=context_service.build_context_sections(session_id=session.session_id),
+        projection_context_sections=context_service.build_context_sections(
+            session_id=session.session_id
+        ),
         runtime_writer_hints=["Runtime Hint"],
         user_instruction="Write the next segment.",
     )
@@ -223,9 +324,13 @@ def test_projection_refresh_service_updates_settled_slots_only(retrieval_session
     assert "writer_hints" not in updated_chapter.builder_snapshot_json
 
 
-def test_orchestrator_fallback_uses_projection_slots_not_writer_hints(retrieval_session):
+def test_orchestrator_fallback_uses_projection_slots_not_writer_hints(
+    retrieval_session,
+):
     session, chapter, service = _seed_story_runtime(retrieval_session)
-    authoritative_state_view_service, projection_state_service = _build_boundary_services(service)
+    authoritative_state_view_service, projection_state_service = (
+        _build_boundary_services(service)
+    )
     orchestrator_service = LongformOrchestratorService(
         authoritative_state_view_service=authoritative_state_view_service,
         projection_state_service=projection_state_service,
@@ -244,7 +349,9 @@ def test_orchestrator_fallback_uses_projection_slots_not_writer_hints(retrieval_
     assert any("Outline A" in query for query in plan.archival_queries)
 
 
-def test_story_turn_accept_outline_updates_projection_via_boundary_service(retrieval_session):
+def test_story_turn_accept_outline_updates_projection_via_boundary_service(
+    retrieval_session,
+):
     session, chapter, service = _seed_story_runtime(retrieval_session)
     turn_domain_service = _build_turn_domain_service(service)
     outline = service.create_artifact(
@@ -270,3 +377,286 @@ def test_story_turn_accept_outline_updates_projection_via_boundary_service(retri
         "Accepted Outline Text"
     ]
     assert response.current_phase == LongformChapterPhase.SEGMENT_DRAFTING
+
+
+class _AsyncOrchestratorService:
+    async def plan(self, **_kwargs):
+        return OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            writer_instruction="Write the next segment.",
+        )
+
+
+class _AsyncSpecialistService:
+    async def analyze(self, **_kwargs):
+        return SpecialistResultBundle(
+            foundation_digest=["Found A"],
+            blueprint_digest=["Blueprint A"],
+            current_outline_digest=["Outline A"],
+            recent_segment_digest=["Segment A"],
+            current_state_digest=["State A"],
+            writer_hints=["Hint A"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_story_turn_domain_service_marks_consumers_synced(retrieval_session):
+    session, _, service = _seed_story_runtime(retrieval_session)
+    recorder = _RecordingBlockConsumerStateService()
+    turn_domain_service = _build_turn_domain_service(
+        service,
+        orchestrator_service=_AsyncOrchestratorService(),
+        specialist_service=_AsyncSpecialistService(),
+        block_consumer_state_service=recorder,
+    )
+
+    plan = await turn_domain_service.orchestrator_plan(
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt="Continue.",
+        target_artifact_id=None,
+    )
+    bundle = await turn_domain_service.specialist_analyze(
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt="Continue.",
+        plan=plan,
+        pending_artifact_id=None,
+        accepted_segment_ids=[],
+    )
+    _ = turn_domain_service.build_packet(
+        session_id=session.session_id,
+        plan=plan,
+        specialist_bundle=bundle,
+    )
+
+    assert recorder.calls == [
+        (session.session_id, "story.orchestrator"),
+        (session.session_id, "story.specialist"),
+        (session.session_id, "story.writer_packet"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_and_specialist_include_block_prompt_context(
+    retrieval_session,
+):
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    authoritative_state_view_service, projection_state_service = (
+        _build_boundary_services(service)
+    )
+    proposal_repository = ProposalRepository(retrieval_session)
+    version_history_read_service = VersionHistoryReadService(
+        adapter=StorySessionCoreStateAdapter(service),
+        proposal_repository=proposal_repository,
+    )
+    builder_projection_context_service = BuilderProjectionContextService(
+        projection_state_service
+    )
+    memory_inspection_read_service = MemoryInspectionReadService(
+        story_session_service=service,
+        builder_projection_context_service=builder_projection_context_service,
+        proposal_repository=proposal_repository,
+        version_history_read_service=version_history_read_service,
+    )
+    rp_block_read_service = RpBlockReadService(
+        story_session_service=service,
+        builder_projection_context_service=builder_projection_context_service,
+        memory_inspection_read_service=memory_inspection_read_service,
+    )
+    consumer_state_service = StoryBlockConsumerStateService(
+        session=retrieval_session,
+        story_session_service=service,
+        rp_block_read_service=rp_block_read_service,
+    )
+    block_prompt_context_service = StoryBlockPromptContextService(
+        rp_block_read_service=rp_block_read_service,
+        story_block_consumer_state_service=consumer_state_service,
+    )
+    block_prompt_render_service = StoryBlockPromptRenderService()
+    block_prompt_compile_service = StoryBlockPromptCompileService(
+        story_block_prompt_context_service=block_prompt_context_service,
+        story_block_prompt_render_service=block_prompt_render_service,
+        story_block_consumer_state_service=consumer_state_service,
+    )
+    orchestrator_gateway = _RecordingStoryLlmGateway(
+        response_text=json.dumps(
+            {
+                "output_kind": StoryArtifactKind.STORY_SEGMENT.value,
+                "needs_retrieval": False,
+                "archival_queries": ["archive policy"],
+                "recall_queries": ["storm callback"],
+                "specialist_focus": ["segment continuity"],
+                "writer_instruction": "Write the next segment.",
+                "notes": ["gateway"],
+            }
+        )
+    )
+    specialist_gateway = _RecordingStoryLlmGateway(
+        response_text=SpecialistResultBundle(
+            foundation_digest=["Found A"],
+            blueprint_digest=["Blueprint A"],
+            current_outline_digest=["Outline A"],
+            recent_segment_digest=["Segment A"],
+            current_state_digest=["State A"],
+            writer_hints=["Hint A"],
+        ).model_dump_json()
+    )
+    archival_hits = [
+        RetrievalHit(
+            hit_id="chunk-archive-1",
+            query_id="rq-archive-1",
+            layer=Layer.ARCHIVAL.value,
+            domain=Domain.WORLD_RULE,
+            domain_path="foundation.world.rules.archive_policy",
+            knowledge_ref=ObjectRef(
+                object_id="world_rule.archive_policy",
+                layer=Layer.ARCHIVAL,
+                domain=Domain.WORLD_RULE,
+                domain_path="foundation.world.rules.archive_policy",
+                scope="story",
+                revision=2,
+            ),
+            excerpt_text="Archive policy says all relics must be sealed at dusk.",
+            score=0.91,
+            rank=1,
+            metadata={"title": "Archive Policy"},
+            provenance_refs=["prov:archive-policy"],
+        )
+    ]
+    recall_hits = [
+        RetrievalHit(
+            hit_id="recall-note-1",
+            query_id="rq-recall-1",
+            layer=Layer.RECALL.value,
+            domain=Domain.CHAPTER,
+            domain_path="chapter.one.scene.callback",
+            knowledge_ref=ObjectRef(
+                object_id="recall.note.storm_callback",
+                layer=Layer.RECALL,
+                domain=Domain.CHAPTER,
+                domain_path="chapter.one.scene.callback",
+                scope="story",
+                revision=1,
+            ),
+            excerpt_text="Earlier in chapter one, the seal broke during the storm.",
+            score=0.77,
+            rank=1,
+            metadata={"title": "Storm Callback"},
+            provenance_refs=["prov:storm-callback"],
+        )
+    ]
+    orchestrator_service = LongformOrchestratorService(
+        llm_gateway=orchestrator_gateway,
+        authoritative_state_view_service=authoritative_state_view_service,
+        projection_state_service=projection_state_service,
+        story_block_prompt_compile_service=block_prompt_compile_service,
+        story_block_prompt_context_service=block_prompt_context_service,
+    )
+    specialist_service = LongformSpecialistService(
+        llm_gateway=specialist_gateway,
+        authoritative_state_view_service=authoritative_state_view_service,
+        projection_state_service=projection_state_service,
+        memory_os_factory=lambda _story_id: _StubMemoryOsService(
+            archival_hits=archival_hits,
+            recall_hits=recall_hits,
+        ),
+        story_block_prompt_compile_service=block_prompt_compile_service,
+        story_block_prompt_context_service=block_prompt_context_service,
+    )
+
+    plan = await orchestrator_service.plan(
+        session=session,
+        chapter=chapter,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt="Continue.",
+        target_artifact_id=None,
+    )
+    bundle = await specialist_service.analyze(
+        session=session,
+        chapter=chapter,
+        plan=plan,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt="Continue.",
+        accepted_segments=[],
+        pending_artifact=None,
+    )
+
+    orchestrator_payload = json.loads(
+        orchestrator_gateway.calls[0]["messages"][1].content
+    )
+    specialist_payload = json.loads(specialist_gateway.calls[0]["messages"][1].content)
+    orchestrator_system_prompt = orchestrator_gateway.calls[0]["messages"][0].content
+    specialist_system_prompt = specialist_gateway.calls[0]["messages"][0].content
+
+    assert orchestrator_payload["block_context"]["consumer_key"] == "story.orchestrator"
+    assert specialist_payload["block_context"]["consumer_key"] == "story.specialist"
+    assert (
+        orchestrator_payload["authoritative_state"]["chapter_digest"]["title"]
+        == "Chapter One"
+    )
+    assert orchestrator_payload["projection_state"]["current_outline_digest"] == [
+        "Outline A"
+    ]
+    assert specialist_payload["projection_state"]["current_outline_digest"] == [
+        "Outline A"
+    ]
+    assert {
+        block["label"]
+        for block in orchestrator_payload["block_context"]["attached_blocks"]
+    } == {
+        "chapter.current",
+        "character.state_digest",
+        "foreshadow.registry",
+        "narrative_progress.current",
+        "plot_thread.active",
+        "timeline.event_spine",
+        "projection.foundation_digest",
+        "projection.blueprint_digest",
+        "projection.current_outline_digest",
+        "projection.recent_segment_digest",
+        "projection.current_state_digest",
+    }
+    assert (
+        specialist_payload["block_context"]["attached_blocks"]
+        == orchestrator_payload["block_context"]["attached_blocks"]
+    )
+    assert specialist_payload["archival_hits"][0]["excerpt_text"] == (
+        "Archive policy says all relics must be sealed at dusk."
+    )
+    assert specialist_payload["recall_hits"][0]["excerpt_text"] == (
+        "Earlier in chapter one, the seal broke during the storm."
+    )
+    assert specialist_payload["archival_block_views"][0]["source"] == "retrieval_store"
+    assert (
+        specialist_payload["archival_block_views"][0]["label"]
+        == "world_rule.archive_policy"
+    )
+    assert (
+        specialist_payload["archival_block_views"][0]["data_json"]["excerpt_text"]
+        == "Archive policy says all relics must be sealed at dusk."
+    )
+    assert specialist_payload["recall_block_views"][0]["source"] == "retrieval_store"
+    assert (
+        specialist_payload["recall_block_views"][0]["label"]
+        == "recall.note.storm_callback"
+    )
+    assert (
+        specialist_payload["recall_block_views"][0]["metadata"]["query_id"]
+        == "rq-recall-1"
+    )
+    assert "[BLOCK_PROMPT_CONTEXT]" in orchestrator_system_prompt
+    assert 'label="chapter.current"' in orchestrator_system_prompt
+    assert 'label="projection.current_outline_digest"' in orchestrator_system_prompt
+    assert "[BLOCK_PROMPT_CONTEXT]" in specialist_system_prompt
+    assert 'label="chapter.current"' in specialist_system_prompt
+    assert plan.notes == ["gateway"]
+    assert bundle.writer_hints == ["Hint A"]

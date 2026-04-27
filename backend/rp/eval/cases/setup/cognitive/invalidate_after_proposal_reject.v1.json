@@ -113,6 +113,17 @@
       }
     ],
     "subjective_hooks": []
+    ,
+    "expected_reason_codes": [
+      "cognition.invalidated_by_proposal_reject",
+      "cognition.stale_snapshot_reused"
+    ],
+    "expected_outcome_chain": {
+      "transcript_status": "pass",
+      "cognition_status": "pass",
+      "readiness_status": "warn"
+    },
+    "expected_recommended_next_action": "reset_rejected_proposal_state_and_force_refinement_path"
   },
   "trace_hooks": {
     "capture_runtime_events": true,

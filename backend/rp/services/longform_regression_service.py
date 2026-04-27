@@ -7,6 +7,8 @@ from rp.models.story_runtime import (
     LongformTurnCommandKind,
     SpecialistResultBundle,
     StoryArtifact,
+    StoryArtifactKind,
+    StoryArtifactStatus,
     StorySession,
 )
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
@@ -15,6 +17,7 @@ from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_specialist_service import LongformSpecialistService
 from .projection_refresh_service import ProjectionRefreshService
 from .proposal_workflow_service import ProposalWorkflowService
+from .recall_detail_ingestion_service import RecallDetailIngestionService
 from .recall_summary_ingestion_service import RecallSummaryIngestionService
 from .story_session_service import StorySessionService
 
@@ -29,9 +32,11 @@ class LongformRegressionService:
         orchestrator_service: LongformOrchestratorService,
         specialist_service: LongformSpecialistService,
         proposal_workflow_service: ProposalWorkflowService,
-        legacy_state_patch_proposal_builder: LegacyStatePatchProposalBuilder | None = None,
+        legacy_state_patch_proposal_builder: LegacyStatePatchProposalBuilder
+        | None = None,
         projection_refresh_service: ProjectionRefreshService | None = None,
         recall_summary_ingestion_service: RecallSummaryIngestionService | None = None,
+        recall_detail_ingestion_service: RecallDetailIngestionService | None = None,
         regression_policy: PostWriteMaintenancePolicy | None = None,
     ) -> None:
         self._story_session_service = story_session_service
@@ -42,9 +47,11 @@ class LongformRegressionService:
             legacy_state_patch_proposal_builder or LegacyStatePatchProposalBuilder()
         )
         self._projection_refresh_service = (
-            projection_refresh_service or ProjectionRefreshService(story_session_service)
+            projection_refresh_service
+            or ProjectionRefreshService(story_session_service)
         )
         self._recall_summary_ingestion_service = recall_summary_ingestion_service
+        self._recall_detail_ingestion_service = recall_detail_ingestion_service
         self._regression_policy = regression_policy or PostWriteMaintenancePolicy(
             preset_id="phase_e_internal_regression",
             fallback_decision=PolicyDecision.NOTIFY_APPLY,
@@ -92,13 +99,9 @@ class LongformRegressionService:
         model_id: str,
         provider_id: str | None,
     ) -> tuple[StorySession, ChapterWorkspace]:
-        accepted_segments = [
-            item
-            for item in self._story_session_service.list_artifacts(
-                chapter_workspace_id=chapter.chapter_workspace_id
-            )
-            if item.status.value == "accepted" and item.artifact_kind.value == "story_segment"
-        ]
+        accepted_segments = self._list_accepted_story_segments(
+            chapter_workspace_id=chapter.chapter_workspace_id
+        )
         plan = await self._orchestrator_service.plan(
             session=session,
             chapter=chapter,
@@ -124,13 +127,24 @@ class LongformRegressionService:
             chapter=chapter,
             bundle=bundle,
         )
-        if self._recall_summary_ingestion_service is not None and bundle.recall_summary_text:
+        if (
+            self._recall_summary_ingestion_service is not None
+            and bundle.recall_summary_text
+        ):
             self._recall_summary_ingestion_service.ingest_chapter_summary(
                 session_id=session.session_id,
                 story_id=session.story_id,
                 chapter_index=chapter.chapter_index,
                 source_workspace_id=session.source_workspace_id,
                 summary_text=bundle.recall_summary_text,
+            )
+        if self._recall_detail_ingestion_service is not None and accepted_segments:
+            self._recall_detail_ingestion_service.ingest_accepted_story_segments(
+                session_id=session.session_id,
+                story_id=session.story_id,
+                chapter_index=chapter.chapter_index,
+                source_workspace_id=session.source_workspace_id,
+                accepted_segments=accepted_segments,
             )
         return updated_session, updated_chapter
 
@@ -155,7 +169,9 @@ class LongformRegressionService:
                     submit_source="post_write_regression",
                     policy=self._regression_policy,
                 )
-        updated_session = self._story_session_service.get_session(session.session_id) or session
+        updated_session = (
+            self._story_session_service.get_session(session.session_id) or session
+        )
         updated_chapter = self._projection_refresh_service.refresh_from_bundle(
             chapter=chapter,
             bundle=bundle,
@@ -168,13 +184,28 @@ class LongformRegressionService:
         chapter: ChapterWorkspace,
         accepted_artifact: StoryArtifact,
     ) -> list[StoryArtifact]:
-        accepted_segments = [
-            item
-            for item in self._story_session_service.list_artifacts(
-                chapter_workspace_id=chapter.chapter_workspace_id
-            )
-            if item.status.value == "accepted" and item.artifact_kind.value == "story_segment"
-        ]
-        if all(item.artifact_id != accepted_artifact.artifact_id for item in accepted_segments):
+        accepted_segments = self._list_accepted_story_segments(
+            chapter_workspace_id=chapter.chapter_workspace_id
+        )
+        if all(
+            item.artifact_id != accepted_artifact.artifact_id
+            for item in accepted_segments
+        ):
             accepted_segments.append(accepted_artifact)
         return accepted_segments
+
+    def _list_accepted_story_segments(
+        self,
+        *,
+        chapter_workspace_id: str,
+    ) -> list[StoryArtifact]:
+        return [
+            item
+            for item in self._story_session_service.list_artifacts(
+                chapter_workspace_id=chapter_workspace_id
+            )
+            if (
+                item.status == StoryArtifactStatus.ACCEPTED
+                and item.artifact_kind == StoryArtifactKind.STORY_SEGMENT
+            )
+        ]

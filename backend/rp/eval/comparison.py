@@ -101,9 +101,16 @@ def summarize_suite(path_or_payload: str | Path | dict[str, Any]) -> dict[str, A
             subjective_status_counts[str(status)] += int(count or 0)
         diagnostics = report.get("diagnostics") or {}
         attribution = diagnostics.get("attribution") if isinstance(diagnostics, dict) else {}
+        report_primary_suspects: set[str] = set()
+        top_level_suspects = report.get("primary_suspects")
+        if isinstance(top_level_suspects, list):
+            report_primary_suspects.update(str(suspect) for suspect in top_level_suspects)
         if isinstance(attribution, dict):
-            for suspect in attribution.get("primary_suspects") or []:
-                primary_suspect_counts[str(suspect)] += 1
+            report_primary_suspects.update(
+                str(suspect) for suspect in attribution.get("primary_suspects") or []
+            )
+        for suspect in report_primary_suspects:
+            primary_suspect_counts[suspect] += 1
         for reason_code in report.get("reason_codes") or diagnostics.get("reason_codes") or []:
             reason_code_counts[str(reason_code)] += 1
         recommended_next_action = (
@@ -492,6 +499,9 @@ def _aggregate_cases(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
             executed_judge_hook_count += int(subjective_summary.get("executed", 0) or 0)
             diagnostics = report.get("diagnostics") or {}
             attribution = diagnostics.get("attribution") if isinstance(diagnostics, dict) else {}
+            top_level_suspects = report.get("primary_suspects")
+            if isinstance(top_level_suspects, list):
+                primary_suspects.update(str(item) for item in top_level_suspects)
             if isinstance(attribution, dict):
                 primary_suspects.update(str(item) for item in attribution.get("primary_suspects") or [])
             for reason_code in report.get("reason_codes") or diagnostics.get("reason_codes") or []:

@@ -10,10 +10,20 @@ from sqlmodel import Session
 
 from config import get_settings
 from rp.graphs.story_graph_runner import StoryGraphRunner
-from rp.models.dsl import Domain
+from rp.models.block_view import BlockSource
+from rp.models.dsl import Domain, Layer
+from rp.models.memory_crud import MemoryBlockProposalSubmitRequest
 from rp.models.story_runtime import ChapterWorkspaceSnapshot
 from rp.models.story_runtime import LongformTurnRequest, StoryRuntimeConfigPatchRequest
-from rp.services.story_runtime_controller import StoryRuntimeController
+from rp.services.story_block_mutation_service import (
+    MemoryBlockMutationUnsupportedError,
+    MemoryBlockProposalNotFoundError,
+    MemoryBlockTargetMismatchError,
+)
+from rp.services.story_runtime_controller import (
+    MemoryBlockHistoryUnsupportedError,
+    StoryRuntimeController,
+)
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from services.database import get_session
 
@@ -65,6 +75,102 @@ def _snapshot_payload(snapshot: ChapterWorkspaceSnapshot) -> dict:
     payload = snapshot.model_dump(mode="json")
     payload["memory_backend"] = _memory_backend_metadata()
     return payload
+
+
+def _memory_block_not_found(block_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "error": {
+                "message": f"Memory block not found: {block_id}",
+                "code": "memory_block_not_found",
+            }
+        },
+    )
+
+
+def _memory_block_history_unsupported(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": "memory_block_history_unsupported",
+            }
+        },
+    )
+
+
+def _memory_block_mutation_unsupported(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": "memory_block_mutation_unsupported",
+            }
+        },
+    )
+
+
+def _memory_block_target_mismatch(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": "memory_block_target_mismatch",
+            }
+        },
+    )
+
+
+def _memory_block_proposal_invalid(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": "memory_block_proposal_invalid",
+            }
+        },
+    )
+
+
+def _memory_block_proposal_not_found(proposal_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "error": {
+                "message": f"Memory block proposal not found: {proposal_id}",
+                "code": "memory_block_proposal_not_found",
+            }
+        },
+    )
+
+
+def _memory_block_proposal_apply_failed(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": "memory_block_proposal_apply_failed",
+            }
+        },
+    )
+
+
+def _memory_block_consumer_not_found(consumer_key: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "error": {
+                "message": f"Memory block consumer not found: {consumer_key}",
+                "code": "memory_block_consumer_not_found",
+            }
+        },
+    )
 
 
 @router.get("/api/rp/story-sessions")
@@ -179,16 +285,130 @@ async def get_story_memory_projection(
 @router.get("/api/rp/story-sessions/{session_id}/memory/blocks")
 async def get_story_memory_blocks(
     session_id: str,
+    layer: Layer | None = None,
+    source: BlockSource | None = None,
     controller: StoryRuntimeController = Depends(_story_controller),
 ):
     try:
-        items = controller.list_memory_blocks(session_id=session_id)
+        items = controller.list_memory_blocks(
+            session_id=session_id,
+            layer=layer,
+            source=source,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=404,
             detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
         ) from exc
     return {"session_id": session_id, "items": items}
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/block-consumers")
+async def get_story_memory_block_consumers(
+    session_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        items = controller.list_memory_block_consumers(session_id=session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    return {"session_id": session_id, "items": items}
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/block-consumers/{consumer_key}")
+async def get_story_memory_block_consumer(
+    session_id: str,
+    consumer_key: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = controller.get_memory_block_consumer(
+            session_id=session_id,
+            consumer_key=consumer_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    if item is None:
+        raise _memory_block_consumer_not_found(consumer_key)
+    return {"session_id": session_id, "item": item}
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/blocks/{block_id}")
+async def get_story_memory_block(
+    session_id: str,
+    block_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = controller.get_memory_block(session_id=session_id, block_id=block_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    if item is None:
+        raise _memory_block_not_found(block_id)
+    return {"session_id": session_id, "item": item}
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/versions")
+async def get_story_memory_block_versions(
+    session_id: str,
+    block_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        result = await controller.read_memory_block_versions(
+            session_id=session_id,
+            block_id=block_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    except MemoryBlockHistoryUnsupportedError as exc:
+        raise _memory_block_history_unsupported(exc) from exc
+    if result is None:
+        raise _memory_block_not_found(block_id)
+    return {
+        "session_id": session_id,
+        "block_id": block_id,
+        **result.model_dump(mode="json"),
+    }
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/provenance")
+async def get_story_memory_block_provenance(
+    session_id: str,
+    block_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        result = await controller.read_memory_block_provenance(
+            session_id=session_id,
+            block_id=block_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    except MemoryBlockHistoryUnsupportedError as exc:
+        raise _memory_block_history_unsupported(exc) from exc
+    if result is None:
+        raise _memory_block_not_found(block_id)
+    return {
+        "session_id": session_id,
+        "block_id": block_id,
+        **result.model_dump(mode="json"),
+    }
 
 
 @router.get("/api/rp/story-sessions/{session_id}/memory/proposals")
@@ -205,6 +425,138 @@ async def get_story_memory_proposals(
             detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
         ) from exc
     return {"session_id": session_id, "items": items}
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/proposals")
+async def get_story_memory_block_proposals(
+    session_id: str,
+    block_id: str,
+    status: str | None = None,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        items = controller.list_memory_block_proposals(
+            session_id=session_id,
+            block_id=block_id,
+            status=status,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    if items is None:
+        raise _memory_block_not_found(block_id)
+    return {"session_id": session_id, "block_id": block_id, "items": items}
+
+
+@router.get(
+    "/api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/proposals/{proposal_id}"
+)
+async def get_story_memory_block_proposal(
+    session_id: str,
+    block_id: str,
+    proposal_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = controller.get_memory_block_proposal(
+            session_id=session_id,
+            block_id=block_id,
+            proposal_id=proposal_id,
+        )
+    except MemoryBlockMutationUnsupportedError as exc:
+        raise _memory_block_mutation_unsupported(exc) from exc
+    except MemoryBlockProposalNotFoundError as exc:
+        raise _memory_block_proposal_not_found(proposal_id) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    if item is None:
+        raise _memory_block_not_found(block_id)
+    return {
+        "session_id": session_id,
+        "block_id": block_id,
+        "proposal_id": proposal_id,
+        "item": item,
+    }
+
+
+@router.post("/api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/proposals")
+async def create_story_memory_block_proposal(
+    session_id: str,
+    block_id: str,
+    payload: MemoryBlockProposalSubmitRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = await controller.submit_memory_block_proposal(
+            session_id=session_id,
+            block_id=block_id,
+            payload=payload,
+        )
+    except MemoryBlockMutationUnsupportedError as exc:
+        raise _memory_block_mutation_unsupported(exc) from exc
+    except MemoryBlockTargetMismatchError as exc:
+        raise _memory_block_target_mismatch(exc) from exc
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _memory_block_proposal_invalid(exc) from exc
+    if item is None:
+        raise _memory_block_not_found(block_id)
+    return {"session_id": session_id, "block_id": block_id, "item": item}
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/memory/blocks/{block_id}/proposals/{proposal_id}/apply"
+)
+async def apply_story_memory_block_proposal(
+    session_id: str,
+    block_id: str,
+    proposal_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = controller.apply_memory_block_proposal(
+            session_id=session_id,
+            block_id=block_id,
+            proposal_id=proposal_id,
+        )
+    except MemoryBlockProposalNotFoundError as exc:
+        raise _memory_block_proposal_not_found(proposal_id) from exc
+    except MemoryBlockMutationUnsupportedError as exc:
+        raise _memory_block_mutation_unsupported(exc) from exc
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _memory_block_proposal_apply_failed(exc) from exc
+    if item is None:
+        raise _memory_block_not_found(block_id)
+    return {
+        "session_id": session_id,
+        "block_id": block_id,
+        "proposal_id": proposal_id,
+        "item": item,
+    }
 
 
 @router.get("/api/rp/story-sessions/{session_id}/memory/versions")

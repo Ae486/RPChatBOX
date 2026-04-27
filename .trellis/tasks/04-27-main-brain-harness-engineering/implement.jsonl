@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/04-27-main-brain-harness-engineering/research/harness-engineering-openai-anthropic.md", "reason": "Main-brain research baseline for harness engineering terminology and architecture framing"}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-local-context-governance.md", "reason": "Executable contract for setup-agent stage-local context governance before implementation"}
+{"file": ".trellis/spec/backend/rp-setup-agent-prior-stage-handoff-context.md", "reason": "Existing setup context boundary that the new stage-local governance slice must preserve"}

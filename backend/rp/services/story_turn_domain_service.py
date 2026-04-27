@@ -1,4 +1,5 @@
 """Shared domain service for story turn commands and generation flow."""
+
 from __future__ import annotations
 
 import json
@@ -23,6 +24,7 @@ from .longform_regression_service import LongformRegressionService
 from .longform_specialist_service import LongformSpecialistService
 from .builder_projection_context_service import BuilderProjectionContextService
 from .projection_state_service import ProjectionStateService
+from .story_block_consumer_state_service import StoryBlockConsumerStateService
 from .story_session_service import StorySessionService
 from .writing_packet_builder import WritingPacketBuilder
 from .writing_worker_execution_service import WritingWorkerExecutionService
@@ -42,6 +44,7 @@ class StoryTurnDomainService:
         writing_packet_builder: WritingPacketBuilder,
         writing_worker_execution_service: WritingWorkerExecutionService,
         regression_service: LongformRegressionService,
+        block_consumer_state_service: StoryBlockConsumerStateService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
@@ -51,6 +54,7 @@ class StoryTurnDomainService:
         self._writing_packet_builder = writing_packet_builder
         self._writing_worker_execution_service = writing_worker_execution_service
         self._regression_service = regression_service
+        self._block_consumer_state_service = block_consumer_state_service
 
     def prepare_generation_inputs(
         self,
@@ -72,9 +76,13 @@ class StoryTurnDomainService:
             chapter=chapter,
             target_artifact_id=target_artifact_id,
         )
-        accepted_segment_ids = [item.artifact_id for item in self.accepted_segments(chapter)]
+        accepted_segment_ids = [
+            item.artifact_id for item in self.accepted_segments(chapter)
+        ]
         return {
-            "pending_artifact_id": pending_artifact.artifact_id if pending_artifact else None,
+            "pending_artifact_id": pending_artifact.artifact_id
+            if pending_artifact
+            else None,
             "accepted_segment_ids": accepted_segment_ids,
         }
 
@@ -90,7 +98,7 @@ class StoryTurnDomainService:
     ) -> OrchestratorPlan:
         session = self.require_session(session_id)
         chapter = self.require_current_chapter(session_id)
-        return await self._orchestrator_service.plan(
+        plan = await self._orchestrator_service.plan(
             session=session,
             chapter=chapter,
             command_kind=command_kind,
@@ -99,6 +107,11 @@ class StoryTurnDomainService:
             user_prompt=user_prompt,
             target_artifact_id=target_artifact_id,
         )
+        self._mark_block_consumer_synced(
+            session_id=session_id,
+            consumer_key="story.orchestrator",
+        )
+        return plan
 
     async def specialist_analyze(
         self,
@@ -125,7 +138,7 @@ class StoryTurnDomainService:
             )
             if artifact.artifact_id in set(accepted_segment_ids)
         ]
-        return await self._specialist_service.analyze(
+        bundle = await self._specialist_service.analyze(
             session=session,
             chapter=chapter,
             plan=plan,
@@ -136,6 +149,11 @@ class StoryTurnDomainService:
             accepted_segments=accepted_segments,
             pending_artifact=pending_artifact,
         )
+        self._mark_block_consumer_synced(
+            session_id=session_id,
+            consumer_key="story.specialist",
+        )
+        return bundle
 
     def build_packet(
         self,
@@ -146,7 +164,7 @@ class StoryTurnDomainService:
     ) -> WritingPacket:
         session = self.require_session(session_id)
         chapter = self.require_current_chapter(session_id)
-        return self._writing_packet_builder.build(
+        packet = self._writing_packet_builder.build(
             session=session,
             chapter=chapter,
             plan=plan,
@@ -156,6 +174,11 @@ class StoryTurnDomainService:
             runtime_writer_hints=list(specialist_bundle.writer_hints),
             user_instruction=plan.writer_instruction,
         )
+        self._mark_block_consumer_synced(
+            session_id=session_id,
+            consumer_key="story.writer_packet",
+        )
+        return packet
 
     async def writer_run(
         self,
@@ -298,7 +321,10 @@ class StoryTurnDomainService:
             session_id=session.session_id,
             current_phase=LongformChapterPhase.SEGMENT_DRAFTING,
         )
-        updated_session, updated_chapter = await self._regression_service.run_light_regression(
+        (
+            updated_session,
+            updated_chapter,
+        ) = await self._regression_service.run_light_regression(
             session=updated_session,
             chapter=updated_chapter,
             accepted_artifact=accepted,
@@ -317,10 +343,15 @@ class StoryTurnDomainService:
             artifact_kind=accepted.artifact_kind,
         )
 
-    async def complete_chapter(self, *, request: LongformTurnRequest) -> LongformTurnResponse:
+    async def complete_chapter(
+        self, *, request: LongformTurnRequest
+    ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
         chapter = self.require_current_chapter(request.session_id)
-        updated_session, updated_chapter = await self._regression_service.run_heavy_regression(
+        (
+            updated_session,
+            updated_chapter,
+        ) = await self._regression_service.run_heavy_regression(
             session=session,
             chapter=chapter,
             model_id=request.model_id,
@@ -433,6 +464,19 @@ class StoryTurnDomainService:
     def extract_text_delta(line: str) -> str:
         return WritingWorkerExecutionService.extract_text_delta(line)
 
+    def _mark_block_consumer_synced(
+        self,
+        *,
+        session_id: str,
+        consumer_key: str,
+    ) -> None:
+        if self._block_consumer_state_service is None:
+            return
+        self._block_consumer_state_service.mark_consumer_synced(
+            session_id=session_id,
+            consumer_key=consumer_key,
+        )
+
     def _persist_generated_artifact_impl(
         self,
         *,
@@ -446,7 +490,10 @@ class StoryTurnDomainService:
         specialist_bundle: SpecialistResultBundle,
     ) -> tuple[StoryArtifact, ChapterWorkspace]:
         revision = 1
-        if request.command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT and pending_artifact is not None:
+        if (
+            request.command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT
+            and pending_artifact is not None
+        ):
             self._story_session_service.update_artifact(
                 artifact_id=pending_artifact.artifact_id,
                 status=StoryArtifactStatus.SUPERSEDED,

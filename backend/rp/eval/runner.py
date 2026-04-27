@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import httpx
 from models.rp_retrieval_store import (
     EmbeddingRecordRecord,
     IndexJobRecord,
@@ -176,34 +177,51 @@ class EvalRunner:
         runtime_events: list[dict] = []
         runtime_result = None
         activation_check: ActivationCheckResult | None = None
+        runtime_debug: dict[str, Any] | None = None
         failure = None
         run_status = "completed"
 
         try:
-            if case.runtime_target.stream:
-                async for chunk in graph_runner.run_turn_stream(request):
-                    payload = _parse_typed_payload(chunk)
-                    if payload is not None and case.trace_hooks.capture_runtime_events:
-                        runtime_events.append(payload)
-            else:
-                await graph_runner.run_turn(request)
-            runtime_result = graph_runner.last_runtime_result
-            if runtime_result is None:
-                run_status = "failed"
-                failure = EvalFailure(
-                    layer="infra",
-                    code="missing_runtime_result",
-                    message="Setup graph finished without exposing RpAgentTurnResult",
-                    retryable=False,
-                    source="runner",
+            if case.runtime_target.mode == "http":
+                http_result = await self._run_setup_case_via_http(
+                    case=case,
+                    request=request,
                 )
-            elif runtime_result.status == "failed":
-                run_status = "failed"
-                failure = _classify_runtime_failure(runtime_result)
+                runtime_result = http_result["runtime_result"]
+                runtime_events = list(http_result["runtime_events"])
+                runtime_debug = http_result["runtime_debug"]
+                failure = http_result["failure"]
+                run_status = "failed" if failure is not None else "completed"
+            else:
+                if case.runtime_target.stream:
+                    async for chunk in graph_runner.run_turn_stream(request):
+                        payload = _parse_typed_payload(chunk)
+                        if payload is not None and case.trace_hooks.capture_runtime_events:
+                            runtime_events.append(payload)
+                else:
+                    await graph_runner.run_turn(request)
+                runtime_result = graph_runner.last_runtime_result
+                if case.trace_hooks.capture_graph_debug:
+                    runtime_debug = graph_runner.get_runtime_debug(
+                        workspace_id=request.workspace_id
+                    )
         except Exception as exc:
-            runtime_result = graph_runner.last_runtime_result
+            runtime_result = graph_runner.last_runtime_result if runtime_result is None else runtime_result
             run_status = "failed"
             failure = _classify_exception_failure(exc, runtime_result)
+
+        if runtime_result is None:
+            run_status = "failed"
+            failure = failure or EvalFailure(
+                layer="infra",
+                code="missing_runtime_result",
+                message="Setup graph finished without exposing RpAgentTurnResult",
+                retryable=False,
+                source="runner",
+            )
+        elif failure is None and runtime_result.status == "failed":
+            run_status = "failed"
+            failure = _classify_runtime_failure(runtime_result)
 
         if bool(case.trace_hooks.capture_activation_snapshot):
             controller = self._factory.build_setup_runtime_controller()
@@ -213,11 +231,6 @@ class EvalRunner:
 
         finished_at = utcnow()
         workspace_after = self._workspace_service.get_workspace(request.workspace_id)
-        runtime_debug = (
-            graph_runner.get_runtime_debug(workspace_id=request.workspace_id)
-            if case.trace_hooks.capture_graph_debug
-            else None
-        )
         runtime_result_payload = (
             runtime_result.model_dump(mode="json")
             if runtime_result is not None
@@ -329,6 +342,122 @@ class EvalRunner:
             result.run.metadata["replay_path"] = replay_path.as_posix()
             result.report["replay_path"] = replay_path.as_posix()
         return result
+
+    async def _run_setup_case_via_http(
+        self,
+        *,
+        case: EvalCase,
+        request: SetupAgentTurnRequest,
+    ) -> dict[str, Any]:
+        from api import rp_setup as rp_setup_api
+        from main import create_app
+
+        graph_runner = self._factory.build_setup_graph_runner()
+        app = create_app()
+        app.dependency_overrides[rp_setup_api._setup_graph_runner] = lambda: graph_runner
+
+        runtime_events: list[dict] = []
+        failure: EvalFailure | None = None
+        runtime_debug: dict[str, Any] | None = None
+        path = self._render_runtime_entrypoint(
+            entrypoint=case.runtime_target.entrypoint,
+            workspace_id=request.workspace_id,
+        )
+
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(
+                    app=app,
+                    raise_app_exceptions=False,
+                ),
+                base_url="http://eval.local",
+            ) as client:
+                request_payload = request.model_dump(mode="json")
+                if case.runtime_target.stream:
+                    async with client.stream(
+                        "POST",
+                        path,
+                        json=request_payload,
+                        headers={"X-Request-Id": f"eval-{uuid4().hex[:12]}"},
+                    ) as response:
+                        body_parts: list[str] = []
+                        async for chunk in response.aiter_text():
+                            body_parts.append(chunk)
+                        if response.status_code >= 400:
+                            failure = self._classify_setup_http_failure(
+                                response=response,
+                                runtime_result=graph_runner.last_runtime_result,
+                            )
+                        for line in "".join(body_parts).splitlines():
+                            payload = _parse_typed_payload(line)
+                            if (
+                                payload is not None
+                                and case.trace_hooks.capture_runtime_events
+                            ):
+                                runtime_events.append(payload)
+                else:
+                    response = await client.post(
+                        path,
+                        json=request_payload,
+                        headers={"X-Request-Id": f"eval-{uuid4().hex[:12]}"},
+                    )
+                    if response.status_code >= 400:
+                        failure = self._classify_setup_http_failure(
+                            response=response,
+                            runtime_result=graph_runner.last_runtime_result,
+                        )
+        finally:
+            if case.trace_hooks.capture_graph_debug:
+                runtime_debug = graph_runner.get_runtime_debug(
+                    workspace_id=request.workspace_id
+                )
+            app.dependency_overrides.clear()
+
+        return {
+            "runtime_result": graph_runner.last_runtime_result,
+            "runtime_events": runtime_events,
+            "runtime_debug": runtime_debug,
+            "failure": failure,
+        }
+
+    @staticmethod
+    def _render_runtime_entrypoint(*, entrypoint: str, workspace_id: str) -> str:
+        try:
+            return entrypoint.format(workspace_id=workspace_id)
+        except KeyError:
+            return entrypoint
+
+    @staticmethod
+    def _classify_setup_http_failure(
+        *,
+        response: httpx.Response,
+        runtime_result,
+    ) -> EvalFailure:
+        if runtime_result is not None and runtime_result.status == "failed":
+            return _classify_runtime_failure(runtime_result)
+
+        message = response.text
+        code = f"http_{response.status_code}"
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if isinstance(payload, dict):
+            detail = payload.get("detail")
+            if isinstance(detail, dict):
+                error = detail.get("error")
+                if isinstance(error, dict):
+                    message = str(error.get("message") or message)
+                    code = str(error.get("code") or code)
+
+        return EvalFailure(
+            layer="infra",
+            code=code,
+            message=message,
+            retryable=response.status_code >= 500,
+            source="http_route",
+        )
 
     async def _run_retrieval_case(self, case: EvalCase) -> EvalRunResult:
         run_id = uuid4().hex

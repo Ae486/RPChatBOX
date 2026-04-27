@@ -177,14 +177,26 @@ def build_report(result: EvalRunResult) -> dict:
         subjective_hook_results=subjective_hook_results,
     )
     diagnostics = report["diagnostics"] if isinstance(report.get("diagnostics"), dict) else {}
+    attribution = diagnostics.get("attribution")
+    if not isinstance(attribution, dict):
+        attribution = {}
     activation_check = result.runtime_result.get("activation_check")
     if not isinstance(activation_check, dict):
         activation_check = {}
     report["reason_codes"] = list(diagnostics.get("reason_codes") or [])
     report["outcome_chain"] = dict(diagnostics.get("outcome_chain") or {})
+    report["outcome_chain_display"] = _render_outcome_chain_display(report["outcome_chain"])
+    report["outcome_chain_stages"] = _render_outcome_chain_stages(report["outcome_chain"])
+    report["primary_suspects"] = list(attribution.get("primary_suspects") or [])
+    report["secondary_suspects"] = list(attribution.get("secondary_suspects") or [])
+    report["evidence_refs"] = list(attribution.get("evidence_refs") or [])
+    report["evidence_ref_details"] = _render_evidence_ref_details(
+        report["evidence_refs"],
+        result=result,
+    )
     report["recommended_next_action"] = (
         diagnostics.get("recommended_next_action")
-        or ((diagnostics.get("attribution") or {}).get("recommended_next_action"))
+        or attribution.get("recommended_next_action")
     )
     report["activation_check"] = activation_check
     report["activation_handoff_snapshot"] = (
@@ -192,6 +204,12 @@ def build_report(result: EvalRunResult) -> dict:
         if isinstance(activation_check.get("handoff"), dict)
         else None
     )
+    report["diagnostic_overview"] = _build_diagnostic_overview(
+        report=report,
+        diagnostics=diagnostics,
+        attribution=attribution,
+    )
+    report["diagnostic_summary_text"] = _render_diagnostic_summary_text(report)
     return report
 
 
@@ -207,14 +225,31 @@ def render_text_summary(result: EvalRunResult) -> str:
             f"{expectation_summary.get('total', 0)}"
             f" fail={expectation_summary.get('fail', 0)}"
         )
+    reason_codes = list(summary.get("reason_codes") or [])
+    primary_suspects = list(summary.get("primary_suspects") or [])
+    next_action = summary.get("recommended_next_action") or "n/a"
+    reason_suffix = (
+        f" reason_codes={','.join(reason_codes[:3])}"
+        if reason_codes
+        else " reason_codes=none"
+    )
+    suspect_suffix = (
+        f" primary_suspects={','.join(primary_suspects[:3])}"
+        if primary_suspects
+        else " primary_suspects=none"
+    )
     return (
         f"[{summary['status']}] {summary['case_id']} "
         f"pass={summary['assertion_summary']['pass']} "
         f"fail={summary['assertion_summary']['fail']} "
         f"warn={summary['assertion_summary']['warn']} "
+        f"failure_layer={summary.get('failure_layer') or 'none'} "
         f"finish_reason={summary.get('finish_reason') or 'n/a'} "
         f"repair_route={summary.get('repair_route') or 'n/a'} "
         f"end_reason={summary.get('end_reason_summary') or 'n/a'}"
+        f"{reason_suffix}"
+        f"{suspect_suffix}"
+        f" next_action={next_action}"
         f"{expectation_suffix}"
     )
 
@@ -355,15 +390,22 @@ def render_suite_markdown(
         lines.append("- diagnostic_expectation_failures: none")
     outcome_chain = dict(diagnostics.get("outcome_chain") or {})
     if outcome_chain:
-        rendered_chain = []
+        lines.append("- outcome_chain:")
         for stage, statuses in outcome_chain.items():
             status_counts = ", ".join(
                 f"{status}={count}" for status, count in dict(statuses).items()
             )
-            rendered_chain.append(f"{stage}({status_counts})")
-        lines.append("- outcome_chain: " + "; ".join(rendered_chain))
+            lines.append(f"  - {stage}: {status_counts}")
     else:
         lines.append("- outcome_chain: none")
+    next_actions = dict(diagnostics.get("recommended_next_actions") or {})
+    if next_actions:
+        lines.append(
+            "- recommended_next_actions: "
+            + ", ".join(f"{action}={count}" for action, count in next_actions.items())
+        )
+    else:
+        lines.append("- recommended_next_actions: none")
 
     ragas_status_counts = dict(summary.get("ragas_status_counts") or {})
     lines.extend(["", "## RAGAS", ""])
@@ -508,6 +550,7 @@ def render_comparison_markdown(*, comparison: dict[str, Any]) -> str:
             recommended_next_action_deltas = dict(
                 deltas.get("recommended_next_action_deltas") or {}
             )
+            drift_notes = _changed_case_drift_notes(deltas)
             lines.append(
                 "- "
                 f"{item.get('case_id')}: "
@@ -518,13 +561,15 @@ def render_comparison_markdown(*, comparison: dict[str, Any]) -> str:
                 f"pending_judge_delta={deltas.get('pending_judge_hook_count', 0)} "
                 f"executed_judge_delta={deltas.get('executed_judge_hook_count', 0)} "
                 f"subjective_score_delta={deltas.get('subjective_average_score')} "
-                f"reason_code_deltas={reason_code_deltas or {}} "
-                f"primary_suspect_deltas={primary_suspect_deltas or {}} "
-                f"outcome_chain_deltas={outcome_chain_deltas or {}} "
-                f"recommended_next_action_deltas={recommended_next_action_deltas or {}} "
+                f"reason_code_deltas={_format_membership_delta(reason_code_deltas)} "
+                f"primary_suspect_deltas={_format_membership_delta(primary_suspect_deltas)} "
+                f"outcome_chain_deltas={_format_map_delta(outcome_chain_deltas)} "
+                f"recommended_next_action_deltas={_format_membership_delta(recommended_next_action_deltas)} "
                 f"diagnostic_expectation_deltas={diagnostic_expectation_deltas or {}} "
                 f"ragas_metric_deltas={ragas_metric_deltas or {}}"
             )
+            if drift_notes:
+                lines.append(f"  - diagnostic_drift: {'; '.join(drift_notes)}")
     else:
         lines.append("- none")
 
@@ -547,6 +592,245 @@ def _derive_end_reason_summary(
     if finish_reason:
         return str(finish_reason)
     return None
+
+
+def _render_outcome_chain_display(outcome_chain: dict[str, Any]) -> list[str]:
+    if not isinstance(outcome_chain, dict):
+        return []
+    labels = {
+        "transcript_status": "transcript",
+        "cognition_status": "cognition",
+        "truth_status": "truth",
+        "readiness_status": "readiness",
+        "activation_handoff_status": "activation_handoff",
+        "runtime_bootstrap_readiness_status": "runtime_bootstrap",
+    }
+    rendered: list[str] = []
+    for key in (
+        "transcript_status",
+        "cognition_status",
+        "truth_status",
+        "readiness_status",
+        "activation_handoff_status",
+        "runtime_bootstrap_readiness_status",
+    ):
+        if key not in outcome_chain:
+            continue
+        rendered.append(f"{labels[key]}={outcome_chain.get(key)}")
+    return rendered
+
+
+def _render_outcome_chain_stages(outcome_chain: dict[str, Any]) -> list[dict[str, str]]:
+    if not isinstance(outcome_chain, dict):
+        return []
+    labels = {
+        "transcript_status": "transcript",
+        "cognition_status": "runtime_private_cognition",
+        "truth_status": "workspace_truth",
+        "readiness_status": "readiness_gate",
+        "activation_handoff_status": "activation_handoff",
+        "runtime_bootstrap_readiness_status": "runtime_bootstrap_readiness",
+    }
+    stage_summaries = {
+        "transcript_status": "Transcript moves the setup turn toward the expected step outcome.",
+        "cognition_status": "Runtime-private cognition is fresh enough for the next decision.",
+        "truth_status": "Workspace truth and commit/readiness judgement are aligned.",
+        "readiness_status": "Readiness gate matches the current setup substrate.",
+        "activation_handoff_status": "Activation handoff contains the fields needed downstream.",
+        "runtime_bootstrap_readiness_status": "Longform runtime has enough setup output to bootstrap.",
+    }
+    stages: list[dict[str, str]] = []
+    for key in labels:
+        if key not in outcome_chain:
+            continue
+        status = str(outcome_chain.get(key) or "unknown")
+        stages.append(
+            {
+                "stage_key": key,
+                "stage": labels[key],
+                "status": status,
+                "summary": stage_summaries[key],
+            }
+        )
+    return stages
+
+
+def _render_evidence_ref_details(
+    evidence_refs: list[Any],
+    *,
+    result: EvalRunResult,
+) -> list[dict[str, Any]]:
+    artifact_ids_by_kind: dict[str, list[str]] = {}
+    for artifact in result.artifacts:
+        artifact_ids_by_kind.setdefault(artifact.kind, []).append(artifact.artifact_id)
+    details: list[dict[str, Any]] = []
+    for raw_ref in evidence_refs:
+        ref = str(raw_ref)
+        kind = ref.removeprefix("artifact:") if ref.startswith("artifact:") else None
+        artifact_ids = sorted(artifact_ids_by_kind.get(kind or "", []))
+        details.append(
+            {
+                "ref": ref,
+                "kind": kind,
+                "available": bool(artifact_ids) or ref == "artifact:runtime_result",
+                "artifact_ids": artifact_ids,
+                "summary": _evidence_ref_summary(ref),
+            }
+        )
+    return details
+
+
+def _evidence_ref_summary(ref: str) -> str:
+    summaries = {
+        "artifact:runtime_result": "Runtime turn result, including finish reason, warnings, tool invocations, and structured payload.",
+        "artifact:tool_sequence": "Ordered setup tool calls/results used to diagnose tool contract or execution failures.",
+        "artifact:cognitive_state_summary": "Runtime-private cognition summary used to spot stale or invalidated setup state.",
+        "artifact:activation_check": "Activation readiness decision and blocking issues.",
+        "artifact:activation_handoff_snapshot": "Activation handoff payload that should bootstrap longform runtime.",
+        "artifact:readiness_snapshot": "Workspace readiness snapshot used to explain readiness/activation gate failures.",
+    }
+    return summaries.get(ref, "Referenced diagnostic evidence artifact.")
+
+
+def _build_diagnostic_overview(
+    *,
+    report: dict[str, Any],
+    diagnostics: dict[str, Any],
+    attribution: dict[str, Any],
+) -> dict[str, Any]:
+    dimensions = attribution.get("dimensions")
+    if not isinstance(dimensions, dict):
+        dimensions = {}
+    return {
+        "failure_layer": {
+            "value": report.get("failure_layer"),
+            "summary": _failure_layer_summary(report.get("failure_layer")),
+        },
+        "reason_codes": [
+            {
+                "code": str(code),
+                "category": str(code).split(".", 1)[0],
+            }
+            for code in report.get("reason_codes") or []
+        ],
+        "primary_suspects": _render_suspect_details(
+            report.get("primary_suspects") or [],
+            dimensions=dimensions,
+        ),
+        "secondary_suspects": _render_suspect_details(
+            report.get("secondary_suspects") or [],
+            dimensions=dimensions,
+        ),
+        "recommended_next_action": report.get("recommended_next_action"),
+        "outcome_chain": report.get("outcome_chain_stages") or [],
+        "evidence_refs": report.get("evidence_ref_details") or [],
+        "diagnostic_expectation_summary": report.get("diagnostic_expectation_summary"),
+        "diagnostic_version": diagnostics.get("diagnostic_version"),
+    }
+
+
+def _render_suspect_details(
+    suspects: list[Any],
+    *,
+    dimensions: dict[str, Any],
+) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
+    for suspect in suspects:
+        name = str(suspect)
+        dimension = dimensions.get(name)
+        if not isinstance(dimension, dict):
+            dimension = {}
+        details.append(
+            {
+                "name": name,
+                "status": dimension.get("status"),
+                "summary": dimension.get("summary"),
+                "reason_codes": list(dimension.get("reason_codes") or []),
+                "evidence": list(dimension.get("evidence") or []),
+            }
+        )
+    return details
+
+
+def _failure_layer_summary(layer: Any) -> str:
+    if not layer:
+        return "No top-level failure layer was assigned."
+    summaries = {
+        "agent": "The run most likely failed in agent behavior or prompt/tool usage.",
+        "deterministic": "The run hit deterministic contract, readiness, or controller assertions.",
+        "infra": "The run most likely failed in provider, database, or external infrastructure.",
+    }
+    return summaries.get(str(layer), "Top-level failure layer assigned by eval runtime.")
+
+
+def _render_diagnostic_summary_text(report: dict[str, Any]) -> str | None:
+    failure_layer = str(report.get("failure_layer") or "none")
+    reason_codes = list(report.get("reason_codes") or [])
+    primary_suspects = list(report.get("primary_suspects") or [])
+    next_action = str(report.get("recommended_next_action") or "").strip()
+    outcome_chain_display = list(report.get("outcome_chain_display") or [])
+    evidence_refs = list(report.get("evidence_refs") or [])
+
+    parts = [f"failure_layer={failure_layer}"]
+    parts.append(
+        "reason_codes=" + (", ".join(reason_codes) if reason_codes else "none")
+    )
+    parts.append(
+        "primary_suspects="
+        + (", ".join(primary_suspects) if primary_suspects else "none")
+    )
+    if next_action:
+        parts.append(f"next_action={next_action}")
+    if outcome_chain_display:
+        parts.append("outcome_chain=" + "; ".join(outcome_chain_display))
+    if evidence_refs:
+        parts.append("evidence_refs=" + ", ".join(evidence_refs))
+    return " | ".join(parts)
+
+
+def _format_membership_delta(delta: dict[str, Any]) -> str:
+    if not delta:
+        return "none"
+    parts: list[str] = []
+    added = list(delta.get("added") or [])
+    removed = list(delta.get("removed") or [])
+    if added:
+        parts.append("added=" + ",".join(str(item) for item in added))
+    if removed:
+        parts.append("removed=" + ",".join(str(item) for item in removed))
+    return ";".join(parts) if parts else "none"
+
+
+def _format_map_delta(delta: dict[str, Any]) -> str:
+    if not delta:
+        return "none"
+    parts: list[str] = []
+    for key, value in delta.items():
+        if isinstance(value, dict):
+            parts.append(f"{key}({_format_membership_delta(value)})")
+        else:
+            parts.append(f"{key}={value}")
+    return ";".join(parts)
+
+
+def _changed_case_drift_notes(deltas: dict[str, Any]) -> list[str]:
+    notes: list[str] = []
+    expectation_delta = dict(deltas.get("diagnostic_expectation_failure_deltas") or {})
+    reason_delta = dict(deltas.get("reason_code_deltas") or {})
+    suspect_delta = dict(deltas.get("primary_suspect_deltas") or {})
+    outcome_delta = dict(deltas.get("outcome_chain_deltas") or {})
+    next_action_delta = dict(deltas.get("recommended_next_action_deltas") or {})
+    if expectation_delta:
+        notes.append("diagnostic expectation alignment changed")
+    if reason_delta:
+        notes.append(f"reason codes {_format_membership_delta(reason_delta)}")
+    if suspect_delta:
+        notes.append(f"primary suspects {_format_membership_delta(suspect_delta)}")
+    if outcome_delta:
+        notes.append(f"outcome chain {_format_map_delta(outcome_delta)}")
+    if next_action_delta:
+        notes.append(f"next action {_format_membership_delta(next_action_delta)}")
+    return notes
 
 
 def _serialize_subjective_hook_result(score, *, artifact_id: str | None = None) -> dict[str, Any]:

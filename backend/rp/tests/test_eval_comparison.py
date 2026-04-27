@@ -31,6 +31,7 @@ def test_compare_suite_outputs_detects_added_removed_and_changed_cases(tmp_path)
                             "hard_failures": [],
                             "assertion_summary": {"pass": 2, "fail": 0, "warn": 0, "skip": 0},
                             "reason_codes": ["prompt.missing_step_targeting"],
+                            "primary_suspects": ["instruction_prompt_skill"],
                             "outcome_chain": {"transcript_status": "pass"},
                             "recommended_next_action": "ask_for_missing_setup_inputs",
                         },
@@ -71,6 +72,7 @@ def test_compare_suite_outputs_detects_added_removed_and_changed_cases(tmp_path)
                                 "prompt.missing_step_targeting",
                                 "controller.commit_proposal_blocked",
                             ],
+                            "primary_suspects": ["decision_policy"],
                             "outcome_chain": {"transcript_status": "warn"},
                             "recommended_next_action": "tighten_commit_readiness_checks_and_review_block_messages",
                             "diagnostic_expectation_results": [
@@ -111,6 +113,10 @@ def test_compare_suite_outputs_detects_added_removed_and_changed_cases(tmp_path)
     assert comparison["changed_cases"][0]["deltas"]["reason_code_deltas"]["added"] == [
         "controller.commit_proposal_blocked"
     ]
+    assert comparison["changed_cases"][0]["deltas"]["primary_suspect_deltas"] == {
+        "added": ["decision_policy"],
+        "removed": ["instruction_prompt_skill"],
+    }
     assert comparison["changed_cases"][0]["deltas"][
         "diagnostic_expectation_failure_deltas"
     ]["added"] == ["diagnostic.reason_code_presence"]
@@ -123,6 +129,9 @@ def test_compare_suite_outputs_detects_added_removed_and_changed_cases(tmp_path)
     assert comparison["drift_summary"]["changed_case_count"] == 1
     assert comparison["drift_summary"]["changed_finish_reason_case_ids"] == ["setup.case.a"]
     assert comparison["drift_summary"]["changed_reason_code_case_ids"] == ["setup.case.a"]
+    assert comparison["drift_summary"]["changed_primary_suspect_case_ids"] == [
+        "setup.case.a"
+    ]
     assert comparison["drift_summary"]["changed_recommended_next_action_case_ids"] == [
         "setup.case.a"
     ]

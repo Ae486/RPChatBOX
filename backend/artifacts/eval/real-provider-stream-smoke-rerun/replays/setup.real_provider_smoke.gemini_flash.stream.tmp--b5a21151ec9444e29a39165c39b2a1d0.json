@@ -1,0 +1,1528 @@
+{
+  "case": {
+    "case_id": "setup.real_provider_smoke.gemini_flash.stream.tmp",
+    "title": "Real-provider setup stream smoke with Mint Gemini 2.5 Flash",
+    "scope": "setup",
+    "category": "real_provider_smoke",
+    "tags": [
+      "smoke",
+      "real-provider",
+      "setup-v2"
+    ],
+    "runtime_target": {
+      "mode": "in_process",
+      "entrypoint": "setup_graph_runner.run_turn",
+      "graph_id": "setup_v2",
+      "stream": true
+    },
+    "input": {
+      "request": {
+        "workspace_id": "case-real-gemini-setup-001--run-9cb27875",
+        "target_step": "writing_contract",
+        "user_prompt": "我想写一篇偏克制、第三人称限知视角的悬疑长篇。当前信息还不完整，请先帮我收敛写作契约，并告诉我下一步最需要补充什么。",
+        "history": [],
+        "model_id": "45776d28-7975-4a4b-8fb3-4cca18daeb02",
+        "provider_id": "39a5de23-0c64-4711-87bc-d69667e53f0d"
+      },
+      "workspace_seed": {
+        "story_id": "story-case-real-gemini-setup-001--run-9cb27875",
+        "mode": "longform",
+        "current_step": "writing_contract",
+        "drafts": {
+          "story_config": {
+            "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+            "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+            "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+            "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422"
+          }
+        }
+      },
+      "env_overrides": {
+        "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+        "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+        "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+        "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+        "save_replay_dir": "artifacts\\eval\\real-provider-stream-smoke-rerun\\replays"
+      },
+      "diagnostic_profile": null
+    },
+    "preconditions": {},
+    "expected": {
+      "deterministic_assertions": [
+        {
+          "assertion_id": "finish_reason_exists",
+          "source": "runtime_result",
+          "type": "exists",
+          "path": "finish_reason",
+          "expected": true,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "assistant_text_exists",
+          "source": "runtime_result",
+          "type": "exists",
+          "path": "assistant_text",
+          "expected": true,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "round_no_exists",
+          "source": "runtime_result",
+          "type": "exists",
+          "path": "structured_payload.round_no",
+          "expected": true,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "activation_check_ready_exists",
+          "source": "runtime_result",
+          "type": "exists",
+          "path": "activation_check.ready",
+          "expected": true,
+          "severity": "error"
+        }
+      ],
+      "subjective_hooks": [],
+      "expected_reason_codes": [],
+      "expected_primary_suspects": [],
+      "expected_outcome_chain": {},
+      "expected_recommended_next_action": null
+    },
+    "trace_hooks": {
+      "capture_runtime_events": true,
+      "capture_graph_debug": true,
+      "capture_workspace_before_after": true,
+      "capture_activation_snapshot": true,
+      "capture_tool_sequence": true
+    },
+    "repeat": {
+      "count": 1,
+      "stop_on_first_hard_failure": false
+    },
+    "baseline": {
+      "compare_by": [
+        "finish_reason",
+        "assertion_pass_rate"
+      ],
+      "baseline_tags": [
+        "real-provider"
+      ]
+    },
+    "metadata": {
+      "purpose": "One-off real provider smoke suite"
+    }
+  },
+  "run": {
+    "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+    "case_id": "setup.real_provider_smoke.gemini_flash.stream.tmp",
+    "scope": "setup",
+    "status": "failed",
+    "started_at": "2026-04-26T09:22:17.011953Z",
+    "finished_at": "2026-04-26T09:22:30.063047Z",
+    "runtime_target": "setup_v2",
+    "baseline_tags": [
+      "real-provider"
+    ],
+    "trace_id": "827478b4bd924492a65e7123e0a35c35",
+    "failure": {
+      "layer": "infra",
+      "code": "runtime_execution_failed",
+      "message": "{'message': 'Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT', 'type': 'runtime_execution_failed'}",
+      "retryable": true,
+      "source": "runtime_result"
+    },
+    "metadata": {
+      "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+      "story_id": "story-case-real-gemini-setup-001--run-9cb27875",
+      "setup_step": "writing_contract",
+      "model_id": "45776d28-7975-4a4b-8fb3-4cca18daeb02",
+      "provider_id": "39a5de23-0c64-4711-87bc-d69667e53f0d",
+      "stream_mode": true,
+      "diagnostic_profile": "setup_outcome_v1"
+    }
+  },
+  "trace": {
+    "trace_id": "827478b4bd924492a65e7123e0a35c35",
+    "spans": [
+      {
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "trace_id": "827478b4bd924492a65e7123e0a35c35",
+        "parent_span_id": null,
+        "name": "setup.turn",
+        "span_kind": "AGENT",
+        "status": "error",
+        "started_at": "2026-04-26T09:22:17.011953Z",
+        "finished_at": "2026-04-26T09:22:30.063047Z",
+        "input": {
+          "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+          "model_id": "45776d28-7975-4a4b-8fb3-4cca18daeb02",
+          "provider_id": "39a5de23-0c64-4711-87bc-d69667e53f0d",
+          "target_step": "writing_contract",
+          "history": [],
+          "user_edit_delta_ids": [],
+          "user_prompt": "我想写一篇偏克制、第三人称限知视角的悬疑长篇。当前信息还不完整，请先帮我收敛写作契约，并告诉我下一步最需要补充什么。"
+        },
+        "output": {
+          "status": "failed",
+          "finish_reason": "runtime_execution_failed",
+          "assistant_text": "",
+          "tool_invocations": [],
+          "tool_results": [],
+          "warnings": [],
+          "structured_payload": {},
+          "error": {
+            "message": "Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT",
+            "type": "runtime_execution_failed"
+          }
+        },
+        "attributes": {
+          "case_id": "setup.real_provider_smoke.gemini_flash.stream.tmp",
+          "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+          "story_id": "story-case-real-gemini-setup-001--run-9cb27875",
+          "target_step": "writing_contract",
+          "setup_step": "writing_contract",
+          "model_id": "45776d28-7975-4a4b-8fb3-4cca18daeb02",
+          "provider_id": "39a5de23-0c64-4711-87bc-d69667e53f0d",
+          "stream_mode": true,
+          "finish_reason": "runtime_execution_failed",
+          "repair_route": null,
+          "cognitive_state_invalidated": null,
+          "cognitive_ready_for_review": null,
+          "cognitive_remaining_issue_count": 0
+        },
+        "error": {
+          "message": "Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT",
+          "type": "runtime_execution_failed"
+        }
+      }
+    ],
+    "events": [
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:0",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 1,
+        "type": "runtime_event.raw",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "chunk": {
+            "id": "chatcmpl-202604261722195481482174yoezJRr",
+            "created": 1777195343,
+            "model": "gemini-2.5-flash",
+            "object": "chat.completion.chunk",
+            "choices": [
+              {
+                "finish_reason": "content_filter",
+                "index": 0,
+                "delta": {}
+              }
+            ]
+          }
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:1",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 2,
+        "type": "runtime_event.usage",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "prompt_tokens": 1126,
+          "completion_tokens": 0,
+          "total_tokens": 1126
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:2",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 3,
+        "type": "runtime_event.tool_call",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "tool_calls": [
+            {
+              "id": "call_009d7c879e7e429ba5946775dfabfa11",
+              "function": {
+                "arguments": "",
+                "name": "rp_setup__setup.patch.writing_contract"
+              },
+              "type": "function",
+              "index": 0
+            }
+          ]
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:3",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 4,
+        "type": "runtime_event.tool_call",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"patch\":{\"pov_rules\":[\"第三人称限知视角\"],\"style_rules\":[\"克制\"]},\"workspace_id\":\"26114fa2e08d454fa9e6bfb5ecec4500\"}"
+              },
+              "type": "function",
+              "index": 0
+            }
+          ]
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:4",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 5,
+        "type": "runtime_event.raw",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "chunk": {
+            "id": "chatcmpl-20260426172224357360453o1seQdAi",
+            "created": 1777195346,
+            "model": "gemini-2.5-flash",
+            "object": "chat.completion.chunk",
+            "choices": [
+              {
+                "finish_reason": "tool_calls",
+                "index": 0,
+                "delta": {}
+              }
+            ]
+          }
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:5",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 6,
+        "type": "runtime_event.usage",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "prompt_tokens": 6404,
+          "completion_tokens": 277,
+          "total_tokens": 6681
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:6",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 7,
+        "type": "runtime_event.tool_started",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "call_id": "call_009d7c879e7e429ba5946775dfabfa11",
+          "tool_name": "rp_setup__setup.patch.writing_contract"
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:7",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 8,
+        "type": "runtime_event.tool_result",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "call_id": "call_009d7c879e7e429ba5946775dfabfa11",
+          "tool_name": "rp_setup__setup.patch.writing_contract",
+          "result": "{\"message\": \"Updated writing_contract draft\", \"success\": true, \"updated_refs\": [\"draft:writing_contract\"], \"warnings\": []}"
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:8",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 9,
+        "type": "runtime_event.tool_call",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "tool_calls": [
+            {
+              "id": "call_90e490a8682342ed80e9309adc89c980",
+              "function": {
+                "arguments": "",
+                "name": "rp_setup__setup.discussion.update_state"
+              },
+              "type": "function",
+              "index": 0
+            }
+          ]
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:9",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 10,
+        "type": "runtime_event.tool_call",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"discussion_state\":{\"confirmed_points\":[\"作品类型为悬疑长篇\",\"写作风格为克制\",\"叙事视角为第三人称限知视角\"],\"current_step\":\"writing_contract\",\"discussion_topic\":\"Writing Contract for a Restrained, Third-Person Limited Suspense Novel\",\"open_questions\":[\"除了克制和第三人称限知视角，你对故事的写作风格、文体以及其他限制条件有什么想法？\"]},\"step_id\":\"writing_contract\",\"workspace_id\":\"26114fa2e08d454fa9e6bfb5ecec4500\"}"
+              },
+              "type": "function",
+              "index": 0
+            }
+          ]
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:10",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 11,
+        "type": "runtime_event.raw",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "chunk": {
+            "id": "chatcmpl-20260426172228379394161aN0tr5v4",
+            "created": 1777195349,
+            "model": "gemini-2.5-flash",
+            "object": "chat.completion.chunk",
+            "choices": [
+              {
+                "finish_reason": "tool_calls",
+                "index": 0,
+                "delta": {}
+              }
+            ]
+          }
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:11",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 12,
+        "type": "runtime_event.usage",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "prompt_tokens": 6528,
+          "completion_tokens": 162,
+          "total_tokens": 6690
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:12",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 13,
+        "type": "runtime_event.tool_started",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "call_id": "call_90e490a8682342ed80e9309adc89c980",
+          "tool_name": "rp_setup__setup.discussion.update_state"
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:13",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 14,
+        "type": "runtime_event.tool_result",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "call_id": "call_90e490a8682342ed80e9309adc89c980",
+          "tool_name": "rp_setup__setup.discussion.update_state",
+          "result": "{\"cognitive_state_snapshot\": {\"chunk_candidates\": [], \"current_step\": \"writing_contract\", \"discussion_state\": {\"candidate_directions\": [], \"confirmed_points\": [\"作品类型为悬疑长篇\", \"写作风格为克制\", \"叙事视角为第三人称限知视角\"], \"current_step\": \"writing_contract\", \"discussion_topic\": \"Writing Contract for a Restrained, Third-Person Limited Suspense Novel\", \"open_questions\": [\"除了克制和第三人称限知视角，你对故事的写作风格、文体以及其他限制条件有什么想法？\"], \"unresolved_conflicts\": [], \"user_preference_signals\": []}, \"invalidated\": false, \"invalidation_reasons\": [], \"source_basis\": {\"current_step\": \"writing_contract\", \"draft_fingerprint\": \"0d2e20fa3168f7a800d3b5fe09d0abcb397bb9b1850024afeea771ddae810840\", \"pending_user_edit_delta_ids\": [], \"workspace_version\": 3}, \"state_version\": 1, \"workspace_id\": \"26114fa2e08d454fa9e6bfb5ecec4500\"}, \"cognitive_state_summary\": {\"candidate_titles\": [], \"confirmed_points\": [\"作品类型为悬疑长篇\", \"写作风格为克制\", \"叙事视角为第三人称限知视角\"], \"current_step\": \"writing_contract\", \"discussion_topic\": \"Writing Contract for a Restrained, Third-Person Limited Suspense Novel\", \"invalidated\": false, \"invalidation_reasons\": [], \"open_questions\": [\"除了克制和第三人称限知视角，你对故事的写作风格、文体以及其他限制条件有什么想法？\"], \"ready_for_review\": false, \"remaining_open_issues\": [], \"unresolved_conflicts\": []}, \"message\": \"Updated discussion state\", \"success\": true, \"updated_refs\": [\"cognitive:discussion_state\"]}"
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:14",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 15,
+        "type": "runtime_event.error",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {
+          "error": {
+            "message": "Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT",
+            "type": "runtime_execution_failed"
+          }
+        }
+      },
+      {
+        "event_id": "b5a21151ec9444e29a39165c39b2a1d0:root:event:15",
+        "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+        "sequence_no": 16,
+        "type": "runtime_event.done",
+        "timestamp": "2026-04-26T09:22:30.084761Z",
+        "payload": {}
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "artifact_id": "b5a21151ec9444e29a39165c39b2a1d0:artifact:runtime_result",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "kind": "runtime_result",
+      "name": "RpAgentTurnResult",
+      "content_type": "application/json",
+      "payload": {
+        "status": "failed",
+        "finish_reason": "runtime_execution_failed",
+        "assistant_text": "",
+        "tool_invocations": [],
+        "tool_results": [],
+        "warnings": [],
+        "structured_payload": {},
+        "error": {
+          "message": "Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT",
+          "type": "runtime_execution_failed"
+        }
+      }
+    },
+    {
+      "artifact_id": "b5a21151ec9444e29a39165c39b2a1d0:artifact:tool_sequence",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "kind": "tool_sequence",
+      "name": "SetupToolSequence",
+      "content_type": "application/json",
+      "payload": {
+        "count": 0,
+        "items": []
+      }
+    },
+    {
+      "artifact_id": "b5a21151ec9444e29a39165c39b2a1d0:artifact:workspace_before",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "kind": "workspace_before",
+      "name": "SetupWorkspaceBefore",
+      "content_type": "application/json",
+      "payload": {
+        "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+        "story_id": "story-case-real-gemini-setup-001--run-9cb27875",
+        "mode": "longform",
+        "workspace_state": "drafting",
+        "current_step": "writing_contract",
+        "step_states": [
+          {
+            "step_id": "foundation",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:17.097799"
+          },
+          {
+            "step_id": "longform_blueprint",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:17.097799"
+          },
+          {
+            "step_id": "writing_contract",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:17.097799"
+          },
+          {
+            "step_id": "story_config",
+            "state": "discussing",
+            "discussion_round": 1,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:17.137742"
+          }
+        ],
+        "story_config_draft": {
+          "model_profile_ref": null,
+          "worker_profile_ref": null,
+          "post_write_policy_preset": null,
+          "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+          "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+          "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+          "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+          "notes": null
+        },
+        "writing_contract_draft": null,
+        "foundation_draft": null,
+        "longform_blueprint_draft": null,
+        "imported_assets": [],
+        "step_asset_bindings": [],
+        "retrieval_ingestion_jobs": [],
+        "commit_proposals": [],
+        "accepted_commits": [],
+        "pending_user_edit_deltas": [],
+        "open_questions": [],
+        "readiness_status": {
+          "step_readiness": {
+            "foundation": "not_ready",
+            "longform_blueprint": "not_ready",
+            "writing_contract": "not_ready",
+            "story_config": "ready_for_commit"
+          },
+          "blocking_issues": [],
+          "warnings": [
+            "Step foundation has no draft content yet",
+            "Step longform_blueprint has no draft content yet",
+            "Step writing_contract has no draft content yet"
+          ]
+        },
+        "version": 2,
+        "created_at": "2026-04-26T09:22:17.097799",
+        "updated_at": "2026-04-26T09:22:17.137742",
+        "activated_at": null,
+        "activated_story_session_id": null
+      }
+    },
+    {
+      "artifact_id": "b5a21151ec9444e29a39165c39b2a1d0:artifact:workspace_after",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "kind": "workspace_after",
+      "name": "SetupWorkspaceAfter",
+      "content_type": "application/json",
+      "payload": {
+        "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+        "story_id": "story-case-real-gemini-setup-001--run-9cb27875",
+        "mode": "longform",
+        "workspace_state": "drafting",
+        "current_step": "writing_contract",
+        "step_states": [
+          {
+            "step_id": "foundation",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:17.097799"
+          },
+          {
+            "step_id": "longform_blueprint",
+            "state": "discussing",
+            "discussion_round": 0,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:17.097799"
+          },
+          {
+            "step_id": "writing_contract",
+            "state": "discussing",
+            "discussion_round": 1,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:26.372082"
+          },
+          {
+            "step_id": "story_config",
+            "state": "discussing",
+            "discussion_round": 1,
+            "review_round": 0,
+            "last_proposal_id": null,
+            "last_commit_id": null,
+            "updated_at": "2026-04-26T09:22:17.137742"
+          }
+        ],
+        "story_config_draft": {
+          "model_profile_ref": null,
+          "worker_profile_ref": null,
+          "post_write_policy_preset": null,
+          "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+          "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+          "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+          "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+          "notes": null
+        },
+        "writing_contract_draft": {
+          "pov_rules": [
+            "第三人称限知视角"
+          ],
+          "style_rules": [
+            "克制"
+          ],
+          "writing_constraints": [],
+          "task_writing_rules": [],
+          "notes": null
+        },
+        "foundation_draft": null,
+        "longform_blueprint_draft": null,
+        "imported_assets": [],
+        "step_asset_bindings": [],
+        "retrieval_ingestion_jobs": [],
+        "commit_proposals": [],
+        "accepted_commits": [],
+        "pending_user_edit_deltas": [],
+        "open_questions": [],
+        "readiness_status": {
+          "step_readiness": {
+            "foundation": "not_ready",
+            "longform_blueprint": "not_ready",
+            "writing_contract": "ready_for_commit",
+            "story_config": "ready_for_commit"
+          },
+          "blocking_issues": [],
+          "warnings": [
+            "Step foundation has no draft content yet",
+            "Step longform_blueprint has no draft content yet"
+          ]
+        },
+        "version": 3,
+        "created_at": "2026-04-26T09:22:17.097799",
+        "updated_at": "2026-04-26T09:22:30.043381",
+        "activated_at": null,
+        "activated_story_session_id": null
+      }
+    },
+    {
+      "artifact_id": "b5a21151ec9444e29a39165c39b2a1d0:artifact:readiness_snapshot",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "kind": "readiness_snapshot",
+      "name": "SetupReadinessSnapshot",
+      "content_type": "application/json",
+      "payload": {
+        "step_readiness": {
+          "foundation": "not_ready",
+          "longform_blueprint": "not_ready",
+          "writing_contract": "ready_for_commit",
+          "story_config": "ready_for_commit"
+        },
+        "blocking_issues": [],
+        "warnings": [
+          "Step foundation has no draft content yet",
+          "Step longform_blueprint has no draft content yet"
+        ]
+      }
+    },
+    {
+      "artifact_id": "b5a21151ec9444e29a39165c39b2a1d0:artifact:graph_debug",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "kind": "graph_debug",
+      "name": "SetupGraphRuntimeDebug",
+      "content_type": "application/json",
+      "payload": {
+        "thread_id": "26114fa2e08d454fa9e6bfb5ecec4500:rp_setup",
+        "namespace": "rp_setup",
+        "latest_checkpoint": {
+          "checkpoint_id": "1f141516-b408-659c-bfff-e0d388c7a589",
+          "parent_checkpoint_id": null,
+          "status": null,
+          "state": {},
+          "cognitive_state_summary": null,
+          "repair_route": null,
+          "summary": {
+            "checkpoint_id": "1f141516-b408-659c-bfff-e0d388c7a589",
+            "parent_checkpoint_id": null,
+            "created_at": "2026-04-26T09:22:17.274306+00:00",
+            "status": null,
+            "state_keys": []
+          }
+        },
+        "latest_meaningful_checkpoint": {
+          "checkpoint_id": "1f141517-2da3-6e3a-8003-d2132d754a9d",
+          "parent_checkpoint_id": "1f141516-b72d-6c16-8002-8bbf35d2ab52",
+          "status": "failed",
+          "state": {
+            "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+            "mode": "longform",
+            "current_step": "writing_contract",
+            "target_step": "writing_contract",
+            "model_id": "45776d28-7975-4a4b-8fb3-4cca18daeb02",
+            "provider_id": "39a5de23-0c64-4711-87bc-d69667e53f0d",
+            "user_prompt": "我想写一篇偏克制、第三人称限知视角的悬疑长篇。当前信息还不完整，请先帮我收敛写作契约，并告诉我下一步最需要补充什么。",
+            "history": [],
+            "user_edit_delta_ids": [],
+            "stream_mode": true,
+            "status": "failed",
+            "context_packet": {
+              "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+              "current_step": "writing_contract",
+              "committed_summaries": [],
+              "current_draft_snapshot": {},
+              "step_asset_preview": [],
+              "user_prompt": "我想写一篇偏克制、第三人称限知视角的悬疑长篇。当前信息还不完整，请先帮我收敛写作契约，并告诉我下一步最需要补充什么。",
+              "user_edit_deltas": [],
+              "spotlights": []
+            },
+            "assistant_text": "",
+            "finish_reason": "runtime_execution_failed",
+            "warnings": [],
+            "response_payload": {},
+            "error": {
+              "message": "Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT",
+              "type": "runtime_execution_failed"
+            }
+          },
+          "cognitive_state_summary": null,
+          "repair_route": null,
+          "summary": {
+            "checkpoint_id": "1f141517-2da3-6e3a-8003-d2132d754a9d",
+            "parent_checkpoint_id": "1f141516-b72d-6c16-8002-8bbf35d2ab52",
+            "created_at": "2026-04-26T09:22:30.025785+00:00",
+            "status": "failed",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "current_step",
+              "error",
+              "finish_reason",
+              "history",
+              "mode",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          }
+        },
+        "history": [
+          {
+            "checkpoint_id": "1f141517-2da3-6e3a-8003-d2132d754a9d",
+            "parent_checkpoint_id": "1f141516-b72d-6c16-8002-8bbf35d2ab52",
+            "created_at": "2026-04-26T09:22:30.025785+00:00",
+            "status": "failed",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "current_step",
+              "error",
+              "finish_reason",
+              "history",
+              "mode",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          },
+          {
+            "checkpoint_id": "1f141516-b72d-6c16-8002-8bbf35d2ab52",
+            "parent_checkpoint_id": "1f141516-b71a-6183-8001-7b5344df82ca",
+            "created_at": "2026-04-26T09:22:17.604200+00:00",
+            "status": "context_built",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "current_step",
+              "error",
+              "finish_reason",
+              "history",
+              "mode",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          },
+          {
+            "checkpoint_id": "1f141516-b71a-6183-8001-7b5344df82ca",
+            "parent_checkpoint_id": "1f141516-b40c-62fe-8000-7b1ae562fdde",
+            "created_at": "2026-04-26T09:22:17.596147+00:00",
+            "status": "workspace_loaded",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "current_step",
+              "error",
+              "finish_reason",
+              "history",
+              "mode",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          },
+          {
+            "checkpoint_id": "1f141516-b40c-62fe-8000-7b1ae562fdde",
+            "parent_checkpoint_id": "1f141516-b408-659c-bfff-e0d388c7a589",
+            "created_at": "2026-04-26T09:22:17.275878+00:00",
+            "status": "received",
+            "state_keys": [
+              "assistant_text",
+              "context_packet",
+              "error",
+              "finish_reason",
+              "history",
+              "model_id",
+              "provider_id",
+              "response_payload",
+              "status",
+              "stream_mode",
+              "target_step",
+              "user_edit_delta_ids",
+              "user_prompt",
+              "warnings",
+              "workspace_id"
+            ]
+          },
+          {
+            "checkpoint_id": "1f141516-b408-659c-bfff-e0d388c7a589",
+            "parent_checkpoint_id": null,
+            "created_at": "2026-04-26T09:22:17.274306+00:00",
+            "status": null,
+            "state_keys": []
+          }
+        ]
+      }
+    },
+    {
+      "artifact_id": "b5a21151ec9444e29a39165c39b2a1d0:artifact:activation_check",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "kind": "activation_check",
+      "name": "ActivationCheckResult",
+      "content_type": "application/json",
+      "payload": {
+        "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+        "ready": false,
+        "blocking_issues": [
+          "Step not frozen: longform_blueprint",
+          "Step not frozen: writing_contract",
+          "Step not frozen: story_config",
+          "Step not frozen: foundation",
+          "foundation commit missing",
+          "blueprint commit missing"
+        ],
+        "warnings": [
+          "Step foundation has no draft content yet",
+          "Step longform_blueprint has no draft content yet"
+        ],
+        "handoff": null
+      }
+    }
+  ],
+  "scores": [
+    {
+      "score_id": "b5a21151ec9444e29a39165c39b2a1d0:score:finish_reason_exists",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+      "name": "finish_reason_exists",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "exists=True expected=True",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "finish_reason",
+        "expected": true,
+        "actual": "runtime_execution_failed"
+      }
+    },
+    {
+      "score_id": "b5a21151ec9444e29a39165c39b2a1d0:score:assistant_text_exists",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+      "name": "assistant_text_exists",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "exists=True expected=True",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "assistant_text",
+        "expected": true,
+        "actual": ""
+      }
+    },
+    {
+      "score_id": "b5a21151ec9444e29a39165c39b2a1d0:score:round_no_exists",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+      "name": "round_no_exists",
+      "kind": "code",
+      "status": "fail",
+      "value_type": "boolean",
+      "value": false,
+      "label": "fail",
+      "explanation": "exists=False expected=True",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "structured_payload.round_no",
+        "expected": true,
+        "actual": null
+      }
+    },
+    {
+      "score_id": "b5a21151ec9444e29a39165c39b2a1d0:score:activation_check_ready_exists",
+      "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+      "span_id": "b5a21151ec9444e29a39165c39b2a1d0:root",
+      "name": "activation_check_ready_exists",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "exists=True expected=True",
+      "severity": "error",
+      "metadata": {
+        "source": "runtime_result",
+        "path": "activation_check.ready",
+        "expected": true,
+        "actual": false
+      }
+    }
+  ],
+  "runtime_result": {
+    "status": "failed",
+    "finish_reason": "runtime_execution_failed",
+    "assistant_text": "",
+    "tool_invocations": [],
+    "tool_results": [],
+    "warnings": [],
+    "structured_payload": {},
+    "error": {
+      "message": "Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT",
+      "type": "runtime_execution_failed"
+    },
+    "activation_check": {
+      "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+      "ready": false,
+      "blocking_issues": [
+        "Step not frozen: longform_blueprint",
+        "Step not frozen: writing_contract",
+        "Step not frozen: story_config",
+        "Step not frozen: foundation",
+        "foundation commit missing",
+        "blueprint commit missing"
+      ],
+      "warnings": [
+        "Step foundation has no draft content yet",
+        "Step longform_blueprint has no draft content yet"
+      ],
+      "handoff": null
+    }
+  },
+  "report": {
+    "run_id": "b5a21151ec9444e29a39165c39b2a1d0",
+    "case_id": "setup.real_provider_smoke.gemini_flash.stream.tmp",
+    "scope": "setup",
+    "status": "failed",
+    "assertion_summary": {
+      "pass": 3,
+      "fail": 1,
+      "warn": 0,
+      "skip": 0
+    },
+    "hard_failures": [
+      "round_no_exists"
+    ],
+    "failure_layer": "infra",
+    "finish_reason": "runtime_execution_failed",
+    "repair_route": null,
+    "completion_guard_reason": null,
+    "last_failure_category": null,
+    "last_failure_message": null,
+    "cognitive_state_invalidated": null,
+    "cognitive_ready_for_review": null,
+    "cognitive_invalidation_reasons": [],
+    "remaining_open_issues": [],
+    "commit_blocked": false,
+    "subjective_hook_summary": {
+      "total": 0,
+      "pending": 0,
+      "executed": 0,
+      "judge_family_counts": {},
+      "rubric_refs": [],
+      "status_counts": {},
+      "average_numeric_score": null,
+      "rubric_summaries": {},
+      "artifact_count": 0
+    },
+    "subjective_hook_results": [],
+    "subjective_hook_artifact_ids": [],
+    "pending_judge_hook_ids": [],
+    "end_reason_summary": "runtime_execution_failed",
+    "ragas": null,
+    "diagnostics": {
+      "diagnostic_version": "v1",
+      "capabilities": {
+        "task_completion": {
+          "status": "fail",
+          "summary": "Setup turn never reached a stable agent outcome because infra/model-provider failed first.",
+          "evidence": [
+            "finish_reason=runtime_execution_failed",
+            "failure_layer=infra",
+            "assertion_fail_total=1"
+          ]
+        },
+        "clarification_gap_detection": {
+          "status": "not_applicable",
+          "summary": "Clarification behavior was not required in this run.",
+          "evidence": [
+            "finish_reason=runtime_execution_failed",
+            "assistant_text_chars=0"
+          ]
+        },
+        "repair_recovery": {
+          "status": "not_applicable",
+          "summary": "No repair or recovery path was needed in this run.",
+          "evidence": [
+            "tool_failure_count=0"
+          ]
+        },
+        "commit_readiness_judgement": {
+          "status": "not_applicable",
+          "summary": "Commit readiness was not meaningfully exercised in this run.",
+          "evidence": [
+            "commit_proposal_blocked=False",
+            "commit_tool_invoked=False",
+            "remaining_open_issue_count=0"
+          ]
+        },
+        "state_adaptation": {
+          "status": "not_applicable",
+          "summary": "No invalidated cognitive state was present, so adaptation was not exercised.",
+          "evidence": [
+            "finish_reason=runtime_execution_failed",
+            "tool_invocation_count=0"
+          ]
+        },
+        "operational_efficiency": {
+          "status": "unknown",
+          "summary": "No token or round metrics were available for efficiency analysis.",
+          "evidence": [
+            "tool_invocation_count=0"
+          ]
+        }
+      },
+      "reason_codes": [
+        "infra.provider_request_failed",
+        "readiness.blocked_by_open_setup_prerequisites"
+      ],
+      "outcome_chain": {
+        "transcript_status": "not_applicable",
+        "cognition_status": "not_applicable",
+        "truth_status": "not_applicable",
+        "readiness_status": "warn",
+        "activation_handoff_status": "fail",
+        "runtime_bootstrap_readiness_status": "warn"
+      },
+      "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+      "attribution": {
+        "primary_suspects": [
+          "infra_model_provider"
+        ],
+        "secondary_suspects": [],
+        "optimization_candidates": [
+          "fix_provider_model_config_and_runtime_connectivity"
+        ],
+        "evidence_refs": [
+          "artifact:runtime_result",
+          "artifact:activation_check",
+          "artifact:readiness_snapshot"
+        ],
+        "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+        "dimensions": {
+          "infra_model_provider": {
+            "status": "fail",
+            "summary": "Run failed before stable agent outcome; error_code=runtime_execution_failed",
+            "evidence": [
+              "failure_layer=infra",
+              "error_code=runtime_execution_failed"
+            ]
+          },
+          "tool_contract_execution": {
+            "status": "unknown",
+            "summary": "This run did not materially exercise tools.",
+            "evidence": [
+              "tool_invocation_count=0",
+              "tool_success_count=0",
+              "tool_failure_count=0",
+              "schema_retry_count=0"
+            ]
+          },
+          "decision_policy": {
+            "status": "unknown",
+            "summary": "Decision-facing assertions failed: round_no_exists.",
+            "evidence": [
+              "hard_failures=['round_no_exists']",
+              "finish_reason=runtime_execution_failed"
+            ]
+          },
+          "structured_output_contract": {
+            "status": "fail",
+            "summary": "Structured outcome is unavailable because runtime failed before producing a stable result.",
+            "evidence": [
+              "finish_reason=runtime_execution_failed",
+              "assistant_text_chars=0",
+              "schema_retry_count=0"
+            ]
+          },
+          "instruction_prompt_skill": {
+            "status": "unknown",
+            "summary": "Prompt/skill quality cannot be judged because infrastructure failed first.",
+            "evidence": [
+              "hard_failures=['round_no_exists']"
+            ]
+          },
+          "token_efficiency": {
+            "status": "unknown",
+            "summary": "Token usage is not currently available for this run.",
+            "evidence": []
+          },
+          "output_quality": {
+            "status": "fail",
+            "summary": "No usable output was produced because runtime failed upstream.",
+            "evidence": [
+              "assistant_text_chars=0",
+              "assertion_fail_total=1"
+            ]
+          }
+        },
+        "taxonomy_dimensions": {
+          "prompt_instruction": {
+            "status": "pass",
+            "summary": "Prompt / instruction alignment for step convergence and finish discipline.",
+            "evidence": [
+              "hard_failures=['round_no_exists']"
+            ],
+            "reason_codes": []
+          },
+          "model_behavior": {
+            "status": "fail",
+            "summary": "Model behavior against structured output and repair expectations.",
+            "evidence": [
+              "finish_reason=runtime_execution_failed",
+              "assistant_text_chars=0",
+              "schema_retry_count=0"
+            ],
+            "reason_codes": []
+          },
+          "tool_contract": {
+            "status": "pass",
+            "summary": "Tool argument and contract correctness.",
+            "evidence": [
+              "tool_invocation_count=0",
+              "tool_success_count=0",
+              "tool_failure_count=0",
+              "schema_retry_count=0"
+            ],
+            "reason_codes": []
+          },
+          "tool_execution": {
+            "status": "pass",
+            "summary": "Tool execution and recoverability after invocation.",
+            "evidence": [
+              "tool_invocation_count=0",
+              "tool_success_count=0",
+              "tool_failure_count=0",
+              "schema_retry_count=0"
+            ],
+            "reason_codes": []
+          },
+          "deterministic_controller": {
+            "status": "pass",
+            "summary": "Deterministic controller and commit/readiness policy correctness.",
+            "evidence": [
+              "hard_failures=['round_no_exists']",
+              "finish_reason=runtime_execution_failed"
+            ],
+            "reason_codes": []
+          },
+          "runtime_private_cognition": {
+            "status": "pass",
+            "summary": "Runtime-private cognition invalidation and reconciliation correctness.",
+            "evidence": [
+              "hard_failures=['round_no_exists']",
+              "finish_reason=runtime_execution_failed"
+            ],
+            "reason_codes": []
+          },
+          "readiness_activation_gate": {
+            "status": "fail",
+            "summary": "Readiness and activation-gate contract between setup outcome and activation bootstrap.",
+            "evidence": [
+              "ready=False",
+              "blocking_issue_count=6"
+            ],
+            "reason_codes": [
+              "readiness.blocked_by_open_setup_prerequisites"
+            ]
+          },
+          "retrieval_readiness": {
+            "status": "pass",
+            "summary": "Retrieval ingestion and archival readiness required by activation.",
+            "evidence": [
+              "archival_ready_ref_count=0"
+            ],
+            "reason_codes": []
+          },
+          "infra_provider": {
+            "status": "fail",
+            "summary": "Infrastructure and provider stability for this run.",
+            "evidence": [
+              "failure_layer=infra",
+              "error_code=runtime_execution_failed"
+            ],
+            "reason_codes": [
+              "infra.provider_request_failed"
+            ]
+          }
+        }
+      },
+      "observability": {
+        "supported_scope": "setup",
+        "request_metrics": {
+          "system_prompt_chars": null,
+          "user_prompt_chars": null,
+          "conversation_message_count": null,
+          "tool_scope_count": null,
+          "tool_scope": []
+        },
+        "usage": {
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "total_tokens": null
+        },
+        "tooling": {
+          "invocation_count": 0,
+          "success_count": 0,
+          "failure_count": 0,
+          "invoked_tool_names": []
+        }
+      }
+    },
+    "reason_codes": [
+      "infra.provider_request_failed",
+      "readiness.blocked_by_open_setup_prerequisites"
+    ],
+    "outcome_chain": {
+      "transcript_status": "not_applicable",
+      "cognition_status": "not_applicable",
+      "truth_status": "not_applicable",
+      "readiness_status": "warn",
+      "activation_handoff_status": "fail",
+      "runtime_bootstrap_readiness_status": "warn"
+    },
+    "outcome_chain_display": [
+      "transcript=not_applicable",
+      "cognition=not_applicable",
+      "truth=not_applicable",
+      "readiness=warn",
+      "activation_handoff=fail",
+      "runtime_bootstrap=warn"
+    ],
+    "outcome_chain_stages": [
+      {
+        "stage_key": "transcript_status",
+        "stage": "transcript",
+        "status": "not_applicable",
+        "summary": "Transcript moves the setup turn toward the expected step outcome."
+      },
+      {
+        "stage_key": "cognition_status",
+        "stage": "runtime_private_cognition",
+        "status": "not_applicable",
+        "summary": "Runtime-private cognition is fresh enough for the next decision."
+      },
+      {
+        "stage_key": "truth_status",
+        "stage": "workspace_truth",
+        "status": "not_applicable",
+        "summary": "Workspace truth and commit/readiness judgement are aligned."
+      },
+      {
+        "stage_key": "readiness_status",
+        "stage": "readiness_gate",
+        "status": "warn",
+        "summary": "Readiness gate matches the current setup substrate."
+      },
+      {
+        "stage_key": "activation_handoff_status",
+        "stage": "activation_handoff",
+        "status": "fail",
+        "summary": "Activation handoff contains the fields needed downstream."
+      },
+      {
+        "stage_key": "runtime_bootstrap_readiness_status",
+        "stage": "runtime_bootstrap_readiness",
+        "status": "warn",
+        "summary": "Longform runtime has enough setup output to bootstrap."
+      }
+    ],
+    "primary_suspects": [
+      "infra_model_provider"
+    ],
+    "secondary_suspects": [],
+    "evidence_refs": [
+      "artifact:runtime_result",
+      "artifact:activation_check",
+      "artifact:readiness_snapshot"
+    ],
+    "evidence_ref_details": [
+      {
+        "ref": "artifact:runtime_result",
+        "kind": "runtime_result",
+        "available": true,
+        "artifact_ids": [
+          "b5a21151ec9444e29a39165c39b2a1d0:artifact:runtime_result"
+        ],
+        "summary": "Runtime turn result, including finish reason, warnings, tool invocations, and structured payload."
+      },
+      {
+        "ref": "artifact:activation_check",
+        "kind": "activation_check",
+        "available": true,
+        "artifact_ids": [
+          "b5a21151ec9444e29a39165c39b2a1d0:artifact:activation_check"
+        ],
+        "summary": "Activation readiness decision and blocking issues."
+      },
+      {
+        "ref": "artifact:readiness_snapshot",
+        "kind": "readiness_snapshot",
+        "available": true,
+        "artifact_ids": [
+          "b5a21151ec9444e29a39165c39b2a1d0:artifact:readiness_snapshot"
+        ],
+        "summary": "Workspace readiness snapshot used to explain readiness/activation gate failures."
+      }
+    ],
+    "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+    "activation_check": {
+      "workspace_id": "26114fa2e08d454fa9e6bfb5ecec4500",
+      "ready": false,
+      "blocking_issues": [
+        "Step not frozen: longform_blueprint",
+        "Step not frozen: writing_contract",
+        "Step not frozen: story_config",
+        "Step not frozen: foundation",
+        "foundation commit missing",
+        "blueprint commit missing"
+      ],
+      "warnings": [
+        "Step foundation has no draft content yet",
+        "Step longform_blueprint has no draft content yet"
+      ],
+      "handoff": null
+    },
+    "activation_handoff_snapshot": null,
+    "diagnostic_overview": {
+      "failure_layer": {
+        "value": "infra",
+        "summary": "The run most likely failed in provider, database, or external infrastructure."
+      },
+      "reason_codes": [
+        {
+          "code": "infra.provider_request_failed",
+          "category": "infra"
+        },
+        {
+          "code": "readiness.blocked_by_open_setup_prerequisites",
+          "category": "readiness"
+        }
+      ],
+      "primary_suspects": [
+        {
+          "name": "infra_model_provider",
+          "status": "fail",
+          "summary": "Run failed before stable agent outcome; error_code=runtime_execution_failed",
+          "reason_codes": [],
+          "evidence": [
+            "failure_layer=infra",
+            "error_code=runtime_execution_failed"
+          ]
+        }
+      ],
+      "secondary_suspects": [],
+      "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+      "outcome_chain": [
+        {
+          "stage_key": "transcript_status",
+          "stage": "transcript",
+          "status": "not_applicable",
+          "summary": "Transcript moves the setup turn toward the expected step outcome."
+        },
+        {
+          "stage_key": "cognition_status",
+          "stage": "runtime_private_cognition",
+          "status": "not_applicable",
+          "summary": "Runtime-private cognition is fresh enough for the next decision."
+        },
+        {
+          "stage_key": "truth_status",
+          "stage": "workspace_truth",
+          "status": "not_applicable",
+          "summary": "Workspace truth and commit/readiness judgement are aligned."
+        },
+        {
+          "stage_key": "readiness_status",
+          "stage": "readiness_gate",
+          "status": "warn",
+          "summary": "Readiness gate matches the current setup substrate."
+        },
+        {
+          "stage_key": "activation_handoff_status",
+          "stage": "activation_handoff",
+          "status": "fail",
+          "summary": "Activation handoff contains the fields needed downstream."
+        },
+        {
+          "stage_key": "runtime_bootstrap_readiness_status",
+          "stage": "runtime_bootstrap_readiness",
+          "status": "warn",
+          "summary": "Longform runtime has enough setup output to bootstrap."
+        }
+      ],
+      "evidence_refs": [
+        {
+          "ref": "artifact:runtime_result",
+          "kind": "runtime_result",
+          "available": true,
+          "artifact_ids": [
+            "b5a21151ec9444e29a39165c39b2a1d0:artifact:runtime_result"
+          ],
+          "summary": "Runtime turn result, including finish reason, warnings, tool invocations, and structured payload."
+        },
+        {
+          "ref": "artifact:activation_check",
+          "kind": "activation_check",
+          "available": true,
+          "artifact_ids": [
+            "b5a21151ec9444e29a39165c39b2a1d0:artifact:activation_check"
+          ],
+          "summary": "Activation readiness decision and blocking issues."
+        },
+        {
+          "ref": "artifact:readiness_snapshot",
+          "kind": "readiness_snapshot",
+          "available": true,
+          "artifact_ids": [
+            "b5a21151ec9444e29a39165c39b2a1d0:artifact:readiness_snapshot"
+          ],
+          "summary": "Workspace readiness snapshot used to explain readiness/activation gate failures."
+        }
+      ],
+      "diagnostic_expectation_summary": null,
+      "diagnostic_version": "v1"
+    },
+    "diagnostic_summary_text": "failure_layer=infra | reason_codes=infra.provider_request_failed, readiness.blocked_by_open_setup_prerequisites | primary_suspects=infra_model_provider | next_action=fix_provider_model_config_and_runtime_connectivity | outcome_chain=transcript=not_applicable; cognition=not_applicable; truth=not_applicable; readiness=warn; activation_handoff=fail; runtime_bootstrap=warn | evidence_refs=artifact:runtime_result, artifact:activation_check, artifact:readiness_snapshot"
+  },
+  "source": {
+    "kind": "offline_eval_case"
+  }
+}

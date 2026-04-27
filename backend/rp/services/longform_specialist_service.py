@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 
 from models.chat import ChatMessage
@@ -17,7 +18,11 @@ from rp.models.story_runtime import (
 from .authoritative_state_view_service import AuthoritativeStateViewService
 from .memory_os_service import MemoryOsService
 from .projection_state_service import ProjectionStateService
+from .retrieval_block_adapter_service import RetrievalBlockAdapterService
 from .retrieval_broker import RetrievalBroker
+from .story_block_prompt_compile_service import StoryBlockPromptCompileService
+from .story_block_prompt_context_service import StoryBlockPromptContextService
+from .story_block_prompt_render_service import StoryBlockPromptRenderService
 from .story_llm_gateway import StoryLlmGateway
 
 
@@ -31,6 +36,12 @@ class LongformSpecialistService:
         authoritative_state_view_service: AuthoritativeStateViewService,
         projection_state_service: ProjectionStateService,
         memory_os_factory=None,
+        retrieval_block_adapter_service: RetrievalBlockAdapterService | None = None,
+        story_block_prompt_compile_service: StoryBlockPromptCompileService
+        | None = None,
+        story_block_prompt_context_service: StoryBlockPromptContextService
+        | None = None,
+        story_block_prompt_render_service: StoryBlockPromptRenderService | None = None,
     ) -> None:
         self._llm_gateway = llm_gateway or StoryLlmGateway()
         self._authoritative_state_view_service = authoritative_state_view_service
@@ -39,6 +50,14 @@ class LongformSpecialistService:
             lambda story_id: MemoryOsService(
                 retrieval_broker=RetrievalBroker(default_story_id=story_id)
             )
+        )
+        self._retrieval_block_adapter_service = (
+            retrieval_block_adapter_service or RetrievalBlockAdapterService()
+        )
+        self._story_block_prompt_compile_service = story_block_prompt_compile_service
+        self._story_block_prompt_context_service = story_block_prompt_context_service
+        self._story_block_prompt_render_service = (
+            story_block_prompt_render_service or StoryBlockPromptRenderService()
         )
 
     async def analyze(
@@ -71,11 +90,53 @@ class LongformSpecialistService:
                 MemorySearchRecallInput(query=query, top_k=3, scope="story")
             )
             recall_hits.extend(result.hits)
-
-        projection_state = self._projection_state_service.get_slot_map(session_id=session.session_id)
-        authoritative_state = self._authoritative_state_view_service.get_state_map(
-            session_id=session.session_id
+        archival_payload_hits = archival_hits[:4]
+        recall_payload_hits = recall_hits[:4]
+        archival_block_views = self._retrieval_block_adapter_service.build_block_views(
+            hits=archival_payload_hits
         )
+        recall_block_views = self._retrieval_block_adapter_service.build_block_views(
+            hits=recall_payload_hits
+        )
+
+        block_context = None
+        prompt_overlay = None
+        if self._story_block_prompt_compile_service is not None:
+            compiled_block_prompt = (
+                self._story_block_prompt_compile_service.compile_consumer_prompt(
+                    session_id=session.session_id,
+                    consumer_key="story.specialist",
+                )
+            )
+            if compiled_block_prompt is not None:
+                block_context = compiled_block_prompt.context
+                prompt_overlay = compiled_block_prompt.prompt_overlay
+        elif self._story_block_prompt_context_service is not None:
+            block_context = (
+                self._story_block_prompt_context_service.build_consumer_context(
+                    session_id=session.session_id,
+                    consumer_key="story.specialist",
+                )
+            )
+            if block_context is not None:
+                prompt_overlay = (
+                    self._story_block_prompt_render_service.render_prompt_overlay(
+                        context=block_context
+                    )
+                )
+        if block_context is not None:
+            projection_state = {
+                slot_name: list(items)
+                for slot_name, items in block_context.projection_state.items()
+            }
+            authoritative_state = deepcopy(block_context.authoritative_state)
+        else:
+            projection_state = self._projection_state_service.get_slot_map(
+                session_id=session.session_id
+            )
+            authoritative_state = self._authoritative_state_view_service.get_state_map(
+                session_id=session.session_id
+            )
         fallback = self._fallback_bundle(
             session=session,
             chapter=chapter,
@@ -102,6 +163,8 @@ class LongformSpecialistService:
             "Do not write user-visible prose. Return compact digests, writer hints, "
             "validation findings, and minimal state_patch_proposals."
         )
+        if prompt_overlay:
+            system_prompt += "\n\n" + prompt_overlay
         user_payload = {
             "session": {
                 "session_id": session.session_id,
@@ -124,6 +187,9 @@ class LongformSpecialistService:
             "user_prompt": user_prompt,
             "authoritative_state": authoritative_state,
             "projection_state": projection_state,
+            "block_context": block_context.model_dump(mode="json")
+            if block_context is not None
+            else None,
             "accepted_segments": [
                 {
                     "artifact_id": item.artifact_id,
@@ -142,7 +208,7 @@ class LongformSpecialistService:
                     "domain_path": hit.domain_path,
                     "metadata": hit.metadata,
                 }
-                for hit in archival_hits[:4]
+                for hit in archival_payload_hits
             ],
             "recall_hits": [
                 {
@@ -151,7 +217,13 @@ class LongformSpecialistService:
                     "domain_path": hit.domain_path,
                     "metadata": hit.metadata,
                 }
-                for hit in recall_hits[:4]
+                for hit in recall_payload_hits
+            ],
+            "archival_block_views": [
+                block.model_dump(mode="json") for block in archival_block_views
+            ],
+            "recall_block_views": [
+                block.model_dump(mode="json") for block in recall_block_views
             ],
             "response_schema": SpecialistResultBundle.model_json_schema(),
         }
@@ -161,7 +233,10 @@ class LongformSpecialistService:
                 provider_id=provider_id,
                 messages=[
                     ChatMessage(role="system", content=system_prompt),
-                    ChatMessage(role="user", content=json.dumps(user_payload, ensure_ascii=False)),
+                    ChatMessage(
+                        role="user",
+                        content=json.dumps(user_payload, ensure_ascii=False),
+                    ),
                 ],
                 temperature=0.2,
                 max_tokens=900,
@@ -189,7 +264,9 @@ class LongformSpecialistService:
     ) -> SpecialistResultBundle:
         blueprint_digest = list(projection_state.get("blueprint_digest", []))
         foundation_digest = list(projection_state.get("foundation_digest", []))
-        current_outline_digest = list(projection_state.get("current_outline_digest", []))
+        current_outline_digest = list(
+            projection_state.get("current_outline_digest", [])
+        )
         recent_segment_digest = [
             item.content_text[:240] for item in accepted_segments[-2:]
         ]
@@ -198,8 +275,14 @@ class LongformSpecialistService:
             f"chapter={chapter.chapter_index}",
             f"accepted_segments={len(chapter.accepted_segment_ids)}",
         ]
-        narrative_progress = authoritative_state.get("narrative_progress") or {}
-        chapter_digest = authoritative_state.get("chapter_digest") or {}
+        raw_narrative_progress = authoritative_state.get("narrative_progress")
+        narrative_progress = (
+            raw_narrative_progress if isinstance(raw_narrative_progress, dict) else {}
+        )
+        raw_chapter_digest = authoritative_state.get("chapter_digest")
+        chapter_digest = (
+            raw_chapter_digest if isinstance(raw_chapter_digest, dict) else {}
+        )
         current_state_digest.extend(
             value
             for value in (
@@ -208,12 +291,20 @@ class LongformSpecialistService:
             )
             if value
         )
-        retrieval_digest = [hit.excerpt_text[:220] for hit in [*archival_hits[:2], *recall_hits[:2]]]
+        retrieval_digest = [
+            hit.excerpt_text[:220] for hit in [*archival_hits[:2], *recall_hits[:2]]
+        ]
         if not current_outline_digest and chapter.accepted_outline_json is not None:
             current_outline_digest.append(
-                str(chapter.accepted_outline_json.get("content_text") or chapter.accepted_outline_json)
+                str(
+                    chapter.accepted_outline_json.get("content_text")
+                    or chapter.accepted_outline_json
+                )
             )
-        if pending_artifact is not None and command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT:
+        if (
+            pending_artifact is not None
+            and command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT
+        ):
             recent_segment_digest.append(pending_artifact.content_text[:240])
         writer_hints = list(plan.specialist_focus)
         writer_hints.extend(retrieval_digest[:2])
@@ -225,8 +316,14 @@ class LongformSpecialistService:
             LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
             LongformTurnCommandKind.COMPLETE_CHAPTER,
         }:
-            segment_text = pending_artifact.content_text if pending_artifact is not None else ""
-            summary = segment_text[:320] if segment_text else "Accepted segment updated runtime state."
+            segment_text = (
+                pending_artifact.content_text if pending_artifact is not None else ""
+            )
+            summary = (
+                segment_text[:320]
+                if segment_text
+                else "Accepted segment updated runtime state."
+            )
             state_patch = {
                 "chapter_digest": {
                     "current_chapter": chapter.chapter_index,
@@ -234,8 +331,12 @@ class LongformSpecialistService:
                 },
                 "narrative_progress": {
                     "last_command": command_kind.value,
-                    "accepted_segments": len(chapter.accepted_segment_ids) + (
-                        1 if command_kind == LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT else 0
+                    "accepted_segments": len(chapter.accepted_segment_ids)
+                    + (
+                        1
+                        if command_kind
+                        == LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT
+                        else 0
                     ),
                     "chapter_summary": summary,
                 },

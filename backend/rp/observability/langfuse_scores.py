@@ -16,6 +16,7 @@ def emit_setup_trace_scores(
     runtime_result: dict[str, Any],
     failure_layer: str | None = None,
     error_code: str | None = None,
+    report: dict[str, Any] | None = None,
 ) -> None:
     """Attach coarse setup scores to the current Langfuse trace."""
     if observation is None:
@@ -27,39 +28,28 @@ def emit_setup_trace_scores(
         failure_layer=failure_layer,
         error_code=error_code,
     )
+    if not isinstance(report, dict):
+        report = {}
+    report_diagnostics = _first_dict(report.get("diagnostics"))
+    report_attribution = _first_dict(report_diagnostics.get("attribution"))
     finish_reason = runtime_result.get("finish_reason")
-    warnings = runtime_result.get("warnings") if isinstance(runtime_result.get("warnings"), list) else []
-    structured_payload = runtime_result.get("structured_payload")
-    if not isinstance(structured_payload, dict):
-        structured_payload = {}
+    warnings = _first_list(runtime_result.get("warnings"))
+    structured_payload = _first_dict(runtime_result.get("structured_payload"))
     repair_route = structured_payload.get("repair_route")
-    completion_guard = (
-        structured_payload.get("completion_guard")
-        if isinstance(structured_payload.get("completion_guard"), dict)
-        else {}
-    )
-    pending_obligation = (
-        structured_payload.get("pending_obligation")
-        if isinstance(structured_payload.get("pending_obligation"), dict)
-        else {}
-    )
-    last_failure = (
-        structured_payload.get("last_failure")
-        if isinstance(structured_payload.get("last_failure"), dict)
-        else {}
-    )
-    cognitive_summary = (
-        structured_payload.get("cognitive_state_summary")
-        if isinstance(structured_payload.get("cognitive_state_summary"), dict)
-        else {}
-    )
+    completion_guard = _first_dict(structured_payload.get("completion_guard"))
+    pending_obligation = _first_dict(structured_payload.get("pending_obligation"))
+    if repair_route is None and (
+        "commit_proposal_blocked" in warnings
+        or pending_obligation.get("obligation_type") == "reassess_commit_readiness"
+    ):
+        repair_route = "block_commit"
+    last_failure = _first_dict(structured_payload.get("last_failure"))
     usage = (
         structured_payload.get("latest_response", {}).get("usage")
         if isinstance(structured_payload.get("latest_response"), dict)
         else None
     )
-    if not isinstance(usage, dict):
-        usage = {}
+    usage = _first_dict(usage)
     tool_invocations = runtime_result.get("tool_invocations")
     if not isinstance(tool_invocations, list):
         tool_invocations = []
@@ -67,18 +57,61 @@ def emit_setup_trace_scores(
     if not isinstance(tool_results, list):
         tool_results = []
     assistant_text = str(runtime_result.get("assistant_text") or "")
-    tool_failure_codes = [
-        str(item.get("error_code") or "")
-        for item in tool_results
-        if isinstance(item, dict) and not bool(item.get("success"))
-    ]
+    turn_goal = _first_dict(structured_payload.get("turn_goal"))
+    working_plan = _first_dict(structured_payload.get("working_plan"))
+    request_context = _first_dict(structured_payload.get("request_context"))
     round_no = int(structured_payload.get("round_no") or 0)
     total_tokens = int(usage.get("total_tokens") or 0)
     capabilities = diagnostics.get("capabilities") or {}
     attribution = diagnostics.get("attribution") or {}
-    attribution_dimensions = attribution.get("dimensions") or {}
-    outcome_chain = diagnostics.get("outcome_chain") or {}
-    reason_codes = diagnostics.get("reason_codes") or []
+    if not isinstance(attribution, dict):
+        attribution = {}
+    attribution_dimensions = _first_dict(
+        report_attribution.get("dimensions"),
+        attribution.get("dimensions"),
+    )
+    outcome_chain = _first_dict(
+        report.get("outcome_chain"),
+        report_diagnostics.get("outcome_chain"),
+        diagnostics.get("outcome_chain"),
+    )
+    reason_codes = _first_list(
+        report.get("reason_codes"),
+        report_diagnostics.get("reason_codes"),
+        diagnostics.get("reason_codes"),
+    )
+    primary_suspects = _first_list(
+        report.get("primary_suspects"),
+        report_attribution.get("primary_suspects"),
+        attribution.get("primary_suspects"),
+    )
+    secondary_suspects = _first_list(
+        report.get("secondary_suspects"),
+        report_attribution.get("secondary_suspects"),
+        attribution.get("secondary_suspects"),
+    )
+    evidence_refs = _first_list(
+        report.get("evidence_refs"),
+        report_attribution.get("evidence_refs"),
+        attribution.get("evidence_refs"),
+    )
+    optimization_candidates = _first_list(
+        report_attribution.get("optimization_candidates"),
+        attribution.get("optimization_candidates"),
+    )
+    recommended_next_action = _first_scalar(
+        report.get("recommended_next_action"),
+        report_diagnostics.get("recommended_next_action"),
+        report_attribution.get("recommended_next_action"),
+        diagnostics.get("recommended_next_action"),
+        attribution.get("recommended_next_action"),
+    )
+    effective_failure_layer = _first_scalar(
+        report.get("failure_layer"),
+        report_diagnostics.get("failure_layer"),
+        diagnostics.get("failure_layer"),
+        failure_layer,
+    )
 
     _score_trace(
         observation,
@@ -98,7 +131,10 @@ def emit_setup_trace_scores(
     _score_trace(
         observation,
         name="setup.commit_blocked",
-        value=bool("commit_proposal_blocked" in warnings),
+        value=bool(
+            repair_route == "block_commit"
+            or "commit_proposal_blocked" in warnings
+        ),
         data_type=_boolean_type(),
         comment="Whether runtime blocked commit proposal in this turn",
     )
@@ -134,6 +170,13 @@ def emit_setup_trace_scores(
     )
     _score_trace(
         observation,
+        name="setup.failure_layer",
+        value=str(effective_failure_layer or "none"),
+        data_type=_categorical_type(),
+        comment="Top-level setup failure layer used by offline/online diagnostics",
+    )
+    _score_trace(
+        observation,
         name="setup.metric.total_tokens",
         value=total_tokens,
         data_type=_numeric_type(),
@@ -153,6 +196,59 @@ def emit_setup_trace_scores(
         data_type=_numeric_type(),
         comment="Tool invocation count for this setup turn",
     )
+    if tool_invocations:
+        _score_trace(
+            observation,
+            name="setup.metric.tokens_per_tool_invocation",
+            value=round(total_tokens / len(tool_invocations), 2),
+            data_type=_numeric_type(),
+            comment="Average tokens spent per tool invocation in this setup turn",
+        )
+    _emit_diagnostic_score_group(
+        observation,
+        prefix="setup",
+        name="tool_selection_correct",
+        entry=_build_setup_tool_selection_entry(
+            tool_invocations=tool_invocations,
+            tool_results=tool_results,
+            turn_goal=turn_goal,
+            working_plan=working_plan,
+            request_context=request_context,
+            pending_obligation=pending_obligation,
+            completion_guard_reason=str(completion_guard.get("reason") or ""),
+            finish_reason=str(finish_reason or ""),
+        ),
+    )
+    _emit_diagnostic_score_group(
+        observation,
+        prefix="setup",
+        name="tool_result_value",
+        entry=_build_setup_tool_result_value_entry(
+            tool_invocations=tool_invocations,
+            tool_results=tool_results,
+            finish_reason=str(finish_reason or ""),
+            assistant_text=assistant_text,
+            request_context=request_context,
+            pending_obligation=pending_obligation,
+            completion_guard_reason=str(completion_guard.get("reason") or ""),
+            repair_route=str(repair_route or ""),
+        ),
+    )
+    _emit_diagnostic_score_group(
+        observation,
+        prefix="setup.loop",
+        name="noop_or_repeated_question",
+        entry=_build_setup_loop_health_entry(
+            round_no=round_no,
+            tool_invocations=tool_invocations,
+            tool_results=tool_results,
+            finish_reason=str(finish_reason or ""),
+            request_context=request_context,
+            pending_obligation=pending_obligation,
+            completion_guard_reason=str(completion_guard.get("reason") or ""),
+            assistant_text=assistant_text,
+        ),
+    )
     for name, entry in capabilities.items():
         _emit_diagnostic_score_group(
             observation,
@@ -170,16 +266,30 @@ def emit_setup_trace_scores(
     _score_trace(
         observation,
         name="setup.attribution.primary_suspects",
-        value=_list_score_value(attribution.get("primary_suspects")),
+        value=_list_score_value(primary_suspects),
         data_type=_categorical_type(),
         comment="Top attribution suspects derived from setup diagnostics",
     )
     _score_trace(
         observation,
+        name="setup.attribution.secondary_suspects",
+        value=_list_score_value(secondary_suspects),
+        data_type=_categorical_type(),
+        comment="Secondary attribution suspects derived from setup diagnostics",
+    )
+    _score_trace(
+        observation,
         name="setup.attribution.optimization_candidates",
-        value=_list_score_value(attribution.get("optimization_candidates")),
+        value=_list_score_value(optimization_candidates),
         data_type=_categorical_type(),
         comment="Suggested optimization actions derived from setup diagnostics",
+    )
+    _score_trace(
+        observation,
+        name="setup.recommended_next_action",
+        value=str(recommended_next_action or "none"),
+        data_type=_categorical_type(),
+        comment="Primary recommended next action derived from setup diagnostics",
     )
     _score_trace(
         observation,
@@ -187,6 +297,13 @@ def emit_setup_trace_scores(
         value=_list_score_value(reason_codes),
         data_type=_categorical_type(),
         comment="Stable setup reason codes derived from offline/online diagnostics",
+    )
+    _score_trace(
+        observation,
+        name="setup.evidence_refs",
+        value=_list_score_value(evidence_refs),
+        data_type=_categorical_type(),
+        comment="Evidence artifact refs backing setup diagnostics",
     )
     for chain_name, status in dict(outcome_chain).items():
         _score_trace(
@@ -654,6 +771,30 @@ def emit_suite_summary_scores(
                 data_type=_numeric_type(),
                 comment=f"Average suite RAGAS metric {metric_name}",
             )
+    diagnostic_summary = summary.get("diagnostic_summary")
+    if not isinstance(diagnostic_summary, dict):
+        diagnostic_summary = {}
+    diagnostic_counters = {
+        "reason_codes": diagnostic_summary.get("reason_codes"),
+        "primary_suspects": diagnostic_summary.get("primary_suspects"),
+        "recommended_next_actions": diagnostic_summary.get("recommended_next_actions"),
+    }
+    for field_name, counter in diagnostic_counters.items():
+        _score_trace(
+            observation,
+            name=f"eval.suite.diagnostic.{field_name}.top",
+            value=_top_counter_score_value(counter),
+            data_type=_categorical_type(),
+            comment=f"Top suite diagnostic values for {field_name}",
+        )
+    expectation_failures = diagnostic_summary.get("diagnostic_expectation_failures")
+    _score_trace(
+        observation,
+        name="eval.suite.diagnostic.expectation_fail_total",
+        value=_counter_total(expectation_failures),
+        data_type=_numeric_type(),
+        comment="Total failed diagnostic expectation assertions across the suite",
+    )
 
 
 def emit_comparison_scores(
@@ -683,6 +824,11 @@ def emit_comparison_scores(
         "changed_subjective_status_case_ids",
         "changed_subjective_score_case_ids",
         "changed_ragas_case_ids",
+        "changed_reason_code_case_ids",
+        "changed_primary_suspect_case_ids",
+        "changed_outcome_chain_case_ids",
+        "changed_recommended_next_action_case_ids",
+        "changed_diagnostic_expectation_case_ids",
     ):
         value = drift_summary.get(field_name)
         items = value if isinstance(value, list) else []
@@ -811,6 +957,502 @@ def _list_score_value(value: Any) -> str:
         items = [str(item).strip() for item in value if str(item).strip()]
         return ",".join(items) if items else "none"
     return "none"
+
+
+def _build_setup_tool_selection_entry(
+    *,
+    tool_invocations: list[Any],
+    tool_results: list[Any],
+    turn_goal: dict[str, Any],
+    working_plan: dict[str, Any],
+    request_context: dict[str, Any],
+    pending_obligation: dict[str, Any],
+    completion_guard_reason: str,
+    finish_reason: str,
+) -> dict[str, Any]:
+    tool_names = _normalized_runtime_tool_names(tool_invocations)
+    success_count = _setup_tool_success_count(tool_results)
+    failure_count = _setup_tool_failure_count(tool_results)
+    expected_prefixes = _expected_setup_tool_prefixes(
+        turn_goal=turn_goal,
+        working_plan=working_plan,
+        pending_obligation=pending_obligation,
+    )
+    question_mode = _setup_question_mode_expected(
+        working_plan=working_plan,
+        request_context=request_context,
+        pending_obligation=pending_obligation,
+        finish_reason=finish_reason,
+    )
+    blocking_open_question_count = int(request_context.get("blocking_open_question_count") or 0)
+    last_proposal_status = str(request_context.get("last_proposal_status") or "").strip()
+    cognitive_state_invalidated = bool(request_context.get("cognitive_state_invalidated"))
+    commit_tool_selected = any(name.startswith("setup.proposal.commit") for name in tool_names)
+    evidence = [
+        _fmt("goal_type", turn_goal.get("goal_type")),
+        _fmt("expected_tool_prefixes", expected_prefixes or ["none"]),
+        _fmt("selected_tools", tool_names or ["none"]),
+        _fmt("question_mode", question_mode),
+        _fmt("success_count", success_count),
+        _fmt("failure_count", failure_count),
+        _fmt("blocking_open_question_count", blocking_open_question_count),
+        _fmt("last_proposal_status", last_proposal_status or "none"),
+        _fmt("cognitive_state_invalidated", cognitive_state_invalidated),
+        _fmt("completion_guard_reason", completion_guard_reason or "none"),
+    ]
+
+    if not tool_names:
+        if question_mode:
+            return _status_entry(
+                status="pass",
+                summary="Runtime stayed in clarification mode instead of selecting a setup tool.",
+                evidence=evidence,
+            )
+        if expected_prefixes:
+            return _status_entry(
+                status="fail",
+                summary="Turn goal implied a tool action, but the model did not select any setup tool.",
+                evidence=evidence,
+            )
+        if finish_reason in {"awaiting_user_input", "continue_discussion", "completed_text"}:
+            return _status_entry(
+                status="fail",
+                summary="Turn produced no setup tool selection even though the runtime did not expose a strong clarification-only reason to skip tools.",
+                evidence=evidence,
+            )
+        return _status_entry(
+            status="warn",
+            summary="No setup tool was selected, and the current turn does not expose a strong expected tool family.",
+            evidence=evidence,
+        )
+
+    if commit_tool_selected and (
+        blocking_open_question_count > 0
+        or last_proposal_status == "rejected"
+        or cognitive_state_invalidated
+        or completion_guard_reason
+        in {"truth_write_not_ready_for_review", "repair_obligation_unresolved"}
+    ):
+        return _status_entry(
+            status="fail",
+            summary="Commit tool was selected even though setup context still required clarification, fresh cognition, or readiness repair.",
+            evidence=evidence,
+        )
+
+    matched = [
+        name
+        for name in tool_names
+        if any(name.startswith(prefix) for prefix in expected_prefixes)
+    ]
+    if matched:
+        return _status_entry(
+            status="pass",
+            summary="Selected setup tool family matches the current turn goal or working plan.",
+            evidence=evidence + [_fmt("matched_tools", matched)],
+        )
+    if not expected_prefixes and success_count > 0:
+        return _status_entry(
+            status="pass",
+            summary="Setup tool selection produced usable progress even though the runtime plan did not expose a narrow expected tool family.",
+            evidence=evidence,
+        )
+    if question_mode:
+        return _status_entry(
+            status="warn",
+            summary="A setup tool was selected even though the runtime appears to be in clarification mode.",
+            evidence=evidence,
+        )
+    if failure_count > 0 and success_count == 0:
+        return _status_entry(
+            status="warn",
+            summary="A plausible setup tool family was selected, but only failed tool results were observed.",
+            evidence=evidence,
+        )
+    if expected_prefixes:
+        return _status_entry(
+            status="fail",
+            summary="Selected setup tool family does not match the expected tool family for this turn.",
+            evidence=evidence,
+        )
+    return _status_entry(
+        status="warn",
+        summary="A setup tool was selected, but the runtime plan does not provide a strong expectation for which family should have been used.",
+        evidence=evidence,
+    )
+
+
+def _build_setup_tool_result_value_entry(
+    *,
+    tool_invocations: list[Any],
+    tool_results: list[Any],
+    finish_reason: str,
+    assistant_text: str,
+    request_context: dict[str, Any],
+    pending_obligation: dict[str, Any],
+    completion_guard_reason: str,
+    repair_route: str,
+) -> dict[str, Any]:
+    blocking_open_question_count = int(request_context.get("blocking_open_question_count") or 0)
+    obligation_type = str(pending_obligation.get("obligation_type") or "")
+    if not tool_invocations:
+        if finish_reason == "awaiting_user_input" and (
+            blocking_open_question_count > 0
+            or obligation_type == "ask_user_for_missing_info"
+        ):
+            return _status_entry(
+                status="not_applicable",
+                summary="Turn stayed in clarification mode, so tool-result value was not expected yet.",
+                evidence=[
+                    _fmt("tool_invocation_count", 0),
+                    _fmt("blocking_open_question_count", blocking_open_question_count),
+                    _fmt("pending_obligation", obligation_type or "none"),
+                ],
+            )
+        return _status_entry(
+            status="fail",
+            summary="Turn produced no setup tool result value and did not show a clear clarification-only reason for skipping tools.",
+            evidence=[
+                _fmt("tool_invocation_count", 0),
+                _fmt("blocking_open_question_count", blocking_open_question_count),
+                _fmt("pending_obligation", obligation_type or "none"),
+                _fmt("finish_reason", finish_reason or "unknown"),
+            ],
+        )
+
+    success_count = _setup_tool_success_count(tool_results)
+    failure_count = _setup_tool_failure_count(tool_results)
+    structured_payload_count = _setup_structured_tool_payload_count(tool_results)
+    final_user_visible_progress = bool(assistant_text.strip()) and finish_reason in {
+        "awaiting_user_input",
+        "completed_text",
+        "continue_discussion",
+    }
+    unresolved_repair = completion_guard_reason == "repair_obligation_unresolved"
+    evidence = [
+        _fmt("success_count", success_count),
+        _fmt("failure_count", failure_count),
+        _fmt("structured_payload_count", structured_payload_count),
+        _fmt("finish_reason", finish_reason or "unknown"),
+        _fmt("pending_obligation", obligation_type or "none"),
+        _fmt("repair_route", repair_route or "none"),
+        _fmt("assistant_text_chars", len(assistant_text)),
+        _fmt("blocking_open_question_count", blocking_open_question_count),
+    ]
+
+    if success_count > 0:
+        if (
+            structured_payload_count > 0
+            or repair_route in {"continue_discussion", "completed"}
+        ) and not unresolved_repair:
+            return _status_entry(
+                status="pass",
+                summary="At least one tool result produced usable state or clearly helped the turn progress.",
+                evidence=evidence,
+            )
+        return _status_entry(
+            status="warn",
+            summary="Tool execution succeeded, but the turn exposes only a weak signal that the result materially advanced state or output quality.",
+            evidence=evidence,
+        )
+
+    if failure_count > 0 and (
+        final_user_visible_progress
+        or repair_route in {"ask_user", "continue_discussion", "auto_repair", "block_commit"}
+    ) and obligation_type in {
+        "ask_user_for_missing_info",
+        "continue_after_tool_failure",
+        "repair_tool_call",
+    }:
+        return _status_entry(
+            status="warn",
+            summary="Tool results were not successful, but they still surfaced useful failure information that the agent converted into a follow-up or clarification.",
+            evidence=evidence,
+        )
+
+    return _status_entry(
+        status="fail",
+        summary="Tool execution consumed budget without producing a successful result or a clearly valuable recovery signal.",
+        evidence=evidence,
+    )
+
+
+def _build_setup_loop_health_entry(
+    *,
+    round_no: int,
+    tool_invocations: list[Any],
+    tool_results: list[Any],
+    finish_reason: str,
+    request_context: dict[str, Any],
+    pending_obligation: dict[str, Any],
+    completion_guard_reason: str,
+    assistant_text: str,
+) -> dict[str, Any]:
+    success_count = _setup_tool_success_count(tool_results)
+    failure_count = _setup_tool_failure_count(tool_results)
+    structured_payload_count = _setup_structured_tool_payload_count(tool_results)
+    obligation_type = str(pending_obligation.get("obligation_type") or "")
+    blocking_open_question_count = int(request_context.get("blocking_open_question_count") or 0)
+    cognitive_state_invalidated = bool(request_context.get("cognitive_state_invalidated"))
+    evidence = [
+        _fmt("round_no", round_no),
+        _fmt("tool_invocation_count", len(tool_invocations)),
+        _fmt("successful_tool_count", success_count),
+        _fmt("failed_tool_count", failure_count),
+        _fmt("structured_payload_count", structured_payload_count),
+        _fmt("finish_reason", finish_reason or "unknown"),
+        _fmt("pending_obligation", obligation_type or "none"),
+        _fmt("completion_guard_reason", completion_guard_reason or "none"),
+        _fmt("blocking_open_question_count", blocking_open_question_count),
+        _fmt("cognitive_state_invalidated", cognitive_state_invalidated),
+    ]
+
+    if round_no >= 4 and success_count == 0:
+        return _status_entry(
+            status="fail",
+            summary="High round count without successful tool progress is a strong signal of a noop loop or repeated question pattern.",
+            evidence=evidence + [_fmt("assistant_text_chars", len(assistant_text))],
+        )
+
+    if success_count > 0:
+        return _status_entry(
+            status="pass",
+            summary="Turn materially advanced through successful tool progress instead of stalling on another user-facing follow-up.",
+            evidence=evidence,
+        )
+
+    if finish_reason == "awaiting_user_input" and (
+        blocking_open_question_count > 0
+        or obligation_type == "ask_user_for_missing_info"
+    ):
+        return _status_entry(
+            status="pass",
+            summary="Another user-facing question was justified by explicit blocking questions or a declared ask-user obligation.",
+            evidence=evidence,
+        )
+
+    if failure_count > 0 and (
+        finish_reason in {"awaiting_user_input", "continue_discussion", "repair_obligation_unfulfilled"}
+        or obligation_type in {"repair_tool_call", "continue_after_tool_failure"}
+        or completion_guard_reason
+    ):
+        return _status_entry(
+            status="warn",
+            summary="Tool activity happened, but the turn still looks like an in-flight repair or failed-progress loop rather than a clean advance.",
+            evidence=evidence + [_fmt("assistant_text_chars", len(assistant_text))],
+        )
+
+    if (
+        finish_reason in {"awaiting_user_input", "continue_discussion"}
+        and (
+            completion_guard_reason
+            or obligation_type in {
+                "repair_tool_call",
+                "continue_after_tool_failure",
+            }
+            or cognitive_state_invalidated
+            or round_no >= 3
+        )
+    ):
+        return _status_entry(
+            status="warn",
+            summary="Turn stayed in discussion mode without tool progress, but runtime exposed a concrete guard or repair reason instead of a silent loop.",
+            evidence=evidence + [_fmt("assistant_text_chars", len(assistant_text))],
+        )
+
+    if finish_reason in {"awaiting_user_input", "continue_discussion", "completed_text"}:
+        return _status_entry(
+            status="fail",
+            summary="Turn looks like a noop or repeated-question loop: no tool progress and no explicit blocking context justified another follow-up.",
+            evidence=evidence + [_fmt("assistant_text_chars", len(assistant_text))],
+        )
+
+    return _status_entry(
+        status="warn",
+        summary="Loop risk could not be strongly classified, but the turn also did not show durable setup progress.",
+        evidence=evidence + [_fmt("assistant_text_chars", len(assistant_text))],
+    )
+
+
+def _status_entry(
+    *,
+    status: str,
+    summary: str,
+    evidence: list[str],
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "summary": summary,
+        "evidence": [item for item in evidence if item],
+    }
+
+
+def _fmt(key: str, value: Any) -> str:
+    return f"{key}={value}"
+
+
+def _normalized_runtime_tool_names(tool_invocations: list[Any]) -> list[str]:
+    names: list[str] = []
+    for item in tool_invocations:
+        if not isinstance(item, dict):
+            continue
+        raw_name = str(item.get("tool_name") or "").strip()
+        if not raw_name:
+            continue
+        if raw_name.startswith("rp_setup__"):
+            raw_name = raw_name[len("rp_setup__") :]
+        names.append(raw_name)
+    return names
+
+
+def _expected_setup_tool_prefixes(
+    *,
+    turn_goal: dict[str, Any],
+    working_plan: dict[str, Any],
+    pending_obligation: dict[str, Any],
+) -> list[str]:
+    prefixes: set[str] = set()
+    goal_type = str(turn_goal.get("goal_type") or "").strip()
+    has_patch_targets = bool(_first_list(working_plan.get("patch_targets")))
+    has_draft_write_targets = bool(_first_list(working_plan.get("draft_write_targets")))
+    has_candidate_targets = bool(_first_list(working_plan.get("candidate_targets")))
+    has_missing_information = bool(
+        _first_list(working_plan.get("missing_information"))
+        or _first_list(working_plan.get("question_targets"))
+    )
+
+    if goal_type in {"patch_draft", "fill_missing_step_fields", "brainstorm_and_clarify"} and has_patch_targets:
+        prefixes.add("setup.patch.")
+    if goal_type == "write_draft_truth" and has_draft_write_targets:
+        prefixes.add("setup.truth.write")
+    if goal_type == "refine_chunk_candidate" and has_candidate_targets:
+        prefixes.add("setup.chunk.upsert")
+    if goal_type in {"prepare_commit_intent"}:
+        prefixes.add("setup.proposal.commit")
+    if goal_type in {
+        "reconcile_after_user_edit",
+        "brainstorm_and_clarify",
+        "clarify_user_intent",
+        "fill_missing_step_fields",
+    }:
+        prefixes.add("setup.discussion.update_state")
+    if goal_type == "recover_from_tool_failure" and has_missing_information:
+        prefixes.add("setup.discussion.update_state")
+
+    pending_tool_name = str(pending_obligation.get("tool_name") or "").strip()
+    if pending_tool_name.startswith("rp_setup__"):
+        pending_tool_name = pending_tool_name[len("rp_setup__") :]
+    if pending_tool_name.startswith("setup."):
+        prefixes.add(pending_tool_name)
+
+    return sorted(prefixes)
+
+
+def _setup_question_mode_expected(
+    *,
+    working_plan: dict[str, Any],
+    request_context: dict[str, Any],
+    pending_obligation: dict[str, Any],
+    finish_reason: str,
+) -> bool:
+    blocking_open_question_count = int(
+        request_context.get("blocking_open_question_count") or 0
+    )
+    return bool(
+        _first_list(working_plan.get("question_targets"))
+        or _first_list(working_plan.get("missing_information"))
+        or pending_obligation.get("obligation_type") == "ask_user_for_missing_info"
+        or (
+            finish_reason == "awaiting_user_input"
+            and blocking_open_question_count > 0
+        )
+    )
+
+
+def _setup_tool_success_count(tool_results: list[Any]) -> int:
+    return sum(
+        1
+        for item in tool_results
+        if isinstance(item, dict) and bool(item.get("success"))
+    )
+
+
+def _setup_tool_failure_count(tool_results: list[Any]) -> int:
+    return sum(
+        1
+        for item in tool_results
+        if isinstance(item, dict) and not bool(item.get("success"))
+    )
+
+
+def _setup_structured_tool_payload_count(tool_results: list[Any]) -> int:
+    count = 0
+    for item in tool_results:
+        if not isinstance(item, dict):
+            continue
+        structured_payload = item.get("structured_payload")
+        if not isinstance(structured_payload, dict):
+            continue
+        if isinstance(structured_payload.get("content_payload"), dict) or isinstance(
+            structured_payload.get("result_payload"), dict
+        ):
+            count += 1
+    return count
+
+
+def _first_list(*values: Any) -> list[Any]:
+    for value in values:
+        if isinstance(value, list):
+            return list(value)
+    return []
+
+
+def _first_dict(*values: Any) -> dict[str, Any]:
+    for value in values:
+        if isinstance(value, dict):
+            return dict(value)
+    return {}
+
+
+def _first_scalar(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _top_counter_score_value(counter: Any, *, limit: int = 3) -> str:
+    if not isinstance(counter, dict):
+        return "none"
+    items: list[tuple[str, int]] = []
+    for key, value in counter.items():
+        name = str(key).strip()
+        if not name:
+            continue
+        try:
+            count = int(value or 0)
+        except (TypeError, ValueError):
+            count = 0
+        items.append((name, count))
+    if not items:
+        return "none"
+    return ",".join(
+        name for name, _ in sorted(items, key=lambda item: (-item[1], item[0]))[:limit]
+    )
+
+
+def _counter_total(counter: Any) -> int:
+    if not isinstance(counter, dict):
+        return 0
+    total = 0
+    for value in counter.values():
+        try:
+            total += int(value or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
 
 
 def _coerce_int(value: Any, *, fallback: int) -> int:

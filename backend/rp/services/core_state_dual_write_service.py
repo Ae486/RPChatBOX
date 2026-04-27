@@ -53,7 +53,9 @@ class CoreStateDualWriteService:
         source_kind: str,
     ) -> None:
         for binding in authoritative_bindings():
-            value = self._extract_payload(snapshot=snapshot, field_name=binding.backend_field)
+            value = self._extract_payload(
+                snapshot=snapshot, field_name=binding.backend_field
+            )
             current_record = self._repository.upsert_authoritative_object(
                 story_id=session.story_id,
                 session_id=session.session_id,
@@ -188,8 +190,16 @@ class CoreStateDualWriteService:
         revision_after: dict[str, int],
         apply_id: str,
         proposal_id: str,
-    ) -> dict[str, tuple[CoreStateAuthoritativeObjectRecord, CoreStateAuthoritativeRevisionRecord]]:
-        written: dict[str, tuple[CoreStateAuthoritativeObjectRecord, CoreStateAuthoritativeRevisionRecord]] = {}
+    ) -> dict[
+        str,
+        tuple[CoreStateAuthoritativeObjectRecord, CoreStateAuthoritativeRevisionRecord],
+    ]:
+        written: dict[
+            str,
+            tuple[
+                CoreStateAuthoritativeObjectRecord, CoreStateAuthoritativeRevisionRecord
+            ],
+        ] = {}
         for raw_ref in target_refs:
             target_ref = normalize_authoritative_ref(raw_ref)
             binding = resolve_authoritative_binding(target_ref)
@@ -286,7 +296,11 @@ class CoreStateDualWriteService:
         refresh_source_ref: str | None = None,
     ) -> None:
         for binding in projection_bindings():
-            items = [str(item) for item in snapshot.get(binding.slot_name, []) if item is not None]
+            items = [
+                str(item)
+                for item in snapshot.get(binding.slot_name, [])
+                if item is not None
+            ]
             existing = self._repository.get_projection_slot(
                 chapter_workspace_id=chapter.chapter_workspace_id,
                 summary_id=binding.summary_id,
@@ -310,7 +324,10 @@ class CoreStateDualWriteService:
                 scope="chapter",
                 current_revision=next_revision,
                 items_json=items,
-                metadata_json={"dual_write_source": refresh_source_kind},
+                metadata_json=self._projection_refresh_metadata(
+                    refresh_source_kind=refresh_source_kind,
+                    refresh_source_ref=refresh_source_ref,
+                ),
                 last_refresh_kind=refresh_source_kind,
             )
             self._repository.upsert_projection_slot_revision(
@@ -328,8 +345,30 @@ class CoreStateDualWriteService:
                 items_json=items,
                 refresh_source_kind=refresh_source_kind,
                 refresh_source_ref=refresh_source_ref,
-                metadata_json={"dual_write_source": refresh_source_kind},
+                metadata_json=self._projection_refresh_metadata(
+                    refresh_source_kind=refresh_source_kind,
+                    refresh_source_ref=refresh_source_ref,
+                ),
             )
+
+    @staticmethod
+    def _projection_refresh_metadata(
+        *,
+        refresh_source_kind: str,
+        refresh_source_ref: str | None,
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {
+            "dual_write_source": refresh_source_kind,
+            "layer_family": "core_state.derived_projection",
+            "semantic_layer": "Core State.derived_projection",
+            "projection_role": "current_projection",
+            "materialization_event": "projection_refresh",
+            "maintenance_event": refresh_source_kind,
+            "authoritative_mutation": False,
+        }
+        if refresh_source_ref:
+            metadata["maintenance_source_ref"] = refresh_source_ref
+        return metadata
 
     def _ensure_authoritative_revision_one(
         self,

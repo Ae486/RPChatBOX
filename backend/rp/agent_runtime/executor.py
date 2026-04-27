@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Callable
 
 from models.chat import ChatCompletionRequest, ChatMessage, ProviderConfig
@@ -13,13 +14,16 @@ from .contracts import (
     RpAgentTurnInput,
     RpAgentTurnResult,
     RuntimeProfile,
+    SetupContextCompactSummary,
     RuntimeToolCall,
     RuntimeToolResult,
     SetupCognitiveStateSnapshot,
     SetupCognitiveStateSummary,
     SetupPendingObligation,
     SetupReflectionTicket,
+    SetupToolOutcome,
     SetupTurnGoal,
+    SetupWorkingDigest,
     SetupWorkingPlan,
 )
 from .events import RuntimeEvent, TypedSseEventAdapter
@@ -33,6 +37,7 @@ from .policies import (
 )
 from .state import RpAgentRunState
 from .tools import RuntimeToolExecutor
+from rp.services.setup_context_governor import SetupContextGovernorService
 
 _SENTINEL = object()
 
@@ -101,6 +106,7 @@ class _RuntimeRunDriver:
         self._tool_executor = tool_executor
         self._profile = profile
         self._langfuse = get_langfuse_service()
+        self._context_governor = SetupContextGovernorService()
         self._event_queue: asyncio.Queue[RuntimeEvent | object] | None = None
         self._event_sequence_no = 0
         self.last_result: RpAgentTurnResult | None = None
@@ -202,6 +208,9 @@ class _RuntimeRunDriver:
             "cognitive_state_summary": self._context_bundle(turn_input).get(
                 "cognitive_state_summary"
             ),
+            "working_digest": self._context_bundle(turn_input).get("working_digest"),
+            "tool_outcomes": list(self._context_bundle(turn_input).get("tool_outcomes") or []),
+            "compact_summary": self._context_bundle(turn_input).get("compact_summary"),
             "repair_route": None,
             "next_action": "build_model_request",
             "schema_retry_count": 0,
@@ -377,6 +386,10 @@ class _RuntimeRunDriver:
         return {
             "status": "goal_derived",
             "turn_goal": goal.model_dump(mode="json", exclude_none=True),
+            "working_digest": self._build_working_digest_payload(
+                state,
+                turn_goal=goal,
+            ),
         }
 
     def _plan_step_slice(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -438,6 +451,10 @@ class _RuntimeRunDriver:
         return {
             "status": "planned",
             "working_plan": plan.model_dump(mode="json", exclude_none=True),
+            "working_digest": self._build_working_digest_payload(
+                state,
+                working_plan=plan,
+            ),
         }
 
     def _build_model_request(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -502,11 +519,12 @@ class _RuntimeRunDriver:
             response = self._coerce_response_dict(
                 await self._llm_service.chat_completion(request)
             )
+            usage_payload = response.get("usage")
             generation.update(
                 output=self._extract_message_payload(response),
                 usage_details=(
-                    dict(response.get("usage"))
-                    if isinstance(response.get("usage"), dict)
+                    dict(usage_payload)
+                    if isinstance(usage_payload, dict)
                     else None
                 ),
             )
@@ -777,6 +795,8 @@ class _RuntimeRunDriver:
         ]
         cognitive_state = state.get("cognitive_state")
         cognitive_state_summary = state.get("cognitive_state_summary")
+        retained_tool_outcomes = self._tool_outcomes(state)
+        latest_outcomes: list[SetupToolOutcome] = []
         if tool_calls:
             normalized_messages.append(
                 ChatMessage(
@@ -808,12 +828,35 @@ class _RuntimeRunDriver:
                     cognitive_state = content_payload["cognitive_state_snapshot"]
                 if isinstance(content_payload.get("cognitive_state_summary"), dict):
                     cognitive_state_summary = content_payload["cognitive_state_summary"]
+            latest_outcomes.append(self._tool_outcome_from_result(result))
+        merged_tool_outcomes = self._context_governor.retain_tool_outcomes(
+            existing=retained_tool_outcomes,
+            latest_results=latest_outcomes,
+        )
         return {
             "status": "tool_results_applied",
             "normalized_messages": normalized_messages,
             "pending_tool_calls": [],
             "cognitive_state": cognitive_state,
             "cognitive_state_summary": cognitive_state_summary,
+            "tool_outcomes": [
+                item.model_dump(mode="json", exclude_none=True)
+                for item in merged_tool_outcomes
+            ],
+            "working_digest": self._build_working_digest_payload(
+                state,
+                cognitive_state=(
+                    SetupCognitiveStateSnapshot.model_validate(cognitive_state)
+                    if isinstance(cognitive_state, dict)
+                    else None
+                ),
+                cognitive_state_summary=(
+                    SetupCognitiveStateSummary.model_validate(cognitive_state_summary)
+                    if isinstance(cognitive_state_summary, dict)
+                    else None
+                ),
+                tool_outcomes=merged_tool_outcomes,
+            ),
         }
 
     def _assess_progress(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -827,6 +870,8 @@ class _RuntimeRunDriver:
                 pending_obligation=self._pending_obligation(state),
                 reflection_ticket=self._reflection_ticket(state),
                 cognitive_state_summary=self._cognitive_state_summary(state),
+                prior_assistant_questions=self._recent_assistant_questions(state),
+                working_digest=self._working_digest(state),
             )
             update: RpAgentRunState = {
                 "status": "assessed",
@@ -844,22 +889,32 @@ class _RuntimeRunDriver:
                         str(state.get("assistant_text") or "")
                     )
                 )
+                update["working_digest"] = self._build_working_digest_payload(
+                    state,
+                    pending_obligation=None,
+                    reflection_ticket=None,
+                )
                 return update
             update["next_action"] = "reflect_if_needed"
+            update["working_digest"] = self._build_working_digest_payload(state)
             return update
 
         decision = RepairDecisionPolicy.assess(
             profile=self._profile,
             tool_results=latest_batch,
+            prior_tool_outcomes=self._tool_outcomes(state),
             schema_retry_count=int(state.get("schema_retry_count") or 0),
             round_no=int(state.get("round_no") or 0),
         )
         warnings = list(state.get("warnings", []))
         if decision.get("warning"):
             warnings.append(str(decision["warning"]))
+        for item in decision.get("warnings") or []:
+            if item and item not in warnings:
+                warnings.append(str(item))
 
         if decision["action"] == "continue":
-            update: RpAgentRunState = {
+            continue_update: RpAgentRunState = {
                 "status": "assessed",
                 "next_action": (
                     "reflect_if_needed"
@@ -879,10 +934,23 @@ class _RuntimeRunDriver:
                     if isinstance(decision.get("last_failure"), dict)
                     else state.get("repair_route")
                 ),
+                "working_digest": self._build_working_digest_payload(
+                    state,
+                    pending_obligation=(
+                        SetupPendingObligation.model_validate(decision["pending_obligation"])
+                        if isinstance(decision.get("pending_obligation"), dict)
+                        else None
+                    ),
+                    reflection_ticket=(
+                        SetupReflectionTicket.model_validate(decision["reflection_ticket"])
+                        if isinstance(decision.get("reflection_ticket"), dict)
+                        else None
+                    ),
+                ),
             }
             if "last_failure" in decision:
-                update["last_failure"] = decision.get("last_failure")
-            return update
+                continue_update["last_failure"] = decision.get("last_failure")
+            return continue_update
 
         return {
             "status": "failed",
@@ -891,6 +959,7 @@ class _RuntimeRunDriver:
             "warnings": warnings,
             "error": decision.get("error"),
             "last_failure": decision.get("last_failure"),
+            "working_digest": self._build_working_digest_payload(state),
         }
 
     def _reflect_if_needed(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -911,6 +980,10 @@ class _RuntimeRunDriver:
                 "next_action": "derive_turn_goal",
                 "warnings": warnings,
                 "reflection_ticket": None,
+                "working_digest": self._build_working_digest_payload(
+                    state,
+                    reflection_ticket=None,
+                ),
             }
 
         return {
@@ -920,6 +993,10 @@ class _RuntimeRunDriver:
             "warnings": warnings,
             "error": decision.get("error"),
             "reflection_ticket": None,
+            "working_digest": self._build_working_digest_payload(
+                state,
+                reflection_ticket=None,
+            ),
         }
 
     async def _finalize_success(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -1057,6 +1134,15 @@ class _RuntimeRunDriver:
                 "completion_guard": state.get("completion_guard"),
                 "cognitive_state": state.get("cognitive_state"),
                 "cognitive_state_summary": state.get("cognitive_state_summary"),
+                "working_digest": (
+                    self._build_working_digest_payload(state)
+                    or state.get("working_digest")
+                ),
+                "tool_outcomes": [
+                    item.model_dump(mode="json", exclude_none=True)
+                    for item in self._tool_outcomes(state)
+                ],
+                "compact_summary": state.get("compact_summary"),
                 "repair_route": state.get("repair_route"),
             },
             error=error,
@@ -1089,6 +1175,12 @@ class _RuntimeRunDriver:
             "last_failure": state.get("last_failure"),
             "reflection_ticket": state.get("reflection_ticket"),
             "cognitive_state_summary": state.get("cognitive_state_summary"),
+            "working_digest": self._build_working_digest_payload(state) or state.get("working_digest"),
+            "tool_outcomes": [
+                item.model_dump(mode="json", exclude_none=True)
+                for item in self._tool_outcomes(state)
+            ],
+            "compact_summary": state.get("compact_summary"),
         }
         if all(value in (None, {}, []) for value in payload.values()):
             return None
@@ -1105,6 +1197,9 @@ class _RuntimeRunDriver:
                 "the missing question explicitly.\n"
                 "If reflection_ticket says block_commit, do not call setup.proposal.commit in this turn.\n"
                 "If cognitive_state_summary.invalidated is true, refresh discussion/chunk state before commit.\n"
+                "If working_digest exists, treat it as thin step-local control state only.\n"
+                "If tool_outcomes exist, use the outcomes but not the historical tool-call process.\n"
+                "If compact_summary exists, treat it as carry-forward context for trimmed older current-step discussion.\n"
                 f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
             ),
         )
@@ -1171,6 +1266,198 @@ class _RuntimeRunDriver:
         if not isinstance(payload, dict):
             return None
         return SetupCognitiveStateSummary.model_validate(payload)
+
+    @staticmethod
+    def _working_digest(state: RpAgentRunState) -> SetupWorkingDigest | None:
+        payload = state.get("working_digest")
+        if not isinstance(payload, dict):
+            return None
+        return SetupWorkingDigest.model_validate(payload)
+
+    @staticmethod
+    def _tool_outcomes(state: RpAgentRunState) -> list[SetupToolOutcome]:
+        items = state.get("tool_outcomes") or []
+        return [
+            SetupToolOutcome.model_validate(item)
+            for item in items
+            if isinstance(item, dict)
+        ]
+
+    @staticmethod
+    def _compact_summary(state: RpAgentRunState) -> SetupContextCompactSummary | None:
+        payload = state.get("compact_summary")
+        if not isinstance(payload, dict):
+            return None
+        return SetupContextCompactSummary.model_validate(payload)
+
+    def _recent_assistant_questions(self, state: RpAgentRunState) -> list[str]:
+        turn_input = self._turn_input(state)
+        questions: list[str] = []
+        for item in turn_input.conversation_messages:
+            if item.get("role") != "assistant":
+                continue
+            content = str(item.get("content") or "").strip()
+            if FinishPolicy.looks_like_question(content):
+                questions.append(content)
+        return questions[-4:]
+
+    def _build_working_digest_payload(
+        self,
+        state: RpAgentRunState,
+        *,
+        turn_goal: SetupTurnGoal | None = None,
+        working_plan: SetupWorkingPlan | None = None,
+        pending_obligation: SetupPendingObligation | None | object = _SENTINEL,
+        reflection_ticket: SetupReflectionTicket | None | object = _SENTINEL,
+        cognitive_state: SetupCognitiveStateSnapshot | None = None,
+        cognitive_state_summary: SetupCognitiveStateSummary | None = None,
+        tool_outcomes: list[SetupToolOutcome] | None = None,
+    ) -> dict[str, Any] | None:
+        digest = self._working_digest(state) or SetupWorkingDigest()
+        goal = turn_goal or self._turn_goal_model(state)
+        plan = working_plan or self._working_plan_model(state)
+        obligation = (
+            self._pending_obligation(state)
+            if pending_obligation is _SENTINEL
+            else pending_obligation
+        )
+        ticket = (
+            self._reflection_ticket(state)
+            if reflection_ticket is _SENTINEL
+            else reflection_ticket
+        )
+        snapshot = cognitive_state or self._cognitive_state(state)
+        summary = cognitive_state_summary or self._cognitive_state_summary(state)
+        retained_outcomes = tool_outcomes or self._tool_outcomes(state)
+        if goal is not None:
+            digest.current_goal = goal.goal_summary
+        if plan is not None:
+            digest.next_focus = plan.current_priority or digest.next_focus
+        if snapshot is not None and snapshot.discussion_state is not None:
+            digest.next_focus = snapshot.discussion_state.next_focus or digest.next_focus
+            digest.rejected_directions = [
+                item.label
+                for item in snapshot.discussion_state.candidate_directions
+                if item.status == "discarded"
+            ][:4]
+        if summary is not None and summary.open_questions:
+            digest.open_questions = list(summary.open_questions[:4])
+        draft_refs = list(digest.draft_refs[:6])
+        if snapshot is not None and snapshot.active_truth_write is not None:
+            target_ref = str(snapshot.active_truth_write.target_ref or "").strip()
+            if target_ref and target_ref not in draft_refs:
+                draft_refs.append(target_ref)
+        for item in retained_outcomes:
+            for ref in item.updated_refs:
+                value = str(ref or "").strip()
+                if value and value not in draft_refs:
+                    draft_refs.append(value)
+                if len(draft_refs) >= 6:
+                    break
+            if len(draft_refs) >= 6:
+                break
+        digest.draft_refs = draft_refs[:6]
+        digest.pending_obligation = (
+            obligation.reason
+            if isinstance(obligation, SetupPendingObligation) and obligation.unresolved
+            else None
+        )
+
+        blockers: list[str] = []
+        context_bundle = self._context_bundle(self._turn_input(state))
+        blocking_count = int(context_bundle.get("blocking_open_question_count") or 0)
+        if blocking_count > 0:
+            blockers.append(f"{blocking_count} blocking_open_question(s)")
+        if summary is not None and summary.invalidated:
+            blockers.append("cognitive_state_invalidated")
+        if summary is not None:
+            blockers.extend(summary.remaining_open_issues[:2])
+        if isinstance(ticket, SetupReflectionTicket) and ticket.required_decision == "block_commit":
+            blockers.append(ticket.summary)
+        digest.commit_blockers = list(dict.fromkeys(blockers))[:4]
+
+        if not any(
+            (
+                digest.current_goal,
+                digest.next_focus,
+                digest.pending_obligation,
+                digest.open_questions,
+                digest.rejected_directions,
+                digest.draft_refs,
+                digest.commit_blockers,
+            )
+        ):
+            return None
+        return digest.model_dump(mode="json", exclude_none=True)
+
+    @staticmethod
+    def _tool_relevance(tool_name: str, *, success: bool) -> str:
+        if not success:
+            return "failure"
+        name = tool_name.removeprefix("rp_setup__")
+        if name.startswith("setup.discussion.") or name.startswith("setup.chunk.") or name.startswith("setup.truth."):
+            return "cognitive"
+        if name.startswith("setup.patch."):
+            return "draft"
+        if name.startswith("setup.question."):
+            return "question"
+        if name.startswith("setup.proposal."):
+            return "proposal"
+        if name.startswith("setup.asset."):
+            return "asset"
+        if name.startswith("setup.read."):
+            return "read"
+        return "other"
+
+    def _tool_outcome_from_result(self, result: RuntimeToolResult) -> SetupToolOutcome:
+        updated_refs: list[str] = []
+        structured_payload = (
+            result.structured_payload
+            if isinstance(result.structured_payload, dict)
+            else {}
+        )
+        content_payload = (
+            structured_payload.get("content_payload")
+            if isinstance(structured_payload.get("content_payload"), dict)
+            else {}
+        )
+        raw_updated_refs = (
+            content_payload.get("updated_refs")
+            if isinstance(content_payload, dict)
+            else None
+        )
+        if isinstance(raw_updated_refs, list):
+            updated_refs = [str(item) for item in raw_updated_refs if item]
+        summary = result.content_text
+        raw_message = content_payload.get("message") if isinstance(content_payload, dict) else None
+        if isinstance(raw_message, str) and raw_message:
+            summary = raw_message
+        elif not result.success:
+            payload = ToolFailureClassifier.error_payload(result)
+            summary = str(payload.get("message") or result.content_text)
+        return SetupToolOutcome(
+            tool_name=result.tool_name,
+            success=result.success,
+            summary=summary[:240],
+            updated_refs=updated_refs[:6],
+            error_code=result.error_code,
+            relevance=self._tool_relevance(result.tool_name, success=result.success),
+            recorded_at=datetime.now(timezone.utc),
+        )
+
+    @staticmethod
+    def _turn_goal_model(state: RpAgentRunState) -> SetupTurnGoal | None:
+        payload = state.get("turn_goal")
+        if not isinstance(payload, dict):
+            return None
+        return SetupTurnGoal.model_validate(payload)
+
+    @staticmethod
+    def _working_plan_model(state: RpAgentRunState) -> SetupWorkingPlan | None:
+        payload = state.get("working_plan")
+        if not isinstance(payload, dict):
+            return None
+        return SetupWorkingPlan.model_validate(payload)
 
     def _contains_blocked_commit_proposal(
         self,

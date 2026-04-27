@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rp.models.dsl import Domain, Layer
+from rp.models.dsl import Layer
 from rp.models.memory_crud import (
     MemoryGetSummaryInput,
     MemoryListVersionsInput,
@@ -39,7 +39,9 @@ class ProjectionReadService:
         self._store_read_enabled = store_read_enabled
         self._core_state_backfill_service = core_state_backfill_service
 
-    async def get_summary(self, input_model: MemoryGetSummaryInput) -> SummaryReadResult:
+    async def get_summary(
+        self, input_model: MemoryGetSummaryInput
+    ) -> SummaryReadResult:
         summary_ids, resolution_warnings = self._resolve_summary_ids(input_model)
         session, chapter, payload = self._adapter.get_projection_payload()
         items: list[SummaryEntry] = []
@@ -53,7 +55,9 @@ class ProjectionReadService:
         for summary_id in summary_ids:
             binding = resolve_projection_binding(summary_id)
             if binding is None:
-                warnings.append(f"phase_e_projection_summary_not_materialized:{summary_id}")
+                warnings.append(
+                    f"phase_e_projection_summary_not_materialized:{summary_id}"
+                )
                 continue
             raw_value = None
             route = "projection.compatibility_mirror"
@@ -83,14 +87,18 @@ class ProjectionReadService:
                     raw_value = row.items_json
                     route = "projection.formal_store"
                 else:
-                    warnings.append(f"phase_g_projection_store_row_missing_fallback:{binding.summary_id}")
+                    warnings.append(
+                        f"phase_g_projection_store_row_missing_fallback:{binding.summary_id}"
+                    )
             if raw_value is None:
                 raw_value = payload.get(binding.slot_name)
             if raw_value is None:
                 warnings.append(f"phase_e_projection_slot_empty:{binding.summary_id}")
                 summary_text = ""
             elif isinstance(raw_value, list):
-                summary_text = "\n".join(str(item) for item in raw_value if item is not None)
+                summary_text = "\n".join(
+                    str(item) for item in raw_value if item is not None
+                )
             else:
                 summary_text = str(raw_value)
             items.append(
@@ -103,7 +111,9 @@ class ProjectionReadService:
                         "slot_name": binding.slot_name,
                         "route": route,
                         "scope": input_model.scope,
-                        "session_id": session.session_id if session is not None else None,
+                        "session_id": session.session_id
+                        if session is not None
+                        else None,
                         "chapter_workspace_id": chapter.chapter_workspace_id,
                     },
                 )
@@ -111,40 +121,56 @@ class ProjectionReadService:
 
         return SummaryReadResult(items=items, warnings=warnings)
 
-    async def list_versions(self, input_model: MemoryListVersionsInput) -> VersionListResult:
+    async def list_versions(
+        self,
+        input_model: MemoryListVersionsInput,
+        *,
+        session_id: str | None = None,
+    ) -> VersionListResult:
         ref = input_model.target_ref.model_copy(
             update={
                 "layer": Layer.CORE_STATE_PROJECTION,
-                "domain_path": input_model.target_ref.domain_path or input_model.target_ref.object_id,
+                "domain_path": input_model.target_ref.domain_path
+                or input_model.target_ref.object_id,
                 "revision": input_model.target_ref.revision or 1,
             }
         )
         if self._store_read_enabled and self._core_state_store_repository is not None:
-            _, chapter = self._adapter.get_current_chapter()
+            _, chapter = self._adapter.get_current_chapter(session_id=session_id)
             if chapter is not None:
-                revisions = self._core_state_store_repository.list_projection_slot_revisions(
-                    chapter_workspace_id=chapter.chapter_workspace_id,
-                    summary_id=normalize_projection_summary_id(ref.object_id),
+                revisions = (
+                    self._core_state_store_repository.list_projection_slot_revisions(
+                        chapter_workspace_id=chapter.chapter_workspace_id,
+                        summary_id=normalize_projection_summary_id(ref.object_id),
+                    )
                 )
                 if revisions:
                     versions = [
                         f"{ref.object_id}@{item.revision}"
-                        for item in sorted(revisions, key=lambda item: item.revision, reverse=True)
+                        for item in sorted(
+                            revisions, key=lambda item: item.revision, reverse=True
+                        )
                     ]
                     return VersionListResult(versions=versions, current_ref=versions[0])
         current_ref = f"{ref.object_id}@{ref.revision or 1}"
         return VersionListResult(versions=[current_ref], current_ref=current_ref)
 
-    async def read_provenance(self, input_model: MemoryReadProvenanceInput) -> ProvenanceResult:
+    async def read_provenance(
+        self,
+        input_model: MemoryReadProvenanceInput,
+        *,
+        session_id: str | None = None,
+    ) -> ProvenanceResult:
         ref = input_model.target_ref.model_copy(
             update={
                 "layer": Layer.CORE_STATE_PROJECTION,
-                "domain_path": input_model.target_ref.domain_path or input_model.target_ref.object_id,
+                "domain_path": input_model.target_ref.domain_path
+                or input_model.target_ref.object_id,
                 "revision": input_model.target_ref.revision or 1,
             }
         )
         if self._store_read_enabled and self._core_state_store_repository is not None:
-            _, chapter = self._adapter.get_current_chapter()
+            _, chapter = self._adapter.get_current_chapter(session_id=session_id)
             if chapter is not None:
                 row = self._core_state_store_repository.get_projection_slot(
                     chapter_workspace_id=chapter.chapter_workspace_id,
@@ -152,23 +178,32 @@ class ProjectionReadService:
                 )
                 if row is not None:
                     return ProvenanceResult(
-                        target_ref=ref.model_copy(update={"revision": row.current_revision}),
+                        target_ref=ref.model_copy(
+                            update={"revision": row.current_revision}
+                        ),
                         source_refs=["core_state_store:projection_slot_revision"],
                         proposal_refs=[],
                         ingestion_refs=[],
                     )
         return ProvenanceResult(
             target_ref=ref,
-            source_refs=["compatibility_mirror:chapter_workspace.builder_snapshot_json"],
+            source_refs=[
+                "compatibility_mirror:chapter_workspace.builder_snapshot_json"
+            ],
             proposal_refs=[],
             ingestion_refs=[],
         )
 
     @staticmethod
-    def _resolve_summary_ids(input_model: MemoryGetSummaryInput) -> tuple[list[str], list[str]]:
+    def _resolve_summary_ids(
+        input_model: MemoryGetSummaryInput,
+    ) -> tuple[list[str], list[str]]:
         if input_model.summary_ids:
             return (
-                [normalize_projection_summary_id(summary_id) for summary_id in input_model.summary_ids],
+                [
+                    normalize_projection_summary_id(summary_id)
+                    for summary_id in input_model.summary_ids
+                ],
                 [],
             )
 
@@ -179,5 +214,7 @@ class ProjectionReadService:
             if domain_summary_ids:
                 summary_ids.extend(domain_summary_ids)
                 continue
-            warnings.append(f"phase_e_projection_domain_not_materialized:{domain.value}")
+            warnings.append(
+                f"phase_e_projection_domain_not_materialized:{domain.value}"
+            )
         return summary_ids, warnings

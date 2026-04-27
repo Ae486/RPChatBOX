@@ -5,11 +5,26 @@ from pathlib import Path
 import pytest
 
 from rp.eval.case_loader import load_case
+from rp.eval.diagnostics import build_setup_diagnostic_projection
 from rp.eval.graders.deterministic import evaluate_diagnostic_expectation_scores
-from rp.eval.models import EvalCase, EvalFailure, EvalRun, EvalRunResult, EvalTrace
-from rp.eval.reporting import attach_diagnostic_expectation_results, build_report
+from rp.eval.models import (
+    EvalArtifact,
+    EvalCase,
+    EvalFailure,
+    EvalRun,
+    EvalRunResult,
+    EvalTrace,
+)
+from rp.eval.reporting import (
+    attach_diagnostic_expectation_results,
+    build_report,
+    render_text_summary,
+)
 from rp.eval.runner import EvalRunner
-from rp.tests.test_eval_setup_cognitive_cases import _TruthWriteAskUserLLMService
+from rp.tests.test_eval_setup_cognitive_cases import (
+    _ProviderFailureSetupLLMService,
+    _TruthWriteAskUserLLMService,
+)
 
 
 def _case_path(*parts: str) -> Path:
@@ -70,14 +85,108 @@ async def test_setup_eval_report_includes_capability_and_diagnostic_summary(
         "diagnostic.reason_code_presence": "pass",
         "diagnostic.attribution_primary_suspect_alignment": "pass",
         "diagnostic.outcome_chain_alignment": "pass",
+        "diagnostic.recommended_next_action_alignment": "pass",
     }
     assert any(
         score.name == "diagnostic.reason_code_presence" and score.status == "pass"
         for score in result.scores
     )
+    assert result.report["primary_suspects"] == ["tool_contract_execution"]
+    assert "artifact:tool_sequence" in result.report["evidence_refs"]
+    assert {
+        item["code"] for item in result.report["diagnostic_overview"]["reason_codes"]
+    } >= {
+        "tool_execution.provider_execution_failed"
+    }
+    assert result.report["diagnostic_overview"]["primary_suspects"][0]["name"] == (
+        "tool_contract_execution"
+    )
+    assert result.report["outcome_chain_stages"][0] == {
+        "stage_key": "transcript_status",
+        "stage": "transcript",
+        "status": "pass",
+        "summary": "Transcript moves the setup turn toward the expected step outcome.",
+    }
+    assert any(
+        item["ref"] == "artifact:tool_sequence" and item["available"] is True
+        for item in result.report["evidence_ref_details"]
+    )
+    assert result.report["outcome_chain_display"][0] == "transcript=pass"
+    assert "failure_layer=none" in result.report["diagnostic_summary_text"]
+    assert "tool_execution.provider_execution_failed" in result.report["diagnostic_summary_text"]
     assert observability["usage"]["total_tokens"] == 2
     assert observability["request_metrics"]["system_prompt_chars"] is not None
     assert observability["tooling"]["failure_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_setup_eval_infra_provider_failure_case_surfaces_diagnostic_contract(
+    retrieval_session,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _ProviderFailureSetupLLMService(),
+    )
+
+    case = load_case(
+        _case_path("infra", "provider_request_failed_during_turn.v1.json")
+    )
+    result = await EvalRunner(retrieval_session).run_case(case)
+
+    assert result.run.status == "failed"
+    assert result.run.failure is not None
+    assert result.run.failure.layer == "infra"
+    assert result.report["failure_layer"] == "infra"
+    assert result.report["reason_codes"] == [
+        "infra.provider_request_failed",
+        "readiness.blocked_by_open_setup_prerequisites",
+    ]
+    assert result.report["primary_suspects"] == ["infra_model_provider"]
+    assert (
+        result.report["recommended_next_action"]
+        == "fix_provider_model_config_and_runtime_connectivity"
+    )
+    assert {
+        item["score_name"]: item["status"]
+        for item in result.report["diagnostic_expectation_results"]
+    } == {
+        "diagnostic.reason_code_presence": "pass",
+        "diagnostic.attribution_primary_suspect_alignment": "pass",
+        "diagnostic.outcome_chain_alignment": "pass",
+        "diagnostic.recommended_next_action_alignment": "pass",
+    }
+
+
+def test_setup_diagnostic_projection_reads_top_level_tool_error_fields():
+    diagnostics = build_setup_diagnostic_projection(
+        runtime_result={
+            "finish_reason": "awaiting_user_input",
+            "assistant_text": "Need to repair the truth write before continuing.",
+            "warnings": [],
+            "tool_invocations": [
+                {
+                    "tool_name": "rp_setup__setup.truth.write",
+                }
+            ],
+            "tool_results": [
+                {
+                    "success": False,
+                    "error_code": "setup_commit_blocked_truth_write_not_ready_for_review",
+                },
+                {
+                    "success": False,
+                    "code": "setup_truth_write_target_ref_mismatch",
+                },
+            ],
+            "structured_payload": {},
+        }
+    )
+
+    assert set(diagnostics["reason_codes"]) == {
+        "controller.commit_proposal_blocked",
+        "tool_contract.truth_write_target_ref_mismatch",
+    }
 
 
 @pytest.mark.asyncio
@@ -161,6 +270,14 @@ def test_build_report_diagnostics_prioritize_infra_failure():
             ),
         ),
         trace=EvalTrace(trace_id="trace-diag-infra-1"),
+        artifacts=[
+            EvalArtifact(
+                artifact_id="run-diag-infra-1:artifact:tool_sequence",
+                run_id="run-diag-infra-1",
+                kind="tool_sequence",
+                name="Tool sequence",
+            )
+        ],
         runtime_result={"finish_reason": None, "assistant_text": "", "warnings": []},
         report={},
     )
@@ -231,4 +348,55 @@ def test_diagnostic_expectation_scores_fail_with_expected_vs_actual_detail():
     assert report["diagnostic_expectation_results"][2]["mismatches"] == {
         "readiness_status": {"expected": "pass", "actual": "warn"}
     }
+
+
+def test_render_text_summary_includes_diagnostic_context():
+    case = EvalCase.model_validate(
+        {
+            "case_id": "setup.diag.render_summary.v1",
+            "title": "render summary",
+            "scope": "setup",
+            "category": "diagnostics",
+            "runtime_target": {
+                "mode": "in_process",
+                "entrypoint": "setup_graph_runner.run_turn",
+                "graph_id": "setup_v2",
+                "stream": False,
+            },
+        }
+    )
+    result = EvalRunResult(
+        case=case,
+        run=EvalRun(
+            run_id="run-render-summary-1",
+            case_id=case.case_id,
+            scope=case.scope,
+            status="completed",
+            runtime_target="setup_v2",
+            trace_id="trace-render-summary-1",
+        ),
+        trace=EvalTrace(trace_id="trace-render-summary-1"),
+        runtime_result={},
+        report={
+            "status": "completed",
+            "case_id": case.case_id,
+            "assertion_summary": {"pass": 3, "fail": 1, "warn": 0, "skip": 0},
+            "failure_layer": "deterministic",
+            "finish_reason": "awaiting_user_input",
+            "repair_route": "ask_user",
+            "end_reason_summary": "repair_route:ask_user",
+            "reason_codes": ["prompt.missing_step_targeting"],
+            "primary_suspects": ["instruction_prompt_skill"],
+            "recommended_next_action": "ask_for_missing_setup_inputs",
+            "diagnostic_expectation_summary": {"total": 2, "pass": 1, "fail": 1, "warn": 0, "skip": 0},
+        },
+    )
+
+    summary = render_text_summary(result)
+
+    assert "failure_layer=deterministic" in summary
+    assert "reason_codes=prompt.missing_step_targeting" in summary
+    assert "primary_suspects=instruction_prompt_skill" in summary
+    assert "next_action=ask_for_missing_setup_inputs" in summary
+    assert "diagnostic_expectations=1/2 fail=1" in summary
 

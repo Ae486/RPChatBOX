@@ -1,11 +1,16 @@
 """Unit tests for the setup-agent runtime executor."""
+
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from rp.agent_runtime.contracts import RpAgentTurnInput, RuntimeProfile, RuntimeToolResult
+from rp.agent_runtime.contracts import (
+    RpAgentTurnInput,
+    RuntimeProfile,
+    RuntimeToolResult,
+)
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor
 
 
@@ -21,12 +26,40 @@ def _turn_input(
         "current_step": "story_config",
         "context_packet": {
             "current_step": "story_config",
+            "committed_summaries": ["world.magic.law"],
             "current_draft_snapshot": {"notes": ["existing"]},
+            "prior_stage_handoffs": [
+                {
+                    "step_id": "foundation",
+                    "commit_id": "commit-foundation-1",
+                    "summary": "world.magic.law",
+                    "committed_refs": ["draft:foundation"],
+                    "spotlights": ["Magic Law"],
+                    "chunk_descriptions": [
+                        {
+                            "chunk_ref": "foundation:magic-law",
+                            "block_type": "foundation_entry",
+                            "title": "Magic Law",
+                            "description": "rule | world.magic.law - Public spellcasting is regulated by guild permits.",
+                            "metadata": {
+                                "domain": "rule",
+                                "path": "world.magic.law",
+                                "entry_id": "magic-law",
+                            },
+                        }
+                    ],
+                    "created_at": "2026-04-27T00:00:00Z",
+                }
+            ],
+            "spotlights": ["Magic Law"],
             "user_prompt": user_prompt,
         },
         "open_question_count": 0,
         "blocking_open_question_count": 0,
         "open_question_texts": [],
+        "has_prior_stage_handoffs": True,
+        "prior_stage_handoff_count": 1,
+        "prior_stage_handoff_steps": ["foundation"],
         "last_proposal_status": None,
     }
     if context_bundle:
@@ -82,17 +115,19 @@ class _FakeToolExecutor:
         self._results = list(results or [])
         self.calls = []
 
-    def get_openai_tool_definitions(self, *, visible_tool_names: list[str]) -> list[dict]:
+    def get_openai_tool_definitions(
+        self, *, visible_tool_names: list[str]
+    ) -> list[dict]:
         return [
             _tool_definition(
-                name
-                if name.startswith("rp_setup__")
-                else f"rp_setup__{name}"
+                name if name.startswith("rp_setup__") else f"rp_setup__{name}"
             )
             for name in visible_tool_names
         ]
 
-    async def execute_tool_call(self, call, *, visible_tool_names: list[str]) -> RuntimeToolResult:
+    async def execute_tool_call(
+        self, call, *, visible_tool_names: list[str]
+    ) -> RuntimeToolResult:
         self.calls.append((call, list(visible_tool_names)))
         if self._results:
             return self._results.pop(0)
@@ -119,13 +154,17 @@ class _FakeLangfuseObservation:
         return False
 
     def update(self, **kwargs):
-        self._sink.append({"kind": "observation_update", "name": self._name, "payload": kwargs})
+        self._sink.append(
+            {"kind": "observation_update", "name": self._name, "payload": kwargs}
+        )
 
     def score(self, **kwargs):
         self._sink.append({"kind": "score", "name": self._name, "payload": kwargs})
 
     def score_trace(self, **kwargs):
-        self._sink.append({"kind": "score_trace", "name": self._name, "payload": kwargs})
+        self._sink.append(
+            {"kind": "score_trace", "name": self._name, "payload": kwargs}
+        )
 
     def start_as_current_observation(self, **kwargs):
         return _FakeLangfuseObservation(
@@ -269,7 +308,9 @@ class _UnknownToolLLM:
                                 "type": "function",
                                 "function": {
                                     "name": "rp_setup__setup.unknown",
-                                    "arguments": json.dumps({"workspace_id": "workspace-1"}),
+                                    "arguments": json.dumps(
+                                        {"workspace_id": "workspace-1"}
+                                    ),
                                 },
                             }
                         ],
@@ -298,7 +339,9 @@ class _AskUserAfterFailureLLM:
                                     "type": "function",
                                     "function": {
                                         "name": "rp_setup__setup.patch.story_config",
-                                        "arguments": json.dumps({"workspace_id": "workspace-1"}),
+                                        "arguments": json.dumps(
+                                            {"workspace_id": "workspace-1"}
+                                        ),
                                     },
                                 }
                             ],
@@ -337,7 +380,9 @@ class _ExplainInsteadOfRepairLLM:
                                     "type": "function",
                                     "function": {
                                         "name": "rp_setup__setup.patch.story_config",
-                                        "arguments": json.dumps({"workspace_id": "workspace-1"}),
+                                        "arguments": json.dumps(
+                                            {"workspace_id": "workspace-1"}
+                                        ),
                                     },
                                 }
                             ],
@@ -380,7 +425,9 @@ class _CommitTooEarlyThenQuestionLLM:
                                             {
                                                 "workspace_id": "workspace-1",
                                                 "step_id": "story_config",
-                                                "target_draft_refs": ["draft:story_config"],
+                                                "target_draft_refs": [
+                                                    "draft:story_config"
+                                                ],
                                             }
                                         ),
                                     },
@@ -489,6 +536,9 @@ async def test_runtime_executor_returns_direct_answer_without_tools():
     assert result.assistant_text == "Direct setup answer."
     assert result.tool_invocations == []
     assert result.tool_results == []
+    assert result.structured_payload["working_digest"] is not None
+    assert result.structured_payload["tool_outcomes"] == []
+    assert result.structured_payload["compact_summary"] is None
 
 
 @pytest.mark.asyncio
@@ -506,13 +556,19 @@ async def test_runtime_executor_executes_tool_and_continues():
     )
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
-    result = await executor.run(_turn_input(), _profile(), llm_service=_ToolThenTextLLM())
+    result = await executor.run(
+        _turn_input(), _profile(), llm_service=_ToolThenTextLLM()
+    )
 
     assert result.status == "completed"
     assert result.assistant_text == "Tool succeeded and I finished the answer."
     assert len(result.tool_invocations) == 1
     assert len(result.tool_results) == 1
     assert tool_executor.calls[0][0].tool_name == "rp_setup__setup.patch.story_config"
+    assert result.structured_payload["tool_outcomes"][0]["tool_name"] == (
+        "rp_setup__setup.patch.story_config"
+    )
+    assert result.structured_payload["tool_outcomes"][0]["success"] is True
 
 
 @pytest.mark.asyncio
@@ -537,7 +593,9 @@ async def test_runtime_executor_allows_one_schema_repair_retry():
     )
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
-    result = await executor.run(_turn_input(), _profile(), llm_service=_SchemaRepairLLM())
+    result = await executor.run(
+        _turn_input(), _profile(), llm_service=_SchemaRepairLLM()
+    )
 
     assert result.status == "completed"
     assert result.assistant_text == "Corrected the tool call and finished."
@@ -613,7 +671,10 @@ async def test_runtime_executor_blocks_false_success_when_repair_obligation_is_u
     assert result.status == "failed"
     assert result.finish_reason == "repair_obligation_unfulfilled"
     assert result.error is not None
-    assert result.structured_payload["completion_guard"]["reason"] == "repair_obligation_unresolved"
+    assert (
+        result.structured_payload["completion_guard"]["reason"]
+        == "repair_obligation_unresolved"
+    )
 
 
 @pytest.mark.asyncio
@@ -722,8 +783,14 @@ async def test_runtime_executor_keeps_non_commit_tool_failure_in_recovery_semant
 
     assert result.status == "completed"
     assert result.finish_reason == "continue_discussion"
-    assert result.structured_payload["turn_goal"]["goal_type"] == "recover_from_tool_failure"
-    assert result.structured_payload["last_failure"]["failure_category"] == "continue_discussion"
+    assert (
+        result.structured_payload["turn_goal"]["goal_type"]
+        == "recover_from_tool_failure"
+    )
+    assert (
+        result.structured_payload["last_failure"]["failure_category"]
+        == "continue_discussion"
+    )
     assert result.structured_payload["repair_route"] == "continue_discussion"
 
 
@@ -742,7 +809,9 @@ async def test_runtime_executor_fails_fast_on_unknown_tool():
     )
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
-    result = await executor.run(_turn_input(), _profile(), llm_service=_UnknownToolLLM())
+    result = await executor.run(
+        _turn_input(), _profile(), llm_service=_UnknownToolLLM()
+    )
 
     assert result.status == "failed"
     assert result.finish_reason == "tool_error_unrecoverable"

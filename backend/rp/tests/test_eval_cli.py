@@ -4,10 +4,12 @@ import json
 from contextlib import nullcontext
 from pathlib import Path
 
+import pytest
+
 from models.model_registry import ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
 from rp.eval.case_loader import load_case
-from rp.eval.cli import _apply_cli_env_overrides, build_parser, main
+from rp.eval.cli import _apply_cli_env_overrides, _print_payload, build_parser, main
 from services.model_registry import get_model_registry_service
 from services.provider_registry import get_provider_registry_service
 import services.model_registry as model_registry_module
@@ -71,7 +73,8 @@ class _FakeJudgeLLMService:
 
 
 class _FakeLangfuseService:
-    def __init__(self) -> None:
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.enabled = enabled
         self.flush_calls = 0
 
     def flush(self) -> None:
@@ -101,6 +104,8 @@ def test_eval_cli_run_suite_writes_bundle_and_passes_thresholds(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "threshold_passed=True" in captured.out
+    assert "top_reason_codes=" in captured.out
+    assert "top_primary_suspects=" in captured.out
     assert (tmp_path / "suite-output" / "suite-summary.json").exists()
     assert (tmp_path / "suite-output" / "derived-summary.json").exists()
     assert (tmp_path / "suite-output" / "thresholds.json").exists()
@@ -251,6 +256,13 @@ def test_eval_cli_parser_supports_langfuse_suite_compare_and_replay_sync_flags()
             "--sync-suite-to-langfuse",
         ]
     )
+    suite_all_args = parser.parse_args(
+        [
+            "run-suite",
+            str(_case_path("retrieval", "search", "query_trace_and_provenance.v1.json")),
+            "--sync-all-to-langfuse",
+        ]
+    )
     compare_args = parser.parse_args(
         [
             "compare",
@@ -283,6 +295,7 @@ def test_eval_cli_parser_supports_langfuse_suite_compare_and_replay_sync_flags()
     )
 
     assert suite_args.sync_suite_to_langfuse is True
+    assert suite_all_args.sync_all_to_langfuse is True
     assert compare_args.sync_comparison_to_langfuse is True
     assert replay_args.sync_replay_to_langfuse is True
     assert replay_ragas_args.run_ragas is True
@@ -312,6 +325,7 @@ def test_eval_cli_compare_reports_changed_cases(tmp_path, capsys):
                             "hard_failures": [],
                             "assertion_summary": {"pass": 1, "fail": 0, "warn": 0, "skip": 0},
                             "reason_codes": ["prompt.missing_step_targeting"],
+                            "primary_suspects": ["instruction_prompt_skill"],
                             "outcome_chain": {"transcript_status": "pass"},
                         },
                     }
@@ -342,7 +356,9 @@ def test_eval_cli_compare_reports_changed_cases(tmp_path, capsys):
                                 "prompt.missing_step_targeting",
                                 "controller.commit_proposal_blocked",
                             ],
+                            "primary_suspects": ["decision_policy"],
                             "outcome_chain": {"transcript_status": "warn"},
+                            "recommended_next_action": "tighten_commit_readiness_checks_and_review_block_messages",
                             "diagnostic_expectation_results": [
                                 {
                                     "score_name": "diagnostic.reason_code_presence",
@@ -367,10 +383,73 @@ def test_eval_cli_compare_reports_changed_cases(tmp_path, capsys):
     assert payload["changed_cases"][0]["case_id"] == "setup.case.a"
     assert payload["drift_summary"]["changed_finish_reason_case_ids"] == ["setup.case.a"]
     assert payload["drift_summary"]["changed_reason_code_case_ids"] == ["setup.case.a"]
+    assert payload["drift_summary"]["changed_primary_suspect_case_ids"] == ["setup.case.a"]
     assert payload["drift_summary"]["changed_outcome_chain_case_ids"] == ["setup.case.a"]
+    assert payload["drift_summary"]["changed_recommended_next_action_case_ids"] == [
+        "setup.case.a"
+    ]
     assert payload["drift_summary"]["changed_diagnostic_expectation_case_ids"] == [
         "setup.case.a"
     ]
+
+
+def test_eval_cli_print_payload_includes_diagnostic_context(capsys):
+    _print_payload(
+        {
+            "case_id": "setup.case.summary",
+            "status": "completed",
+            "report": {
+                "case_id": "setup.case.summary",
+                "status": "completed",
+                "finish_reason": "awaiting_user_input",
+                "failure_layer": "deterministic",
+                "assertion_summary": {"pass": 3, "fail": 1, "warn": 0, "skip": 0},
+                "reason_codes": ["prompt.missing_step_targeting"],
+                "primary_suspects": ["instruction_prompt_skill"],
+                "recommended_next_action": "ask_for_missing_setup_inputs",
+                "outcome_chain_display": ["transcript=warn", "readiness=fail"],
+                "evidence_refs": ["artifact:tool_sequence", "artifact:readiness_snapshot"],
+            },
+        },
+        as_json=False,
+    )
+    captured = capsys.readouterr()
+
+    assert "failure_layer=deterministic" in captured.out
+    assert "reason_codes=prompt.missing_step_targeting" in captured.out
+    assert "primary_suspects=instruction_prompt_skill" in captured.out
+    assert "next_action=ask_for_missing_setup_inputs" in captured.out
+    assert "outcome_chain=transcript=warn;readiness=fail" in captured.out
+    assert "evidence_refs=artifact:tool_sequence,artifact:readiness_snapshot" in captured.out
+
+
+def test_eval_cli_print_payload_includes_langfuse_sync_summary(capsys):
+    _print_payload(
+        {
+            "suite": {"items": []},
+            "summary": {
+                "run_count": 1,
+                "case_count": 1,
+                "failed_run_count": 0,
+                "repeat_case_ids": [],
+                "assertion_fail_total": 0,
+                "assertion_warn_total": 0,
+                "executed_judge_hook_total": 0,
+                "pending_judge_hook_total": 0,
+                "diagnostic_summary": {},
+            },
+            "thresholds": {"passed": True},
+            "langfuse_sync": {
+                "suite_replay_sync_count": 2,
+                "comparison_synced": True,
+            },
+        },
+        as_json=False,
+    )
+    captured = capsys.readouterr()
+
+    assert "langfuse_replays_synced=2" in captured.out
+    assert "langfuse_comparison_synced=True" in captured.out
 
 
 def test_eval_cli_run_suite_writes_comparison_markdown(
@@ -419,12 +498,73 @@ def test_eval_cli_run_suite_writes_comparison_markdown(
             str(baseline_dir),
         ]
     )
-    capsys.readouterr()
+    captured = capsys.readouterr()
 
     assert exit_code == 0
+    assert "suite run_count=" in captured.out
+    assert "compare added=" in captured.out
     comparison_markdown = (tmp_path / "suite-output" / "comparison.md").read_text(encoding="utf-8")
     assert "# RP Eval Comparison" in comparison_markdown
     assert "hard_failure_drifts" in comparison_markdown
+
+
+def test_eval_cli_run_suite_sync_all_to_langfuse_updates_summary(
+    retrieval_session,
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.setattr(
+        "rp.eval.cli._open_eval_session",
+        lambda: nullcontext(retrieval_session),
+    )
+    monkeypatch.setattr(
+        "rp.eval.cli.get_langfuse_service",
+        lambda: _FakeLangfuseService(enabled=True),
+    )
+    monkeypatch.setattr(
+        "rp.eval.cli.sync_suite_bundle_to_langfuse",
+        lambda **kwargs: {
+            "suite_summary_synced": True,
+            "suite_replay_sync_count": 1,
+            "comparison_synced": False,
+        },
+    )
+
+    exit_code = main(
+        [
+            "run-suite",
+            str(_case_path("retrieval", "ingestion", "commit_ingestion_and_query.v1.json")),
+            "--output-dir",
+            str(tmp_path / "suite-sync-output"),
+            "--sync-all-to-langfuse",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "langfuse_replays_synced=1" in captured.out
+    assert "langfuse_comparison_synced=False" in captured.out
+
+
+def test_eval_cli_sync_flags_require_langfuse_enabled(capsys, monkeypatch):
+    monkeypatch.setattr(
+        "rp.eval.cli.get_langfuse_service",
+        lambda: _FakeLangfuseService(enabled=False),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "run-suite",
+                str(_case_path("retrieval", "search", "query_trace_and_provenance.v1.json")),
+                "--sync-all-to-langfuse",
+            ]
+        )
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "需要已启用 Langfuse" in captured.err
 
 
 def test_eval_cli_can_enable_subjective_judges(

@@ -1,0 +1,1684 @@
+{
+  "case": {
+    "case_id": "retrieval.search.query_trace_and_provenance.v1",
+    "title": "Retrieval query should expose stable trace fields and provenance-rich hits",
+    "scope": "retrieval",
+    "category": "retrieval_ready",
+    "tags": [
+      "mvp",
+      "deterministic",
+      "retrieval-core"
+    ],
+    "runtime_target": {
+      "mode": "in_process",
+      "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+      "graph_id": "retrieval_core",
+      "stream": false
+    },
+    "input": {
+      "request": {
+        "workspace_id": "case-retrieval-trace-001--run-2c62111b",
+        "query": {
+          "query_kind": "archival",
+          "text_query": "archive sunrise ledger",
+          "domains": [
+            "world_rule"
+          ],
+          "top_k": 2,
+          "filters": {},
+          "search_kind": "chunks",
+          "rerank": true
+        }
+      },
+      "workspace_seed": {
+        "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+        "mode": "longform",
+        "current_step": "foundation",
+        "drafts": {
+          "foundation": {
+            "entries": [
+              {
+                "entry_id": "archive_rule_a",
+                "domain": "world",
+                "path": "world.archive_rule_a",
+                "title": "Archive Rule A",
+                "tags": [
+                  "archive"
+                ],
+                "source_refs": [],
+                "content": {
+                  "summary": "The archive ledger is sealed before sunrise."
+                }
+              },
+              {
+                "entry_id": "archive_rule_b",
+                "domain": "world",
+                "path": "world.archive_rule_b",
+                "title": "Archive Rule B",
+                "tags": [
+                  "ledger"
+                ],
+                "source_refs": [],
+                "content": {
+                  "summary": "The ledger room opens only after dawn inventory."
+                }
+              }
+            ]
+          },
+          "story_config": {
+            "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+            "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+            "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+            "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422"
+          }
+        },
+        "accepted_proposals": [
+          {
+            "step_id": "foundation",
+            "target_draft_refs": [
+              "foundation:archive_rule_a",
+              "foundation:archive_rule_b"
+            ],
+            "reason": "freeze foundation"
+          }
+        ]
+      },
+      "env_overrides": {
+        "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+        "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+        "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+        "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+        "save_replay_dir": "artifacts\\eval\\real-provider-suite-output\\replays"
+      },
+      "diagnostic_profile": null
+    },
+    "preconditions": {},
+    "expected": {
+      "deterministic_assertions": [
+        {
+          "assertion_id": "finish_is_retrieval_completed",
+          "source": "retrieval_result",
+          "type": "equals",
+          "path": "finish_reason",
+          "expected": "retrieval_completed",
+          "severity": "error"
+        },
+        {
+          "assertion_id": "query_trace_id_exists",
+          "source": "retrieval_result",
+          "type": "exists",
+          "path": "query_result.trace.trace_id",
+          "expected": true,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "query_route_exists",
+          "source": "retrieval_result",
+          "type": "exists",
+          "path": "query_result.trace.route",
+          "expected": true,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "retriever_routes_exist",
+          "source": "retrieval_result",
+          "type": "count_gte",
+          "path": "query_result.trace.retriever_routes",
+          "expected": 1,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "pipeline_stages_exist",
+          "source": "retrieval_result",
+          "type": "count_gte",
+          "path": "query_result.trace.pipeline_stages",
+          "expected": 2,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "query_hits_exist",
+          "source": "retrieval_result",
+          "type": "count_gte",
+          "path": "query_result.hits",
+          "expected": 1,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "hit_provenance_exists",
+          "source": "retrieval_result",
+          "type": "count_gte",
+          "path": "query_result.hits[0].provenance_refs",
+          "expected": 1,
+          "severity": "error"
+        },
+        {
+          "assertion_id": "hit_asset_id_exists",
+          "source": "retrieval_result",
+          "type": "exists",
+          "path": "query_result.hits[0].metadata.asset_id",
+          "expected": true,
+          "severity": "error"
+        }
+      ],
+      "subjective_hooks": [
+        {
+          "hook_id": "retrieval_query_quality",
+          "judge_family": "llm_judge",
+          "rubric_ref": "retrieval/query-quality/v1",
+          "target": "query_text"
+        }
+      ],
+      "expected_reason_codes": [],
+      "expected_primary_suspects": [],
+      "expected_outcome_chain": {},
+      "expected_recommended_next_action": null
+    },
+    "trace_hooks": {
+      "capture_runtime_events": false,
+      "capture_graph_debug": false,
+      "capture_workspace_before_after": true,
+      "capture_activation_snapshot": true,
+      "capture_tool_sequence": true
+    },
+    "repeat": {
+      "count": 1,
+      "stop_on_first_hard_failure": false
+    },
+    "baseline": {
+      "compare_by": [
+        "finish_reason",
+        "assertion_pass_rate"
+      ],
+      "baseline_tags": [
+        "main"
+      ]
+    },
+    "metadata": {}
+  },
+  "run": {
+    "run_id": "80cee92e6f184cb4a20ea3265571819a",
+    "case_id": "retrieval.search.query_trace_and_provenance.v1",
+    "scope": "retrieval",
+    "status": "completed",
+    "started_at": "2026-04-26T05:20:19.386626Z",
+    "finished_at": "2026-04-26T05:20:39.564240Z",
+    "runtime_target": "retrieval_core",
+    "baseline_tags": [
+      "main"
+    ],
+    "trace_id": "765d15655abf482ba2fb122a778f20ed",
+    "failure": null,
+    "metadata": {
+      "workspace_id": "0a9915615fd443c39de64abca3bc111d",
+      "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+      "commit_id": "b1913e11d650435fb347b4ab084335cc",
+      "ragas_status": "not_requested"
+    }
+  },
+  "trace": {
+    "trace_id": "765d15655abf482ba2fb122a778f20ed",
+    "spans": [
+      {
+        "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+        "trace_id": "765d15655abf482ba2fb122a778f20ed",
+        "parent_span_id": null,
+        "name": "retrieval.ingestion",
+        "span_kind": "CHAIN",
+        "status": "ok",
+        "started_at": "2026-04-26T05:20:19.386626Z",
+        "finished_at": "2026-04-26T05:20:39.564240Z",
+        "input": {
+          "workspace_id": "0a9915615fd443c39de64abca3bc111d",
+          "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+          "commit_id": "b1913e11d650435fb347b4ab084335cc"
+        },
+        "output": {
+          "finish_reason": "retrieval_completed",
+          "workspace_id": "0a9915615fd443c39de64abca3bc111d",
+          "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+          "commit_id": "b1913e11d650435fb347b4ab084335cc",
+          "completed_job_ids": [
+            "ced0bf4835274e74af9cd6b69c2e98d3",
+            "2ae0a2ab078f4bf5a83161d1fca46548"
+          ],
+          "query_input": {
+            "query_kind": "archival",
+            "text_query": "archive sunrise ledger",
+            "domains": [
+              "world_rule"
+            ],
+            "top_k": 2,
+            "filters": {},
+            "search_kind": "chunks",
+            "rerank": true
+          },
+          "query_result": {
+            "query": "archive sunrise ledger",
+            "hits": [
+              {
+                "hit_id": "chunk_32f778da36594ce59e8849186544090e",
+                "query_id": "rq_9492664d46",
+                "layer": "archival",
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_a",
+                "knowledge_ref": {
+                  "object_id": "chunk_32f778da36594ce59e8849186544090e",
+                  "layer": "archival",
+                  "domain": "world_rule",
+                  "domain_path": "foundation.world.world.archive_rule_a",
+                  "scope": "story",
+                  "revision": 1
+                },
+                "excerpt_text": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+                "score": 0.603835,
+                "rank": 1,
+                "metadata": {
+                  "domain": "world_rule",
+                  "domain_path": "foundation.world.world.archive_rule_a",
+                  "title": "Archive Rule A",
+                  "tags": [
+                    "archive"
+                  ],
+                  "source_refs": [],
+                  "commit_id": "b1913e11d650435fb347b4ab084335cc",
+                  "section_id": "archive_rule_a",
+                  "section_part": 0,
+                  "parent_section_part": 0,
+                  "view_part": 0,
+                  "chunk_view": "primary",
+                  "chunk_size": "default",
+                  "chunk_pass": 0,
+                  "chunking_strategy": "section_aligned",
+                  "chunk_view_priority": 0,
+                  "chunk_family_id": "archive_rule_a:0",
+                  "char_start": 0,
+                  "char_end": 59,
+                  "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_a",
+                  "document_title": "Archive Rule A",
+                  "document_summary": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+                  "page_ref": null,
+                  "context_header": "Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a",
+                  "contextual_text_version": "v1",
+                  "contextual_text": "Context: Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a\nSummary: {\"summary\": \"The archive ledger is sealed before sunrise.\"}\n{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+                  "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+                  "asset_kind": "foundation_entry",
+                  "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+                  "collection_kind": "archival",
+                  "token_count": 8,
+                  "page_no": null,
+                  "page_label": null,
+                  "image_caption": null,
+                  "result_kind": "chunk"
+                },
+                "provenance_refs": [
+                  "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+                  "index_job:index_bdd7a3699e124f9ca24c7e9427ba5756",
+                  "commit:b1913e11d650435fb347b4ab084335cc"
+                ]
+              },
+              {
+                "hit_id": "chunk_60741a15d4d04b04b429baf474617f82",
+                "query_id": "rq_9492664d46",
+                "layer": "archival",
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_b",
+                "knowledge_ref": {
+                  "object_id": "chunk_60741a15d4d04b04b429baf474617f82",
+                  "layer": "archival",
+                  "domain": "world_rule",
+                  "domain_path": "foundation.world.world.archive_rule_b",
+                  "scope": "story",
+                  "revision": 1
+                },
+                "excerpt_text": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+                "score": 0.150524,
+                "rank": 2,
+                "metadata": {
+                  "domain": "world_rule",
+                  "domain_path": "foundation.world.world.archive_rule_b",
+                  "title": "Archive Rule B",
+                  "tags": [
+                    "ledger"
+                  ],
+                  "source_refs": [],
+                  "commit_id": "b1913e11d650435fb347b4ab084335cc",
+                  "section_id": "archive_rule_b",
+                  "section_part": 0,
+                  "parent_section_part": 0,
+                  "view_part": 0,
+                  "chunk_view": "primary",
+                  "chunk_size": "default",
+                  "chunk_pass": 0,
+                  "chunking_strategy": "section_aligned",
+                  "chunk_view_priority": 0,
+                  "chunk_family_id": "archive_rule_b:0",
+                  "char_start": 0,
+                  "char_end": 63,
+                  "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_b",
+                  "document_title": "Archive Rule B",
+                  "document_summary": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+                  "page_ref": null,
+                  "context_header": "Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b",
+                  "contextual_text_version": "v1",
+                  "contextual_text": "Context: Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b\nSummary: {\"summary\": \"The ledger room opens only after dawn inventory.\"}\n{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+                  "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+                  "asset_kind": "foundation_entry",
+                  "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+                  "collection_kind": "archival",
+                  "token_count": 9,
+                  "page_no": null,
+                  "page_label": null,
+                  "image_caption": null,
+                  "result_kind": "chunk"
+                },
+                "provenance_refs": [
+                  "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+                  "index_job:index_839f63b37704445590f26f437b6ee4c0",
+                  "commit:b1913e11d650435fb347b4ab084335cc"
+                ]
+              }
+            ],
+            "trace": {
+              "trace_id": "trace_478c83f8a5",
+              "query_id": "rq_9492664d46",
+              "route": "retrieval.hybrid.rrf",
+              "result_kind": "chunk",
+              "filters_applied": {
+                "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+                "domains": [
+                  "world_rule"
+                ],
+                "scope": null,
+                "filters": {},
+                "top_k": 2,
+                "rerank": true
+              },
+              "retriever_routes": [
+                "retrieval.keyword.lexical",
+                "retrieval.semantic.python"
+              ],
+              "pipeline_stages": [
+                "retrieve",
+                "fusion",
+                "rerank",
+                "chunk_result_builder"
+              ],
+              "reranker_name": "cross_encoder_hosted",
+              "candidate_count": 2,
+              "returned_count": 2,
+              "timings": {
+                "keyword_ms": 22.29,
+                "semantic_ms": 8381.002,
+                "fusion_ms": 0.275,
+                "rerank_ms": 3654.874,
+                "chunk_builder_ms": 0.069
+              },
+              "warnings": [],
+              "details": {
+                "rerank": {
+                  "backend_name": "hosted",
+                  "model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+                  "model_name": "Qwen/Qwen3-VL-Reranker-8B",
+                  "provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+                  "resolution_source": "registry_capability",
+                  "input_candidate_count": 2,
+                  "expected_count": 2,
+                  "returned_item_count": 2,
+                  "used_backend_result": true
+                }
+              }
+            },
+            "warnings": []
+          },
+          "maintenance": {}
+        },
+        "attributes": {
+          "case_id": "retrieval.search.query_trace_and_provenance.v1",
+          "workspace_id": "0a9915615fd443c39de64abca3bc111d",
+          "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+          "commit_id": "b1913e11d650435fb347b4ab084335cc",
+          "completed_job_count": 2
+        },
+        "error": null
+      },
+      {
+        "span_id": "80cee92e6f184cb4a20ea3265571819a:retriever",
+        "trace_id": "765d15655abf482ba2fb122a778f20ed",
+        "parent_span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+        "name": "retrieval.query",
+        "span_kind": "RETRIEVER",
+        "status": "ok",
+        "started_at": "2026-04-26T05:20:19.386626Z",
+        "finished_at": "2026-04-26T05:20:39.564240Z",
+        "input": {
+          "query": {
+            "query_kind": "archival",
+            "text_query": "archive sunrise ledger",
+            "domains": [
+              "world_rule"
+            ],
+            "top_k": 2,
+            "filters": {},
+            "search_kind": "chunks",
+            "rerank": true
+          }
+        },
+        "output": {
+          "query": "archive sunrise ledger",
+          "hits": [
+            {
+              "hit_id": "chunk_32f778da36594ce59e8849186544090e",
+              "query_id": "rq_9492664d46",
+              "layer": "archival",
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_a",
+              "knowledge_ref": {
+                "object_id": "chunk_32f778da36594ce59e8849186544090e",
+                "layer": "archival",
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_a",
+                "scope": "story",
+                "revision": 1
+              },
+              "excerpt_text": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+              "score": 0.603835,
+              "rank": 1,
+              "metadata": {
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_a",
+                "title": "Archive Rule A",
+                "tags": [
+                  "archive"
+                ],
+                "source_refs": [],
+                "commit_id": "b1913e11d650435fb347b4ab084335cc",
+                "section_id": "archive_rule_a",
+                "section_part": 0,
+                "parent_section_part": 0,
+                "view_part": 0,
+                "chunk_view": "primary",
+                "chunk_size": "default",
+                "chunk_pass": 0,
+                "chunking_strategy": "section_aligned",
+                "chunk_view_priority": 0,
+                "chunk_family_id": "archive_rule_a:0",
+                "char_start": 0,
+                "char_end": 59,
+                "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_a",
+                "document_title": "Archive Rule A",
+                "document_summary": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+                "page_ref": null,
+                "context_header": "Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a",
+                "contextual_text_version": "v1",
+                "contextual_text": "Context: Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a\nSummary: {\"summary\": \"The archive ledger is sealed before sunrise.\"}\n{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+                "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+                "asset_kind": "foundation_entry",
+                "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+                "collection_kind": "archival",
+                "token_count": 8,
+                "page_no": null,
+                "page_label": null,
+                "image_caption": null,
+                "result_kind": "chunk"
+              },
+              "provenance_refs": [
+                "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+                "index_job:index_bdd7a3699e124f9ca24c7e9427ba5756",
+                "commit:b1913e11d650435fb347b4ab084335cc"
+              ]
+            },
+            {
+              "hit_id": "chunk_60741a15d4d04b04b429baf474617f82",
+              "query_id": "rq_9492664d46",
+              "layer": "archival",
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_b",
+              "knowledge_ref": {
+                "object_id": "chunk_60741a15d4d04b04b429baf474617f82",
+                "layer": "archival",
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_b",
+                "scope": "story",
+                "revision": 1
+              },
+              "excerpt_text": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+              "score": 0.150524,
+              "rank": 2,
+              "metadata": {
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_b",
+                "title": "Archive Rule B",
+                "tags": [
+                  "ledger"
+                ],
+                "source_refs": [],
+                "commit_id": "b1913e11d650435fb347b4ab084335cc",
+                "section_id": "archive_rule_b",
+                "section_part": 0,
+                "parent_section_part": 0,
+                "view_part": 0,
+                "chunk_view": "primary",
+                "chunk_size": "default",
+                "chunk_pass": 0,
+                "chunking_strategy": "section_aligned",
+                "chunk_view_priority": 0,
+                "chunk_family_id": "archive_rule_b:0",
+                "char_start": 0,
+                "char_end": 63,
+                "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_b",
+                "document_title": "Archive Rule B",
+                "document_summary": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+                "page_ref": null,
+                "context_header": "Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b",
+                "contextual_text_version": "v1",
+                "contextual_text": "Context: Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b\nSummary: {\"summary\": \"The ledger room opens only after dawn inventory.\"}\n{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+                "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+                "asset_kind": "foundation_entry",
+                "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+                "collection_kind": "archival",
+                "token_count": 9,
+                "page_no": null,
+                "page_label": null,
+                "image_caption": null,
+                "result_kind": "chunk"
+              },
+              "provenance_refs": [
+                "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+                "index_job:index_839f63b37704445590f26f437b6ee4c0",
+                "commit:b1913e11d650435fb347b4ab084335cc"
+              ]
+            }
+          ],
+          "trace": {
+            "trace_id": "trace_478c83f8a5",
+            "query_id": "rq_9492664d46",
+            "route": "retrieval.hybrid.rrf",
+            "result_kind": "chunk",
+            "filters_applied": {
+              "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+              "domains": [
+                "world_rule"
+              ],
+              "scope": null,
+              "filters": {},
+              "top_k": 2,
+              "rerank": true
+            },
+            "retriever_routes": [
+              "retrieval.keyword.lexical",
+              "retrieval.semantic.python"
+            ],
+            "pipeline_stages": [
+              "retrieve",
+              "fusion",
+              "rerank",
+              "chunk_result_builder"
+            ],
+            "reranker_name": "cross_encoder_hosted",
+            "candidate_count": 2,
+            "returned_count": 2,
+            "timings": {
+              "keyword_ms": 22.29,
+              "semantic_ms": 8381.002,
+              "fusion_ms": 0.275,
+              "rerank_ms": 3654.874,
+              "chunk_builder_ms": 0.069
+            },
+            "warnings": [],
+            "details": {
+              "rerank": {
+                "backend_name": "hosted",
+                "model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+                "model_name": "Qwen/Qwen3-VL-Reranker-8B",
+                "provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+                "resolution_source": "registry_capability",
+                "input_candidate_count": 2,
+                "expected_count": 2,
+                "returned_item_count": 2,
+                "used_backend_result": true
+              }
+            }
+          },
+          "warnings": []
+        },
+        "attributes": {
+          "route": "retrieval.hybrid.rrf",
+          "result_kind": "chunk"
+        },
+        "error": null
+      }
+    ],
+    "events": []
+  },
+  "artifacts": [
+    {
+      "artifact_id": "80cee92e6f184cb4a20ea3265571819a:artifact:retrieval_result",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "kind": "retrieval_result",
+      "name": "RetrievalRunResult",
+      "content_type": "application/json",
+      "payload": {
+        "finish_reason": "retrieval_completed",
+        "workspace_id": "0a9915615fd443c39de64abca3bc111d",
+        "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+        "commit_id": "b1913e11d650435fb347b4ab084335cc",
+        "completed_job_ids": [
+          "ced0bf4835274e74af9cd6b69c2e98d3",
+          "2ae0a2ab078f4bf5a83161d1fca46548"
+        ],
+        "query_input": {
+          "query_kind": "archival",
+          "text_query": "archive sunrise ledger",
+          "domains": [
+            "world_rule"
+          ],
+          "top_k": 2,
+          "filters": {},
+          "search_kind": "chunks",
+          "rerank": true
+        },
+        "query_result": {
+          "query": "archive sunrise ledger",
+          "hits": [
+            {
+              "hit_id": "chunk_32f778da36594ce59e8849186544090e",
+              "query_id": "rq_9492664d46",
+              "layer": "archival",
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_a",
+              "knowledge_ref": {
+                "object_id": "chunk_32f778da36594ce59e8849186544090e",
+                "layer": "archival",
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_a",
+                "scope": "story",
+                "revision": 1
+              },
+              "excerpt_text": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+              "score": 0.603835,
+              "rank": 1,
+              "metadata": {
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_a",
+                "title": "Archive Rule A",
+                "tags": [
+                  "archive"
+                ],
+                "source_refs": [],
+                "commit_id": "b1913e11d650435fb347b4ab084335cc",
+                "section_id": "archive_rule_a",
+                "section_part": 0,
+                "parent_section_part": 0,
+                "view_part": 0,
+                "chunk_view": "primary",
+                "chunk_size": "default",
+                "chunk_pass": 0,
+                "chunking_strategy": "section_aligned",
+                "chunk_view_priority": 0,
+                "chunk_family_id": "archive_rule_a:0",
+                "char_start": 0,
+                "char_end": 59,
+                "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_a",
+                "document_title": "Archive Rule A",
+                "document_summary": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+                "page_ref": null,
+                "context_header": "Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a",
+                "contextual_text_version": "v1",
+                "contextual_text": "Context: Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a\nSummary: {\"summary\": \"The archive ledger is sealed before sunrise.\"}\n{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+                "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+                "asset_kind": "foundation_entry",
+                "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+                "collection_kind": "archival",
+                "token_count": 8,
+                "page_no": null,
+                "page_label": null,
+                "image_caption": null,
+                "result_kind": "chunk"
+              },
+              "provenance_refs": [
+                "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+                "index_job:index_bdd7a3699e124f9ca24c7e9427ba5756",
+                "commit:b1913e11d650435fb347b4ab084335cc"
+              ]
+            },
+            {
+              "hit_id": "chunk_60741a15d4d04b04b429baf474617f82",
+              "query_id": "rq_9492664d46",
+              "layer": "archival",
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_b",
+              "knowledge_ref": {
+                "object_id": "chunk_60741a15d4d04b04b429baf474617f82",
+                "layer": "archival",
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_b",
+                "scope": "story",
+                "revision": 1
+              },
+              "excerpt_text": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+              "score": 0.150524,
+              "rank": 2,
+              "metadata": {
+                "domain": "world_rule",
+                "domain_path": "foundation.world.world.archive_rule_b",
+                "title": "Archive Rule B",
+                "tags": [
+                  "ledger"
+                ],
+                "source_refs": [],
+                "commit_id": "b1913e11d650435fb347b4ab084335cc",
+                "section_id": "archive_rule_b",
+                "section_part": 0,
+                "parent_section_part": 0,
+                "view_part": 0,
+                "chunk_view": "primary",
+                "chunk_size": "default",
+                "chunk_pass": 0,
+                "chunking_strategy": "section_aligned",
+                "chunk_view_priority": 0,
+                "chunk_family_id": "archive_rule_b:0",
+                "char_start": 0,
+                "char_end": 63,
+                "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_b",
+                "document_title": "Archive Rule B",
+                "document_summary": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+                "page_ref": null,
+                "context_header": "Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b",
+                "contextual_text_version": "v1",
+                "contextual_text": "Context: Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b\nSummary: {\"summary\": \"The ledger room opens only after dawn inventory.\"}\n{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+                "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+                "asset_kind": "foundation_entry",
+                "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+                "collection_kind": "archival",
+                "token_count": 9,
+                "page_no": null,
+                "page_label": null,
+                "image_caption": null,
+                "result_kind": "chunk"
+              },
+              "provenance_refs": [
+                "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+                "index_job:index_839f63b37704445590f26f437b6ee4c0",
+                "commit:b1913e11d650435fb347b4ab084335cc"
+              ]
+            }
+          ],
+          "trace": {
+            "trace_id": "trace_478c83f8a5",
+            "query_id": "rq_9492664d46",
+            "route": "retrieval.hybrid.rrf",
+            "result_kind": "chunk",
+            "filters_applied": {
+              "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+              "domains": [
+                "world_rule"
+              ],
+              "scope": null,
+              "filters": {},
+              "top_k": 2,
+              "rerank": true
+            },
+            "retriever_routes": [
+              "retrieval.keyword.lexical",
+              "retrieval.semantic.python"
+            ],
+            "pipeline_stages": [
+              "retrieve",
+              "fusion",
+              "rerank",
+              "chunk_result_builder"
+            ],
+            "reranker_name": "cross_encoder_hosted",
+            "candidate_count": 2,
+            "returned_count": 2,
+            "timings": {
+              "keyword_ms": 22.29,
+              "semantic_ms": 8381.002,
+              "fusion_ms": 0.275,
+              "rerank_ms": 3654.874,
+              "chunk_builder_ms": 0.069
+            },
+            "warnings": [],
+            "details": {
+              "rerank": {
+                "backend_name": "hosted",
+                "model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+                "model_name": "Qwen/Qwen3-VL-Reranker-8B",
+                "provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+                "resolution_source": "registry_capability",
+                "input_candidate_count": 2,
+                "expected_count": 2,
+                "returned_item_count": 2,
+                "used_backend_result": true
+              }
+            }
+          },
+          "warnings": []
+        },
+        "maintenance": {}
+      }
+    },
+    {
+      "artifact_id": "80cee92e6f184cb4a20ea3265571819a:artifact:retrieval_truth",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "kind": "retrieval_truth",
+      "name": "RetrievalTruth",
+      "content_type": "application/json",
+      "payload": {
+        "source_assets": [
+          {
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+            "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+            "parse_status": "parsed",
+            "ingestion_status": "completed",
+            "commit_id": "b1913e11d650435fb347b4ab084335cc"
+          },
+          {
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+            "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+            "parse_status": "parsed",
+            "ingestion_status": "completed",
+            "commit_id": "b1913e11d650435fb347b4ab084335cc"
+          }
+        ],
+        "parsed_documents": [
+          {
+            "parsed_document_id": "pd_b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a_ef4518c7",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+            "parser_kind": "seed_sections"
+          },
+          {
+            "parsed_document_id": "pd_b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b_d2ce1e08",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+            "parser_kind": "seed_sections"
+          }
+        ],
+        "chunks": [
+          {
+            "chunk_id": "chunk_32f778da36594ce59e8849186544090e",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_a",
+            "is_active": true
+          },
+          {
+            "chunk_id": "chunk_60741a15d4d04b04b429baf474617f82",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_b",
+            "is_active": true
+          }
+        ],
+        "embeddings": [
+          {
+            "embedding_id": "emb_de06b31b03eb4a54b9a0177f3a933cf9",
+            "chunk_id": "chunk_32f778da36594ce59e8849186544090e",
+            "vector_dim": 4096,
+            "status": "completed",
+            "is_active": true
+          },
+          {
+            "embedding_id": "emb_da62edd13c4643619a8956faf40d9012",
+            "chunk_id": "chunk_60741a15d4d04b04b429baf474617f82",
+            "vector_dim": 4096,
+            "status": "completed",
+            "is_active": true
+          }
+        ],
+        "index_jobs": [
+          {
+            "job_id": "index_bdd7a3699e124f9ca24c7e9427ba5756",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+            "job_kind": "ingest",
+            "job_state": "completed",
+            "error_message": null
+          },
+          {
+            "job_id": "index_839f63b37704445590f26f437b6ee4c0",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+            "job_kind": "ingest",
+            "job_state": "completed",
+            "error_message": null
+          }
+        ]
+      }
+    },
+    {
+      "artifact_id": "80cee92e6f184cb4a20ea3265571819a:artifact:subjective_hook:retrieval_query_quality",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "kind": "subjective_hook_record",
+      "name": "SubjectiveHookRecord:retrieval_query_quality",
+      "content_type": "application/json",
+      "payload": {
+        "hook_id": "retrieval_query_quality",
+        "name": "hook:retrieval_query_quality",
+        "kind": "llm",
+        "status": "skip",
+        "label": "pending",
+        "score": null,
+        "explanation": "Subjective hook prepared but no judge executor is configured yet",
+        "severity": "warn",
+        "judge_family": "llm_judge",
+        "rubric_ref": "retrieval/query-quality/v1",
+        "rubric_title": "Retrieval Query Quality",
+        "target": {
+          "name": "query_text",
+          "available": true,
+          "source": "retrieval_result",
+          "path": "query_input.text_query",
+          "preview": "archive sunrise ledger"
+        },
+        "judge": {
+          "model_id": null,
+          "provider_id": null,
+          "prompt_version": "llm-judge/v2",
+          "response_schema_version": "judge-response/v2",
+          "status_source": null,
+          "score_source": null,
+          "score_band": null,
+          "score_band_conflict": false,
+          "skip_reason": null
+        },
+        "request": null,
+        "response": null,
+        "strengths": [],
+        "issues": []
+      }
+    },
+    {
+      "artifact_id": "80cee92e6f184cb4a20ea3265571819a:artifact:ragas_report",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "kind": "ragas_report",
+      "name": "RagasReport",
+      "content_type": "application/json",
+      "payload": {
+        "enabled": false,
+        "available": true,
+        "status": "not_requested",
+        "metric_names": [
+          "context_precision",
+          "context_recall",
+          "response_relevancy",
+          "faithfulness"
+        ],
+        "sample_count": 0,
+        "record_count": 0,
+        "metric_summary": {
+          "context_precision": null,
+          "context_recall": null,
+          "response_relevancy": null,
+          "faithfulness": null
+        },
+        "sample_overview": [],
+        "error": null
+      }
+    }
+  ],
+  "scores": [
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:finish_is_retrieval_completed",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "finish_is_retrieval_completed",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "expected='retrieval_completed' actual='retrieval_completed'",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "actual": "retrieval_completed"
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:query_trace_id_exists",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "query_trace_id_exists",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "exists=True expected=True",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "query_result.trace.trace_id",
+        "expected": true,
+        "actual": "trace_478c83f8a5"
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:query_route_exists",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "query_route_exists",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "exists=True expected=True",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "query_result.trace.route",
+        "expected": true,
+        "actual": "retrieval.hybrid.rrf"
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:retriever_routes_exist",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "retriever_routes_exist",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "count=2 expected_gte=1",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "query_result.trace.retriever_routes",
+        "expected": 1,
+        "actual": [
+          "retrieval.keyword.lexical",
+          "retrieval.semantic.python"
+        ]
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:pipeline_stages_exist",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "pipeline_stages_exist",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "count=4 expected_gte=2",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "query_result.trace.pipeline_stages",
+        "expected": 2,
+        "actual": [
+          "retrieve",
+          "fusion",
+          "rerank",
+          "chunk_result_builder"
+        ]
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:query_hits_exist",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "query_hits_exist",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "count=2 expected_gte=1",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "query_result.hits",
+        "expected": 1,
+        "actual": [
+          {
+            "hit_id": "chunk_32f778da36594ce59e8849186544090e",
+            "query_id": "rq_9492664d46",
+            "layer": "archival",
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_a",
+            "knowledge_ref": {
+              "object_id": "chunk_32f778da36594ce59e8849186544090e",
+              "layer": "archival",
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_a",
+              "scope": "story",
+              "revision": 1
+            },
+            "excerpt_text": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+            "score": 0.603835,
+            "rank": 1,
+            "metadata": {
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_a",
+              "title": "Archive Rule A",
+              "tags": [
+                "archive"
+              ],
+              "source_refs": [],
+              "commit_id": "b1913e11d650435fb347b4ab084335cc",
+              "section_id": "archive_rule_a",
+              "section_part": 0,
+              "parent_section_part": 0,
+              "view_part": 0,
+              "chunk_view": "primary",
+              "chunk_size": "default",
+              "chunk_pass": 0,
+              "chunking_strategy": "section_aligned",
+              "chunk_view_priority": 0,
+              "chunk_family_id": "archive_rule_a:0",
+              "char_start": 0,
+              "char_end": 59,
+              "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_a",
+              "document_title": "Archive Rule A",
+              "document_summary": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+              "page_ref": null,
+              "context_header": "Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a",
+              "contextual_text_version": "v1",
+              "contextual_text": "Context: Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a\nSummary: {\"summary\": \"The archive ledger is sealed before sunrise.\"}\n{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+              "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+              "asset_kind": "foundation_entry",
+              "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+              "collection_kind": "archival",
+              "token_count": 8,
+              "page_no": null,
+              "page_label": null,
+              "image_caption": null,
+              "result_kind": "chunk"
+            },
+            "provenance_refs": [
+              "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+              "index_job:index_bdd7a3699e124f9ca24c7e9427ba5756",
+              "commit:b1913e11d650435fb347b4ab084335cc"
+            ]
+          },
+          {
+            "hit_id": "chunk_60741a15d4d04b04b429baf474617f82",
+            "query_id": "rq_9492664d46",
+            "layer": "archival",
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_b",
+            "knowledge_ref": {
+              "object_id": "chunk_60741a15d4d04b04b429baf474617f82",
+              "layer": "archival",
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_b",
+              "scope": "story",
+              "revision": 1
+            },
+            "excerpt_text": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+            "score": 0.150524,
+            "rank": 2,
+            "metadata": {
+              "domain": "world_rule",
+              "domain_path": "foundation.world.world.archive_rule_b",
+              "title": "Archive Rule B",
+              "tags": [
+                "ledger"
+              ],
+              "source_refs": [],
+              "commit_id": "b1913e11d650435fb347b4ab084335cc",
+              "section_id": "archive_rule_b",
+              "section_part": 0,
+              "parent_section_part": 0,
+              "view_part": 0,
+              "chunk_view": "primary",
+              "chunk_size": "default",
+              "chunk_pass": 0,
+              "chunking_strategy": "section_aligned",
+              "chunk_view_priority": 0,
+              "chunk_family_id": "archive_rule_b:0",
+              "char_start": 0,
+              "char_end": 63,
+              "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_b",
+              "document_title": "Archive Rule B",
+              "document_summary": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+              "page_ref": null,
+              "context_header": "Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b",
+              "contextual_text_version": "v1",
+              "contextual_text": "Context: Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b\nSummary: {\"summary\": \"The ledger room opens only after dawn inventory.\"}\n{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+              "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+              "asset_kind": "foundation_entry",
+              "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+              "collection_kind": "archival",
+              "token_count": 9,
+              "page_no": null,
+              "page_label": null,
+              "image_caption": null,
+              "result_kind": "chunk"
+            },
+            "provenance_refs": [
+              "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+              "index_job:index_839f63b37704445590f26f437b6ee4c0",
+              "commit:b1913e11d650435fb347b4ab084335cc"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:hit_provenance_exists",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "hit_provenance_exists",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "count=3 expected_gte=1",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "query_result.hits[0].provenance_refs",
+        "expected": 1,
+        "actual": [
+          "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+          "index_job:index_bdd7a3699e124f9ca24c7e9427ba5756",
+          "commit:b1913e11d650435fb347b4ab084335cc"
+        ]
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:hit_asset_id_exists",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "hit_asset_id_exists",
+      "kind": "code",
+      "status": "pass",
+      "value_type": "boolean",
+      "value": true,
+      "label": "pass",
+      "explanation": "exists=True expected=True",
+      "severity": "error",
+      "metadata": {
+        "source": "retrieval_result",
+        "path": "query_result.hits[0].metadata.asset_id",
+        "expected": true,
+        "actual": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a"
+      }
+    },
+    {
+      "score_id": "80cee92e6f184cb4a20ea3265571819a:score:hook:retrieval_query_quality",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "span_id": "80cee92e6f184cb4a20ea3265571819a:root",
+      "name": "hook:retrieval_query_quality",
+      "kind": "llm",
+      "status": "skip",
+      "value_type": "categorical",
+      "value": "pending",
+      "label": "pending",
+      "explanation": "Subjective hook prepared but no judge executor is configured yet",
+      "severity": "warn",
+      "metadata": {
+        "hook_id": "retrieval_query_quality",
+        "judge_family": "llm_judge",
+        "rubric_ref": "retrieval/query-quality/v1",
+        "target": "query_text",
+        "resolved_source": "retrieval_result",
+        "resolved_path": "query_input.text_query",
+        "target_available": true,
+        "target_preview": "archive sunrise ledger",
+        "rubric_title": "Retrieval Query Quality",
+        "judge_prompt_version": "llm-judge/v2",
+        "judge_response_schema_version": "judge-response/v2"
+      }
+    }
+  ],
+  "runtime_result": {
+    "finish_reason": "retrieval_completed",
+    "workspace_id": "0a9915615fd443c39de64abca3bc111d",
+    "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+    "commit_id": "b1913e11d650435fb347b4ab084335cc",
+    "completed_job_ids": [
+      "ced0bf4835274e74af9cd6b69c2e98d3",
+      "2ae0a2ab078f4bf5a83161d1fca46548"
+    ],
+    "query_input": {
+      "query_kind": "archival",
+      "text_query": "archive sunrise ledger",
+      "domains": [
+        "world_rule"
+      ],
+      "top_k": 2,
+      "filters": {},
+      "search_kind": "chunks",
+      "rerank": true
+    },
+    "query_result": {
+      "query": "archive sunrise ledger",
+      "hits": [
+        {
+          "hit_id": "chunk_32f778da36594ce59e8849186544090e",
+          "query_id": "rq_9492664d46",
+          "layer": "archival",
+          "domain": "world_rule",
+          "domain_path": "foundation.world.world.archive_rule_a",
+          "knowledge_ref": {
+            "object_id": "chunk_32f778da36594ce59e8849186544090e",
+            "layer": "archival",
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_a",
+            "scope": "story",
+            "revision": 1
+          },
+          "excerpt_text": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+          "score": 0.603835,
+          "rank": 1,
+          "metadata": {
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_a",
+            "title": "Archive Rule A",
+            "tags": [
+              "archive"
+            ],
+            "source_refs": [],
+            "commit_id": "b1913e11d650435fb347b4ab084335cc",
+            "section_id": "archive_rule_a",
+            "section_part": 0,
+            "parent_section_part": 0,
+            "view_part": 0,
+            "chunk_view": "primary",
+            "chunk_size": "default",
+            "chunk_pass": 0,
+            "chunking_strategy": "section_aligned",
+            "chunk_view_priority": 0,
+            "chunk_family_id": "archive_rule_a:0",
+            "char_start": 0,
+            "char_end": 59,
+            "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_a",
+            "document_title": "Archive Rule A",
+            "document_summary": "{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+            "page_ref": null,
+            "context_header": "Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a",
+            "contextual_text_version": "v1",
+            "contextual_text": "Context: Archive Rule A :: Archive Rule A :: foundation.world.world.archive_rule_a\nSummary: {\"summary\": \"The archive ledger is sealed before sunrise.\"}\n{\"summary\": \"The archive ledger is sealed before sunrise.\"}",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+            "asset_kind": "foundation_entry",
+            "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+            "collection_kind": "archival",
+            "token_count": 8,
+            "page_no": null,
+            "page_label": null,
+            "image_caption": null,
+            "result_kind": "chunk"
+          },
+          "provenance_refs": [
+            "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_a",
+            "index_job:index_bdd7a3699e124f9ca24c7e9427ba5756",
+            "commit:b1913e11d650435fb347b4ab084335cc"
+          ]
+        },
+        {
+          "hit_id": "chunk_60741a15d4d04b04b429baf474617f82",
+          "query_id": "rq_9492664d46",
+          "layer": "archival",
+          "domain": "world_rule",
+          "domain_path": "foundation.world.world.archive_rule_b",
+          "knowledge_ref": {
+            "object_id": "chunk_60741a15d4d04b04b429baf474617f82",
+            "layer": "archival",
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_b",
+            "scope": "story",
+            "revision": 1
+          },
+          "excerpt_text": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+          "score": 0.150524,
+          "rank": 2,
+          "metadata": {
+            "domain": "world_rule",
+            "domain_path": "foundation.world.world.archive_rule_b",
+            "title": "Archive Rule B",
+            "tags": [
+              "ledger"
+            ],
+            "source_refs": [],
+            "commit_id": "b1913e11d650435fb347b4ab084335cc",
+            "section_id": "archive_rule_b",
+            "section_part": 0,
+            "parent_section_part": 0,
+            "view_part": 0,
+            "chunk_view": "primary",
+            "chunk_size": "default",
+            "chunk_pass": 0,
+            "chunking_strategy": "section_aligned",
+            "chunk_view_priority": 0,
+            "chunk_family_id": "archive_rule_b:0",
+            "char_start": 0,
+            "char_end": 63,
+            "source_ref": "setup_commit:b1913e11d650435fb347b4ab084335cc:archive_rule_b",
+            "document_title": "Archive Rule B",
+            "document_summary": "{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+            "page_ref": null,
+            "context_header": "Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b",
+            "contextual_text_version": "v1",
+            "contextual_text": "Context: Archive Rule B :: Archive Rule B :: foundation.world.world.archive_rule_b\nSummary: {\"summary\": \"The ledger room opens only after dawn inventory.\"}\n{\"summary\": \"The ledger room opens only after dawn inventory.\"}",
+            "asset_id": "b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+            "asset_kind": "foundation_entry",
+            "collection_id": "story-case-retrieval-trace-001--run-2c62111b:archival",
+            "collection_kind": "archival",
+            "token_count": 9,
+            "page_no": null,
+            "page_label": null,
+            "image_caption": null,
+            "result_kind": "chunk"
+          },
+          "provenance_refs": [
+            "asset:b1913e11d650435fb347b4ab084335cc:foundation_entry:archive_rule_b",
+            "index_job:index_839f63b37704445590f26f437b6ee4c0",
+            "commit:b1913e11d650435fb347b4ab084335cc"
+          ]
+        }
+      ],
+      "trace": {
+        "trace_id": "trace_478c83f8a5",
+        "query_id": "rq_9492664d46",
+        "route": "retrieval.hybrid.rrf",
+        "result_kind": "chunk",
+        "filters_applied": {
+          "story_id": "story-case-retrieval-trace-001--run-2c62111b",
+          "domains": [
+            "world_rule"
+          ],
+          "scope": null,
+          "filters": {},
+          "top_k": 2,
+          "rerank": true
+        },
+        "retriever_routes": [
+          "retrieval.keyword.lexical",
+          "retrieval.semantic.python"
+        ],
+        "pipeline_stages": [
+          "retrieve",
+          "fusion",
+          "rerank",
+          "chunk_result_builder"
+        ],
+        "reranker_name": "cross_encoder_hosted",
+        "candidate_count": 2,
+        "returned_count": 2,
+        "timings": {
+          "keyword_ms": 22.29,
+          "semantic_ms": 8381.002,
+          "fusion_ms": 0.275,
+          "rerank_ms": 3654.874,
+          "chunk_builder_ms": 0.069
+        },
+        "warnings": [],
+        "details": {
+          "rerank": {
+            "backend_name": "hosted",
+            "model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+            "model_name": "Qwen/Qwen3-VL-Reranker-8B",
+            "provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+            "resolution_source": "registry_capability",
+            "input_candidate_count": 2,
+            "expected_count": 2,
+            "returned_item_count": 2,
+            "used_backend_result": true
+          }
+        }
+      },
+      "warnings": []
+    },
+    "maintenance": {}
+  },
+  "report": {
+    "run_id": "80cee92e6f184cb4a20ea3265571819a",
+    "case_id": "retrieval.search.query_trace_and_provenance.v1",
+    "scope": "retrieval",
+    "status": "completed",
+    "assertion_summary": {
+      "pass": 8,
+      "fail": 0,
+      "warn": 0,
+      "skip": 1
+    },
+    "hard_failures": [],
+    "failure_layer": null,
+    "finish_reason": "retrieval_completed",
+    "repair_route": null,
+    "completion_guard_reason": null,
+    "last_failure_category": null,
+    "last_failure_message": null,
+    "cognitive_state_invalidated": null,
+    "cognitive_ready_for_review": null,
+    "cognitive_invalidation_reasons": [],
+    "remaining_open_issues": [],
+    "commit_blocked": false,
+    "subjective_hook_summary": {
+      "total": 1,
+      "pending": 1,
+      "executed": 0,
+      "judge_family_counts": {
+        "llm_judge": 1
+      },
+      "rubric_refs": [
+        "retrieval/query-quality/v1"
+      ],
+      "status_counts": {
+        "skip": 1
+      },
+      "average_numeric_score": null,
+      "rubric_summaries": {
+        "retrieval/query-quality/v1": {
+          "total": 1,
+          "pending": 1,
+          "executed": 0,
+          "status_counts": {
+            "skip": 1
+          },
+          "average_numeric_score": null,
+          "hook_ids": [
+            "retrieval_query_quality"
+          ],
+          "case_count": 1
+        }
+      },
+      "artifact_count": 1
+    },
+    "subjective_hook_results": [
+      {
+        "hook_id": "retrieval_query_quality",
+        "artifact_id": "80cee92e6f184cb4a20ea3265571819a:artifact:subjective_hook:retrieval_query_quality",
+        "judge_family": "llm_judge",
+        "rubric_ref": "retrieval/query-quality/v1",
+        "rubric_title": "Retrieval Query Quality",
+        "status": "skip",
+        "score": null,
+        "label": "pending",
+        "explanation": "Subjective hook prepared but no judge executor is configured yet",
+        "judge_model_id": null,
+        "judge_provider_id": null,
+        "judge_prompt_version": "llm-judge/v2",
+        "judge_response_schema_version": "judge-response/v2",
+        "judge_skip_reason": null,
+        "judge_status_source": null,
+        "judge_score_source": null,
+        "judge_score_band": null,
+        "judge_score_band_conflict": false,
+        "judge_strengths": [],
+        "judge_issues": [],
+        "target_available": true,
+        "resolved_source": "retrieval_result",
+        "resolved_path": "query_input.text_query"
+      }
+    ],
+    "subjective_hook_artifact_ids": [
+      "80cee92e6f184cb4a20ea3265571819a:artifact:subjective_hook:retrieval_query_quality"
+    ],
+    "pending_judge_hook_ids": [
+      "retrieval_query_quality"
+    ],
+    "end_reason_summary": "retrieval_completed",
+    "ragas": {
+      "enabled": false,
+      "available": true,
+      "status": "not_requested",
+      "metric_names": [
+        "context_precision",
+        "context_recall",
+        "response_relevancy",
+        "faithfulness"
+      ],
+      "sample_count": 0,
+      "record_count": 0,
+      "metric_summary": {
+        "context_precision": null,
+        "context_recall": null,
+        "response_relevancy": null,
+        "faithfulness": null
+      },
+      "sample_overview": [],
+      "error": null
+    },
+    "diagnostics": {
+      "diagnostic_version": "v1",
+      "capabilities": {},
+      "attribution": {
+        "primary_suspects": [],
+        "optimization_candidates": [],
+        "dimensions": {}
+      },
+      "observability": {
+        "supported_scope": "retrieval",
+        "diagnostic_mode": "not_implemented_for_scope"
+      }
+    },
+    "reason_codes": [],
+    "outcome_chain": {},
+    "outcome_chain_display": [],
+    "outcome_chain_stages": [],
+    "primary_suspects": [],
+    "secondary_suspects": [],
+    "evidence_refs": [],
+    "evidence_ref_details": [],
+    "recommended_next_action": null,
+    "activation_check": {},
+    "activation_handoff_snapshot": null,
+    "diagnostic_overview": {
+      "failure_layer": {
+        "value": null,
+        "summary": "No top-level failure layer was assigned."
+      },
+      "reason_codes": [],
+      "primary_suspects": [],
+      "secondary_suspects": [],
+      "recommended_next_action": null,
+      "outcome_chain": [],
+      "evidence_refs": [],
+      "diagnostic_expectation_summary": null,
+      "diagnostic_version": "v1"
+    },
+    "diagnostic_summary_text": "failure_layer=none | reason_codes=none | primary_suspects=none"
+  },
+  "source": {
+    "kind": "offline_eval_case"
+  }
+}

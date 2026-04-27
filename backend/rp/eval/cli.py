@@ -20,6 +20,7 @@ from .comparison import compare_suite_outputs, evaluate_suite_thresholds, summar
 from .langfuse_sync import (
     sync_comparison_to_langfuse,
     sync_replay_to_langfuse,
+    sync_suite_bundle_to_langfuse,
     sync_suite_summary_to_langfuse,
 )
 from .ragas_replay import attach_ragas_report_to_replay, run_ragas_on_replay_payload
@@ -88,6 +89,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_suite.add_argument("--json", action="store_true", help="Print full JSON payload.")
     run_suite.add_argument("--sync-suite-to-langfuse", action="store_true", help="Sync suite summary and thresholds to Langfuse.")
+    run_suite.add_argument(
+        "--sync-all-to-langfuse",
+        action="store_true",
+        help=(
+            "Sync the full suite bundle to Langfuse: suite summary, every replay in the suite, "
+            "and comparison drift when --baseline-dir is provided. Requires replay bundles."
+        ),
+    )
 
     compare = subparsers.add_parser("compare", help="Compare two suite outputs.")
     compare.add_argument("current", help="Current suite output directory or suite-summary.json.")
@@ -124,10 +133,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run-case":
             return asyncio.run(_run_case_command(args))
         if args.command == "run-suite":
+            _require_langfuse_enabled(
+                parser,
+                requested=bool(
+                    getattr(args, "sync_suite_to_langfuse", False)
+                    or getattr(args, "sync_all_to_langfuse", False)
+                ),
+                flag_names=["--sync-suite-to-langfuse", "--sync-all-to-langfuse"],
+            )
             return asyncio.run(_run_suite_command(args))
         if args.command == "compare":
             payload = compare_suite_outputs(args.current, args.baseline)
             if getattr(args, "sync_comparison_to_langfuse", False):
+                _require_langfuse_enabled(
+                    parser,
+                    requested=True,
+                    flag_names=["--sync-comparison-to-langfuse"],
+                )
                 sync_comparison_to_langfuse(comparison=payload)
             _print_payload(payload, as_json=args.json)
             return 0
@@ -150,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
                         encoding="utf-8",
                     )
             if getattr(args, "sync_replay_to_langfuse", False):
+                _require_langfuse_enabled(
+                    parser,
+                    requested=True,
+                    flag_names=["--sync-replay-to-langfuse"],
+                )
                 sync_replay_to_langfuse(replay_payload=payload)
             _print_payload(payload, as_json=args.json)
             return 0
@@ -188,9 +215,14 @@ async def _run_case_command(args) -> int:
                 output_dir=args.output_dir,
                 payload=result_payload,
             )
+        raw_suite_payload = payload.get("suite")
+        suite_payload = raw_suite_payload if isinstance(raw_suite_payload, dict) else {}
+        raw_suite_items = suite_payload.get("items")
+        suite_items = raw_suite_items if isinstance(raw_suite_items, list) else []
+        first_item = suite_items[0] if suite_items else None
         result_payload = {
             **result_payload,
-            "case": payload["suite"]["items"][0]["report"] if payload["suite"]["items"] else None,
+            "case": first_item.get("report") if isinstance(first_item, dict) else None,
         }
         _print_payload(result_payload, as_json=args.json)
         return 0 if result_payload["thresholds"]["passed"] else 1
@@ -218,11 +250,13 @@ async def _run_suite_command(args) -> int:
         repeat_count=args.repeat_count,
         args=args,
     )
+    raw_suite_payload = payload.get("suite")
+    suite_payload = raw_suite_payload if isinstance(raw_suite_payload, dict) else {}
     result_payload = {
-        "suite": payload["suite"],
+        "suite": suite_payload,
         "summary": payload["summary"],
         "thresholds": evaluate_suite_thresholds(
-            payload["suite"],
+            suite_payload,
             max_fail=int(args.max_fails),
             max_warn=args.max_warns,
             allowed_soft_fail_case_ids=set(args.allow_soft_fail or []),
@@ -230,15 +264,28 @@ async def _run_suite_command(args) -> int:
     }
     if args.baseline_dir:
         result_payload["comparison"] = compare_suite_outputs(
-            payload["suite"],
+            suite_payload,
             args.baseline_dir,
         )
     if getattr(args, "sync_suite_to_langfuse", False):
         sync_suite_summary_to_langfuse(
-            suite_payload=payload["suite"],
+            suite_payload=suite_payload,
             summary=result_payload["summary"],
             thresholds=result_payload["thresholds"],
         )
+        result_payload["langfuse_sync"] = {
+            "suite_summary_synced": True,
+            "suite_replay_sync_count": 0,
+            "comparison_synced": False,
+        }
+    if getattr(args, "sync_all_to_langfuse", False):
+        sync_summary = sync_suite_bundle_to_langfuse(
+            suite_payload=suite_payload,
+            summary=result_payload["summary"],
+            thresholds=result_payload["thresholds"],
+            comparison=result_payload.get("comparison"),
+        )
+        result_payload["langfuse_sync"] = sync_summary
     if args.output_dir:
         _write_analysis_bundle(
             output_dir=args.output_dir,
@@ -397,20 +444,19 @@ def _print_payload(payload: dict, *, as_json: bool) -> None:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
-    if "comparison" in payload:
-        comparison = payload["comparison"]
-        print(
-            f"compare added={len(comparison['added_case_ids'])} "
-            f"removed={len(comparison['removed_case_ids'])} "
-            f"changed={len(comparison['changed_cases'])} "
-            f"finish_reason_drifts={len(comparison['drift_summary']['changed_finish_reason_case_ids'])} "
-            f"judge_status_drifts={len(comparison['drift_summary'].get('changed_subjective_status_case_ids') or [])}"
-        )
-        return
-
     if "suite" in payload:
         summary = payload["summary"]
         thresholds = payload["thresholds"]
+        langfuse_sync = payload.get("langfuse_sync")
+        if not isinstance(langfuse_sync, dict):
+            langfuse_sync = {}
+        diagnostic_summary = dict(summary.get("diagnostic_summary") or {})
+        top_reason_codes = _top_counter_keys(diagnostic_summary.get("reason_codes"))
+        top_primary_suspects = _top_counter_keys(diagnostic_summary.get("primary_suspects"))
+        top_next_actions = _top_counter_keys(
+            diagnostic_summary.get("recommended_next_actions"),
+            limit=1,
+        )
         print(
             f"suite run_count={summary['run_count']} "
             f"cases={summary['case_count']} "
@@ -418,9 +464,32 @@ def _print_payload(payload: dict, *, as_json: bool) -> None:
             f"repeat_cases={len(summary['repeat_case_ids'])} "
             f"fails={summary['assertion_fail_total']} "
             f"warns={summary['assertion_warn_total']} "
+            f"diagnostic_expectation_failures={sum(int(value or 0) for value in dict(diagnostic_summary.get('diagnostic_expectation_failures') or {}).values())} "
+            f"top_reason_codes={','.join(top_reason_codes) or 'none'} "
+            f"top_primary_suspects={','.join(top_primary_suspects) or 'none'} "
+            f"top_next_actions={','.join(top_next_actions) or 'none'} "
             f"executed_judges={summary.get('executed_judge_hook_total', 0)} "
             f"pending_judges={summary.get('pending_judge_hook_total', 0)} "
+            f"langfuse_replays_synced={int(langfuse_sync.get('suite_replay_sync_count') or 0)} "
+            f"langfuse_comparison_synced={bool(langfuse_sync.get('comparison_synced'))} "
             f"threshold_passed={thresholds['passed']}"
+        )
+        if "comparison" not in payload:
+            return
+
+    if "comparison" in payload:
+        comparison = payload["comparison"]
+        print(
+            f"compare added={len(comparison['added_case_ids'])} "
+            f"removed={len(comparison['removed_case_ids'])} "
+            f"changed={len(comparison['changed_cases'])} "
+            f"finish_reason_drifts={len(comparison['drift_summary']['changed_finish_reason_case_ids'])} "
+            f"reason_code_drifts={len(comparison['drift_summary'].get('changed_reason_code_case_ids') or [])} "
+            f"primary_suspect_drifts={len(comparison['drift_summary'].get('changed_primary_suspect_case_ids') or [])} "
+            f"outcome_chain_drifts={len(comparison['drift_summary'].get('changed_outcome_chain_case_ids') or [])} "
+            f"next_action_drifts={len(comparison['drift_summary'].get('changed_recommended_next_action_case_ids') or [])} "
+            f"diagnostic_expectation_drifts={len(comparison['drift_summary'].get('changed_diagnostic_expectation_case_ids') or [])} "
+            f"judge_status_drifts={len(comparison['drift_summary'].get('changed_subjective_status_case_ids') or [])}"
         )
         return
 
@@ -440,10 +509,21 @@ def _print_payload(payload: dict, *, as_json: bool) -> None:
             or report.get("status")
             or "unknown"
         )
+        outcome_chain = report.get("outcome_chain_display") or [
+            f"{key}={value}"
+            for key, value in dict(report.get("outcome_chain") or {}).items()
+        ]
+        evidence_refs = list(report.get("evidence_refs") or [])
         print(
             f"case {case_id} status={status} "
             f"finish_reason={report.get('finish_reason') or 'n/a'} "
-            f"fails={report.get('assertion_summary', {}).get('fail', 0)}"
+            f"failure_layer={report.get('failure_layer') or 'none'} "
+            f"fails={report.get('assertion_summary', {}).get('fail', 0)} "
+            f"reason_codes={','.join(report.get('reason_codes') or []) or 'none'} "
+            f"primary_suspects={','.join(report.get('primary_suspects') or []) or 'none'} "
+            f"next_action={report.get('recommended_next_action') or 'n/a'} "
+            f"outcome_chain={';'.join(outcome_chain) or 'none'} "
+            f"evidence_refs={','.join(evidence_refs) or 'none'}"
         )
         return
 
@@ -456,6 +536,36 @@ def _print_payload(payload: dict, *, as_json: bool) -> None:
         return
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _top_counter_keys(counter: Any, *, limit: int = 3) -> list[str]:
+    if not isinstance(counter, dict):
+        return []
+    return [
+        str(key)
+        for key, _ in sorted(
+            counter.items(),
+            key=lambda item: (-int(item[1] or 0), str(item[0])),
+        )[:limit]
+    ]
+
+
+def _require_langfuse_enabled(
+    parser: argparse.ArgumentParser,
+    *,
+    requested: bool,
+    flag_names: list[str],
+) -> None:
+    if not requested:
+        return
+    if get_langfuse_service().enabled:
+        return
+    joined_flags = ", ".join(flag_names)
+    parser.error(
+        f"{joined_flags} 需要已启用 Langfuse。请先设置 "
+        "LANGFUSE_ENABLED=true、LANGFUSE_PUBLIC_KEY、LANGFUSE_SECRET_KEY，"
+        "必要时再设置 LANGFUSE_BASE_URL。"
+    )
 
 
 if __name__ == "__main__":

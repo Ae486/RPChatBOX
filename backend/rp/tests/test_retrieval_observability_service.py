@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 import pytest
 
 from rp.models.dsl import Domain
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.memory_crud import (
+    RetrievalHit,
+    RetrievalQuery,
+    RetrievalSearchResult,
+    RetrievalTrace,
+)
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
 from rp.services.retrieval_collection_service import RetrievalCollectionService
@@ -86,7 +91,9 @@ async def _seed_story_and_search(retrieval_session):
 
 
 @pytest.mark.asyncio
-async def test_observability_view_includes_trace_hits_and_maintenance(retrieval_session):
+async def test_observability_view_includes_trace_hits_and_maintenance(
+    retrieval_session,
+):
     query, result = await _seed_story_and_search(retrieval_session)
 
     view = RetrievalObservabilityService(retrieval_session).build_view(
@@ -106,6 +113,13 @@ async def test_observability_view_includes_trace_hits_and_maintenance(retrieval_
     assert view.top_hits[0].page_ref == "XI (11)"
     assert view.top_hits[0].image_caption == "Observability diagram."
     assert view.top_hits[0].contextual_text_version == "v2"
+    assert view.top_hits[0].block_view is not None
+    assert view.top_hits[0].block_view.source == "retrieval_store"
+    assert view.top_hits[0].block_view.label == view.top_hits[0].hit_id
+    assert (
+        view.top_hits[0].block_view.data_json["excerpt_text"]
+        == "Observability requires route, timing, and rerank visibility."
+    )
     assert view.maintenance is not None
     assert view.maintenance.story_id == "story-observability"
     assert view.maintenance.collection_count == 1
@@ -113,7 +127,11 @@ async def test_observability_view_includes_trace_hits_and_maintenance(retrieval_
     assert view.maintenance.active_chunk_count >= 1
     rerank_details = view.details.get("rerank")
     if rerank_details is not None:
-        assert rerank_details["backend_name"] in {"hosted", "local_cross_encoder", "chain"}
+        assert rerank_details["backend_name"] in {
+            "hosted",
+            "local_cross_encoder",
+            "chain",
+        }
 
 
 def test_observability_view_buckets_warnings_and_preserves_rerank_details():
@@ -171,7 +189,10 @@ def test_observability_view_buckets_warnings_and_preserves_rerank_details():
                 }
             },
         ),
-        warnings=["dense_unavailable:empty_query", "rerank_backend_failed:TimeoutError"],
+        warnings=[
+            "dense_unavailable:empty_query",
+            "rerank_backend_failed:TimeoutError",
+        ],
     )
 
     view = RetrievalObservabilityService().build_view(
@@ -188,3 +209,6 @@ def test_observability_view_buckets_warnings_and_preserves_rerank_details():
     assert view.details["rerank"]["backend_name"] == "hosted"
     assert view.details["rerank"]["used_backend_result"] is False
     assert view.top_hits[0].page_label == "V"
+    assert view.top_hits[0].block_view is not None
+    assert view.top_hits[0].block_view.source == "retrieval_store"
+    assert view.top_hits[0].block_view.label == "chunk-warning"

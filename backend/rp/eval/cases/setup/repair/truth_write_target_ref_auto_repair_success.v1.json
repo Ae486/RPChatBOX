@@ -62,7 +62,18 @@
         "severity": "error"
       }
     ],
-    "subjective_hooks": []
+    "subjective_hooks": [],
+    "expected_reason_codes": [
+      "tool_contract.truth_write_target_ref_mismatch"
+    ],
+    "expected_primary_suspects": [
+      "tool_contract_execution"
+    ],
+    "expected_outcome_chain": {
+      "truth_status": "not_applicable",
+      "readiness_status": "warn"
+    },
+    "expected_recommended_next_action": "tighten_truth_write_target_ref_validation_and_add_targeted_repair_prompt"
   },
   "trace_hooks": {
     "capture_runtime_events": true,

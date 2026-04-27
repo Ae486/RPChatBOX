@@ -1,0 +1,284 @@
+{
+  "run_id": "128564859e1e4b5787d78874d9ab942d",
+  "case_id": "activation.bootstrap.ready_workspace_activation.v1",
+  "scope": "activation",
+  "status": "completed",
+  "assertion_summary": {
+    "pass": 5,
+    "fail": 0,
+    "warn": 0,
+    "skip": 1
+  },
+  "hard_failures": [],
+  "failure_layer": null,
+  "finish_reason": "activation_completed",
+  "repair_route": null,
+  "completion_guard_reason": null,
+  "last_failure_category": null,
+  "last_failure_message": null,
+  "cognitive_state_invalidated": null,
+  "cognitive_ready_for_review": null,
+  "cognitive_invalidation_reasons": [],
+  "remaining_open_issues": [],
+  "commit_blocked": false,
+  "subjective_hook_summary": {
+    "total": 1,
+    "pending": 1,
+    "executed": 0,
+    "judge_family_counts": {
+      "llm_judge": 1
+    },
+    "rubric_refs": [
+      "activation/handoff-quality/v1"
+    ],
+    "status_counts": {
+      "skip": 1
+    },
+    "average_numeric_score": null,
+    "rubric_summaries": {
+      "activation/handoff-quality/v1": {
+        "total": 1,
+        "pending": 1,
+        "executed": 0,
+        "status_counts": {
+          "skip": 1
+        },
+        "average_numeric_score": null,
+        "hook_ids": [
+          "activation_handoff_quality"
+        ],
+        "case_count": 1
+      }
+    },
+    "artifact_count": 1
+  },
+  "subjective_hook_results": [
+    {
+      "hook_id": "activation_handoff_quality",
+      "artifact_id": "128564859e1e4b5787d78874d9ab942d:artifact:subjective_hook:activation_handoff_quality",
+      "judge_family": "llm_judge",
+      "rubric_ref": "activation/handoff-quality/v1",
+      "rubric_title": "Activation Handoff Quality",
+      "status": "skip",
+      "score": null,
+      "label": "pending",
+      "explanation": "Subjective hook prepared but no judge executor is configured yet",
+      "judge_model_id": null,
+      "judge_provider_id": null,
+      "judge_prompt_version": "llm-judge/v2",
+      "judge_response_schema_version": "judge-response/v2",
+      "judge_skip_reason": null,
+      "judge_status_source": null,
+      "judge_score_source": null,
+      "judge_score_band": null,
+      "judge_score_band_conflict": false,
+      "judge_strengths": [],
+      "judge_issues": [],
+      "target_available": true,
+      "resolved_source": "activation_result",
+      "resolved_path": "activation_check.handoff"
+    }
+  ],
+  "subjective_hook_artifact_ids": [
+    "128564859e1e4b5787d78874d9ab942d:artifact:subjective_hook:activation_handoff_quality"
+  ],
+  "pending_judge_hook_ids": [
+    "activation_handoff_quality"
+  ],
+  "end_reason_summary": "activation_completed",
+  "ragas": null,
+  "diagnostics": {
+    "diagnostic_version": "v1",
+    "capabilities": {
+      "readiness_gate": {
+        "status": "pass",
+        "summary": "Activation readiness gate passed and the workspace is eligible for bootstrap.",
+        "evidence": [
+          "ready=True",
+          "blocking_issue_count=0",
+          "finish_reason=activation_completed"
+        ]
+      },
+      "handoff_integrity": {
+        "status": "pass",
+        "summary": "Activation handoff contains the minimum runtime config, writer contract, and continuity refs.",
+        "evidence": [
+          "has_handoff=True",
+          "runtime_story_config_keys=['mode', 'model_profile_ref', 'post_write_policy_preset', 'retrieval_embedding_model_id', 'retrieval_embedding_provider_id', 'retrieval_rerank_model_id', 'retrieval_rerank_provider_id', 'story_id', 'worker_profile_ref']",
+          "writer_contract_keys=['pov_rules', 'style_rules', 'task_writing_rules', 'writing_constraints']",
+          "foundation_commit_ref_count=1",
+          "archival_ready_ref_count=2"
+        ]
+      },
+      "session_bootstrap": {
+        "status": "pass",
+        "summary": "Activation successfully materialized a StorySession and chapter workspace.",
+        "evidence": [
+          "session_id=e0e760ce6e8e4c71b9a7bc41bd3e3166",
+          "current_phase=outline_drafting",
+          "current_chapter_index=1",
+          "initial_outline_required=True"
+        ]
+      }
+    },
+    "attribution": {
+      "primary_suspects": [],
+      "optimization_candidates": [],
+      "dimensions": {
+        "setup_readiness_contract": {
+          "status": "pass",
+          "summary": "Setup-side readiness contract supplied all required prerequisites for activation.",
+          "evidence": [
+            "ready=True",
+            "warning_count=0"
+          ]
+        },
+        "activation_handoff_contract": {
+          "status": "pass",
+          "summary": "Activation handoff contract is structurally complete.",
+          "evidence": [
+            "has_handoff=True",
+            "blueprint_commit_ref=6c4c62338f854a909d65fff7ff5d4b62",
+            "foundation_commit_ref_count=1",
+            "archival_ready_ref_count=2"
+          ]
+        },
+        "bootstrap_execution": {
+          "status": "pass",
+          "summary": "Session bootstrap executed and persisted correctly.",
+          "evidence": [
+            "finish_reason=activation_completed"
+          ]
+        },
+        "deterministic_gate_policy": {
+          "status": "pass",
+          "summary": "Deterministic gate and bootstrap path are consistent: ready workspace activated successfully.",
+          "evidence": [
+            "ready=True",
+            "blocking_issue_count=0",
+            "activation_success=True"
+          ]
+        }
+      }
+    },
+    "observability": {
+      "supported_scope": "activation",
+      "activation": {
+        "ready": true,
+        "blocking_issue_count": 0,
+        "warning_count": 0,
+        "has_handoff": true,
+        "foundation_commit_ref_count": 1,
+        "archival_ready_ref_count": 2,
+        "activation_success": true
+      }
+    }
+  },
+  "reason_codes": [],
+  "outcome_chain": {},
+  "outcome_chain_display": [],
+  "outcome_chain_stages": [],
+  "primary_suspects": [],
+  "secondary_suspects": [],
+  "evidence_refs": [],
+  "evidence_ref_details": [],
+  "recommended_next_action": null,
+  "activation_check": {
+    "workspace_id": "53516c395f234125b1516fbe49df8f21",
+    "ready": true,
+    "blocking_issues": [],
+    "warnings": [],
+    "handoff": {
+      "handoff_id": "c24ac0f8e01c4b709f6a764038c21e9f",
+      "story_id": "story-case-activation-001--run-149e49fe",
+      "workspace_id": "53516c395f234125b1516fbe49df8f21",
+      "mode": "longform",
+      "runtime_story_config": {
+        "story_id": "story-case-activation-001--run-149e49fe",
+        "mode": "longform",
+        "model_profile_ref": "model.default",
+        "worker_profile_ref": "worker.default",
+        "post_write_policy_preset": "balanced",
+        "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+        "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+        "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+        "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422"
+      },
+      "writer_contract": {
+        "pov_rules": [
+          "third_person_limited"
+        ],
+        "style_rules": [
+          "restrained"
+        ],
+        "writing_constraints": [
+          "avoid exposition dumps"
+        ],
+        "task_writing_rules": []
+      },
+      "foundation_commit_refs": [
+        "6b7561fc85824b6c9c69d0cd28b58e5f"
+      ],
+      "blueprint_commit_ref": "6c4c62338f854a909d65fff7ff5d4b62",
+      "archival_ready_refs": [
+        "foundation_char_1",
+        "longform_blueprint"
+      ],
+      "created_at": "2026-04-26T05:20:19.184856Z"
+    }
+  },
+  "activation_handoff_snapshot": {
+    "handoff_id": "c24ac0f8e01c4b709f6a764038c21e9f",
+    "story_id": "story-case-activation-001--run-149e49fe",
+    "workspace_id": "53516c395f234125b1516fbe49df8f21",
+    "mode": "longform",
+    "runtime_story_config": {
+      "story_id": "story-case-activation-001--run-149e49fe",
+      "mode": "longform",
+      "model_profile_ref": "model.default",
+      "worker_profile_ref": "worker.default",
+      "post_write_policy_preset": "balanced",
+      "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+      "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+      "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+      "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422"
+    },
+    "writer_contract": {
+      "pov_rules": [
+        "third_person_limited"
+      ],
+      "style_rules": [
+        "restrained"
+      ],
+      "writing_constraints": [
+        "avoid exposition dumps"
+      ],
+      "task_writing_rules": []
+    },
+    "foundation_commit_refs": [
+      "6b7561fc85824b6c9c69d0cd28b58e5f"
+    ],
+    "blueprint_commit_ref": "6c4c62338f854a909d65fff7ff5d4b62",
+    "archival_ready_refs": [
+      "foundation_char_1",
+      "longform_blueprint"
+    ],
+    "created_at": "2026-04-26T05:20:19.184856Z"
+  },
+  "diagnostic_overview": {
+    "failure_layer": {
+      "value": null,
+      "summary": "No top-level failure layer was assigned."
+    },
+    "reason_codes": [],
+    "primary_suspects": [],
+    "secondary_suspects": [],
+    "recommended_next_action": null,
+    "outcome_chain": [],
+    "evidence_refs": [],
+    "diagnostic_expectation_summary": null,
+    "diagnostic_version": "v1"
+  },
+  "diagnostic_summary_text": "failure_layer=none | reason_codes=none | primary_suspects=none",
+  "replay_path": "artifacts/eval/real-provider-suite-output/replays/activation.bootstrap.ready_workspace_activation.v1--128564859e1e4b5787d78874d9ab942d.json"
+}

@@ -62,7 +62,18 @@
         "severity": "error"
       }
     ],
-    "subjective_hooks": []
+    "subjective_hooks": [],
+    "expected_reason_codes": [
+      "tool_execution.provider_execution_failed"
+    ],
+    "expected_primary_suspects": [
+      "tool_contract_execution"
+    ],
+    "expected_outcome_chain": {
+      "transcript_status": "pass",
+      "readiness_status": "warn"
+    },
+    "expected_recommended_next_action": "tighten_tool_schema_and_error_messages"
   },
   "trace_hooks": {
     "capture_runtime_events": true,

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from sqlmodel import Session
 
 from config import get_settings
@@ -405,6 +404,69 @@ def test_setup_agent_turn_rejects_model_without_agent_capability(client):
     assert response.status_code == 400
     error = response.json()["detail"]["error"]["message"]
     assert "not compatible with SetupAgent" in error
+
+
+def test_setup_agent_turn_accepts_model_when_tool_support_inferred_from_supported_params(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("RP_SETUP_AGENT_RUNTIME_V2_ENABLED", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "services.model_capability_service._try_get_model_info",
+        lambda **kwargs: {
+            "key": "openai/gemini-2.5-flash",
+            "litellm_provider": "openai",
+            "mode": None,
+            "supports_function_calling": None,
+            "supports_tool_choice": None,
+        },
+    )
+    monkeypatch.setattr(
+        "services.model_capability_service._get_supported_openai_params",
+        lambda **kwargs: ["temperature", "tools", "tool_choice"],
+    )
+    monkeypatch.setattr(
+        "services.model_capability_service._supports_parallel_function_calling",
+        lambda **kwargs: False,
+    )
+    client.put("/api/providers/provider-setup", json=_provider_payload())
+    client.put(
+        "/api/providers/provider-setup/models/model-setup-inferred",
+        json={
+            **_model_payload("model-setup-inferred"),
+            "model_name": "gemini-2.5-flash",
+            "display_name": "Gemini 2.5 Flash",
+            "capabilities": [],
+        },
+    )
+    model_summary = client.get(
+        "/api/providers/provider-setup/models/model-setup-inferred"
+    )
+    workspace_id = _create_workspace(client)
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _CaptureStepLLMService(),
+    )
+
+    assert model_summary.status_code == 200
+    assert "tool" in model_summary.json()["capabilities"]
+    assert (
+        model_summary.json()["capability_profile"]["supports_function_calling"] is True
+    )
+
+    response = client.post(
+        f"/api/rp/setup/workspaces/{workspace_id}/turn",
+        json={
+            "workspace_id": workspace_id,
+            "model_id": "model-setup-inferred",
+            "target_step": "foundation",
+            "history": [],
+            "user_prompt": "请继续世界观背景。",
+        },
+    )
+
+    assert response.status_code == 200
 
 
 def test_setup_agent_turn_failure_emits_langfuse_scores(client, monkeypatch):

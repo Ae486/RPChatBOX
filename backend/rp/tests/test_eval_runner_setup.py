@@ -77,6 +77,52 @@ class _CommitProposalLLMService:
         }
 
 
+class _StreamCommitProposalLLMService:
+    def __init__(self) -> None:
+        self._chat_round = 0
+
+    async def chat_completion_stream(self, request):
+        self._chat_round += 1
+        system_prompt = request.messages[0].content or ""
+        workspace_id = system_prompt.split('"workspace_id": "')[1].split('"')[0]
+        if self._chat_round == 1:
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "tool_call",
+                        "tool_calls": [
+                            {
+                                "id": "call_commit_stream",
+                                "type": "function",
+                                "function": {
+                                    "name": "rp_setup__setup.proposal.commit",
+                                    "arguments": json.dumps(
+                                        {
+                                            "workspace_id": workspace_id,
+                                            "step_id": "writing_contract",
+                                            "target_draft_refs": ["draft:writing_contract"],
+                                            "reason": "The writing contract is coherent enough for review.",
+                                        }
+                                    ),
+                                },
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
+            yield 'data: {"type":"done"}\n\n'
+            return
+
+        yield 'data: {"type":"text_delta","delta":"I prepared a review proposal."}\n\n'
+        yield 'data: {"type":"done"}\n\n'
+
+    async def chat_completion(self, request):
+        raise AssertionError("non-stream path not expected")
+
+
 class _DiscussionOnlyLLMService:
     async def chat_completion_stream(self, request):
         raise AssertionError("stream path not expected")
@@ -205,6 +251,234 @@ async def test_eval_runner_executes_setup_case_and_creates_proposal(
         artifact for artifact in result.artifacts if artifact.kind == "workspace_after"
     )
     assert workspace_after.payload["commit_proposals"][-1]["status"] == "pending_review"
+    assert result.report["assertion_summary"]["fail"] == 0
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_http_mode_uses_real_setup_turn_route(
+    retrieval_session,
+    monkeypatch,
+):
+    get_provider_registry_service.cache_clear()
+    import services.model_registry as model_registry_module
+
+    model_registry_module._model_registry_service = None
+
+    provider_service = get_provider_registry_service()
+    model_service = get_model_registry_service()
+    provider_service.upsert_entry(
+        ProviderRegistryEntry(
+            id="provider-eval-http",
+            name="Eval Provider HTTP",
+            type="openai",
+            api_key="sk-test",
+            api_url="https://example.com/v1",
+            custom_headers={},
+            is_enabled=True,
+        )
+    )
+    model_service.upsert_entry(
+        ModelRegistryEntry(
+            id="model-eval-http",
+            provider_id="provider-eval-http",
+            model_name="gpt-4o-mini",
+            display_name="Eval Model HTTP",
+            capabilities=["text", "tool"],
+            is_enabled=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _CommitProposalLLMService(),
+    )
+
+    case = EvalCase.model_validate(
+        {
+            "case_id": "setup.commit_proposal.writing_contract.http.v1",
+            "title": "Writing contract ready proposal via setup API route",
+            "scope": "setup",
+            "category": "commit_proposal",
+            "tags": ["mvp", "deterministic", "http"],
+            "runtime_target": {
+                "mode": "http",
+                "entrypoint": "/api/rp/setup/workspaces/{workspace_id}/turn",
+                "graph_id": "setup_v2",
+                "stream": False,
+            },
+            "input": {
+                "request": {
+                    "workspace_id": "workspace-case-http-1",
+                    "model_id": "model-eval-http",
+                    "provider_id": "provider-eval-http",
+                    "user_prompt": "如果已经足够，请发起 review。",
+                    "history": [],
+                },
+                "workspace_seed": {
+                    "story_id": "story-eval-http-1",
+                    "mode": "longform",
+                    "current_step": "writing_contract",
+                    "drafts": {
+                        "writing_contract": {
+                            "pov_rules": ["third_person_limited"],
+                            "style_rules": ["restrained"],
+                            "writing_constraints": ["avoid exposition dumps"],
+                        }
+                    },
+                },
+                "env_overrides": {},
+            },
+            "preconditions": {},
+            "expected": {
+                "deterministic_assertions": [
+                    {
+                        "assertion_id": "proposal_created_http",
+                        "source": "workspace_truth",
+                        "type": "equals",
+                        "path": "commit_proposals[-1].status",
+                        "expected": "pending_review",
+                        "severity": "error",
+                    }
+                ],
+                "subjective_hooks": [],
+            },
+            "trace_hooks": {
+                "capture_runtime_events": True,
+                "capture_graph_debug": True,
+                "capture_workspace_before_after": True,
+            },
+            "repeat": {"count": 1, "stop_on_first_hard_failure": False},
+            "baseline": {"compare_by": [], "baseline_tags": ["main"]},
+            "metadata": {},
+        }
+    )
+
+    runner = EvalRunner(retrieval_session)
+    result = await runner.run_case(case)
+
+    assert result.run.status == "completed"
+    assert result.runtime_result["finish_reason"] == "completed_text"
+    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.proposal.commit"
+    assert any(
+        score.name == "proposal_created_http" and score.status == "pass"
+        for score in result.scores
+    )
+    assert result.report["assertion_summary"]["fail"] == 0
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_http_stream_mode_uses_real_setup_turn_stream_route(
+    retrieval_session,
+    monkeypatch,
+):
+    get_provider_registry_service.cache_clear()
+    import services.model_registry as model_registry_module
+
+    model_registry_module._model_registry_service = None
+
+    provider_service = get_provider_registry_service()
+    model_service = get_model_registry_service()
+    provider_service.upsert_entry(
+        ProviderRegistryEntry(
+            id="provider-eval-http-stream",
+            name="Eval Provider HTTP Stream",
+            type="openai",
+            api_key="sk-test",
+            api_url="https://example.com/v1",
+            custom_headers={},
+            is_enabled=True,
+        )
+    )
+    model_service.upsert_entry(
+        ModelRegistryEntry(
+            id="model-eval-http-stream",
+            provider_id="provider-eval-http-stream",
+            model_name="gpt-4o-mini",
+            display_name="Eval Model HTTP Stream",
+            capabilities=["text", "tool"],
+            is_enabled=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _StreamCommitProposalLLMService(),
+    )
+
+    case = EvalCase.model_validate(
+        {
+            "case_id": "setup.commit_proposal.writing_contract.http.stream.v1",
+            "title": "Writing contract ready proposal via setup stream API route",
+            "scope": "setup",
+            "category": "commit_proposal",
+            "tags": ["mvp", "deterministic", "http", "stream"],
+            "runtime_target": {
+                "mode": "http",
+                "entrypoint": "/api/rp/setup/workspaces/{workspace_id}/turn/stream",
+                "graph_id": "setup_v2",
+                "stream": True,
+            },
+            "input": {
+                "request": {
+                    "workspace_id": "workspace-case-http-stream-1",
+                    "model_id": "model-eval-http-stream",
+                    "provider_id": "provider-eval-http-stream",
+                    "user_prompt": "如果已经足够，请发起 review。",
+                    "history": [],
+                },
+                "workspace_seed": {
+                    "story_id": "story-eval-http-stream-1",
+                    "mode": "longform",
+                    "current_step": "writing_contract",
+                    "drafts": {
+                        "writing_contract": {
+                            "pov_rules": ["third_person_limited"],
+                            "style_rules": ["restrained"],
+                            "writing_constraints": ["avoid exposition dumps"],
+                        }
+                    },
+                },
+                "env_overrides": {},
+            },
+            "preconditions": {},
+            "expected": {
+                "deterministic_assertions": [
+                    {
+                        "assertion_id": "proposal_created_http_stream",
+                        "source": "workspace_truth",
+                        "type": "equals",
+                        "path": "commit_proposals[-1].status",
+                        "expected": "pending_review",
+                        "severity": "error",
+                    }
+                ],
+                "subjective_hooks": [],
+            },
+            "trace_hooks": {
+                "capture_runtime_events": True,
+                "capture_graph_debug": True,
+                "capture_workspace_before_after": True,
+            },
+            "repeat": {"count": 1, "stop_on_first_hard_failure": False},
+            "baseline": {"compare_by": [], "baseline_tags": ["main"]},
+            "metadata": {},
+        }
+    )
+
+    runner = EvalRunner(retrieval_session)
+    result = await runner.run_case(case)
+
+    event_types = [event.type for event in result.trace.events]
+
+    assert result.run.status == "completed"
+    assert result.runtime_result["finish_reason"] == "completed_text"
+    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.proposal.commit"
+    assert "runtime_event.tool_call" in event_types
+    assert "runtime_event.tool_result" in event_types
+    assert any(
+        score.name == "proposal_created_http_stream" and score.status == "pass"
+        for score in result.scores
+    )
     assert result.report["assertion_summary"]["fail"] == 0
 
 

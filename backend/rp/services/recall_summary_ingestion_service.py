@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from rp.models.retrieval_records import SourceAsset
+from rp.models.retrieval_records import IndexJob, SourceAsset
 from rp.models.setup_workspace import StoryMode
 from .retrieval_collection_service import RetrievalCollectionService
 from .retrieval_document_service import RetrievalDocumentService
@@ -56,6 +56,16 @@ class RecallSummaryIngestionService:
             ingestion_status="queued",
             mapped_targets=["recall"],
             metadata={
+                "layer": "recall",
+                "source_family": "longform_story_runtime",
+                "materialization_event": "heavy_regression.chapter_close",
+                "materialization_kind": "chapter_summary",
+                "materialized_to_recall": True,
+                "source_type": "chapter_summary",
+                "session_id": session_id,
+                "chapter_index": chapter_index,
+                "domain": "chapter",
+                "domain_path": f"recall.chapter.{chapter_index}",
                 "seed_sections": [
                     {
                         "section_id": f"chapter_summary:{chapter_index}",
@@ -67,17 +77,33 @@ class RecallSummaryIngestionService:
                             "domain": "chapter",
                             "domain_path": f"recall.chapter.{chapter_index}",
                             "tags": ["chapter_summary", "recall"],
+                            "layer": "recall",
+                            "source_family": "longform_story_runtime",
+                            "materialization_event": "heavy_regression.chapter_close",
+                            "materialization_kind": "chapter_summary",
+                            "materialized_to_recall": True,
+                            "source_type": "chapter_summary",
+                            "session_id": session_id,
+                            "chapter_index": chapter_index,
                         },
                     }
-                ]
+                ],
             },
             created_at=now,
             updated_at=now,
         )
         self._document_service.upsert_source_asset(asset)
-        self._ingestion_service.ingest_asset(
+        job = self._ingestion_service.ingest_asset(
             story_id=story_id,
             asset_id=asset_id,
             collection_id=collection.collection_id,
         )
+        self._raise_if_job_failed(job=job, asset_id=asset_id)
         return asset_id
+
+    @staticmethod
+    def _raise_if_job_failed(*, job: IndexJob, asset_id: str) -> None:
+        if job.job_state == "completed":
+            return
+        error_detail = job.error_message or job.job_state
+        raise RuntimeError(f"recall_summary_ingestion_failed:{asset_id}:{error_detail}")

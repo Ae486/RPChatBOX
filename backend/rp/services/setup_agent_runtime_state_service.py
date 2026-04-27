@@ -13,11 +13,15 @@ from rp.agent_runtime.contracts import (
     ChunkCandidate,
     DiscussionState,
     DraftTruthWrite,
+    SetupContextCompactSummary,
     SetupCognitiveSourceBasis,
     SetupCognitiveStateSnapshot,
     SetupCognitiveStateSummary,
+    SetupToolOutcome,
+    SetupWorkingDigest,
 )
 from rp.models.setup_workspace import CommitProposalStatus, SetupStepId
+from rp.services.setup_context_governor import SetupContextGovernorService
 
 
 def _utcnow() -> datetime:
@@ -29,6 +33,7 @@ class SetupAgentRuntimeStateService:
 
     def __init__(self, session: Session) -> None:
         self._session = session
+        self._context_governor = SetupContextGovernorService()
 
     def get_snapshot(
         self,
@@ -239,7 +244,50 @@ class SetupAgentRuntimeStateService:
             truth_write_status=truth_write_status,
             ready_for_review=ready_for_review,
             remaining_open_issues=remaining_open_issues,
+            working_digest=snapshot.working_digest,
+            tool_outcomes=list(snapshot.tool_outcomes),
+            compact_summary=snapshot.compact_summary,
         )
+
+    def persist_turn_governance(
+        self,
+        *,
+        workspace,
+        context_packet,
+        step_id: SetupStepId,
+        working_digest: SetupWorkingDigest | None,
+        tool_outcomes: list[SetupToolOutcome],
+        compact_summary: SetupContextCompactSummary | None,
+    ) -> SetupCognitiveStateSnapshot | None:
+        snapshot = self.get_snapshot(
+            workspace_id=workspace.workspace_id,
+            step_id=step_id,
+        )
+        if (
+            snapshot is None
+            and working_digest is None
+            and not tool_outcomes
+            and compact_summary is None
+        ):
+            return None
+
+        ensured_snapshot = self._ensure_snapshot(
+            workspace=workspace,
+            context_packet=context_packet,
+            step_id=step_id,
+        )
+        ensured_snapshot.working_digest = working_digest
+        ensured_snapshot.tool_outcomes = self._context_governor.retain_tool_outcomes(
+            existing=ensured_snapshot.tool_outcomes,
+            latest_results=tool_outcomes,
+        )
+        ensured_snapshot.compact_summary = compact_summary
+        ensured_snapshot.source_basis = self._build_source_basis(
+            workspace=workspace,
+            context_packet=context_packet,
+            step_id=step_id,
+        )
+        return self.save_snapshot(ensured_snapshot)
 
     def _ensure_snapshot(
         self,

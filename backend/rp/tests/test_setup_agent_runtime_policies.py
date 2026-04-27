@@ -7,6 +7,8 @@ from rp.agent_runtime.contracts import (
     SetupCognitiveStateSummary,
     SetupPendingObligation,
     SetupReflectionTicket,
+    SetupToolOutcome,
+    SetupWorkingDigest,
 )
 from rp.agent_runtime.policies import (
     CompletionGuardPolicy,
@@ -242,3 +244,59 @@ def test_completion_guard_treats_truth_write_not_ready_for_review_as_follow_up()
     assert decision["allow_finalize"] is True
     assert decision["finish_reason"] == "continue_discussion"
     assert decision["completion_guard"]["reason"] == "truth_write_not_ready_for_review"
+
+
+def test_completion_guard_blocks_repeated_question_without_progress():
+    decision = CompletionGuardPolicy.assess(
+        assistant_text="Which style rules do you want me to lock in for this draft?",
+        pending_obligation=None,
+        reflection_ticket=None,
+        prior_assistant_questions=[
+            "Which style rules do you want me to lock in for this draft?"
+        ],
+        working_digest=SetupWorkingDigest(
+            open_questions=["Need the exact style rules."],
+        ),
+    )
+
+    assert decision["allow_finalize"] is False
+    assert decision["completion_guard"]["reason"] == "repeated_question_without_progress"
+
+
+def test_repair_decision_policy_marks_repeated_tool_failure_warning():
+    result = RuntimeToolResult(
+        call_id="call_truth_write",
+        tool_name="rp_setup__setup.truth.write",
+        success=False,
+        content_text='{"code":"setup_tool_failed"}',
+        error_code="SETUP_TOOL_FAILED",
+        structured_payload={
+            "error_payload": {
+                "code": "setup_tool_failed",
+                "message": "Draft truth write could not be applied yet.",
+                "details": {
+                    "repair_strategy": "continue_discussion",
+                },
+            }
+        },
+    )
+
+    decision = RepairDecisionPolicy.assess(
+        profile=_profile(),
+        tool_results=[result],
+        prior_tool_outcomes=[
+            SetupToolOutcome(
+                tool_name="rp_setup__setup.truth.write",
+                success=False,
+                summary="Draft truth write could not be applied yet.",
+                updated_refs=[],
+                error_code="setup_tool_failed",
+                relevance="failure",
+                recorded_at="2026-04-27T00:00:00Z",
+            )
+        ],
+        schema_retry_count=0,
+        round_no=1,
+    )
+
+    assert "repeated_tool_failure" in decision["warnings"]

@@ -5,8 +5,13 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from rp.models.block_view import RpBlockView
+from rp.models.block_view import BlockSource, RpBlockView
 from rp.models.dsl import Domain, Layer
+from rp.models.story_runtime import (
+    StoryArtifact,
+    StoryArtifactStatus,
+    StoryDiscussionEntry,
+)
 
 from .builder_projection_context_service import BuilderProjectionContextService
 from .core_state_store_repository import CoreStateStoreRepository
@@ -20,7 +25,7 @@ from .story_session_service import StorySessionService
 
 
 class RpBlockReadService:
-    """Present current Core State rows and mirrors as read-only Block views."""
+    """Present current RP memory surfaces as read-only Block views."""
 
     def __init__(
         self,
@@ -37,13 +42,20 @@ class RpBlockReadService:
         self._memory_inspection_read_service = memory_inspection_read_service
         self._store_read_enabled = store_read_enabled
 
-    def list_blocks(self, *, session_id: str) -> list[RpBlockView]:
-        """List authoritative and projection Core State blocks for a session."""
+    def list_blocks(
+        self,
+        *,
+        session_id: str,
+        layer: Layer | None = None,
+        source: BlockSource | None = None,
+    ) -> list[RpBlockView]:
+        """List current session Block views across Core State and Runtime Workspace."""
 
-        return [
-            *self.list_authoritative_blocks(session_id=session_id),
-            *self.list_projection_blocks(session_id=session_id),
+        blocks = [
+            *self.list_core_state_blocks(session_id=session_id),
+            *self.list_runtime_workspace_blocks(session_id=session_id),
         ]
+        return self._filter_blocks(blocks, layer=layer, source=source)
 
     def get_block(self, *, session_id: str, block_id: str) -> RpBlockView | None:
         """Read one Block envelope by the formal or deterministic mirror id."""
@@ -52,6 +64,20 @@ class RpBlockReadService:
             if block.block_id == block_id:
                 return block
         return None
+
+    @staticmethod
+    def _filter_blocks(
+        blocks: list[RpBlockView],
+        *,
+        layer: Layer | None,
+        source: BlockSource | None,
+    ) -> list[RpBlockView]:
+        return [
+            block
+            for block in blocks
+            if (layer is None or block.layer == layer)
+            and (source is None or block.source == source)
+        ]
 
     def list_authoritative_blocks(self, *, session_id: str) -> list[RpBlockView]:
         """List Core State authoritative objects, preserving mirror fallback."""
@@ -202,6 +228,46 @@ class RpBlockReadService:
             )
         return sorted(blocks, key=lambda block: (block.layer.value, block.label))
 
+    def list_core_state_blocks(
+        self,
+        *,
+        session_id: str,
+        layer: Layer | None = None,
+        source: BlockSource | None = None,
+    ) -> list[RpBlockView]:
+        """List only Core State Block views for internal compile/consumer paths."""
+
+        blocks = [
+            *self.list_authoritative_blocks(session_id=session_id),
+            *self.list_projection_blocks(session_id=session_id),
+        ]
+        return self._filter_blocks(blocks, layer=layer, source=source)
+
+    def list_runtime_workspace_blocks(self, *, session_id: str) -> list[RpBlockView]:
+        """List current-chapter draft artifacts and discussion entries as runtime blocks."""
+
+        session = self._story_session_service.get_session(session_id)
+        if session is None:
+            return []
+        chapter = self._story_session_service.get_current_chapter(session_id)
+        if chapter is None:
+            return []
+
+        blocks = [
+            self._runtime_artifact_block(session=session, artifact=artifact)
+            for artifact in self._story_session_service.list_artifacts(
+                chapter_workspace_id=chapter.chapter_workspace_id
+            )
+            if artifact.status == StoryArtifactStatus.DRAFT
+        ]
+        blocks.extend(
+            self._runtime_discussion_block(session=session, entry=entry)
+            for entry in self._story_session_service.list_discussion_entries(
+                chapter_workspace_id=chapter.chapter_workspace_id
+            )
+        )
+        return sorted(blocks, key=lambda block: block.block_id)
+
     def _inspection_authoritative_by_object_id(
         self,
         *,
@@ -275,6 +341,7 @@ class RpBlockReadService:
                 **deepcopy(row.metadata_json or {}),
                 "route": "core_state_store",
                 "source": "core_state_store",
+                "source_field": row.slot_name,
                 "source_table": "rp_core_state_projection_slots",
                 "source_row_id": row.projection_slot_id,
                 "story_id": row.story_id,
@@ -282,6 +349,76 @@ class RpBlockReadService:
                 "chapter_workspace_id": row.chapter_workspace_id,
                 "last_refresh_kind": row.last_refresh_kind,
                 "updated_at": row.updated_at,
+            },
+        )
+
+    @staticmethod
+    def _runtime_artifact_block(*, session, artifact: StoryArtifact) -> RpBlockView:
+        label = f"runtime_workspace.artifact.{artifact.artifact_id}"
+        return RpBlockView(
+            block_id=f"runtime_workspace:artifact:{artifact.artifact_id}",
+            label=label,
+            layer=Layer.RUNTIME_WORKSPACE,
+            domain=Domain.CHAPTER,
+            domain_path=label,
+            scope="chapter",
+            revision=int(artifact.revision or 1),
+            source="runtime_workspace_store",
+            data_json=artifact.model_dump(mode="json"),
+            metadata={
+                "route": "story_session_runtime.artifacts",
+                "source": "runtime_workspace_store",
+                "source_table": "rp_story_artifacts",
+                "source_row_id": artifact.artifact_id,
+                "layer": Layer.RUNTIME_WORKSPACE.value,
+                "source_family": "runtime_workspace",
+                "workspace_role": "current_turn_scratch",
+                "materialized_to_recall": False,
+                "recall_materialization_state": "not_recall_materialized",
+                "not_scene_transcript": True,
+                "scene_transcript": False,
+                "story_id": session.story_id,
+                "session_id": session.session_id,
+                "chapter_workspace_id": artifact.chapter_workspace_id,
+                "artifact_kind": artifact.artifact_kind.value,
+                "artifact_status": artifact.status.value,
+                "updated_at": artifact.updated_at,
+            },
+        )
+
+    @staticmethod
+    def _runtime_discussion_block(
+        *, session, entry: StoryDiscussionEntry
+    ) -> RpBlockView:
+        label = f"runtime_workspace.discussion.{entry.entry_id}"
+        return RpBlockView(
+            block_id=f"runtime_workspace:discussion:{entry.entry_id}",
+            label=label,
+            layer=Layer.RUNTIME_WORKSPACE,
+            domain=Domain.CHAPTER,
+            domain_path=label,
+            scope="chapter",
+            revision=1,
+            source="runtime_workspace_store",
+            data_json=entry.model_dump(mode="json"),
+            metadata={
+                "route": "story_session_runtime.discussion_entries",
+                "source": "runtime_workspace_store",
+                "source_table": "rp_story_discussion_entries",
+                "source_row_id": entry.entry_id,
+                "layer": Layer.RUNTIME_WORKSPACE.value,
+                "source_family": "runtime_workspace",
+                "workspace_role": "current_turn_scratch",
+                "materialized_to_recall": False,
+                "recall_materialization_state": "not_recall_materialized",
+                "not_scene_transcript": True,
+                "scene_transcript": False,
+                "story_id": session.story_id,
+                "session_id": session.session_id,
+                "chapter_workspace_id": entry.chapter_workspace_id,
+                "discussion_role": entry.role,
+                "linked_artifact_id": entry.linked_artifact_id,
+                "created_at": entry.created_at,
             },
         )
 

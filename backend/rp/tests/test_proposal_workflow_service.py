@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_crud import ProposalSubmitInput
+from rp.models.dsl import Domain, Layer
+from rp.models.memory_crud import MemorySearchRecallInput, ProposalSubmitInput
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from rp.models.story_runtime import (
     LongformChapterPhase,
@@ -14,12 +14,18 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.services.legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
+from rp.services.legacy_state_patch_proposal_builder import (
+    LegacyStatePatchProposalBuilder,
+)
 from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
+from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
+from rp.services.retrieval_broker import RetrievalBroker
+from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 
@@ -34,7 +40,10 @@ def _seed_story_runtime(retrieval_session):
         writer_contract={},
         current_state_json={
             "chapter_digest": {"current_chapter": 1, "title": "Chapter One"},
-            "narrative_progress": {"current_phase": "outline_drafting", "accepted_segments": 0},
+            "narrative_progress": {
+                "current_phase": "outline_drafting",
+                "accepted_segments": 0,
+            },
             "timeline_spine": [],
             "active_threads": [],
             "foreshadow_registry": [],
@@ -42,7 +51,7 @@ def _seed_story_runtime(retrieval_session):
         },
         initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
     )
-    chapter = service.create_chapter_workspace(
+    service.create_chapter_workspace(
         session_id=session.session_id,
         chapter_index=1,
         phase=LongformChapterPhase.OUTLINE_DRAFTING,
@@ -90,11 +99,22 @@ class _CapturingSpecialist:
         self.accepted_segment_ids: list[str] = []
 
     async def analyze(self, **kwargs):
-        self.accepted_segment_ids = [item.artifact_id for item in kwargs["accepted_segments"]]
+        self.accepted_segment_ids = [
+            item.artifact_id for item in kwargs["accepted_segments"]
+        ]
         return SpecialistResultBundle(
             foundation_digest=["Found Updated"],
             current_state_digest=["phase=segment_drafting"],
             writer_hints=["Runtime Only Hint"],
+        )
+
+
+class _HeavyRegressionRecallSpecialist:
+    async def analyze(self, **kwargs):
+        return SpecialistResultBundle(
+            foundation_digest=["Found Updated"],
+            current_state_digest=["phase=chapter_completed"],
+            recall_summary_text="Chapter one settled into a tense marketplace truce.",
         )
 
 
@@ -134,7 +154,10 @@ async def test_proposal_workflow_applies_and_persists_receipt(retrieval_session)
     assert receipt.status == "applied"
     updated_session = story_session_service.get_session(session.session_id)
     assert updated_session is not None
-    assert updated_session.current_state_json["chapter_digest"]["title"] == "Updated Chapter"
+    assert (
+        updated_session.current_state_json["chapter_digest"]["title"]
+        == "Updated Chapter"
+    )
     proposal_record = repository.get_proposal_record(receipt.proposal_id)
     assert proposal_record is not None
     assert proposal_record.status == "applied"
@@ -184,7 +207,9 @@ async def test_apply_service_does_not_reapply_applied_proposal(retrieval_session
 
     updated_session = story_session_service.get_session(session.session_id)
     assert updated_session is not None
-    assert updated_session.current_state_json["timeline_spine"] == [{"event": "first-event"}]
+    assert updated_session.current_state_json["timeline_spine"] == [
+        {"event": "first-event"}
+    ]
     assert replay_receipt.proposal_id == receipt.proposal_id
     assert len(repository.list_apply_receipts_for_proposal(receipt.proposal_id)) == 1
 
@@ -225,12 +250,16 @@ async def test_proposal_workflow_keeps_review_required_pending(retrieval_session
     assert receipt.status == "review_required"
     updated_session = story_session_service.get_session(session.session_id)
     assert updated_session is not None
-    assert updated_session.current_state_json["chapter_digest"]["title"] == "Chapter One"
+    assert (
+        updated_session.current_state_json["chapter_digest"]["title"] == "Chapter One"
+    )
     assert repository.list_apply_receipts_for_proposal(receipt.proposal_id) == []
 
 
 @pytest.mark.asyncio
-async def test_proposal_workflow_marks_failed_for_non_authoritative_target(retrieval_session):
+async def test_proposal_workflow_marks_failed_for_non_authoritative_target(
+    retrieval_session,
+):
     session, chapter = _seed_story_runtime(retrieval_session)
     _, repository, workflow = _build_workflow(retrieval_session)
 
@@ -269,11 +298,15 @@ async def test_proposal_workflow_marks_failed_for_non_authoritative_target(retri
 
 
 @pytest.mark.asyncio
-async def test_proposal_workflow_rejects_unimplemented_operation_kinds_before_persist(retrieval_session):
+async def test_proposal_workflow_rejects_unimplemented_operation_kinds_before_persist(
+    retrieval_session,
+):
     session, chapter = _seed_story_runtime(retrieval_session)
     _, repository, workflow = _build_workflow(retrieval_session)
 
-    with pytest.raises(ValueError, match="phase_e_operation_not_supported:remove_record"):
+    with pytest.raises(
+        ValueError, match="phase_e_operation_not_supported:remove_record"
+    ):
         await workflow.submit_and_route(
             ProposalSubmitInput(
                 story_id="story-1",
@@ -305,7 +338,9 @@ async def test_proposal_workflow_rejects_unimplemented_operation_kinds_before_pe
 
 
 @pytest.mark.asyncio
-async def test_proposal_workflow_rolls_back_state_when_receipt_write_fails(retrieval_session, monkeypatch):
+async def test_proposal_workflow_rolls_back_state_when_receipt_write_fails(
+    retrieval_session, monkeypatch
+):
     session, chapter = _seed_story_runtime(retrieval_session)
     story_session_service, repository, workflow = _build_workflow(retrieval_session)
 
@@ -345,15 +380,22 @@ async def test_proposal_workflow_rolls_back_state_when_receipt_write_fails(retri
 
     updated_session = story_session_service.get_session(session.session_id)
     assert updated_session is not None
-    assert updated_session.current_state_json["chapter_digest"]["title"] == "Chapter One"
+    assert (
+        updated_session.current_state_json["chapter_digest"]["title"] == "Chapter One"
+    )
     proposal_records = repository.list_proposals_for_story("story-1")
     assert len(proposal_records) == 1
     assert proposal_records[0].status == "failed"
-    assert repository.list_apply_receipts_for_proposal(proposal_records[0].proposal_id) == []
+    assert (
+        repository.list_apply_receipts_for_proposal(proposal_records[0].proposal_id)
+        == []
+    )
 
 
 @pytest.mark.asyncio
-async def test_longform_regression_routes_authoritative_patch_through_workflow(retrieval_session):
+async def test_longform_regression_routes_authoritative_patch_through_workflow(
+    retrieval_session,
+):
     session, chapter = _seed_story_runtime(retrieval_session)
     story_session_service, repository, workflow = _build_workflow(retrieval_session)
     regression_service = LongformRegressionService(
@@ -380,19 +422,28 @@ async def test_longform_regression_routes_authoritative_patch_through_workflow(r
         ),
     )
 
-    assert updated_session.current_state_json["narrative_progress"]["accepted_segments"] == 1
+    assert (
+        updated_session.current_state_json["narrative_progress"]["accepted_segments"]
+        == 1
+    )
     proposal_records = repository.list_proposals_for_story("story-1")
     assert len(proposal_records) == 1
     assert proposal_records[0].submit_source == "post_write_regression"
     assert proposal_records[0].status == "applied"
-    apply_receipts = repository.list_apply_receipts_for_proposal(proposal_records[0].proposal_id)
+    apply_receipts = repository.list_apply_receipts_for_proposal(
+        proposal_records[0].proposal_id
+    )
     assert len(apply_receipts) == 1
-    assert updated_chapter.builder_snapshot_json["foundation_digest"] == ["Found Updated"]
+    assert updated_chapter.builder_snapshot_json["foundation_digest"] == [
+        "Found Updated"
+    ]
     assert "writer_hints" not in updated_chapter.builder_snapshot_json
 
 
 @pytest.mark.asyncio
-async def test_longform_regression_light_path_deduplicates_newly_accepted_segment(retrieval_session):
+async def test_longform_regression_light_path_deduplicates_newly_accepted_segment(
+    retrieval_session,
+):
     session, chapter = _seed_story_runtime(retrieval_session)
     story_session_service, _, workflow = _build_workflow(retrieval_session)
     accepted_artifact = story_session_service.create_artifact(
@@ -430,3 +481,147 @@ async def test_longform_regression_light_path_deduplicates_newly_accepted_segmen
     )
 
     assert specialist_service.accepted_segment_ids == [accepted_artifact.artifact_id]
+
+
+@pytest.mark.asyncio
+async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
+    retrieval_session,
+):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    story_session_service, _, workflow = _build_workflow(retrieval_session)
+    accepted_primary = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text=(
+            "The silver braid oath was hidden beneath the market stair,"
+            " beside a lantern scored with nine tally marks."
+        ),
+    )
+    accepted_secondary = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="A second accepted segment described the watch rotation at dusk.",
+    )
+    draft_artifact = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Draft prose must not enter settled recall.",
+    )
+    superseded_artifact = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.SUPERSEDED,
+        content_text="Superseded prose must not enter settled recall.",
+    )
+    story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.CHAPTER_OUTLINE,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="Accepted outline belongs to a different retention slice.",
+    )
+    discussion_entry = story_session_service.create_discussion_entry(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        role="assistant",
+        content_text="This is a runtime planning discussion, not settled scene prose.",
+        linked_artifact_id=draft_artifact.artifact_id,
+    )
+    story_session_service.commit()
+
+    specialist_service = _HeavyRegressionRecallSpecialist()
+    regression_service = LongformRegressionService(
+        story_session_service=story_session_service,
+        orchestrator_service=_StaticPlanOrchestrator(),
+        specialist_service=specialist_service,
+        proposal_workflow_service=workflow,
+        legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
+        recall_summary_ingestion_service=RecallSummaryIngestionService(
+            retrieval_session
+        ),
+        recall_detail_ingestion_service=RecallDetailIngestionService(retrieval_session),
+    )
+
+    session = story_session_service.get_session(session.session_id)
+    chapter = story_session_service.get_chapter_by_index(
+        session_id=accepted_primary.session_id,
+        chapter_index=1,
+    )
+    assert session is not None
+    assert chapter is not None
+
+    await regression_service.run_heavy_regression(
+        session=session,
+        chapter=chapter,
+        model_id="model-1",
+        provider_id=None,
+    )
+    retrieval_session.commit()
+
+    assets = RetrievalDocumentService(retrieval_session).list_story_assets(
+        session.story_id
+    )
+    summary_assets = [
+        asset for asset in assets if asset.asset_kind == "chapter_summary"
+    ]
+    detail_assets = [
+        asset for asset in assets if asset.asset_kind == "accepted_story_segment"
+    ]
+
+    assert len(summary_assets) == 1
+    assert len(detail_assets) == 2
+    assert {asset.asset_kind for asset in assets} == {
+        "chapter_summary",
+        "accepted_story_segment",
+    }
+    summary_asset = summary_assets[0]
+    assert summary_asset.metadata["layer"] == "recall"
+    assert summary_asset.metadata["source_family"] == "longform_story_runtime"
+    assert summary_asset.metadata["materialization_event"] == (
+        "heavy_regression.chapter_close"
+    )
+    assert summary_asset.metadata["materialization_kind"] == "chapter_summary"
+    assert summary_asset.metadata["materialized_to_recall"] is True
+    summary_seed = summary_asset.metadata["seed_sections"][0]
+    assert summary_seed["metadata"]["materialization_kind"] == "chapter_summary"
+    assert summary_seed["metadata"]["materialized_to_recall"] is True
+    assert {asset.metadata["artifact_id"] for asset in detail_assets} == {
+        accepted_primary.artifact_id,
+        accepted_secondary.artifact_id,
+    }
+    assert all(
+        asset.metadata.get("materialization_event") == "heavy_regression.chapter_close"
+        for asset in detail_assets
+    )
+    assert all(
+        asset.metadata.get("materialized_to_recall") is True for asset in detail_assets
+    )
+    assert draft_artifact.artifact_id not in {
+        asset.metadata.get("artifact_id") for asset in detail_assets
+    }
+    assert superseded_artifact.artifact_id not in {
+        asset.metadata.get("artifact_id") for asset in detail_assets
+    }
+    assert discussion_entry.entry_id not in {
+        asset.metadata.get("discussion_entry_id") for asset in assets
+    }
+
+    broker = RetrievalBroker(default_story_id=session.story_id)
+    recall_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="silver braid lantern tally marks",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=3,
+        )
+    )
+
+    returned_asset_ids = {hit.metadata.get("asset_id") for hit in recall_result.hits}
+    assert f"recall_detail_{accepted_primary.artifact_id}" in returned_asset_ids

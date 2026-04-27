@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from rp.models.dsl import Domain, Layer
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.story_runtime import (
+    LongformChapterPhase,
+    StoryArtifactKind,
+    StoryArtifactStatus,
+)
 from rp.services.builder_projection_context_service import (
     BuilderProjectionContextService,
 )
@@ -155,6 +159,32 @@ def test_block_read_service_lists_formal_store_authoritative_and_projection_bloc
         )
         == authoritative_block
     )
+    assert (
+        service.get_block(session_id=session.session_id, block_id="missing-block")
+        is None
+    )
+    authoritative_only = service.list_blocks(
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE,
+    )
+    core_store_only = service.list_blocks(
+        session_id=session.session_id,
+        source="core_state_store",
+    )
+    mirror_only = service.list_blocks(
+        session_id=session.session_id,
+        source="compatibility_mirror",
+    )
+    assert authoritative_block in authoritative_only
+    assert projection_block not in authoritative_only
+    assert all(
+        block.layer == Layer.CORE_STATE_AUTHORITATIVE for block in authoritative_only
+    )
+    assert authoritative_block in core_store_only
+    assert projection_block in core_store_only
+    assert all(block.source == "core_state_store" for block in core_store_only)
+    assert mirror_only
+    assert all(block.source == "compatibility_mirror" for block in mirror_only)
     assert authoritative_block.label == "chapter.current"
     assert authoritative_block.layer == Layer.CORE_STATE_AUTHORITATIVE
     assert authoritative_block.domain == Domain.CHAPTER
@@ -365,3 +395,135 @@ def test_block_read_service_respects_store_read_switch_when_rows_exist(
     assert projection_block.source == "compatibility_mirror"
     assert projection_block.revision == 1
     assert projection_block.items_json == ["Mirror outline"]
+
+
+def test_block_read_service_lists_runtime_workspace_draft_and_discussion_blocks(
+    retrieval_session,
+):
+    story_session_service, session, chapter = _seed_runtime(retrieval_session)
+    draft_artifact = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Pending runtime segment",
+        metadata={"command_kind": "write_next_segment"},
+        revision=2,
+    )
+    accepted_artifact = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="Accepted segment should stay out of runtime workspace blocks",
+        metadata={"command_kind": "accept_pending_segment"},
+        revision=3,
+    )
+    discussion_entry = story_session_service.create_discussion_entry(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        role="assistant",
+        content_text="Keep the draft tighter and more immediate.",
+        linked_artifact_id=draft_artifact.artifact_id,
+    )
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    service = _build_block_read_service(
+        retrieval_session=retrieval_session,
+        story_session_service=story_session_service,
+        core_repo=core_repo,
+        store_read_enabled=True,
+    )
+
+    runtime_blocks = service.list_blocks(
+        session_id=session.session_id,
+        layer=Layer.RUNTIME_WORKSPACE,
+    )
+    runtime_source_only = service.list_blocks(
+        session_id=session.session_id,
+        source="runtime_workspace_store",
+    )
+    artifact_block = next(
+        block
+        for block in runtime_blocks
+        if block.block_id == f"runtime_workspace:artifact:{draft_artifact.artifact_id}"
+    )
+    discussion_block = next(
+        block
+        for block in runtime_blocks
+        if block.block_id == f"runtime_workspace:discussion:{discussion_entry.entry_id}"
+    )
+
+    assert (
+        service.get_block(
+            session_id=session.session_id,
+            block_id=artifact_block.block_id,
+        )
+        == artifact_block
+    )
+    assert all(block.layer == Layer.RUNTIME_WORKSPACE for block in runtime_blocks)
+    assert all(
+        block.source == "runtime_workspace_store" for block in runtime_source_only
+    )
+    assert all(
+        block.metadata["source_row_id"] != accepted_artifact.artifact_id
+        for block in runtime_blocks
+    )
+
+    assert artifact_block.label == (
+        f"runtime_workspace.artifact.{draft_artifact.artifact_id}"
+    )
+    assert artifact_block.domain == Domain.CHAPTER
+    assert artifact_block.domain_path == artifact_block.label
+    assert artifact_block.scope == "chapter"
+    assert artifact_block.revision == 2
+    assert artifact_block.source == "runtime_workspace_store"
+    assert artifact_block.data_json["artifact_kind"] == (
+        StoryArtifactKind.STORY_SEGMENT.value
+    )
+    assert artifact_block.data_json["status"] == StoryArtifactStatus.DRAFT.value
+    assert artifact_block.data_json["content_text"] == "Pending runtime segment"
+    assert artifact_block.metadata["route"] == "story_session_runtime.artifacts"
+    assert artifact_block.metadata["source_table"] == "rp_story_artifacts"
+    assert artifact_block.metadata["layer"] == Layer.RUNTIME_WORKSPACE.value
+    assert artifact_block.metadata["source_family"] == "runtime_workspace"
+    assert artifact_block.metadata["workspace_role"] == "current_turn_scratch"
+    assert artifact_block.metadata["materialized_to_recall"] is False
+    assert artifact_block.metadata["recall_materialization_state"] == (
+        "not_recall_materialized"
+    )
+    assert artifact_block.metadata["not_scene_transcript"] is True
+    assert artifact_block.metadata["scene_transcript"] is False
+    assert artifact_block.metadata["session_id"] == session.session_id
+    assert artifact_block.metadata["chapter_workspace_id"] == (
+        chapter.chapter_workspace_id
+    )
+
+    assert discussion_block.label == (
+        f"runtime_workspace.discussion.{discussion_entry.entry_id}"
+    )
+    assert discussion_block.domain == Domain.CHAPTER
+    assert discussion_block.domain_path == discussion_block.label
+    assert discussion_block.scope == "chapter"
+    assert discussion_block.revision == 1
+    assert discussion_block.source == "runtime_workspace_store"
+    assert discussion_block.data_json["role"] == "assistant"
+    assert discussion_block.data_json["content_text"] == (
+        "Keep the draft tighter and more immediate."
+    )
+    assert discussion_block.data_json["linked_artifact_id"] == (
+        draft_artifact.artifact_id
+    )
+    assert discussion_block.metadata["route"] == (
+        "story_session_runtime.discussion_entries"
+    )
+    assert discussion_block.metadata["source_table"] == "rp_story_discussion_entries"
+    assert discussion_block.metadata["layer"] == Layer.RUNTIME_WORKSPACE.value
+    assert discussion_block.metadata["source_family"] == "runtime_workspace"
+    assert discussion_block.metadata["workspace_role"] == "current_turn_scratch"
+    assert discussion_block.metadata["materialized_to_recall"] is False
+    assert discussion_block.metadata["recall_materialization_state"] == (
+        "not_recall_materialized"
+    )
+    assert discussion_block.metadata["not_scene_transcript"] is True
+    assert discussion_block.metadata["scene_transcript"] is False
+    assert discussion_block.metadata["discussion_role"] == "assistant"

@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 import pytest
 
 from rp.models.dsl import Domain
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.memory_crud import (
+    RetrievalHit,
+    RetrievalQuery,
+    RetrievalSearchResult,
+    RetrievalTrace,
+)
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
 from rp.services.retrieval_collection_service import RetrievalCollectionService
@@ -34,13 +39,17 @@ class _FakeLangfuseObservation:
         return False
 
     def update(self, **kwargs):
-        self._sink.append({"kind": "observation_update", "name": self._name, "payload": kwargs})
+        self._sink.append(
+            {"kind": "observation_update", "name": self._name, "payload": kwargs}
+        )
 
     def score(self, **kwargs):
         self._sink.append({"kind": "score", "name": self._name, "payload": kwargs})
 
     def score_trace(self, **kwargs):
-        self._sink.append({"kind": "score_trace", "name": self._name, "payload": kwargs})
+        self._sink.append(
+            {"kind": "score_trace", "name": self._name, "payload": kwargs}
+        )
 
     def start_as_current_observation(self, **kwargs):
         return _FakeLangfuseObservation(
@@ -140,17 +149,25 @@ async def test_search_chunks_and_documents_use_real_store(retrieval_session):
     assert chunk_result.hits[0].metadata["section_id"] == "rule-1"
     assert chunk_result.hits[0].metadata["section_part"] == 0
     assert chunk_result.hits[0].metadata["domain"] == "world_rule"
-    assert chunk_result.hits[0].metadata["domain_path"] == "foundation.world.archive_rule"
+    assert (
+        chunk_result.hits[0].metadata["domain_path"] == "foundation.world.archive_rule"
+    )
     assert chunk_result.hits[0].metadata["document_title"] == "Archive Ledger"
     assert chunk_result.hits[0].metadata["document_summary"]
     assert chunk_result.hits[0].metadata["page_no"] == 7
     assert chunk_result.hits[0].metadata["page_label"] == "VII"
     assert chunk_result.hits[0].metadata["page_ref"] == "VII (7)"
-    assert chunk_result.hits[0].metadata["image_caption"] == "Diagram of the archive ledger seal."
+    assert (
+        chunk_result.hits[0].metadata["image_caption"]
+        == "Diagram of the archive ledger seal."
+    )
     assert chunk_result.hits[0].metadata["context_header"]
     assert chunk_result.hits[0].metadata["contextual_text_version"] == "v2"
     assert "Page: VII (7)" in chunk_result.hits[0].metadata["contextual_text"]
-    assert "Image: Diagram of the archive ledger seal." in chunk_result.hits[0].metadata["contextual_text"]
+    assert (
+        "Image: Diagram of the archive ledger seal."
+        in chunk_result.hits[0].metadata["contextual_text"]
+    )
     assert chunk_result.hits[0].hit_id.startswith("chunk_")
     assert document_result.hits
     assert document_result.hits[0].metadata["result_kind"] == "document"
@@ -165,7 +182,9 @@ async def test_search_chunks_and_documents_use_real_store(retrieval_session):
     assert rag_result.hits[0].metadata["rag_document_summary"]
     assert rag_result.hits[0].excerpt_text.startswith("Context:")
     assert "Page: VII (7)" in rag_result.hits[0].excerpt_text
-    assert "Image: Diagram of the archive ledger seal." in rag_result.hits[0].excerpt_text
+    assert (
+        "Image: Diagram of the archive ledger seal." in rag_result.hits[0].excerpt_text
+    )
     assert rag_result.trace is not None
     assert rag_result.trace.result_kind == "rag"
     assert "rag_context_builder" in rag_result.trace.pipeline_stages
@@ -263,7 +282,9 @@ async def test_retrieval_service_uses_explicit_pipeline_slots(retrieval_session)
         ) -> RetrievalSearchResult:
             self.seen_query = query
             self.seen_result = result
-            return result.model_copy(update={"warnings": [*result.warnings, "reranked"]})
+            return result.model_copy(
+                update={"warnings": [*result.warnings, "reranked"]}
+            )
 
     class StubChunkResultBuilder:
         def __init__(self) -> None:
@@ -278,7 +299,12 @@ async def test_retrieval_service_uses_explicit_pipeline_slots(retrieval_session)
         ) -> RetrievalSearchResult:
             self.seen_query = query
             self.seen_result = result
-            return result.model_copy(update={"query": query.text_query or "", "warnings": [*result.warnings, "built"]})
+            return result.model_copy(
+                update={
+                    "query": query.text_query or "",
+                    "warnings": [*result.warnings, "built"],
+                }
+            )
 
     preprocessor = StubPreprocessor()
     retriever_a = StubRetriever(route="keyword.stub", score=0.8)
@@ -361,7 +387,9 @@ async def test_retrieval_service_emits_langfuse_observation(retrieval_session):
             )
 
     class StubReranker:
-        async def rerank(self, *, query: RetrievalQuery, result: RetrievalSearchResult) -> RetrievalSearchResult:
+        async def rerank(
+            self, *, query: RetrievalQuery, result: RetrievalSearchResult
+        ) -> RetrievalSearchResult:
             return result
 
     fake_langfuse = _FakeLangfuseService()
@@ -384,12 +412,17 @@ async def test_retrieval_service_emits_langfuse_observation(retrieval_session):
     result = await service.search_chunks(query)
 
     assert result.hits[0].hit_id == "chunk-observation"
-    observation_names = [item["name"] for item in fake_langfuse.events if item["kind"] == "observation_enter"]
+    observation_names = [
+        item["name"]
+        for item in fake_langfuse.events
+        if item["kind"] == "observation_enter"
+    ]
     assert "rp.retrieval.search_chunks" in observation_names
     updates = [
         item["payload"]["output"]
         for item in fake_langfuse.events
-        if item["kind"] == "observation_update" and item["name"] == "rp.retrieval.search_chunks"
+        if item["kind"] == "observation_update"
+        and item["name"] == "rp.retrieval.search_chunks"
     ]
     assert updates
     observability = updates[-1]["observability"]
@@ -398,10 +431,19 @@ async def test_retrieval_service_emits_langfuse_observation(retrieval_session):
     assert observability["route"].startswith("retrieval.keyword.stub")
     assert observability["returned_count"] == 1
     assert observability["top_hits"][0]["asset_id"] == "asset-observation"
+    assert observability["top_hits"][0]["block_view"]["source"] == "retrieval_store"
+    assert observability["top_hits"][0]["block_view"]["block_id"].startswith(
+        "retrieval.archival.rq-observation."
+    )
+    assert observability["top_hits"][0]["block_view"]["block_id"].endswith(
+        ".chunk-observation"
+    )
 
 
 @pytest.mark.asyncio
-async def test_simple_metadata_reranker_can_promote_metadata_aligned_hit(retrieval_session):
+async def test_simple_metadata_reranker_can_promote_metadata_aligned_hit(
+    retrieval_session,
+):
     class StubRetriever:
         async def search(self, query: RetrievalQuery) -> RetrievalSearchResult:
             return RetrievalSearchResult(
@@ -478,7 +520,9 @@ async def test_simple_metadata_reranker_can_promote_metadata_aligned_hit(retriev
 
 
 @pytest.mark.asyncio
-async def test_search_chunks_short_circuits_empty_query_even_with_active_embeddings(retrieval_session):
+async def test_search_chunks_short_circuits_empty_query_even_with_active_embeddings(
+    retrieval_session,
+):
     collection = RetrievalCollectionService(retrieval_session).ensure_story_collection(
         story_id="story-empty-query",
         scope="story",

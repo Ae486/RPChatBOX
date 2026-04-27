@@ -1,14 +1,17 @@
 """SetupAgent execution layer with legacy fallback and runtime-v2 support."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import AsyncIterator, Callable
 
 from models.chat import ChatCompletionRequest, ChatMessage
-from models.mcp_config import McpToolInfo
 from rp.agent_runtime.adapters import SetupRuntimeAdapter
-from rp.agent_runtime.contracts import RpAgentTurnResult
+from rp.agent_runtime.contracts import (
+    RpAgentTurnResult,
+    SetupContextCompactSummary,
+    SetupToolOutcome,
+    SetupWorkingDigest,
+)
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor
 from rp.models.setup_agent import (
     SetupAgentDialogueMessage,
@@ -21,6 +24,7 @@ from rp.services.memory_os_service import MemoryOsService
 from rp.services.setup_agent_prompt_service import SetupAgentPromptService
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
+from rp.services.setup_context_governor import SetupContextGovernorService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
@@ -59,6 +63,11 @@ class SetupAgentExecutionService:
         "memory.list_versions",
         "memory.read_provenance",
     }
+    _STANDARD_CONTEXT_TOKEN_BUDGET = 2400
+    _COMPACT_CONTEXT_TOKEN_BUDGET = 600
+    _COMPACT_HISTORY_COUNT_THRESHOLD = 8
+    _COMPACT_HISTORY_CHARS_THRESHOLD = 4000
+    _COMPACT_USER_EDIT_THRESHOLD = 3
 
     def __init__(
         self,
@@ -70,6 +79,7 @@ class SetupAgentExecutionService:
         runtime_executor: RpAgentRuntimeExecutor | None = None,
         adapter: SetupRuntimeAdapter | None = None,
         runtime_state_service: SetupAgentRuntimeStateService | None = None,
+        context_governor: SetupContextGovernorService | None = None,
         mcp_manager_factory: Callable[[str], McpManager] | None = None,
     ) -> None:
         self._workspace_service = workspace_service
@@ -79,6 +89,7 @@ class SetupAgentExecutionService:
         self._runtime_executor = runtime_executor
         self._adapter = adapter
         self._runtime_state_service = runtime_state_service
+        self._context_governor = context_governor or SetupContextGovernorService()
         self._mcp_manager_factory = (
             mcp_manager_factory
             or (lambda story_id: self._build_setup_mcp_manager(story_id=story_id))
@@ -220,6 +231,7 @@ class SetupAgentExecutionService:
         model_name: str,
         stream: bool,
     ) -> ChatCompletionRequest:
+        token_budget = self._context_token_budget(request)
         context_packet = self._context_builder.build(
             SetupContextBuilderInput(
                 mode=workspace.mode.value,
@@ -227,7 +239,7 @@ class SetupAgentExecutionService:
                 current_step=(request.target_step or workspace.current_step).value,
                 user_prompt=request.user_prompt,
                 user_edit_delta_ids=list(request.user_edit_delta_ids),
-                token_budget=None,
+                token_budget=token_budget,
             )
         )
         system_prompt = self._prompt_service.build_system_prompt(
@@ -250,6 +262,17 @@ class SetupAgentExecutionService:
             provider=provider,
             enable_tools=True,
         )
+
+    @classmethod
+    def _context_token_budget(cls, request: SetupAgentTurnRequest) -> int:
+        history_chars = sum(len(item.content or "") for item in request.history)
+        if (
+            len(request.history) >= cls._COMPACT_HISTORY_COUNT_THRESHOLD
+            or history_chars >= cls._COMPACT_HISTORY_CHARS_THRESHOLD
+            or len(request.user_edit_delta_ids) >= cls._COMPACT_USER_EDIT_THRESHOLD
+        ):
+            return cls._COMPACT_CONTEXT_TOKEN_BUDGET
+        return cls._STANDARD_CONTEXT_TOKEN_BUDGET
 
     @staticmethod
     def _history_to_chat_messages(history: list[SetupAgentDialogueMessage]) -> list[ChatMessage]:
@@ -342,6 +365,13 @@ class SetupAgentExecutionService:
             raise ValueError(f"SetupWorkspace not found: {workspace_id}")
         return workspace
 
+    def _require_runtime_v2_components(
+        self,
+    ) -> tuple[SetupRuntimeAdapter, RpAgentRuntimeExecutor]:
+        if self._adapter is None or self._runtime_executor is None:
+            raise RuntimeError("SetupAgent runtime v2 components are not configured")
+        return self._adapter, self._runtime_executor
+
     async def _run_turn_v2(
         self,
         *,
@@ -350,6 +380,7 @@ class SetupAgentExecutionService:
         model_name: str,
         provider,
     ) -> RpAgentTurnResult:
+        adapter, runtime_executor = self._require_runtime_v2_components()
         langfuse = get_langfuse_service()
         with langfuse.start_as_current_observation(
             name="rp.setup.runtime_v2",
@@ -363,44 +394,24 @@ class SetupAgentExecutionService:
                 "user_prompt": request.user_prompt,
             },
         ) as observation:
-            context_packet = self._context_builder.build(
-                SetupContextBuilderInput(
-                    mode=workspace.mode.value,
-                    workspace_id=workspace.workspace_id,
-                    current_step=(request.target_step or workspace.current_step).value,
-                    user_prompt=request.user_prompt,
-                    user_edit_delta_ids=list(request.user_edit_delta_ids),
-                    token_budget=None,
-                )
-            )
-            cognitive_state = (
-                self._runtime_state_service.reconcile_snapshot(
-                    workspace=workspace,
-                    context_packet=context_packet,
-                    step_id=request.target_step or workspace.current_step,
-                )
-                if self._runtime_state_service is not None
-                else None
-            )
-            cognitive_state_summary = (
-                self._runtime_state_service.summarize_for_prompt(cognitive_state)
-                if self._runtime_state_service is not None
-                else None
-            )
-            turn_input = self._adapter.build_turn_input(
+            turn_input, context_packet = self._build_runtime_v2_turn_input(
+                adapter=adapter,
                 request=request,
                 workspace=workspace,
-                context_packet=context_packet,
                 model_name=model_name,
                 provider=provider,
-                cognitive_state=cognitive_state,
-                cognitive_state_summary=cognitive_state_summary,
             )
-            profile = self._adapter.build_runtime_profile()
-            result = await self._runtime_executor.run(
+            profile = adapter.build_runtime_profile()
+            result = await runtime_executor.run(
                 turn_input.model_copy(update={"stream": False}),
                 profile,
                 llm_service=self._llm_service,
+            )
+            self._persist_runtime_v2_governance(
+                workspace=workspace,
+                context_packet=context_packet,
+                step_id=request.target_step or workspace.current_step,
+                result=result,
             )
             observation.update(
                 output={
@@ -422,6 +433,7 @@ class SetupAgentExecutionService:
         model_name: str,
         provider,
     ) -> AsyncIterator[str]:
+        adapter, runtime_executor = self._require_runtime_v2_components()
         langfuse = get_langfuse_service()
         with langfuse.start_as_current_observation(
             name="rp.setup.runtime_v2.stream",
@@ -436,48 +448,29 @@ class SetupAgentExecutionService:
                 "stream": True,
             },
         ) as observation:
-            context_packet = self._context_builder.build(
-                SetupContextBuilderInput(
-                    mode=workspace.mode.value,
-                    workspace_id=workspace.workspace_id,
-                    current_step=(request.target_step or workspace.current_step).value,
-                    user_prompt=request.user_prompt,
-                    user_edit_delta_ids=list(request.user_edit_delta_ids),
-                    token_budget=None,
-                )
-            )
-            cognitive_state = (
-                self._runtime_state_service.reconcile_snapshot(
-                    workspace=workspace,
-                    context_packet=context_packet,
-                    step_id=request.target_step or workspace.current_step,
-                )
-                if self._runtime_state_service is not None
-                else None
-            )
-            cognitive_state_summary = (
-                self._runtime_state_service.summarize_for_prompt(cognitive_state)
-                if self._runtime_state_service is not None
-                else None
-            )
-            turn_input = self._adapter.build_turn_input(
+            turn_input, context_packet = self._build_runtime_v2_turn_input(
+                adapter=adapter,
                 request=request,
                 workspace=workspace,
-                context_packet=context_packet,
                 model_name=model_name,
                 provider=provider,
-                cognitive_state=cognitive_state,
-                cognitive_state_summary=cognitive_state_summary,
-            ).model_copy(update={"stream": True})
-            profile = self._adapter.build_runtime_profile()
-            async for chunk in self._runtime_executor.run_stream(
+            )
+            turn_input = turn_input.model_copy(update={"stream": True})
+            profile = adapter.build_runtime_profile()
+            async for chunk in runtime_executor.run_stream(
                 turn_input,
                 profile,
                 llm_service=self._llm_service,
             ):
                 yield chunk
-            self._last_runtime_result = self._runtime_executor.last_result
+            self._last_runtime_result = runtime_executor.last_result
             if self._last_runtime_result is not None:
+                self._persist_runtime_v2_governance(
+                    workspace=workspace,
+                    context_packet=context_packet,
+                    step_id=request.target_step or workspace.current_step,
+                    result=self._last_runtime_result,
+                )
                 observation.update(
                     output={
                         "finish_reason": self._last_runtime_result.finish_reason,
@@ -487,3 +480,130 @@ class SetupAgentExecutionService:
                         "tool_result_count": len(self._last_runtime_result.tool_results),
                     }
                 )
+
+    def _build_runtime_v2_turn_input(
+        self,
+        *,
+        adapter: SetupRuntimeAdapter,
+        request: SetupAgentTurnRequest,
+        workspace,
+        model_name: str,
+        provider,
+    ):
+        current_step = request.target_step or workspace.current_step
+        token_budget = self._context_token_budget(request)
+        context_packet = self._context_builder.build(
+            SetupContextBuilderInput(
+                mode=workspace.mode.value,
+                workspace_id=workspace.workspace_id,
+                current_step=current_step.value,
+                user_prompt=request.user_prompt,
+                user_edit_delta_ids=list(request.user_edit_delta_ids),
+                token_budget=token_budget,
+            )
+        )
+        cognitive_state = (
+            self._runtime_state_service.reconcile_snapshot(
+                workspace=workspace,
+                context_packet=context_packet,
+                step_id=current_step,
+            )
+            if self._runtime_state_service is not None
+            else None
+        )
+        cognitive_state_summary = (
+            self._runtime_state_service.summarize_for_prompt(cognitive_state)
+            if self._runtime_state_service is not None
+            else None
+        )
+        open_questions = [
+            question
+            for question in workspace.open_questions
+            if question.step_id == current_step
+        ]
+        blocking_open_questions = [
+            question
+            for question in open_questions
+            if question.status.value == "open" and question.severity.value == "blocking"
+        ]
+        last_proposal_status = None
+        proposals = [
+            proposal for proposal in workspace.commit_proposals if proposal.step_id == current_step
+        ]
+        if proposals:
+            last_proposal_status = max(proposals, key=lambda item: item.created_at).status.value
+
+        retained_tool_outcomes = (
+            list(cognitive_state_summary.tool_outcomes)
+            if cognitive_state_summary is not None
+            else []
+        )
+        working_digest = self._context_governor.build_initial_digest(
+            cognitive_state=cognitive_state,
+            cognitive_state_summary=cognitive_state_summary,
+            blocking_open_question_count=len(blocking_open_questions),
+            last_proposal_status=last_proposal_status,
+        )
+        governed_history, compact_summary, governance_metadata = (
+            self._context_governor.govern_history(
+                history=list(request.history),
+                retained_tool_outcomes=retained_tool_outcomes,
+                working_digest=working_digest,
+                existing_summary=(
+                    cognitive_state_summary.compact_summary
+                    if cognitive_state_summary is not None
+                    else None
+                ),
+                context_profile=context_packet.context_profile,
+            )
+        )
+        turn_input = adapter.build_turn_input(
+            request=request,
+            workspace=workspace,
+            context_packet=context_packet,
+            model_name=model_name,
+            provider=provider,
+            governed_history=governed_history,
+            working_digest=working_digest,
+            tool_outcomes=retained_tool_outcomes,
+            compact_summary=compact_summary,
+            governance_metadata=governance_metadata,
+            cognitive_state=cognitive_state,
+            cognitive_state_summary=cognitive_state_summary,
+        )
+        return turn_input, context_packet
+
+    def _persist_runtime_v2_governance(
+        self,
+        *,
+        workspace,
+        context_packet,
+        step_id,
+        result: RpAgentTurnResult,
+    ) -> None:
+        if self._runtime_state_service is None:
+            return
+        payload = result.structured_payload if isinstance(result.structured_payload, dict) else {}
+        working_digest = (
+            SetupWorkingDigest.model_validate(payload["working_digest"])
+            if isinstance(payload.get("working_digest"), dict)
+            else None
+        )
+        tool_outcomes = [
+            SetupToolOutcome.model_validate(item)
+            for item in payload.get("tool_outcomes", [])
+            if isinstance(item, dict)
+        ]
+        compact_summary = (
+            SetupContextCompactSummary.model_validate(payload["compact_summary"])
+            if isinstance(payload.get("compact_summary"), dict)
+            else None
+        )
+        self._runtime_state_service.persist_turn_governance(
+            workspace=workspace,
+            context_packet=context_packet,
+            step_id=step_id,
+            working_digest=working_digest,
+            tool_outcomes=tool_outcomes,
+            compact_summary=compact_summary,
+        )

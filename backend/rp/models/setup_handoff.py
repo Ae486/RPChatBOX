@@ -1,12 +1,13 @@
 """Setup context packets, tool results, and activation handoff models."""
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_workspace import SetupStepId, StoryMode
 
 
 class SetupToolResult(BaseModel):
@@ -33,6 +34,32 @@ class SetupContextBuilderInput(BaseModel):
     token_budget: int | None = None
 
 
+class SetupStageChunkDescription(BaseModel):
+    """Compact retrieval-friendly description for one accepted setup truth unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_ref: str
+    block_type: str
+    title: str
+    description: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SetupStageHandoffPacket(BaseModel):
+    """Compact prior-stage truth packet injected into later setup stages."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: SetupStepId
+    commit_id: str
+    summary: str
+    committed_refs: list[str] = Field(default_factory=list)
+    spotlights: list[str] = Field(default_factory=list)
+    chunk_descriptions: list[SetupStageChunkDescription] = Field(default_factory=list)
+    created_at: datetime
+
+
 class SetupContextPacket(BaseModel):
     """Context packet passed into the SetupAgent loop."""
 
@@ -40,12 +67,14 @@ class SetupContextPacket(BaseModel):
 
     workspace_id: str
     current_step: str
+    context_profile: Literal["standard", "compact"] = "standard"
     committed_summaries: list[str] = Field(default_factory=list)
     current_draft_snapshot: dict[str, Any] = Field(default_factory=dict)
     step_asset_preview: list[dict[str, Any]] = Field(default_factory=list)
     user_prompt: str
     user_edit_deltas: list[dict[str, Any]] = Field(default_factory=list)
     spotlights: list[str] = Field(default_factory=list)
+    prior_stage_handoffs: list[SetupStageHandoffPacket] = Field(default_factory=list)
 
 
 class RuntimeStoryConfigSeed(BaseModel):

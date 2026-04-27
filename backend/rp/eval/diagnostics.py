@@ -1589,6 +1589,10 @@ def _setup_tool_error_codes(tool_results: list[Any]) -> list[str]:
     for item in tool_results:
         if not isinstance(item, dict) or bool(item.get("success")):
             continue
+        if item.get("error_code"):
+            codes.append(str(item.get("error_code")))
+        if item.get("code"):
+            codes.append(str(item.get("code")))
         structured_payload = item.get("structured_payload")
         if isinstance(structured_payload, dict):
             content_payload = structured_payload.get("content_payload")

@@ -1,0 +1,974 @@
+{
+  "suite_id": "8b3bc2dddf2f4366933ef2373d9b8686",
+  "case_count": 3,
+  "run_count": 3,
+  "pass_count": 2,
+  "fail_count": 1,
+  "output_dir": "artifacts/eval/real-provider-suite-output",
+  "items": [
+    {
+      "case_id": "activation.bootstrap.ready_workspace_activation.v1",
+      "run_id": "128564859e1e4b5787d78874d9ab942d",
+      "scope": "activation",
+      "status": "completed",
+      "attempt_index": 1,
+      "replay_path": "artifacts/eval/real-provider-suite-output/replays/activation.bootstrap.ready_workspace_activation.v1--128564859e1e4b5787d78874d9ab942d.json",
+      "report_path": "artifacts/eval/real-provider-suite-output/reports/activation.bootstrap.ready_workspace_activation.v1--128564859e1e4b5787d78874d9ab942d.json",
+      "report": {
+        "run_id": "128564859e1e4b5787d78874d9ab942d",
+        "case_id": "activation.bootstrap.ready_workspace_activation.v1",
+        "scope": "activation",
+        "status": "completed",
+        "assertion_summary": {
+          "pass": 5,
+          "fail": 0,
+          "warn": 0,
+          "skip": 1
+        },
+        "hard_failures": [],
+        "failure_layer": null,
+        "finish_reason": "activation_completed",
+        "repair_route": null,
+        "completion_guard_reason": null,
+        "last_failure_category": null,
+        "last_failure_message": null,
+        "cognitive_state_invalidated": null,
+        "cognitive_ready_for_review": null,
+        "cognitive_invalidation_reasons": [],
+        "remaining_open_issues": [],
+        "commit_blocked": false,
+        "subjective_hook_summary": {
+          "total": 1,
+          "pending": 1,
+          "executed": 0,
+          "judge_family_counts": {
+            "llm_judge": 1
+          },
+          "rubric_refs": [
+            "activation/handoff-quality/v1"
+          ],
+          "status_counts": {
+            "skip": 1
+          },
+          "average_numeric_score": null,
+          "rubric_summaries": {
+            "activation/handoff-quality/v1": {
+              "total": 1,
+              "pending": 1,
+              "executed": 0,
+              "status_counts": {
+                "skip": 1
+              },
+              "average_numeric_score": null,
+              "hook_ids": [
+                "activation_handoff_quality"
+              ],
+              "case_count": 1
+            }
+          },
+          "artifact_count": 1
+        },
+        "subjective_hook_results": [
+          {
+            "hook_id": "activation_handoff_quality",
+            "artifact_id": "128564859e1e4b5787d78874d9ab942d:artifact:subjective_hook:activation_handoff_quality",
+            "judge_family": "llm_judge",
+            "rubric_ref": "activation/handoff-quality/v1",
+            "rubric_title": "Activation Handoff Quality",
+            "status": "skip",
+            "score": null,
+            "label": "pending",
+            "explanation": "Subjective hook prepared but no judge executor is configured yet",
+            "judge_model_id": null,
+            "judge_provider_id": null,
+            "judge_prompt_version": "llm-judge/v2",
+            "judge_response_schema_version": "judge-response/v2",
+            "judge_skip_reason": null,
+            "judge_status_source": null,
+            "judge_score_source": null,
+            "judge_score_band": null,
+            "judge_score_band_conflict": false,
+            "judge_strengths": [],
+            "judge_issues": [],
+            "target_available": true,
+            "resolved_source": "activation_result",
+            "resolved_path": "activation_check.handoff"
+          }
+        ],
+        "subjective_hook_artifact_ids": [
+          "128564859e1e4b5787d78874d9ab942d:artifact:subjective_hook:activation_handoff_quality"
+        ],
+        "pending_judge_hook_ids": [
+          "activation_handoff_quality"
+        ],
+        "end_reason_summary": "activation_completed",
+        "ragas": null,
+        "diagnostics": {
+          "diagnostic_version": "v1",
+          "capabilities": {
+            "readiness_gate": {
+              "status": "pass",
+              "summary": "Activation readiness gate passed and the workspace is eligible for bootstrap.",
+              "evidence": [
+                "ready=True",
+                "blocking_issue_count=0",
+                "finish_reason=activation_completed"
+              ]
+            },
+            "handoff_integrity": {
+              "status": "pass",
+              "summary": "Activation handoff contains the minimum runtime config, writer contract, and continuity refs.",
+              "evidence": [
+                "has_handoff=True",
+                "runtime_story_config_keys=['mode', 'model_profile_ref', 'post_write_policy_preset', 'retrieval_embedding_model_id', 'retrieval_embedding_provider_id', 'retrieval_rerank_model_id', 'retrieval_rerank_provider_id', 'story_id', 'worker_profile_ref']",
+                "writer_contract_keys=['pov_rules', 'style_rules', 'task_writing_rules', 'writing_constraints']",
+                "foundation_commit_ref_count=1",
+                "archival_ready_ref_count=2"
+              ]
+            },
+            "session_bootstrap": {
+              "status": "pass",
+              "summary": "Activation successfully materialized a StorySession and chapter workspace.",
+              "evidence": [
+                "session_id=e0e760ce6e8e4c71b9a7bc41bd3e3166",
+                "current_phase=outline_drafting",
+                "current_chapter_index=1",
+                "initial_outline_required=True"
+              ]
+            }
+          },
+          "attribution": {
+            "primary_suspects": [],
+            "optimization_candidates": [],
+            "dimensions": {
+              "setup_readiness_contract": {
+                "status": "pass",
+                "summary": "Setup-side readiness contract supplied all required prerequisites for activation.",
+                "evidence": [
+                  "ready=True",
+                  "warning_count=0"
+                ]
+              },
+              "activation_handoff_contract": {
+                "status": "pass",
+                "summary": "Activation handoff contract is structurally complete.",
+                "evidence": [
+                  "has_handoff=True",
+                  "blueprint_commit_ref=6c4c62338f854a909d65fff7ff5d4b62",
+                  "foundation_commit_ref_count=1",
+                  "archival_ready_ref_count=2"
+                ]
+              },
+              "bootstrap_execution": {
+                "status": "pass",
+                "summary": "Session bootstrap executed and persisted correctly.",
+                "evidence": [
+                  "finish_reason=activation_completed"
+                ]
+              },
+              "deterministic_gate_policy": {
+                "status": "pass",
+                "summary": "Deterministic gate and bootstrap path are consistent: ready workspace activated successfully.",
+                "evidence": [
+                  "ready=True",
+                  "blocking_issue_count=0",
+                  "activation_success=True"
+                ]
+              }
+            }
+          },
+          "observability": {
+            "supported_scope": "activation",
+            "activation": {
+              "ready": true,
+              "blocking_issue_count": 0,
+              "warning_count": 0,
+              "has_handoff": true,
+              "foundation_commit_ref_count": 1,
+              "archival_ready_ref_count": 2,
+              "activation_success": true
+            }
+          }
+        },
+        "reason_codes": [],
+        "outcome_chain": {},
+        "outcome_chain_display": [],
+        "outcome_chain_stages": [],
+        "primary_suspects": [],
+        "secondary_suspects": [],
+        "evidence_refs": [],
+        "evidence_ref_details": [],
+        "recommended_next_action": null,
+        "activation_check": {
+          "workspace_id": "53516c395f234125b1516fbe49df8f21",
+          "ready": true,
+          "blocking_issues": [],
+          "warnings": [],
+          "handoff": {
+            "handoff_id": "c24ac0f8e01c4b709f6a764038c21e9f",
+            "story_id": "story-case-activation-001--run-149e49fe",
+            "workspace_id": "53516c395f234125b1516fbe49df8f21",
+            "mode": "longform",
+            "runtime_story_config": {
+              "story_id": "story-case-activation-001--run-149e49fe",
+              "mode": "longform",
+              "model_profile_ref": "model.default",
+              "worker_profile_ref": "worker.default",
+              "post_write_policy_preset": "balanced",
+              "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+              "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+              "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+              "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422"
+            },
+            "writer_contract": {
+              "pov_rules": [
+                "third_person_limited"
+              ],
+              "style_rules": [
+                "restrained"
+              ],
+              "writing_constraints": [
+                "avoid exposition dumps"
+              ],
+              "task_writing_rules": []
+            },
+            "foundation_commit_refs": [
+              "6b7561fc85824b6c9c69d0cd28b58e5f"
+            ],
+            "blueprint_commit_ref": "6c4c62338f854a909d65fff7ff5d4b62",
+            "archival_ready_refs": [
+              "foundation_char_1",
+              "longform_blueprint"
+            ],
+            "created_at": "2026-04-26T05:20:19.184856Z"
+          }
+        },
+        "activation_handoff_snapshot": {
+          "handoff_id": "c24ac0f8e01c4b709f6a764038c21e9f",
+          "story_id": "story-case-activation-001--run-149e49fe",
+          "workspace_id": "53516c395f234125b1516fbe49df8f21",
+          "mode": "longform",
+          "runtime_story_config": {
+            "story_id": "story-case-activation-001--run-149e49fe",
+            "mode": "longform",
+            "model_profile_ref": "model.default",
+            "worker_profile_ref": "worker.default",
+            "post_write_policy_preset": "balanced",
+            "retrieval_embedding_model_id": "9a93618a-02cb-44bf-b1cf-9521257f2af4",
+            "retrieval_embedding_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422",
+            "retrieval_rerank_model_id": "70592c06-f955-47f5-a327-ed8fd541e1ee",
+            "retrieval_rerank_provider_id": "0c20569f-ef2d-4864-af42-703c1e53c422"
+          },
+          "writer_contract": {
+            "pov_rules": [
+              "third_person_limited"
+            ],
+            "style_rules": [
+              "restrained"
+            ],
+            "writing_constraints": [
+              "avoid exposition dumps"
+            ],
+            "task_writing_rules": []
+          },
+          "foundation_commit_refs": [
+            "6b7561fc85824b6c9c69d0cd28b58e5f"
+          ],
+          "blueprint_commit_ref": "6c4c62338f854a909d65fff7ff5d4b62",
+          "archival_ready_refs": [
+            "foundation_char_1",
+            "longform_blueprint"
+          ],
+          "created_at": "2026-04-26T05:20:19.184856Z"
+        },
+        "diagnostic_overview": {
+          "failure_layer": {
+            "value": null,
+            "summary": "No top-level failure layer was assigned."
+          },
+          "reason_codes": [],
+          "primary_suspects": [],
+          "secondary_suspects": [],
+          "recommended_next_action": null,
+          "outcome_chain": [],
+          "evidence_refs": [],
+          "diagnostic_expectation_summary": null,
+          "diagnostic_version": "v1"
+        },
+        "diagnostic_summary_text": "failure_layer=none | reason_codes=none | primary_suspects=none",
+        "replay_path": "artifacts/eval/real-provider-suite-output/replays/activation.bootstrap.ready_workspace_activation.v1--128564859e1e4b5787d78874d9ab942d.json"
+      }
+    },
+    {
+      "case_id": "retrieval.search.query_trace_and_provenance.v1",
+      "run_id": "80cee92e6f184cb4a20ea3265571819a",
+      "scope": "retrieval",
+      "status": "completed",
+      "attempt_index": 1,
+      "replay_path": "artifacts/eval/real-provider-suite-output/replays/retrieval.search.query_trace_and_provenance.v1--80cee92e6f184cb4a20ea3265571819a.json",
+      "report_path": "artifacts/eval/real-provider-suite-output/reports/retrieval.search.query_trace_and_provenance.v1--80cee92e6f184cb4a20ea3265571819a.json",
+      "report": {
+        "run_id": "80cee92e6f184cb4a20ea3265571819a",
+        "case_id": "retrieval.search.query_trace_and_provenance.v1",
+        "scope": "retrieval",
+        "status": "completed",
+        "assertion_summary": {
+          "pass": 8,
+          "fail": 0,
+          "warn": 0,
+          "skip": 1
+        },
+        "hard_failures": [],
+        "failure_layer": null,
+        "finish_reason": "retrieval_completed",
+        "repair_route": null,
+        "completion_guard_reason": null,
+        "last_failure_category": null,
+        "last_failure_message": null,
+        "cognitive_state_invalidated": null,
+        "cognitive_ready_for_review": null,
+        "cognitive_invalidation_reasons": [],
+        "remaining_open_issues": [],
+        "commit_blocked": false,
+        "subjective_hook_summary": {
+          "total": 1,
+          "pending": 1,
+          "executed": 0,
+          "judge_family_counts": {
+            "llm_judge": 1
+          },
+          "rubric_refs": [
+            "retrieval/query-quality/v1"
+          ],
+          "status_counts": {
+            "skip": 1
+          },
+          "average_numeric_score": null,
+          "rubric_summaries": {
+            "retrieval/query-quality/v1": {
+              "total": 1,
+              "pending": 1,
+              "executed": 0,
+              "status_counts": {
+                "skip": 1
+              },
+              "average_numeric_score": null,
+              "hook_ids": [
+                "retrieval_query_quality"
+              ],
+              "case_count": 1
+            }
+          },
+          "artifact_count": 1
+        },
+        "subjective_hook_results": [
+          {
+            "hook_id": "retrieval_query_quality",
+            "artifact_id": "80cee92e6f184cb4a20ea3265571819a:artifact:subjective_hook:retrieval_query_quality",
+            "judge_family": "llm_judge",
+            "rubric_ref": "retrieval/query-quality/v1",
+            "rubric_title": "Retrieval Query Quality",
+            "status": "skip",
+            "score": null,
+            "label": "pending",
+            "explanation": "Subjective hook prepared but no judge executor is configured yet",
+            "judge_model_id": null,
+            "judge_provider_id": null,
+            "judge_prompt_version": "llm-judge/v2",
+            "judge_response_schema_version": "judge-response/v2",
+            "judge_skip_reason": null,
+            "judge_status_source": null,
+            "judge_score_source": null,
+            "judge_score_band": null,
+            "judge_score_band_conflict": false,
+            "judge_strengths": [],
+            "judge_issues": [],
+            "target_available": true,
+            "resolved_source": "retrieval_result",
+            "resolved_path": "query_input.text_query"
+          }
+        ],
+        "subjective_hook_artifact_ids": [
+          "80cee92e6f184cb4a20ea3265571819a:artifact:subjective_hook:retrieval_query_quality"
+        ],
+        "pending_judge_hook_ids": [
+          "retrieval_query_quality"
+        ],
+        "end_reason_summary": "retrieval_completed",
+        "ragas": {
+          "enabled": false,
+          "available": true,
+          "status": "not_requested",
+          "metric_names": [
+            "context_precision",
+            "context_recall",
+            "response_relevancy",
+            "faithfulness"
+          ],
+          "sample_count": 0,
+          "record_count": 0,
+          "metric_summary": {
+            "context_precision": null,
+            "context_recall": null,
+            "response_relevancy": null,
+            "faithfulness": null
+          },
+          "sample_overview": [],
+          "error": null
+        },
+        "diagnostics": {
+          "diagnostic_version": "v1",
+          "capabilities": {},
+          "attribution": {
+            "primary_suspects": [],
+            "optimization_candidates": [],
+            "dimensions": {}
+          },
+          "observability": {
+            "supported_scope": "retrieval",
+            "diagnostic_mode": "not_implemented_for_scope"
+          }
+        },
+        "reason_codes": [],
+        "outcome_chain": {},
+        "outcome_chain_display": [],
+        "outcome_chain_stages": [],
+        "primary_suspects": [],
+        "secondary_suspects": [],
+        "evidence_refs": [],
+        "evidence_ref_details": [],
+        "recommended_next_action": null,
+        "activation_check": {},
+        "activation_handoff_snapshot": null,
+        "diagnostic_overview": {
+          "failure_layer": {
+            "value": null,
+            "summary": "No top-level failure layer was assigned."
+          },
+          "reason_codes": [],
+          "primary_suspects": [],
+          "secondary_suspects": [],
+          "recommended_next_action": null,
+          "outcome_chain": [],
+          "evidence_refs": [],
+          "diagnostic_expectation_summary": null,
+          "diagnostic_version": "v1"
+        },
+        "diagnostic_summary_text": "failure_layer=none | reason_codes=none | primary_suspects=none",
+        "replay_path": "artifacts/eval/real-provider-suite-output/replays/retrieval.search.query_trace_and_provenance.v1--80cee92e6f184cb4a20ea3265571819a.json"
+      }
+    },
+    {
+      "case_id": "setup.real_provider_smoke.gemini_flash.v1",
+      "run_id": "3cf8a7b27d784e5f9ff19c32f5f586ab",
+      "scope": "setup",
+      "status": "failed",
+      "attempt_index": 1,
+      "replay_path": "artifacts/eval/real-provider-suite-output/replays/setup.real_provider_smoke.gemini_flash.v1--3cf8a7b27d784e5f9ff19c32f5f586ab.json",
+      "report_path": "artifacts/eval/real-provider-suite-output/reports/setup.real_provider_smoke.gemini_flash.v1--3cf8a7b27d784e5f9ff19c32f5f586ab.json",
+      "report": {
+        "run_id": "3cf8a7b27d784e5f9ff19c32f5f586ab",
+        "case_id": "setup.real_provider_smoke.gemini_flash.v1",
+        "scope": "setup",
+        "status": "failed",
+        "assertion_summary": {
+          "pass": 1,
+          "fail": 3,
+          "warn": 0,
+          "skip": 0
+        },
+        "hard_failures": [
+          "finish_reason_exists",
+          "assistant_text_exists",
+          "round_no_exists"
+        ],
+        "failure_layer": "infra",
+        "finish_reason": null,
+        "repair_route": null,
+        "completion_guard_reason": null,
+        "last_failure_category": null,
+        "last_failure_message": null,
+        "cognitive_state_invalidated": null,
+        "cognitive_ready_for_review": null,
+        "cognitive_invalidation_reasons": [],
+        "remaining_open_issues": [],
+        "commit_blocked": false,
+        "subjective_hook_summary": {
+          "total": 0,
+          "pending": 0,
+          "executed": 0,
+          "judge_family_counts": {},
+          "rubric_refs": [],
+          "status_counts": {},
+          "average_numeric_score": null,
+          "rubric_summaries": {},
+          "artifact_count": 0
+        },
+        "subjective_hook_results": [],
+        "subjective_hook_artifact_ids": [],
+        "pending_judge_hook_ids": [],
+        "end_reason_summary": null,
+        "ragas": null,
+        "diagnostics": {
+          "diagnostic_version": "v1",
+          "capabilities": {
+            "task_completion": {
+              "status": "fail",
+              "summary": "Setup turn never reached a stable agent outcome because infra/model-provider failed first.",
+              "evidence": [
+                "failure_layer=infra",
+                "assertion_fail_total=3"
+              ]
+            },
+            "clarification_gap_detection": {
+              "status": "not_applicable",
+              "summary": "Clarification behavior was not required in this run.",
+              "evidence": [
+                "assistant_text_chars=0"
+              ]
+            },
+            "repair_recovery": {
+              "status": "not_applicable",
+              "summary": "No repair or recovery path was needed in this run.",
+              "evidence": [
+                "tool_failure_count=0"
+              ]
+            },
+            "commit_readiness_judgement": {
+              "status": "not_applicable",
+              "summary": "Commit readiness was not meaningfully exercised in this run.",
+              "evidence": [
+                "commit_proposal_blocked=False",
+                "commit_tool_invoked=False",
+                "remaining_open_issue_count=0"
+              ]
+            },
+            "state_adaptation": {
+              "status": "not_applicable",
+              "summary": "No invalidated cognitive state was present, so adaptation was not exercised.",
+              "evidence": [
+                "tool_invocation_count=0"
+              ]
+            },
+            "operational_efficiency": {
+              "status": "unknown",
+              "summary": "No token or round metrics were available for efficiency analysis.",
+              "evidence": [
+                "tool_invocation_count=0"
+              ]
+            }
+          },
+          "reason_codes": [
+            "infra.provider_request_failed",
+            "readiness.blocked_by_open_setup_prerequisites"
+          ],
+          "outcome_chain": {
+            "transcript_status": "not_applicable",
+            "cognition_status": "not_applicable",
+            "truth_status": "not_applicable",
+            "readiness_status": "warn",
+            "activation_handoff_status": "fail",
+            "runtime_bootstrap_readiness_status": "warn"
+          },
+          "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+          "attribution": {
+            "primary_suspects": [
+              "infra_model_provider"
+            ],
+            "secondary_suspects": [],
+            "optimization_candidates": [
+              "fix_provider_model_config_and_runtime_connectivity"
+            ],
+            "evidence_refs": [
+              "artifact:runtime_result",
+              "artifact:activation_check",
+              "artifact:readiness_snapshot"
+            ],
+            "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+            "dimensions": {
+              "infra_model_provider": {
+                "status": "fail",
+                "summary": "Run failed before stable agent outcome; error_code=TypeError",
+                "evidence": [
+                  "failure_layer=infra",
+                  "error_code=TypeError"
+                ]
+              },
+              "tool_contract_execution": {
+                "status": "unknown",
+                "summary": "This run did not materially exercise tools.",
+                "evidence": [
+                  "tool_invocation_count=0",
+                  "tool_success_count=0",
+                  "tool_failure_count=0",
+                  "schema_retry_count=0"
+                ]
+              },
+              "decision_policy": {
+                "status": "unknown",
+                "summary": "Decision-facing assertions failed: finish_reason_exists, assistant_text_exists, round_no_exists.",
+                "evidence": [
+                  "hard_failures=['finish_reason_exists', 'assistant_text_exists', 'round_no_exists']"
+                ]
+              },
+              "structured_output_contract": {
+                "status": "fail",
+                "summary": "Structured outcome is unavailable because runtime failed before producing a stable result.",
+                "evidence": [
+                  "assistant_text_chars=0",
+                  "schema_retry_count=0"
+                ]
+              },
+              "instruction_prompt_skill": {
+                "status": "unknown",
+                "summary": "Prompt/skill quality cannot be judged because infrastructure failed first.",
+                "evidence": [
+                  "hard_failures=['finish_reason_exists', 'assistant_text_exists', 'round_no_exists']"
+                ]
+              },
+              "token_efficiency": {
+                "status": "unknown",
+                "summary": "Token usage is not currently available for this run.",
+                "evidence": []
+              },
+              "output_quality": {
+                "status": "fail",
+                "summary": "No usable output was produced because runtime failed upstream.",
+                "evidence": [
+                  "assistant_text_chars=0",
+                  "assertion_fail_total=3"
+                ]
+              }
+            },
+            "taxonomy_dimensions": {
+              "prompt_instruction": {
+                "status": "pass",
+                "summary": "Prompt / instruction alignment for step convergence and finish discipline.",
+                "evidence": [
+                  "hard_failures=['finish_reason_exists', 'assistant_text_exists', 'round_no_exists']"
+                ],
+                "reason_codes": []
+              },
+              "model_behavior": {
+                "status": "fail",
+                "summary": "Model behavior against structured output and repair expectations.",
+                "evidence": [
+                  "assistant_text_chars=0",
+                  "schema_retry_count=0"
+                ],
+                "reason_codes": []
+              },
+              "tool_contract": {
+                "status": "pass",
+                "summary": "Tool argument and contract correctness.",
+                "evidence": [
+                  "tool_invocation_count=0",
+                  "tool_success_count=0",
+                  "tool_failure_count=0",
+                  "schema_retry_count=0"
+                ],
+                "reason_codes": []
+              },
+              "tool_execution": {
+                "status": "pass",
+                "summary": "Tool execution and recoverability after invocation.",
+                "evidence": [
+                  "tool_invocation_count=0",
+                  "tool_success_count=0",
+                  "tool_failure_count=0",
+                  "schema_retry_count=0"
+                ],
+                "reason_codes": []
+              },
+              "deterministic_controller": {
+                "status": "pass",
+                "summary": "Deterministic controller and commit/readiness policy correctness.",
+                "evidence": [
+                  "hard_failures=['finish_reason_exists', 'assistant_text_exists', 'round_no_exists']"
+                ],
+                "reason_codes": []
+              },
+              "runtime_private_cognition": {
+                "status": "pass",
+                "summary": "Runtime-private cognition invalidation and reconciliation correctness.",
+                "evidence": [
+                  "hard_failures=['finish_reason_exists', 'assistant_text_exists', 'round_no_exists']"
+                ],
+                "reason_codes": []
+              },
+              "readiness_activation_gate": {
+                "status": "fail",
+                "summary": "Readiness and activation-gate contract between setup outcome and activation bootstrap.",
+                "evidence": [
+                  "ready=False",
+                  "blocking_issue_count=7"
+                ],
+                "reason_codes": [
+                  "readiness.blocked_by_open_setup_prerequisites"
+                ]
+              },
+              "retrieval_readiness": {
+                "status": "pass",
+                "summary": "Retrieval ingestion and archival readiness required by activation.",
+                "evidence": [
+                  "archival_ready_ref_count=0"
+                ],
+                "reason_codes": []
+              },
+              "infra_provider": {
+                "status": "fail",
+                "summary": "Infrastructure and provider stability for this run.",
+                "evidence": [
+                  "failure_layer=infra",
+                  "error_code=TypeError"
+                ],
+                "reason_codes": [
+                  "infra.provider_request_failed"
+                ]
+              }
+            }
+          },
+          "observability": {
+            "supported_scope": "setup",
+            "request_metrics": {
+              "system_prompt_chars": null,
+              "user_prompt_chars": null,
+              "conversation_message_count": null,
+              "tool_scope_count": null,
+              "tool_scope": []
+            },
+            "usage": {
+              "prompt_tokens": null,
+              "completion_tokens": null,
+              "total_tokens": null
+            },
+            "tooling": {
+              "invocation_count": 0,
+              "success_count": 0,
+              "failure_count": 0,
+              "invoked_tool_names": []
+            }
+          }
+        },
+        "reason_codes": [
+          "infra.provider_request_failed",
+          "readiness.blocked_by_open_setup_prerequisites"
+        ],
+        "outcome_chain": {
+          "transcript_status": "not_applicable",
+          "cognition_status": "not_applicable",
+          "truth_status": "not_applicable",
+          "readiness_status": "warn",
+          "activation_handoff_status": "fail",
+          "runtime_bootstrap_readiness_status": "warn"
+        },
+        "outcome_chain_display": [
+          "transcript=not_applicable",
+          "cognition=not_applicable",
+          "truth=not_applicable",
+          "readiness=warn",
+          "activation_handoff=fail",
+          "runtime_bootstrap=warn"
+        ],
+        "outcome_chain_stages": [
+          {
+            "stage_key": "transcript_status",
+            "stage": "transcript",
+            "status": "not_applicable",
+            "summary": "Transcript moves the setup turn toward the expected step outcome."
+          },
+          {
+            "stage_key": "cognition_status",
+            "stage": "runtime_private_cognition",
+            "status": "not_applicable",
+            "summary": "Runtime-private cognition is fresh enough for the next decision."
+          },
+          {
+            "stage_key": "truth_status",
+            "stage": "workspace_truth",
+            "status": "not_applicable",
+            "summary": "Workspace truth and commit/readiness judgement are aligned."
+          },
+          {
+            "stage_key": "readiness_status",
+            "stage": "readiness_gate",
+            "status": "warn",
+            "summary": "Readiness gate matches the current setup substrate."
+          },
+          {
+            "stage_key": "activation_handoff_status",
+            "stage": "activation_handoff",
+            "status": "fail",
+            "summary": "Activation handoff contains the fields needed downstream."
+          },
+          {
+            "stage_key": "runtime_bootstrap_readiness_status",
+            "stage": "runtime_bootstrap_readiness",
+            "status": "warn",
+            "summary": "Longform runtime has enough setup output to bootstrap."
+          }
+        ],
+        "primary_suspects": [
+          "infra_model_provider"
+        ],
+        "secondary_suspects": [],
+        "evidence_refs": [
+          "artifact:runtime_result",
+          "artifact:activation_check",
+          "artifact:readiness_snapshot"
+        ],
+        "evidence_ref_details": [
+          {
+            "ref": "artifact:runtime_result",
+            "kind": "runtime_result",
+            "available": true,
+            "artifact_ids": [
+              "3cf8a7b27d784e5f9ff19c32f5f586ab:artifact:runtime_result"
+            ],
+            "summary": "Runtime turn result, including finish reason, warnings, tool invocations, and structured payload."
+          },
+          {
+            "ref": "artifact:activation_check",
+            "kind": "activation_check",
+            "available": true,
+            "artifact_ids": [
+              "3cf8a7b27d784e5f9ff19c32f5f586ab:artifact:activation_check"
+            ],
+            "summary": "Activation readiness decision and blocking issues."
+          },
+          {
+            "ref": "artifact:readiness_snapshot",
+            "kind": "readiness_snapshot",
+            "available": true,
+            "artifact_ids": [
+              "3cf8a7b27d784e5f9ff19c32f5f586ab:artifact:readiness_snapshot"
+            ],
+            "summary": "Workspace readiness snapshot used to explain readiness/activation gate failures."
+          }
+        ],
+        "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+        "activation_check": {
+          "workspace_id": "1a4218654f33467980cfbb1f7d221ac5",
+          "ready": false,
+          "blocking_issues": [
+            "Step not frozen: foundation",
+            "Step not frozen: longform_blueprint",
+            "Step not frozen: writing_contract",
+            "Step not frozen: story_config",
+            "writing_contract_draft missing",
+            "foundation commit missing",
+            "blueprint commit missing"
+          ],
+          "warnings": [
+            "Step foundation has no draft content yet",
+            "Step longform_blueprint has no draft content yet",
+            "Step writing_contract has no draft content yet"
+          ],
+          "handoff": null
+        },
+        "activation_handoff_snapshot": null,
+        "diagnostic_overview": {
+          "failure_layer": {
+            "value": "infra",
+            "summary": "The run most likely failed in provider, database, or external infrastructure."
+          },
+          "reason_codes": [
+            {
+              "code": "infra.provider_request_failed",
+              "category": "infra"
+            },
+            {
+              "code": "readiness.blocked_by_open_setup_prerequisites",
+              "category": "readiness"
+            }
+          ],
+          "primary_suspects": [
+            {
+              "name": "infra_model_provider",
+              "status": "fail",
+              "summary": "Run failed before stable agent outcome; error_code=TypeError",
+              "reason_codes": [],
+              "evidence": [
+                "failure_layer=infra",
+                "error_code=TypeError"
+              ]
+            }
+          ],
+          "secondary_suspects": [],
+          "recommended_next_action": "fix_provider_model_config_and_runtime_connectivity",
+          "outcome_chain": [
+            {
+              "stage_key": "transcript_status",
+              "stage": "transcript",
+              "status": "not_applicable",
+              "summary": "Transcript moves the setup turn toward the expected step outcome."
+            },
+            {
+              "stage_key": "cognition_status",
+              "stage": "runtime_private_cognition",
+              "status": "not_applicable",
+              "summary": "Runtime-private cognition is fresh enough for the next decision."
+            },
+            {
+              "stage_key": "truth_status",
+              "stage": "workspace_truth",
+              "status": "not_applicable",
+              "summary": "Workspace truth and commit/readiness judgement are aligned."
+            },
+            {
+              "stage_key": "readiness_status",
+              "stage": "readiness_gate",
+              "status": "warn",
+              "summary": "Readiness gate matches the current setup substrate."
+            },
+            {
+              "stage_key": "activation_handoff_status",
+              "stage": "activation_handoff",
+              "status": "fail",
+              "summary": "Activation handoff contains the fields needed downstream."
+            },
+            {
+              "stage_key": "runtime_bootstrap_readiness_status",
+              "stage": "runtime_bootstrap_readiness",
+              "status": "warn",
+              "summary": "Longform runtime has enough setup output to bootstrap."
+            }
+          ],
+          "evidence_refs": [
+            {
+              "ref": "artifact:runtime_result",
+              "kind": "runtime_result",
+              "available": true,
+              "artifact_ids": [
+                "3cf8a7b27d784e5f9ff19c32f5f586ab:artifact:runtime_result"
+              ],
+              "summary": "Runtime turn result, including finish reason, warnings, tool invocations, and structured payload."
+            },
+            {
+              "ref": "artifact:activation_check",
+              "kind": "activation_check",
+              "available": true,
+              "artifact_ids": [
+                "3cf8a7b27d784e5f9ff19c32f5f586ab:artifact:activation_check"
+              ],
+              "summary": "Activation readiness decision and blocking issues."
+            },
+            {
+              "ref": "artifact:readiness_snapshot",
+              "kind": "readiness_snapshot",
+              "available": true,
+              "artifact_ids": [
+                "3cf8a7b27d784e5f9ff19c32f5f586ab:artifact:readiness_snapshot"
+              ],
+              "summary": "Workspace readiness snapshot used to explain readiness/activation gate failures."
+            }
+          ],
+          "diagnostic_expectation_summary": null,
+          "diagnostic_version": "v1"
+        },
+        "diagnostic_summary_text": "failure_layer=infra | reason_codes=infra.provider_request_failed, readiness.blocked_by_open_setup_prerequisites | primary_suspects=infra_model_provider | next_action=fix_provider_model_config_and_runtime_connectivity | outcome_chain=transcript=not_applicable; cognition=not_applicable; truth=not_applicable; readiness=warn; activation_handoff=fail; runtime_bootstrap=warn | evidence_refs=artifact:runtime_result, artifact:activation_check, artifact:readiness_snapshot",
+        "replay_path": "artifacts/eval/real-provider-suite-output/replays/setup.real_provider_smoke.gemini_flash.v1--3cf8a7b27d784e5f9ff19c32f5f586ab.json"
+      }
+    }
+  ]
+}
