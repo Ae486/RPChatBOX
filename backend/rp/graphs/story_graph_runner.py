@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
+from typing import AsyncIterator, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -40,12 +40,12 @@ class StoryGraphRunner:
     async def run_turn(self, request: LongformTurnRequest) -> LongformTurnResponse:
         initial_state = self._initial_state(request=request, stream_mode=False)
         async with open_async_checkpointed_graph(self._compile_graph) as graph:
-            prepared_state = await graph.ainvoke(
+            await graph.ainvoke(
                 initial_state,
                 config=self._thread_config(request.session_id),
             )
             snapshot = await graph.aget_state(self._thread_config(request.session_id))
-            final_state = dict(snapshot.values or {})
+            final_state = cast(StoryGraphState, dict(snapshot.values or {}))
         self._raise_if_error(final_state)
         return LongformTurnResponse.model_validate(final_state.get("response_payload") or {})
 
@@ -237,6 +237,14 @@ class StoryGraphRunner:
             "provider_id": request.provider_id,
             "user_prompt": request.user_prompt,
             "target_artifact_id": request.target_artifact_id,
+            "story_segment_metadata_patch": (
+                request.story_segment_metadata_patch.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                )
+                if request.story_segment_metadata_patch is not None
+                else None
+            ),
             "stream_mode": stream_mode,
             "pending_artifact_id": None,
             "accepted_segment_ids": [],
@@ -306,12 +314,13 @@ class StoryGraphRunner:
     @staticmethod
     def _snapshot_summary(snapshot) -> dict:
         created_at = getattr(snapshot, "created_at", None)
+        isoformat = getattr(created_at, "isoformat", None)
         return {
             "checkpoint_id": snapshot_checkpoint_id(snapshot),
             "parent_checkpoint_id": snapshot_parent_checkpoint_id(snapshot),
             "created_at": (
-                created_at.isoformat()
-                if hasattr(created_at, "isoformat")
+                isoformat()
+                if callable(isoformat)
                 else str(created_at) if created_at is not None else None
             ),
             "status": (snapshot.values or {}).get("status"),

@@ -6,9 +6,24 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
-from models.rp_retrieval_store import KnowledgeChunkRecord, KnowledgeCollectionRecord, SourceAssetRecord
+from models.rp_retrieval_store import (
+    KnowledgeChunkRecord,
+    KnowledgeCollectionRecord,
+    SourceAssetRecord,
+)
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_crud import RetrievalHit, RetrievalQuery
+
+_ASSET_METADATA_FALLBACK_FIELDS = (
+    "layer",
+    "source_family",
+    "materialization_event",
+    "materialization_kind",
+    "materialized_to_recall",
+    "chapter_index",
+    "artifact_id",
+    "artifact_revision",
+)
 
 
 def coerce_domain(value: str | None) -> Domain:
@@ -42,7 +57,11 @@ def cosine_similarity(left: Iterable[float], right: Iterable[float]) -> float:
 
 
 def query_vector_literal(vector: Iterable[float]) -> str:
-    return "[" + ",".join(f"{float(item):.12f}".rstrip("0").rstrip(".") for item in vector) + "]"
+    return (
+        "["
+        + ",".join(f"{float(item):.12f}".rstrip("0").rstrip(".") for item in vector)
+        + "]"
+    )
 
 
 def build_filters_applied(query: RetrievalQuery) -> dict[str, Any]:
@@ -79,7 +98,9 @@ def row_matches_common_filters(
             return False
 
     mapped_targets = list(query.filters.get("mapped_targets") or [])
-    if mapped_targets and not set(mapped_targets).intersection(set(asset.mapped_targets_json or [])):
+    if mapped_targets and not set(mapped_targets).intersection(
+        set(asset.mapped_targets_json or [])
+    ):
         return False
 
     if query.query_kind == "archival" and not collection_ids:
@@ -87,6 +108,12 @@ def row_matches_common_filters(
             return False
     if query.query_kind == "recall":
         if collection is None or collection.collection_kind != "recall":
+            return False
+        if not _matches_recall_source_family_filters(
+            chunk=chunk,
+            asset=asset,
+            query=query,
+        ):
             return False
 
     return bool(chunk.is_active)
@@ -101,6 +128,68 @@ def chunk_view_priority(metadata: dict[str, Any] | None) -> int:
         return 0
 
 
+def _merge_asset_metadata_fallbacks(
+    *,
+    metadata: dict[str, Any],
+    asset: SourceAssetRecord,
+) -> None:
+    asset_metadata = asset.metadata_json or {}
+    if not isinstance(asset_metadata, dict):
+        return
+    for field_name in _ASSET_METADATA_FALLBACK_FIELDS:
+        if field_name in metadata:
+            continue
+        if field_name not in asset_metadata:
+            continue
+        metadata[field_name] = asset_metadata[field_name]
+
+
+def _metadata_value_with_asset_fallback(
+    *,
+    chunk: KnowledgeChunkRecord,
+    asset: SourceAssetRecord,
+    field_name: str,
+) -> Any:
+    chunk_metadata = chunk.metadata_json or {}
+    if isinstance(chunk_metadata, dict) and field_name in chunk_metadata:
+        return chunk_metadata[field_name]
+    asset_metadata = asset.metadata_json or {}
+    if isinstance(asset_metadata, dict) and field_name in asset_metadata:
+        return asset_metadata[field_name]
+    return None
+
+
+def _matches_any_filter_value(value: Any, allowed_values: list[object]) -> bool:
+    if not allowed_values:
+        return True
+    return value in set(allowed_values)
+
+
+def _matches_recall_source_family_filters(
+    *,
+    chunk: KnowledgeChunkRecord,
+    asset: SourceAssetRecord,
+    query: RetrievalQuery,
+) -> bool:
+    filter_fields = {
+        "materialization_kinds": "materialization_kind",
+        "source_families": "source_family",
+        "chapter_indices": "chapter_index",
+    }
+    for filter_key, metadata_field in filter_fields.items():
+        allowed_values = list(query.filters.get(filter_key) or [])
+        if not allowed_values:
+            continue
+        value = _metadata_value_with_asset_fallback(
+            chunk=chunk,
+            asset=asset,
+            field_name=metadata_field,
+        )
+        if not _matches_any_filter_value(value, allowed_values):
+            return False
+    return True
+
+
 def build_chunk_hit(
     *,
     query: RetrievalQuery,
@@ -112,17 +201,22 @@ def build_chunk_hit(
 ) -> RetrievalHit:
     domain = coerce_domain(chunk.domain)
     metadata = dict(chunk.metadata_json or {})
+    _merge_asset_metadata_fallbacks(metadata=metadata, asset=asset)
     metadata["asset_id"] = asset.asset_id
     metadata["asset_kind"] = asset.asset_kind
     metadata["title"] = chunk.title or asset.title
     metadata["domain"] = chunk.domain
     metadata["domain_path"] = chunk.domain_path
     metadata["collection_id"] = chunk.collection_id
-    metadata["collection_kind"] = collection.collection_kind if collection is not None else None
+    metadata["collection_kind"] = (
+        collection.collection_kind if collection is not None else None
+    )
     metadata["token_count"] = chunk.token_count
     metadata["section_id"] = metadata.get("section_id")
     metadata["section_part"] = int(metadata.get("section_part") or 0)
-    metadata["parent_section_part"] = int(metadata.get("parent_section_part") or metadata["section_part"])
+    metadata["parent_section_part"] = int(
+        metadata.get("parent_section_part") or metadata["section_part"]
+    )
     metadata["view_part"] = int(metadata.get("view_part") or metadata["section_part"])
     metadata["chunk_view"] = str(metadata.get("chunk_view") or "primary")
     metadata["chunk_size"] = str(metadata.get("chunk_size") or "default")
@@ -140,7 +234,9 @@ def build_chunk_hit(
     return RetrievalHit(
         hit_id=chunk.chunk_id,
         query_id=query.query_id,
-        layer=Layer.RECALL.value if query.query_kind == "recall" else Layer.ARCHIVAL.value,
+        layer=Layer.RECALL.value
+        if query.query_kind == "recall"
+        else Layer.ARCHIVAL.value,
         domain=domain,
         domain_path=chunk.domain_path,
         knowledge_ref=ObjectRef(

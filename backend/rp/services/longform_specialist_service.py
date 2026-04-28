@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from typing import Any
 
 from models.chat import ChatMessage
 from rp.models.memory_crud import MemorySearchArchivalInput, MemorySearchRecallInput
@@ -28,6 +29,8 @@ from .story_llm_gateway import StoryLlmGateway
 
 class LongformSpecialistService:
     """Digest retrieval and runtime state into builder-ready slots."""
+
+    _TERMINAL_FORESHADOW_STATUSES = frozenset({"resolved", "retired", "closed"})
 
     def __init__(
         self,
@@ -161,7 +164,8 @@ class LongformSpecialistService:
             "You are the longform_specialist for an active-story MVP. "
             "Digest retrieval and runtime state into JSON only. "
             "Do not write user-visible prose. Return compact digests, writer hints, "
-            "validation findings, and minimal state_patch_proposals."
+            "validation findings, minimal state_patch_proposals, and optional "
+            "story_segment_metadata."
         )
         if prompt_overlay:
             system_prompt += "\n\n" + prompt_overlay
@@ -216,6 +220,9 @@ class LongformSpecialistService:
                     "domain": hit.domain.value,
                     "domain_path": hit.domain_path,
                     "metadata": hit.metadata,
+                    "source_family": hit.metadata.get("source_family"),
+                    "materialization_kind": hit.metadata.get("materialization_kind"),
+                    "materialization_event": hit.metadata.get("materialization_event"),
                 }
                 for hit in recall_payload_hits
             ],
@@ -347,6 +354,13 @@ class LongformSpecialistService:
                     }
                 ],
             }
+            if command_kind == LongformTurnCommandKind.COMPLETE_CHAPTER:
+                foreshadow_updates = self._build_terminal_foreshadow_patch(
+                    accepted_segments=accepted_segments,
+                    authoritative_state=authoritative_state,
+                )
+                if foreshadow_updates:
+                    state_patch["foreshadow_registry"] = foreshadow_updates
 
         recall_summary = None
         if command_kind == LongformTurnCommandKind.COMPLETE_CHAPTER:
@@ -366,3 +380,111 @@ class LongformSpecialistService:
             summary_updates=retrieval_digest[:3],
             recall_summary_text=recall_summary,
         )
+
+    @classmethod
+    def _build_terminal_foreshadow_patch(
+        cls,
+        *,
+        accepted_segments: list[StoryArtifact],
+        authoritative_state: dict[str, object],
+    ) -> list[dict[str, Any]]:
+        latest_by_id: dict[str, tuple[int, dict[str, Any]]] = {}
+        sequence = 0
+        for artifact in accepted_segments:
+            raw_updates = artifact.metadata.get("foreshadow_status_updates")
+            if not isinstance(raw_updates, list):
+                continue
+            for item in raw_updates:
+                if not isinstance(item, dict):
+                    continue
+                foreshadow_id = cls._normalize_foreshadow_id(item.get("foreshadow_id"))
+                terminal_status = cls._resolve_terminal_foreshadow_status(item)
+                if not foreshadow_id or terminal_status is None:
+                    continue
+                latest_by_id[foreshadow_id] = (
+                    sequence,
+                    cls._normalize_foreshadow_snapshot(
+                        item,
+                        foreshadow_id=foreshadow_id,
+                        terminal_status=terminal_status,
+                    ),
+                )
+                sequence += 1
+        if not latest_by_id:
+            return []
+        existing_signatures = cls._existing_foreshadow_signatures(
+            authoritative_state.get("foreshadow_registry")
+        )
+        emitted_snapshots: list[dict[str, Any]] = []
+        for _, snapshot in sorted(latest_by_id.values(), key=lambda item: item[0]):
+            signature = cls._foreshadow_snapshot_signature(snapshot)
+            if signature in existing_signatures:
+                continue
+            emitted_snapshots.append(snapshot)
+        return emitted_snapshots
+
+    @classmethod
+    def _existing_foreshadow_signatures(cls, raw_registry: object) -> set[str]:
+        if not isinstance(raw_registry, list):
+            return set()
+        signatures: set[str] = set()
+        for item in raw_registry:
+            if not isinstance(item, dict):
+                continue
+            foreshadow_id = cls._normalize_foreshadow_id(item.get("foreshadow_id"))
+            terminal_status = cls._resolve_terminal_foreshadow_status(item)
+            if not foreshadow_id or terminal_status is None:
+                continue
+            signatures.add(
+                cls._foreshadow_snapshot_signature(
+                    cls._normalize_foreshadow_snapshot(
+                        item,
+                        foreshadow_id=foreshadow_id,
+                        terminal_status=terminal_status,
+                    )
+                )
+            )
+        return signatures
+
+    @classmethod
+    def _normalize_foreshadow_snapshot(
+        cls,
+        raw_update: dict[str, Any],
+        *,
+        foreshadow_id: str,
+        terminal_status: str,
+    ) -> dict[str, Any]:
+        normalized = deepcopy(dict(raw_update))
+        for key, value in list(normalized.items()):
+            if isinstance(value, str):
+                normalized[key] = value.strip()
+        normalized["foreshadow_id"] = foreshadow_id
+        normalized["status"] = terminal_status
+        raw_state = normalized.get("state")
+        if isinstance(raw_state, str):
+            normalized["state"] = raw_state.strip().lower()
+        return normalized
+
+    @classmethod
+    def _resolve_terminal_foreshadow_status(
+        cls,
+        snapshot: dict[str, Any],
+    ) -> str | None:
+        for key in ("status", "state"):
+            value = snapshot.get(key)
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip().lower()
+            if normalized in cls._TERMINAL_FORESHADOW_STATUSES:
+                return normalized
+        return None
+
+    @staticmethod
+    def _normalize_foreshadow_id(raw_value: object) -> str:
+        if not isinstance(raw_value, str):
+            return ""
+        return raw_value.strip()
+
+    @staticmethod
+    def _foreshadow_snapshot_signature(snapshot: dict[str, Any]) -> str:
+        return json.dumps(snapshot, ensure_ascii=False, sort_keys=True)

@@ -77,11 +77,17 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
   - Runtime-owned fields: chunk_id, parent_id, workspace_id, story_id, mode, stage_id, commit_id, source_basis, version, timestamps, status, token_count, content_hash, embedding_model_version.
   - Retrieval-enrichment fields: extracted_entities, relationship_edges, keyword_terms, retrieval_text, filter_metadata, rerank_summary.
 - The retrieval index should distinguish embedded text, filter metadata, and rerank/display payload. Not every field should be embedded, and not every field should be model-authored.
+- Compact is stage-local context engineering, not a generic state-management layer. Stage transitions already use handoff packets for large context cuts; compact inside this task should focus on one current setup stage.
+- SetupAgent compact should borrow mature framework mechanics where they fit, lighten generic coding-agent features, and customize recovery around RP setup drafts:
+  - borrow from Claude Code / CC: pre-model context compression, no-tools compact expert, analysis stripped from retained summary, and post-compact recovery thinking
+  - borrow from `pi-mono`: explicit `transformContext -> convertToLlm` style pre-LLM boundary
+  - do not copy CC's full coding-agent five-layer stack, file tracking, prompt-cache editing, or full-session coding summary schema
+  - add a stage-local draft recovery tool (`setup.read.draft_refs`) so compact summaries can keep refs/hints instead of storing all draft details
 
 ### Open Questions
 
 - What exact stop/continue contract should SetupAgent use when the model produces both user-facing text and tool calls, or when no tool call is produced but the step is still incomplete?
-- What context budget and compaction policy should setup use for per-turn messages, tool results, cognitive snapshots, and retrieval fallback?
+- What exact token thresholds should setup use for pre-call token estimation and observed-usage compact pressure after the first compact implementation lands?
 - Which actions are safe for the runtime to auto-retry, and which must become an explicit user question or hard failure?
 - What is the minimum required schema for a stage handoff packet, especially for foundation chunks that will later support retrieval and next-stage context injection?
 - Which retrieval enrichment fields are MVP-critical for longform setup, and which should be delayed until retrieval eval shows a recall/precision gap?
@@ -94,6 +100,8 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
 - Skills, stage-specific tool visibility, and eval tuning remain important, but they are follow-up harness surfaces that should attach to a stronger loop rather than substitute for it.
 - The target is not to copy a coding agent wholesale. The target is to extract reusable loop semantics and adapt them to setup's prestory business boundary.
 - Stage handoff context should prefer `committed truth + compacted summaries + retrieval-friendly chunk descriptions` over raw prior discussion logs.
+- The current compact slice should treat `working_digest` and `compact_summary` as separate surfaces: digest is live control state; compact summary is older current-step context carry-forward with draft refs and recovery hints.
+- Compact expert work should be a helper prompt role (`SetupStageCompactExpert`) with strict JSON output and no tools, not a second autonomous agent loop.
 
 ### Current Agent Body Assessment
 
@@ -271,18 +279,53 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
   - explicit user commit must be allowed even when content is blank or incomplete
   - draft is user-editable and user edits should be tracked as deltas; those edits invalidate/reconcile setup cognition
   - stage progression must follow the preset setup sequence and must pass through commit; arbitrary stage switching is invalid because the next stage depends on previous-stage summary/handoff data
+  - stage-local compact is a context-engineering pipeline: context pressure, raw-window retention, tool-outcome pruning, optional compact expert summary, draft-ref recovery, runtime overlay, and transient context report
+  - `setup.read.draft_refs` is required as a stage-local retrieval tool for recovering exact draft details after compaction
+  - compact and digest stay separate: compact preserves older context; digest controls current work
 - Remaining key decisions:
   - exact continue-site taxonomy
   - exact finish-reason taxonomy
   - exact handoff packet schema
-  - exact compact/retrieval boundary per stage
+  - exact production thresholds for pre-call token estimates and observed-usage compact pressure
   - exact MVP retrieval-enrichment fields for longform-first setup
   - exact warning/unresolved-issue payload emitted on explicit commit when readiness is weak
+
+### Authoritative Execution Control (2026-04-28)
+
+- Whole main spec is **not** complete. Slice-local green tests must not be treated as proof that the entire development spec is done.
+- The current execution-control baseline is:
+  - [`research/setup-agent-main-spec-alignment-checklist.md`](research/setup-agent-main-spec-alignment-checklist.md)
+- That alignment note freezes:
+  - what is already landed
+  - what is only partial
+  - what has not started
+  - what is in hard conflict
+- Retry-budget truth is now resolved:
+  - schema / tool-argument auto-repair is frozen at `1` bounded retry
+- `Context Transform And Stage Handoff Hardening` previously landed as a completed slice:
+  - stronger `SetupStageHandoffPacket`
+  - prior-stage open issue carry-forward
+  - retrieval refs / source basis carry-forward
+  - stricter prompt contract around prior-stage handoff usage
+- The current next single slice is:
+  - `Stage-Local Compact Context Engineering`
+- This slice implements:
+  - compact as stage-local context engineering
+  - compact expert prompt role with deterministic fallback
+  - draft-ref recovery through `setup.read.draft_refs`
+  - message/token/observed-usage context pressure reporting
+- Deferred out of this slice:
+  - `Foundation Chunk Contract And Retrieval-Friendly Truth Surface`
+  - explicit user-commit warning payload
+  - skills runtime
+  - more outer-harness cleanup
 
 ### Research References
 
 - [`research/harness-engineering-openai-anthropic.md`](research/harness-engineering-openai-anthropic.md) — baseline for OpenAI/Anthropic harness-engineering vocabulary.
 - [`research/current-agent-gap-analysis.md`](research/current-agent-gap-analysis.md) — current gap analysis for skills, tools, mode profile, and harness layering.
+- [`research/setup-agent-main-spec-alignment-checklist.md`](research/setup-agent-main-spec-alignment-checklist.md) — frozen alignment note for main spec vs executable specs vs current implementation, including hard conflicts and next-slice boundary.
+- [`research/setup-agent-stage-local-compact-context-engineering-design.md`](research/setup-agent-stage-local-compact-context-engineering-design.md) — source synthesis for compact as stage-local context engineering, including CC/Pi borrowing, RP lightweight boundaries, compact expert role, and draft-ref recovery.
 
 ### Output Artifacts
 

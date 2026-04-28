@@ -36,6 +36,8 @@ class RpAgentRunState(TypedDict, total=False):
     tool_outcomes: list[dict[str, Any]]
     compact_summary: dict[str, Any] | None
     repair_route: str | None
+    continue_reason: str | None
+    loop_trace: list[dict[str, Any]]
     next_action: str
     schema_retry_count: int
     error_event_emitted: bool

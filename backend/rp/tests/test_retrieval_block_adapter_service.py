@@ -27,7 +27,11 @@ def test_build_block_views_maps_retrieval_hits_without_mutating_metadata():
         excerpt_text="Archive policy says all relics must be sealed at dusk.",
         score=0.91,
         rank=1,
-        metadata={"title": "Archive Policy", "document_title": "Worldbook"},
+        metadata={
+            "title": "Archive Policy",
+            "document_title": "Worldbook",
+            "read_only": False,
+        },
         provenance_refs=["prov:archive-policy"],
     )
     recall_hit = RetrievalHit(
@@ -40,7 +44,21 @@ def test_build_block_views_maps_retrieval_hits_without_mutating_metadata():
         excerpt_text="Earlier in chapter one, the seal broke during the storm.",
         score=0.77,
         rank=2,
-        metadata={"title": "Storm Callback"},
+        metadata={
+            "title": "Storm Callback",
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "heavy_regression.chapter_close",
+            "materialization_kind": "accepted_story_segment",
+            "materialized_to_recall": True,
+            "chapter_index": 1,
+            "artifact_id": "artifact-1",
+            "artifact_revision": 3,
+            "asset_id": "recall_detail_artifact-1",
+            "asset_kind": "accepted_story_segment",
+            "source_ref": "story_session:session-1:chapter:1:artifact:artifact-1",
+            "mutation_mode": "wrong_mode_from_source",
+        },
         provenance_refs=["prov:storm-callback"],
     )
     archival_metadata_before = dict(archival_hit.metadata)
@@ -64,11 +82,31 @@ def test_build_block_views_maps_retrieval_hits_without_mutating_metadata():
     )
     assert blocks[0].metadata["query_id"] == "rq-archive-1"
     assert blocks[0].metadata["source"] == "retrieval_store"
+    assert blocks[0].metadata["read_only"] is True
+    assert blocks[0].metadata["mutation_mode"] == "unsupported_retrieval_backed"
+    assert blocks[0].metadata["history_mode"] == "retrieval_backed"
+    assert blocks[0].metadata["proposal_visibility"] == "unsupported"
     assert blocks[1].label == "recall-note-1"
     assert blocks[1].layer == Layer.RECALL
     assert blocks[1].domain_path == ""
     assert blocks[1].scope == "retrieval"
     assert blocks[1].revision == 1
+    assert blocks[1].data_json["source_family"] == "longform_story_runtime"
+    assert blocks[1].data_json["materialization_kind"] == "accepted_story_segment"
+    assert blocks[1].metadata["source_family"] == "longform_story_runtime"
+    assert blocks[1].metadata["materialization_event"] == (
+        "heavy_regression.chapter_close"
+    )
+    assert blocks[1].metadata["materialization_kind"] == "accepted_story_segment"
+    assert blocks[1].metadata["materialized_to_recall"] is True
+    assert blocks[1].metadata["chapter_index"] == 1
+    assert blocks[1].metadata["artifact_id"] == "artifact-1"
+    assert blocks[1].metadata["artifact_revision"] == 3
+    assert blocks[1].metadata["asset_kind"] == "accepted_story_segment"
+    assert blocks[1].metadata["read_only"] is True
+    assert blocks[1].metadata["mutation_mode"] == "unsupported_retrieval_backed"
+    assert blocks[1].metadata["history_mode"] == "retrieval_backed"
+    assert blocks[1].metadata["proposal_visibility"] == "unsupported"
     assert blocks[1].metadata["raw_domain_path"] is None
     assert blocks[1].metadata["raw_scope"] is None
     assert archival_hit.metadata == archival_metadata_before

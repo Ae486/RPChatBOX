@@ -71,10 +71,10 @@ Recall source families:
 ```text
 chapter_summary
 accepted_story_segment
-future scene_transcript
-future continuity_note
-future character_long_history_summary
-future retired_foreshadow_summary
+scene_transcript
+continuity_note
+character_long_history_summary
+retired_foreshadow_summary
 ```
 
 ### 3. Contracts
@@ -90,7 +90,7 @@ future retired_foreshadow_summary
   - It should answer "what compact current view should runtime, writer-facing packet assembly, UI, debug, or export consume?"
   - Refreshing projection is maintenance, not authoritative truth mutation.
 - `Recall Memory` owns historical story material.
-  - It is retrieval-oriented and may include summaries, accepted prose, future closed-scene transcripts, continuity notes, and long-history summaries.
+  - It is retrieval-oriented and may include summaries, accepted prose, closed-scene transcripts, continuity notes, and long-history summaries.
   - It should answer "what previously happened or was settled, but is no longer the current compact state?"
   - Recall physical storage remains retrieval-core unless a later executable spec proves current retrieval-core cannot support a required behavior.
 - `Archival Knowledge` owns source/reference material.
@@ -131,16 +131,18 @@ future retired_foreshadow_summary
 - Heavy regression / chapter close:
   - may materialize chapter-level summary into Recall Memory;
   - may materialize accepted story prose into Recall Memory;
+  - may materialize continuity notes, per-character long-history summaries, and retired-foreshadow summaries into Recall Memory;
   - must not ingest drafts, superseded artifacts, or current-turn discussion traces as settled history.
   - Recall summary/detail source asset metadata and seed section metadata must mark:
     - `layer = "recall"`
     - `source_family = "longform_story_runtime"`
     - `materialization_event = "heavy_regression.chapter_close"`
     - `materialized_to_recall = True`
-    - `materialization_kind = "chapter_summary"` or `"accepted_story_segment"`
-- Future scene close:
-  - may materialize a selected closed-scene transcript into Recall Memory;
-  - must define transcript construction rules before treating `StoryDiscussionEntry` as a transcript source.
+    - `materialization_kind = "chapter_summary"`, `"accepted_story_segment"`, `"continuity_note"`, `"character_long_history_summary"`, or `"retired_foreshadow_summary"`
+- Scene close:
+  - may materialize a selected closed-scene transcript into Recall Memory through the existing retrieval-core chain;
+  - current triggers are explicit scene close and chapter-complete auto-close, with rerun allowed when a later accepted segment still belongs to an already closed scene;
+  - transcript materialization still requires explicit `scene_ref`, source filtering/normalization, and must skip empty results rather than fabricate Recall history.
 - Setup/story-evolution import:
   - may materialize authored/imported source material into Archival Knowledge;
   - may propose authoritative Core State mutations through proposal/apply;
@@ -194,6 +196,8 @@ future retired_foreshadow_summary
 | Current hot summary needs read | Use `memory.get_summary` through `MemoryOsService` / `RetrievalBroker` and resolve `Core State.derived_projection` |
 | Accepted prose is closed during heavy regression | Materialize into Recall Memory as `accepted_story_segment` through retrieval-core |
 | Chapter summary is produced during chapter close | Materialize into Recall Memory as `chapter_summary` |
+| Chapter-close authoritative character snapshots exist | Materialize per-character `character_long_history_summary` Recall assets through retrieval-core |
+| Chapter-close authoritative foreshadow snapshots carry explicit terminal markers | Materialize per-foreshadow `retired_foreshadow_summary` Recall assets through retrieval-core |
 | Draft artifact exists in current workspace | Keep it in Runtime Workspace; do not ingest into Recall |
 | Discussion entry exists | Keep as Runtime Workspace / interaction trace unless a transcript promotion spec selects it |
 | Imported world book or source document arrives | Ingest into Archival Knowledge, preserving source metadata |

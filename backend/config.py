@@ -32,13 +32,6 @@ class Settings(BaseSettings):
     # LiteLLM toggle (False = fallback to httpx direct proxy)
     use_litellm: bool = True
     use_litellm_router: bool = True
-    rp_setup_agent_runtime_v2_enabled: bool = Field(
-        default=True,
-        validation_alias=AliasChoices(
-            "CHATBOX_BACKEND_RP_SETUP_AGENT_RUNTIME_V2_ENABLED",
-            "RP_SETUP_AGENT_RUNTIME_V2_ENABLED",
-        ),
-    )
     rp_memory_core_state_store_write_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices(

@@ -56,6 +56,40 @@ def build_setup_trace(
                 "stream_mode": stream_mode,
                 "finish_reason": runtime_result.finish_reason if runtime_result else None,
                 "repair_route": _structured_payload_value(runtime_result, "repair_route"),
+                "continue_reason": _structured_payload_value(runtime_result, "continue_reason"),
+                "loop_trace_count": len(_structured_payload_list(runtime_result, "loop_trace")),
+                "context_profile": _context_report_value(
+                    runtime_result,
+                    "context_profile",
+                ),
+                "context_compacted_history_count": _context_report_value(
+                    runtime_result,
+                    "compacted_history_count",
+                ),
+                "context_estimated_input_tokens": _context_report_value(
+                    runtime_result,
+                    "estimated_input_tokens",
+                ),
+                "context_previous_prompt_tokens": _context_report_value(
+                    runtime_result,
+                    "previous_prompt_tokens",
+                ),
+                "context_previous_total_tokens": _context_report_value(
+                    runtime_result,
+                    "previous_total_tokens",
+                ),
+                "context_summary_strategy": _context_report_value(
+                    runtime_result,
+                    "summary_strategy",
+                ),
+                "context_summary_action": _context_report_value(
+                    runtime_result,
+                    "summary_action",
+                ),
+                "context_fallback_reason": _context_report_value(
+                    runtime_result,
+                    "fallback_reason",
+                ),
                 "cognitive_state_invalidated": _cognitive_summary_value(
                     runtime_result,
                     "invalidated",
@@ -148,6 +182,28 @@ def build_setup_trace(
                 kind="cognitive_state",
                 name="SetupCognitiveStateSnapshot",
                 payload=cognitive_state,
+            )
+        )
+    loop_trace = _structured_payload_value(runtime_result, "loop_trace")
+    if isinstance(loop_trace, list):
+        artifacts.append(
+            EvalArtifact(
+                artifact_id=f"{run_id}:artifact:loop_trace",
+                run_id=run_id,
+                kind="loop_trace",
+                name="SetupLoopTrace",
+                payload={"frames": list(loop_trace)},
+            )
+        )
+    context_report = _structured_payload_value(runtime_result, "context_report")
+    if isinstance(context_report, dict):
+        artifacts.append(
+            EvalArtifact(
+                artifact_id=f"{run_id}:artifact:context_report",
+                run_id=run_id,
+                kind="context_report",
+                name="SetupContextGovernanceReport",
+                payload=context_report,
             )
         )
     if workspace_before is not None:
@@ -390,6 +446,26 @@ def _structured_payload_value(
     if not isinstance(payload, dict):
         return None
     return payload.get(key)
+
+
+def _structured_payload_list(
+    result: RpAgentTurnResult | None,
+    key: str,
+) -> list[Any]:
+    value = _structured_payload_value(result, key)
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def _context_report_value(
+    result: RpAgentTurnResult | None,
+    key: str,
+) -> Any | None:
+    report = _structured_payload_value(result, "context_report")
+    if not isinstance(report, dict):
+        return None
+    return report.get(key)
 
 
 def _cognitive_summary_value(

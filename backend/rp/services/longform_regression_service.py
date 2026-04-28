@@ -17,7 +17,16 @@ from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_specialist_service import LongformSpecialistService
 from .projection_refresh_service import ProjectionRefreshService
 from .proposal_workflow_service import ProposalWorkflowService
+from .recall_character_long_history_ingestion_service import (
+    RecallCharacterLongHistoryIngestionService,
+)
+from .recall_continuity_note_ingestion_service import (
+    RecallContinuityNoteIngestionService,
+)
 from .recall_detail_ingestion_service import RecallDetailIngestionService
+from .recall_retired_foreshadow_ingestion_service import (
+    RecallRetiredForeshadowIngestionService,
+)
 from .recall_summary_ingestion_service import RecallSummaryIngestionService
 from .story_session_service import StorySessionService
 
@@ -37,6 +46,12 @@ class LongformRegressionService:
         projection_refresh_service: ProjectionRefreshService | None = None,
         recall_summary_ingestion_service: RecallSummaryIngestionService | None = None,
         recall_detail_ingestion_service: RecallDetailIngestionService | None = None,
+        recall_continuity_note_ingestion_service: RecallContinuityNoteIngestionService
+        | None = None,
+        recall_character_long_history_ingestion_service: RecallCharacterLongHistoryIngestionService
+        | None = None,
+        recall_retired_foreshadow_ingestion_service: RecallRetiredForeshadowIngestionService
+        | None = None,
         regression_policy: PostWriteMaintenancePolicy | None = None,
     ) -> None:
         self._story_session_service = story_session_service
@@ -52,6 +67,15 @@ class LongformRegressionService:
         )
         self._recall_summary_ingestion_service = recall_summary_ingestion_service
         self._recall_detail_ingestion_service = recall_detail_ingestion_service
+        self._recall_continuity_note_ingestion_service = (
+            recall_continuity_note_ingestion_service
+        )
+        self._recall_character_long_history_ingestion_service = (
+            recall_character_long_history_ingestion_service
+        )
+        self._recall_retired_foreshadow_ingestion_service = (
+            recall_retired_foreshadow_ingestion_service
+        )
         self._regression_policy = regression_policy or PostWriteMaintenancePolicy(
             preset_id="phase_e_internal_regression",
             fallback_decision=PolicyDecision.NOTIFY_APPLY,
@@ -146,6 +170,52 @@ class LongformRegressionService:
                 source_workspace_id=session.source_workspace_id,
                 accepted_segments=accepted_segments,
             )
+        if (
+            self._recall_continuity_note_ingestion_service is not None
+            and bundle.summary_updates
+        ):
+            self._recall_continuity_note_ingestion_service.ingest_continuity_notes(
+                session_id=session.session_id,
+                story_id=session.story_id,
+                chapter_index=chapter.chapter_index,
+                source_workspace_id=session.source_workspace_id,
+                summary_updates=bundle.summary_updates,
+            )
+        if (
+            self._recall_character_long_history_ingestion_service is not None
+            and isinstance(updated_session.current_state_json, dict)
+        ):
+            character_state_digest = updated_session.current_state_json.get(
+                "character_state_digest"
+            )
+            if isinstance(character_state_digest, dict):
+                self._recall_character_long_history_ingestion_service.ingest_character_summaries(
+                    session_id=updated_session.session_id,
+                    story_id=updated_session.story_id,
+                    chapter_index=updated_chapter.chapter_index,
+                    source_workspace_id=updated_session.source_workspace_id,
+                    character_state_digest=character_state_digest,
+                    chapter_summary_text=bundle.recall_summary_text,
+                    continuity_notes=bundle.summary_updates,
+                    accepted_segments=accepted_segments,
+                )
+        if self._recall_retired_foreshadow_ingestion_service is not None and isinstance(
+            updated_session.current_state_json, dict
+        ):
+            foreshadow_registry = updated_session.current_state_json.get(
+                "foreshadow_registry"
+            )
+            if isinstance(foreshadow_registry, list):
+                self._recall_retired_foreshadow_ingestion_service.ingest_retired_foreshadow_summaries(
+                    session_id=updated_session.session_id,
+                    story_id=updated_session.story_id,
+                    chapter_index=updated_chapter.chapter_index,
+                    source_workspace_id=updated_session.source_workspace_id,
+                    foreshadow_registry=foreshadow_registry,
+                    chapter_summary_text=bundle.recall_summary_text,
+                    continuity_notes=bundle.summary_updates,
+                    accepted_segments=accepted_segments,
+                )
         return updated_session, updated_chapter
 
     async def _apply_bundle(

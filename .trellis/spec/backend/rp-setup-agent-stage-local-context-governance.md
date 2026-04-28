@@ -1,15 +1,20 @@
 # RP Setup Agent Stage-Local Context Governance
 
-> Executable contract for SetupAgent runtime-v2 stage-local context governance: thin working digest, retained tool outcomes, compacted older step history, and minimal no-progress guards.
+> Executable contract for SetupAgent runtime-v2 stage-local context engineering: thin working digest, retained tool outcomes, compacted older step history, draft-ref recovery, compact-expert summarization, and minimal no-progress guards.
 
-## Scenario: SetupAgent Keeps Only Live Step Control State And Compacts Old Step History
+## Scenario: SetupAgent Compacts Current-Stage Context Without Replacing Draft Truth
 
 ### 1. Scope / Trigger
 
-- Trigger: add or edit `backend/rp/agent_runtime/contracts.py`, `backend/rp/agent_runtime/state.py`, `backend/rp/agent_runtime/executor.py`, `backend/rp/agent_runtime/policies.py`, `backend/rp/agent_runtime/adapters.py`, `backend/rp/services/setup_agent_execution_service.py`, `backend/rp/services/setup_agent_runtime_state_service.py`, `backend/rp/services/setup_agent_prompt_service.py`, or the setup stage-local context governor / compaction services when the change affects what current-step context is visible to SetupAgent.
+- Trigger: add or edit `backend/rp/agent_runtime/contracts.py`, `backend/rp/agent_runtime/state.py`, `backend/rp/agent_runtime/executor.py`, `backend/rp/agent_runtime/policies.py`, `backend/rp/agent_runtime/adapters.py`, `backend/rp/services/setup_agent_execution_service.py`, `backend/rp/services/setup_agent_runtime_state_service.py`, `backend/rp/services/setup_agent_prompt_service.py`, `backend/rp/tools/setup_tool_provider.py`, or the setup stage-local context governor / compaction services when the change affects what current-step context is visible to SetupAgent.
 - Applies only to setup/prestory runtime-v2 current-step context inside one setup stage.
-- This slice is internal only. It does not change `SetupWorkspace` business truth, prior-stage handoff packets, Memory OS, retrieval contracts, or user manual commit authority.
+- This slice is stage-local context engineering. It does not change `SetupWorkspace` business truth, prior-stage handoff packets, Memory OS, cross-stage retrieval contracts, or user manual commit authority.
 - This slice must not introduce a new durable setup-memory subsystem. Runtime-private governance state stays inside the existing `SetupAgentRuntimeStateRecord.snapshot_json`.
+- Source policy:
+  - Borrow directly from Claude Code / CC: compact runs before model-call assembly, compact experts are no-tools summarizers, and summary reasoning is stripped before reinjection.
+  - Borrow directly from Pi: compact belongs in an explicit pre-LLM context transform boundary.
+  - Lighten for RP setup: no disk-spilled generic tool-result store, no full session tree compaction, no prompt-cache edit layer, and no generic coding-agent file tracking.
+  - Customize for RP setup: draft refs are the recovery surface because stable setup truth is already written into drafts.
 
 ### 2. Signatures
 
@@ -33,8 +38,33 @@
   - `source_fingerprint: str`
   - `source_message_count: int`
   - `summary_lines: list[str]`
+  - `confirmed_points: list[str]`
   - `open_threads: list[str]`
+  - `rejected_directions: list[str]`
   - `draft_refs: list[str]`
+  - `recovery_hints: list[SetupCompactRecoveryHint]`
+  - `must_not_infer: list[str]`
+- `SetupCompactRecoveryHint`
+  - `ref: str`
+  - `reason: str`
+  - `detail: str | None`
+- `SetupDraftRefReadInput`
+  - `workspace_id: str`
+  - `step_id: SetupStepId`
+  - `refs: list[str]`
+  - `detail: Literal["summary", "full"] = "summary"`
+  - `max_chars: int = 4000`
+- `SetupDraftRefReadItem`
+  - `ref: str`
+  - `found: bool`
+  - `block_type: Literal["story_config", "writing_contract", "foundation_entry", "longform_blueprint"] | None`
+  - `title: str | None`
+  - `summary: str | None`
+  - `payload: dict[str, Any] | None`
+- `SetupDraftRefReadResult`
+  - `success: bool`
+  - `items: list[SetupDraftRefReadItem]`
+  - `missing_refs: list[str]`
 - `SetupCognitiveStateSnapshot`
   - add `working_digest: SetupWorkingDigest | None`
   - add `tool_outcomes: list[SetupToolOutcome]`
@@ -50,6 +80,19 @@
     - `working_digest: SetupWorkingDigest | None`
     - `existing_summary: SetupContextCompactSummary | None`
     - `context_profile: Literal["standard", "compact"]`
+- `SetupContextCompactionService.build_expert_prompt(...) -> list[ChatMessage]`
+  - inputs:
+    - `dropped_history: list[SetupAgentDialogueMessage]`
+    - `existing_summary: SetupContextCompactSummary | None`
+    - `working_digest: SetupWorkingDigest | None`
+    - `retained_tool_outcomes: list[SetupToolOutcome]`
+    - `current_step: SetupStepId`
+    - `draft_refs: list[str]`
+- `SetupContextCompactionService.validate_expert_summary(...) -> SetupContextCompactSummary`
+  - inputs:
+    - `payload: dict[str, Any]`
+    - `source_fingerprint: str`
+    - `source_message_count: int`
 - `SetupContextGovernorService.govern_history(...) -> tuple[list[SetupAgentDialogueMessage], SetupContextCompactSummary | None, dict[str, int]]`
   - inputs:
     - `history: list[SetupAgentDialogueMessage]`
@@ -57,8 +100,13 @@
     - `working_digest: SetupWorkingDigest | None`
     - `existing_summary: SetupContextCompactSummary | None`
     - `context_profile: Literal["standard", "compact"]`
+    - `estimated_input_tokens: int | None`
+    - `previous_usage: dict[str, int] | None`
 - `SetupContextGovernorService.build_initial_digest(...) -> SetupWorkingDigest | None`
 - `SetupContextGovernorService.retain_tool_outcomes(...) -> list[SetupToolOutcome]`
+- Local setup tool `setup.read.draft_refs`
+  - input schema: `SetupDraftRefReadInput`
+  - output schema: `SetupDraftRefReadResult`
 - `SetupAgentRuntimeStateService.persist_turn_governance(...) -> SetupCognitiveStateSnapshot`
   - inputs:
     - `workspace`
@@ -74,6 +122,7 @@
     - `tool_outcomes: list[SetupToolOutcome] | None`
     - `compact_summary: SetupContextCompactSummary | None`
     - `governance_metadata: dict[str, int] | None`
+    - `context_report: SetupContextGovernanceReport | None`
 - `RpAgentRunState`
   - add `working_digest: dict[str, Any] | None`
   - add `tool_outcomes: list[dict[str, Any]]`
@@ -86,11 +135,17 @@
 
 ### 3. Contracts
 
-- `working_digest` is live current-step control state. It is not a compact history summary.
-- `compact_summary` is only the compressed carry-forward view of older current-step raw discussion that was removed from the prompt-visible message list.
+- `working_digest` is live current-step control state. It answers "what is the agent trying to do now, what is next, and what blocks completion?" It is not a compact history summary.
+- `compact_summary` is only the compressed carry-forward view of older current-step raw discussion that was removed from the prompt-visible message list. It answers "what older stage-local context must survive after raw history is trimmed?"
+- `context_report` is the transient explanation of the compact/context decision for this turn. It is not a durable cognition field and it is not prompt content.
 - `tool_outcomes` keep final outcomes only:
   - keep one summarized outcome per completed tool result
   - never keep retry chains, intermediate argument fixes, or raw tool execution process as cross-turn prompt context
+- `setup.read.draft_refs` is the stage-local recovery tool:
+  - it reads existing setup draft refs without mutating `SetupWorkspace`
+  - it exists because `compact_summary` carries refs and recovery hints, not every draft detail
+  - it must be visible to SetupAgent as a read-only setup tool
+  - it must not read prior-stage raw discussion or Memory OS state
 - Stage-local context remains step-scoped:
   - `context_packet.current_draft_snapshot`
   - `context_packet.user_edit_deltas`
@@ -99,6 +154,15 @@
   - compacted older current-step history
   - these are current-step only and must not be folded into `prior_stage_handoffs`
 - Prior-stage truth still comes only from `prior_stage_handoffs`. Stage-local compact history never replaces that handoff contract.
+- Compact trigger policy must use two families of signals:
+  - message pressure: current-step `history` count crossing a deterministic threshold
+  - token pressure: estimated pre-call input tokens or observed previous model usage crossing a deterministic threshold
+  - user-edit pressure may still force compact mode because user edits invalidate stale current-step cognition
+- Token usage source policy:
+  - pre-call token estimates may use framework utilities such as LangChain/LangGraph `trim_messages` / approximate token counters when available
+  - response-side `usage.prompt_tokens`, `usage.completion_tokens`, and `usage.total_tokens` from LiteLLM/OpenAI-compatible responses are observation and calibration signals
+  - response-side usage alone must not be the only pre-call safety mechanism because it arrives after the model request
+  - response-side usage must be scoped to the same `(workspace_id, current_step)` before it can trigger `observed_usage_threshold`; usage from another workspace or setup step is not stage-local context pressure
 - `SetupContextGovernorService.govern_history(...)` must keep only recent raw current-step messages:
   - `standard` profile keeps the last `6` history messages raw
   - `compact` profile keeps the last `4` history messages raw
@@ -109,9 +173,27 @@
   - if no dropped history exists, return `None`
 - `compact_summary` must stay thin:
   - `summary_lines` max `6`
+  - `confirmed_points` max `8`
   - `open_threads` max `4`
+  - `rejected_directions` max `4`
   - `draft_refs` max `6`
+  - `recovery_hints` max `6`
+  - `must_not_infer` max `4`
   - it must not replay long verbatim discussion blocks
+  - it must not own `current_goal`, `next_focus`, or `commit_blockers`; those remain `working_digest`
+- Compact expert policy:
+  - role name: `SetupStageCompactExpert`
+  - it is a prompt role/helper call, not a new autonomous agent, not a new durable state subsystem, and not a draft writer
+  - it must receive only current-step dropped messages plus bounded prior compact summary, digest, tool outcomes, current step id, and draft refs
+  - it must output strict JSON matching `SetupContextCompactSummary` fields
+  - it must not call tools, write drafts, propose commits, mutate cognition, or reconstruct prior-stage raw discussion
+  - it may internally reason, but any analysis/scratchpad text must be stripped before validation and persistence
+  - it must update an existing compact summary when one exists instead of regenerating unrelated history from scratch
+  - if expert compact fails validation or model invocation, runtime must fall back to deterministic compact summary and record the fallback in `context_report`
+- Expert compact is not CC full autocompact:
+  - copy CC's no-tools summarizer role and analysis-stripping pattern
+  - copy Pi's explicit pre-LLM transform boundary
+  - do not copy CC's generic full-session/file-edit summary sections, prompt-cache editing, or disk-backed tool result budget
 - `retain_tool_outcomes(...)` must keep at most `6` outcomes after prune:
   - unresolved failures are retained first
   - then the newest successful outcomes that touched draft/cognitive/question/proposal refs
@@ -132,40 +214,65 @@
 - The runtime-private persistence surface stays unchanged at the storage layer:
   - no new setup runtime table
   - `SetupAgentRuntimeStateRecord.snapshot_json` remains the only persistence surface for digest / tool outcomes / compact summary
+- `context_report` must stay outside `SetupAgentRuntimeStateRecord.snapshot_json`
 - `persist_turn_governance(...)` runs after each runtime-v2 turn and updates the current-step snapshot without clearing existing discussion/chunk/truth state.
 - Minimal no-progress guard is required:
   - if the assistant emits the same normalized user-facing question that already exists in recent assistant history and the current turn produced no new tool progress, finalization must be blocked with a repeat-question guard
   - if the same tool failure signature repeats against retained failure outcomes, the runtime must warn about repeated failure instead of treating it as fresh progress
+  - this slice does **not** attempt semantic similarity classification for "similar questions" or "similar stalls"; repeated-question detection is limited to exact normalized text match
+  - broader anti-stall heuristics are deferred to eval-guided follow-up work instead of being hard-coded into the current runtime slice
 
 ### 4. Validation & Error Matrix
 
 - no stored snapshot exists for the current step -> start with empty digest, empty retained tool outcomes, and `compact_summary = None`
-- history length does not exceed the raw-history limit for the active profile -> keep full history raw and `compact_summary = None`
+- history length and estimated token pressure do not exceed the active profile limits -> keep full history raw and `compact_summary = None`
+- history count crosses threshold -> select compact profile with reason `history_count_threshold`
+- estimated pre-call input tokens cross threshold -> select compact profile with reason `estimated_input_tokens_threshold`
+- previous model usage crosses threshold -> select compact profile with reason `observed_usage_threshold`
+- previous model usage from another workspace or setup step crosses threshold -> ignore it for this turn's compact decision and do not surface previous token counts in `context_report`
+- user edit delta count crosses threshold -> select compact profile with reason `user_edit_threshold`
 - dropped-history prefix exists and matches stored compact fingerprint -> reuse existing `compact_summary`
-- dropped-history prefix exists and does not match stored compact fingerprint -> rebuild `compact_summary`
+- dropped-history prefix exists and does not match stored compact fingerprint -> rebuild `compact_summary` with the configured strategy
+- expert compact succeeds and validates -> persist/expose the validated `compact_summary` only
+- expert compact returns non-JSON, forbidden fields, unsupported refs, or oversized lists -> fall back to deterministic compact summary and record fallback in `context_report`
+- expert compact attempts tool use or draft mutation -> reject the expert result and fall back to deterministic compact summary
+- expert compact is disabled by config/profile -> use deterministic compact summary and report strategy `deterministic_prefix_summary`
 - retained outcomes exceed `6` after merge -> prune successes first, preserve unresolved failures
 - tool result has no meaningful `updated_refs` and is a non-failure read/tool artifact -> it may be dropped from retained cross-turn outcomes
+- `setup.read.draft_refs` receives an empty `refs` list -> validation error `setup_draft_refs_required`
+- `setup.read.draft_refs` receives an unsupported ref prefix -> item returns `found=false` and the ref appears in `missing_refs`
+- `setup.read.draft_refs` receives `detail="summary"` -> return compact summaries/picked fields, not full draft payload blobs
+- `setup.read.draft_refs` receives `detail="full"` -> return payload bounded by `max_chars`; do not exceed the requested cap
 - assistant question repeats a recent assistant question and no new tool result succeeded -> `CompletionGuardPolicy` blocks finalization with `reason="repeated_question_without_progress"`
 - latest tool failure repeats a retained failure signature -> keep the normal repair route, but append warning `repeated_tool_failure`
+- assistant question is merely topically similar but not an exact normalized repeat -> no special runtime block in this slice; rely on normal completion semantics and eval observation
 - `working_digest` would exceed its field caps -> truncate list fields before prompt injection
 - current-step compact summary exists but there is no dropped history anymore -> clear `compact_summary`
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a long `foundation` discussion keeps the last 4 raw messages, carries earlier discussion through one compact summary, preserves one unresolved `setup.truth.write` failure outcome, and injects a thin digest that says what still blocks review.
+- Good: a long `foundation` discussion keeps the last 4 raw messages, carries earlier discussion through one expert-validated compact summary, preserves one unresolved `setup.truth.write` failure outcome, records `foundation:magic-law` as a draft ref with a recovery hint, and injects a thin digest that says what still blocks review.
+- Good: after compaction, the model needs the exact guild-law detail, calls `setup.read.draft_refs` with `refs=["foundation:magic-law"]`, and receives the current draft entry instead of relying on old raw chat text.
 - Base: a short `story_config` turn with 2 prior messages keeps the full raw history, has no compact summary, and carries no retained outcomes.
-- Bad: replaying the entire current-step transcript every turn, storing tool retry chains as prompt-visible history, or using `working_digest` as if it were the stage compaction artifact.
+- Base: expert compact is disabled or unavailable, so deterministic summary rebuilds the compact summary and `context_report.summary_strategy` records the fallback.
+- Bad: replaying the entire current-step transcript every turn, storing tool retry chains as prompt-visible history, using `working_digest` as if it were the stage compaction artifact, or making the compact expert write draft truth directly.
 
 ### 6. Tests Required
 
 - `backend/rp/tests/test_setup_context_governor.py`
   - assert `standard` keeps the last 6 raw history messages and `compact` keeps the last 4
   - assert dropped history produces a reusable compact summary fingerprint
+  - assert expert compact output is validated, capped, and falls back to deterministic summary on invalid payload
   - assert retained outcomes keep unresolved failures and prune duplicate/superseded successes
   - assert initial digest stays thin and deterministic
+- `backend/rp/tests/test_setup_tool_provider.py`
+  - assert `setup.read.draft_refs` resolves `draft:story_config`, `draft:writing_contract`, `draft:longform_blueprint`, and `foundation:<entry_id>`
+  - assert unsupported or missing refs are reported in `missing_refs`
+  - assert `detail="summary"` returns bounded summaries and `detail="full"` honors `max_chars`
 - `backend/rp/tests/test_setup_agent_runtime_state_service.py`
   - assert `persist_turn_governance(...)` stores digest / tool outcomes / compact summary in the existing snapshot
   - assert `summarize_for_prompt(...)` exposes those governance artifacts
+  - assert transient `context_report` is not written into the snapshot
 - `backend/rp/tests/test_setup_agent_runtime_executor.py`
   - assert runtime structured payload exposes `working_digest`, `tool_outcomes`, and `compact_summary`
   - assert latest tool results merge into retained tool outcomes without carrying raw retry process
@@ -174,6 +281,8 @@
   - assert repeated tool failure adds warning `repeated_tool_failure`
 - `backend/rp/tests/test_setup_agent_execution_service_v2.py`
   - assert runtime-v2 context assembly uses governed history rather than the raw full request history when compaction is required
+  - assert compact profile reasons include message-count, estimated-token, observed-usage, or user-edit triggers as applicable
+  - assert observed-usage compact pressure cannot cross-contaminate unrelated workspaces or setup steps
 
 ### 7. Wrong vs Correct
 
@@ -181,10 +290,20 @@
 
 - Treat `digest` as the same thing as `compact_summary`.
 - Keep raw tool retries, argument-fix attempts, and tool execution process as cross-turn prompt context.
+- Persist `context_report` as if it were durable stage cognition.
 - Add a second durable state layer just to remember setup-stage conversation.
+- Introduce semantic "similar-question" or "stall-intent" classifiers without eval evidence and without a mature reference pattern.
+- Let the compact expert call setup tools, write drafts, decide commit readiness, or reconstruct previous-stage raw discussion.
+- Copy CC's full coding-agent compact schema into RP setup even though RP setup truth is already recoverable through drafts.
+- Store all draft details inside `compact_summary` instead of storing refs and using `setup.read.draft_refs` for recovery.
 
 #### Correct
 
 - Keep `working_digest` as thin live control state, separate from the history compaction artifact.
 - Keep only final tool outcomes across turns, then drop the process trace.
 - Compact only older current-step raw history, keep recent raw turns visible, and persist everything inside the existing runtime snapshot.
+- Keep compact decision reporting transient and observable without turning it into durable setup memory.
+- Keep the current no-progress guard narrow: exact normalized repeat-question and repeated failure signature only; leave broader stall policy to later eval-driven work.
+- Run compact as pre-model context engineering: pressure check, raw-window retention, outcome pruning, optional expert summary, runtime overlay assembly.
+- Use `setup.read.draft_refs` as the stage-local detail recovery tool after compaction.
+- Borrow mature framework mechanics where they fit, lighten generic coding-agent features, and customize recovery around RP setup drafts.

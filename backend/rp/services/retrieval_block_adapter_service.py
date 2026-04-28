@@ -50,6 +50,8 @@ class RetrievalBlockAdapterService:
                 "rank": hit.rank,
                 "knowledge_ref": knowledge_ref,
                 "provenance_refs": list(hit.provenance_refs),
+                "source_family": hit.metadata.get("source_family"),
+                "materialization_kind": hit.metadata.get("materialization_kind"),
             },
             metadata={
                 **deepcopy(hit.metadata),
@@ -66,6 +68,10 @@ class RetrievalBlockAdapterService:
                 "raw_revision": hit.knowledge_ref.revision
                 if hit.knowledge_ref
                 else None,
+                "read_only": True,
+                "mutation_mode": "unsupported_retrieval_backed",
+                "history_mode": "retrieval_backed",
+                "proposal_visibility": "unsupported",
             },
         )
 

@@ -21,6 +21,7 @@ from .contracts import (
     SetupCognitiveStateSummary,
     SetupPendingObligation,
     SetupReflectionTicket,
+    SetupReActTraceFrame,
     SetupToolOutcome,
     SetupTurnGoal,
     SetupWorkingDigest,
@@ -212,6 +213,8 @@ class _RuntimeRunDriver:
             "tool_outcomes": list(self._context_bundle(turn_input).get("tool_outcomes") or []),
             "compact_summary": self._context_bundle(turn_input).get("compact_summary"),
             "repair_route": None,
+            "continue_reason": None,
+            "loop_trace": [],
             "next_action": "build_model_request",
             "schema_retry_count": 0,
             "error_event_emitted": False,
@@ -666,9 +669,16 @@ class _RuntimeRunDriver:
                 for call in runtime_tool_calls
             ],
             "completion_guard": None,
+            "continue_reason": None,
         }
         if state.get("error"):
             update["next_action"] = "finalize_failure"
+            update["loop_trace"] = self._append_loop_trace(
+                state,
+                update,
+                decision_site="inspect_model_output",
+                tool_names=[call.tool_name for call in runtime_tool_calls],
+            )
             return update
         if runtime_tool_calls and self._contains_blocked_commit_proposal(state, runtime_tool_calls):
             context_bundle = self._context_bundle(self._turn_input(state))
@@ -687,11 +697,25 @@ class _RuntimeRunDriver:
             ).model_dump(mode="json", exclude_none=True)
             update["reflection_ticket"] = reflection_ticket
             update["warnings"] = list(state.get("warnings", [])) + ["commit_proposal_blocked"]
+            update["continue_reason"] = "commit_reassess_reflection"
             update["next_action"] = "reflect_if_needed"
+            update["loop_trace"] = self._append_loop_trace(
+                state,
+                update,
+                decision_site="inspect_model_output",
+                tool_names=[call.tool_name for call in runtime_tool_calls],
+            )
             return update
         if runtime_tool_calls:
             update["reflection_ticket"] = None
+            update["continue_reason"] = "tool_call_batch_pending"
             update["next_action"] = "execute_tools"
+            update["loop_trace"] = self._append_loop_trace(
+                state,
+                update,
+                decision_site="inspect_model_output",
+                tool_names=[call.tool_name for call in runtime_tool_calls],
+            )
             return update
         decision = CompletionGuardPolicy.assess(
             assistant_text=assistant_text,
@@ -710,8 +734,19 @@ class _RuntimeRunDriver:
                 or FinishPolicy.completed_text_finish_reason(assistant_text)
             )
             update["next_action"] = "finalize_success"
+            update["loop_trace"] = self._append_loop_trace(
+                state,
+                update,
+                decision_site="inspect_model_output",
+            )
             return update
+        update["continue_reason"] = "completion_guard_retry"
         update["next_action"] = "reflect_if_needed"
+        update["loop_trace"] = self._append_loop_trace(
+            state,
+            update,
+            decision_site="inspect_model_output",
+        )
         return update
 
     async def _execute_tools(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -876,6 +911,7 @@ class _RuntimeRunDriver:
             update: RpAgentRunState = {
                 "status": "assessed",
                 "completion_guard": decision.get("completion_guard"),
+                "continue_reason": None,
             }
             if "pending_obligation" in decision:
                 update["pending_obligation"] = decision.get("pending_obligation")
@@ -894,9 +930,20 @@ class _RuntimeRunDriver:
                     pending_obligation=None,
                     reflection_ticket=None,
                 )
+                update["loop_trace"] = self._append_loop_trace(
+                    state,
+                    update,
+                    decision_site="assess_progress",
+                )
                 return update
+            update["continue_reason"] = "completion_guard_retry"
             update["next_action"] = "reflect_if_needed"
             update["working_digest"] = self._build_working_digest_payload(state)
+            update["loop_trace"] = self._append_loop_trace(
+                state,
+                update,
+                decision_site="assess_progress",
+            )
             return update
 
         decision = RepairDecisionPolicy.assess(
@@ -934,6 +981,7 @@ class _RuntimeRunDriver:
                     if isinstance(decision.get("last_failure"), dict)
                     else state.get("repair_route")
                 ),
+                "continue_reason": None,
                 "working_digest": self._build_working_digest_payload(
                     state,
                     pending_obligation=(
@@ -950,9 +998,20 @@ class _RuntimeRunDriver:
             }
             if "last_failure" in decision:
                 continue_update["last_failure"] = decision.get("last_failure")
+            if decision.get("reflection_ticket") is not None:
+                continue_update["continue_reason"] = "commit_reassess_reflection"
+            elif isinstance(decision.get("last_failure"), dict):
+                continue_update["continue_reason"] = "tool_failure_follow_up"
+            else:
+                continue_update["continue_reason"] = "tool_result_follow_up"
+            continue_update["loop_trace"] = self._append_loop_trace(
+                state,
+                continue_update,
+                decision_site="assess_progress",
+            )
             return continue_update
 
-        return {
+        failure_update: RpAgentRunState = {
             "status": "failed",
             "next_action": "finalize_failure",
             "finish_reason": str(decision.get("finish_reason") or "runtime_failed"),
@@ -961,6 +1020,12 @@ class _RuntimeRunDriver:
             "last_failure": decision.get("last_failure"),
             "working_digest": self._build_working_digest_payload(state),
         }
+        failure_update["loop_trace"] = self._append_loop_trace(
+            state,
+            failure_update,
+            decision_site="assess_progress",
+        )
+        return failure_update
 
     def _reflect_if_needed(self, state: RpAgentRunState) -> RpAgentRunState:
         decision = ReflectionTriggerPolicy.assess(
@@ -975,18 +1040,25 @@ class _RuntimeRunDriver:
             warnings.append(str(decision["warning"]))
 
         if decision["action"] == "continue":
-            return {
+            continue_update: RpAgentRunState = {
                 "status": "reflected",
                 "next_action": "derive_turn_goal",
                 "warnings": warnings,
                 "reflection_ticket": None,
+                "continue_reason": "reflection_retry",
                 "working_digest": self._build_working_digest_payload(
                     state,
                     reflection_ticket=None,
                 ),
             }
+            continue_update["loop_trace"] = self._append_loop_trace(
+                state,
+                continue_update,
+                decision_site="reflect_if_needed",
+            )
+            return continue_update
 
-        return {
+        failure_update: RpAgentRunState = {
             "status": "failed",
             "next_action": "finalize_failure",
             "finish_reason": str(decision.get("finish_reason") or "runtime_failed"),
@@ -998,6 +1070,12 @@ class _RuntimeRunDriver:
                 reflection_ticket=None,
             ),
         }
+        failure_update["loop_trace"] = self._append_loop_trace(
+            state,
+            failure_update,
+            decision_site="reflect_if_needed",
+        )
+        return failure_update
 
     async def _finalize_success(self, state: RpAgentRunState) -> RpAgentRunState:
         await self._emit_event(
@@ -1005,13 +1083,20 @@ class _RuntimeRunDriver:
             event_type="done",
             payload={},
         )
-        return {
+        update: RpAgentRunState = {
             "status": "completed",
             "finish_reason": state.get("finish_reason")
             or FinishPolicy.completed_text_finish_reason(
                 str(state.get("assistant_text") or "")
             ),
+            "continue_reason": None,
         }
+        update["loop_trace"] = self._append_loop_trace(
+            state,
+            update,
+            decision_site="finalize_success",
+        )
+        return update
 
     async def _finalize_failure(self, state: RpAgentRunState) -> RpAgentRunState:
         error = state.get("error") or {
@@ -1029,12 +1114,19 @@ class _RuntimeRunDriver:
             event_type="done",
             payload={},
         )
-        return {
+        update: RpAgentRunState = {
             "status": "failed",
             "error": error,
             "finish_reason": str(state.get("finish_reason") or "runtime_failed"),
+            "continue_reason": None,
             "error_event_emitted": True,
         }
+        update["loop_trace"] = self._append_loop_trace(
+            state,
+            update,
+            decision_site="finalize_failure",
+        )
+        return update
 
     @staticmethod
     def _route_after_inspect(state: RpAgentRunState) -> str:
@@ -1124,6 +1216,7 @@ class _RuntimeRunDriver:
                         "cognitive_state_invalidated"
                     ),
                 },
+                "context_report": context_bundle.get("context_report"),
                 "latest_tool_batch": list(state.get("latest_tool_batch", [])),
                 "latest_response": state.get("latest_response") or {},
                 "turn_goal": state.get("turn_goal"),
@@ -1144,6 +1237,8 @@ class _RuntimeRunDriver:
                 ],
                 "compact_summary": state.get("compact_summary"),
                 "repair_route": state.get("repair_route"),
+                "continue_reason": state.get("continue_reason"),
+                "loop_trace": list(state.get("loop_trace", [])),
             },
             error=error,
         )
@@ -1200,6 +1295,7 @@ class _RuntimeRunDriver:
                 "If working_digest exists, treat it as thin step-local control state only.\n"
                 "If tool_outcomes exist, use the outcomes but not the historical tool-call process.\n"
                 "If compact_summary exists, treat it as carry-forward context for trimmed older current-step discussion.\n"
+                "If compact_summary recovery_hints point to draft refs and exact detail is needed, call setup.read.draft_refs.\n"
                 f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
             ),
         )
@@ -1444,6 +1540,112 @@ class _RuntimeRunDriver:
             relevance=self._tool_relevance(result.tool_name, success=result.success),
             recorded_at=datetime.now(timezone.utc),
         )
+
+    def _append_loop_trace(
+        self,
+        state: RpAgentRunState,
+        update: RpAgentRunState,
+        *,
+        decision_site: str,
+        tool_names: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        merged_state: RpAgentRunState = dict(state)
+        merged_state.update(update)
+        existing = list(state.get("loop_trace", []))
+        frame = self._build_loop_trace_frame(
+            merged_state,
+            decision_site=decision_site,
+            tool_names=tool_names,
+        )
+        existing.append(frame.model_dump(mode="json", exclude_none=True))
+        return existing
+
+    def _build_loop_trace_frame(
+        self,
+        state: RpAgentRunState,
+        *,
+        decision_site: str,
+        tool_names: list[str] | None = None,
+    ) -> SetupReActTraceFrame:
+        resolved_tool_names = (
+            list(tool_names)
+            if tool_names is not None
+            else self._trace_tool_names(state)
+        )
+        assistant_text = str(state.get("assistant_text") or "")
+        terminal_kind = FinishPolicy.terminal_output_kind(assistant_text)
+        if state.get("error"):
+            action_kind = "error"
+        elif resolved_tool_names:
+            action_kind = "tool_batch"
+        elif not assistant_text.strip():
+            action_kind = "empty"
+        else:
+            action_kind = "assistant_text"
+        if terminal_kind == "ask_user":
+            assistant_text_kind = "question"
+        elif terminal_kind == "text":
+            assistant_text_kind = "text"
+        else:
+            assistant_text_kind = "empty"
+        latest_batch = self._latest_tool_batch_results(state)
+        updated_refs: list[str] = []
+        for result in latest_batch:
+            for ref in self._tool_outcome_from_result(result).updated_refs:
+                if ref not in updated_refs:
+                    updated_refs.append(ref)
+        return SetupReActTraceFrame(
+            round_no=int(state.get("round_no") or 0),
+            decision_site=decision_site,
+            goal=(dict(state.get("turn_goal")) if isinstance(state.get("turn_goal"), dict) else None),
+            plan=(
+                dict(state.get("working_plan"))
+                if isinstance(state.get("working_plan"), dict)
+                else None
+            ),
+            action={
+                "kind": action_kind,
+                "tool_names": resolved_tool_names,
+                "assistant_text_kind": assistant_text_kind,
+            },
+            observation={
+                "tool_result_count": len(latest_batch),
+                "tool_failure_count": len([item for item in latest_batch if not item.success]),
+                "updated_refs": updated_refs,
+                "warnings": list(state.get("warnings", [])),
+            },
+            reflection=(
+                dict(state.get("reflection_ticket"))
+                if isinstance(state.get("reflection_ticket"), dict)
+                else None
+            ),
+            decision={
+                "next_action": str(state.get("next_action") or ""),
+                "continue_reason": state.get("continue_reason"),
+                "finish_reason": state.get("finish_reason"),
+                "repair_route": state.get("repair_route"),
+            },
+        )
+
+    @staticmethod
+    def _trace_tool_names(state: RpAgentRunState) -> list[str]:
+        names: list[str] = []
+        for item in state.get("pending_tool_calls", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("tool_name") or "").strip()
+            if name:
+                names.append(name)
+        return names
+
+    @staticmethod
+    def _latest_tool_batch_results(state: RpAgentRunState) -> list[RuntimeToolResult]:
+        results: list[RuntimeToolResult] = []
+        for item in state.get("latest_tool_batch", []):
+            if not isinstance(item, dict):
+                continue
+            results.append(RuntimeToolResult.model_validate(item))
+        return results
 
     @staticmethod
     def _turn_goal_model(state: RpAgentRunState) -> SetupTurnGoal | None:

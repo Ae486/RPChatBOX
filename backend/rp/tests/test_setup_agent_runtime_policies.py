@@ -52,6 +52,39 @@ def test_tool_failure_classifier_prefers_structured_error_payload():
     assert ToolFailureClassifier.missing_required_fields(result) == ["patch"]
 
 
+def test_tool_failure_classifier_derives_nested_missing_fields_from_error_list():
+    result = RuntimeToolResult(
+        call_id="call_patch",
+        tool_name="rp_setup__setup.patch.story_config",
+        success=False,
+        content_text='{"code":"schema_validation_failed"}',
+        error_code="SCHEMA_VALIDATION_FAILED",
+        structured_payload={
+            "error_payload": {
+                "code": "schema_validation_failed",
+                "message": "Nested field is missing.",
+                "details": {
+                    "repair_strategy": "auto_repair",
+                    "errors": [
+                        {
+                            "type": "missing",
+                            "loc": ["arguments", "patch", "style_rules"],
+                        },
+                        {
+                            "type": "string_type",
+                            "loc": ["arguments", "patch", "notes"],
+                        },
+                    ],
+                },
+            }
+        },
+    )
+
+    assert ToolFailureClassifier.missing_required_fields(result) == [
+        "patch.style_rules"
+    ]
+
+
 def test_repair_decision_policy_returns_ask_user_obligation():
     result = RuntimeToolResult(
         call_id="call_question",
@@ -82,6 +115,36 @@ def test_repair_decision_policy_returns_ask_user_obligation():
     assert decision["action"] == "continue"
     assert decision["pending_obligation"]["obligation_type"] == "ask_user_for_missing_info"
     assert decision["last_failure"]["failure_category"] == "ask_user"
+
+
+def test_repair_decision_policy_schema_retry_budget_is_one():
+    result = RuntimeToolResult(
+        call_id="call_patch",
+        tool_name="rp_setup__setup.patch.story_config",
+        success=False,
+        content_text='{"code":"schema_validation_failed"}',
+        error_code="SCHEMA_VALIDATION_FAILED",
+        structured_payload={
+            "error_payload": {
+                "code": "schema_validation_failed",
+                "message": "Patch payload is still missing.",
+                "details": {
+                    "repair_strategy": "auto_repair",
+                    "required_fields": ["patch"],
+                },
+            }
+        },
+    )
+
+    decision = RepairDecisionPolicy.assess(
+        profile=_profile(),
+        tool_results=[result],
+        schema_retry_count=1,
+        round_no=2,
+    )
+
+    assert decision["action"] == "finalize_failure"
+    assert decision["finish_reason"] == "tool_schema_validation_failed"
 
 
 def test_repair_decision_policy_continue_discussion_does_not_become_commit_reassessment():

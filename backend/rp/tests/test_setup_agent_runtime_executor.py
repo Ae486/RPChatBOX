@@ -204,6 +204,24 @@ class _TextOnlyLLM:
         }
 
 
+class _RecordingTextOnlyLLM:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def chat_completion(self, request):
+        self.requests.append(request)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Recorded direct answer.",
+                    }
+                }
+            ]
+        }
+
+
 class _ToolThenTextLLM:
     def __init__(self) -> None:
         self.round = 0
@@ -539,6 +557,124 @@ async def test_runtime_executor_returns_direct_answer_without_tools():
     assert result.structured_payload["working_digest"] is not None
     assert result.structured_payload["tool_outcomes"] == []
     assert result.structured_payload["compact_summary"] is None
+    assert result.structured_payload["context_report"] is None
+    assert result.structured_payload["continue_reason"] is None
+    assert result.structured_payload["loop_trace"]
+    assert result.structured_payload["loop_trace"][-1]["decision"]["finish_reason"] == "completed_text"
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_places_runtime_overlay_after_system_prompt():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            context_bundle={
+                "cognitive_state_summary": {
+                    "current_step": "story_config",
+                    "invalidated": False,
+                    "invalidation_reasons": [],
+                    "open_questions": ["Which preset should be used?"],
+                },
+                "working_digest": {
+                    "current_goal": "Clarify setup",
+                    "next_focus": "Lock runtime preset",
+                    "open_questions": ["Which preset should be used?"],
+                    "draft_refs": ["draft:story_config"],
+                    "commit_blockers": [],
+                },
+                "tool_outcomes": [
+                    {
+                        "tool_name": "rp_setup__setup.read.step_context",
+                        "success": True,
+                        "summary": "Read current story config draft",
+                        "updated_refs": ["draft:story_config"],
+                        "relevance": "read",
+                        "recorded_at": "2026-04-28T00:00:00Z",
+                    }
+                ],
+                "compact_summary": {
+                    "source_fingerprint": "fp-1",
+                    "source_message_count": 4,
+                    "summary_lines": ["Earlier draft discussion was compacted."],
+                    "open_threads": ["Need exact preset name."],
+                    "draft_refs": ["draft:story_config"],
+                    "recovery_hints": [
+                        {
+                            "ref": "draft:story_config",
+                            "reason": "Need exact draft detail.",
+                        }
+                    ],
+                },
+                "context_report": {
+                    "context_profile": "compact",
+                    "profile_reasons": [
+                        "history_count_threshold",
+                        "user_edit_threshold",
+                    ],
+                    "raw_history_count": 10,
+                    "raw_history_chars": 3200,
+                    "estimated_input_tokens": 900,
+                    "previous_prompt_tokens": 1200,
+                    "previous_total_tokens": 1600,
+                    "user_edit_delta_count": 3,
+                    "prior_stage_handoff_count": 1,
+                    "raw_history_limit": 4,
+                    "kept_history_count": 4,
+                    "compacted_history_count": 6,
+                    "retained_tool_outcome_count": 1,
+                    "summary_strategy": "deterministic_prefix_summary",
+                    "summary_action": "rebuilt",
+                    "summary_line_count": 1,
+                },
+            }
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.requests
+    request = llm.requests[0]
+    messages = request.messages
+    assert messages[0].role == "system"
+    assert messages[0].content == "You are SetupAgent."
+    assert messages[1].role == "system"
+    assert "Runtime turn state follows as JSON." in messages[1].content
+    assert "setup.read.draft_refs" in messages[1].content
+    assert "context_packet" not in messages[1].content
+    assert "context_report" not in messages[1].content
+    assert messages[-1].role == "user"
+    assert messages[-1].content == "Please help with setup."
+    assert result.structured_payload["context_report"]["context_profile"] == "compact"
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_only_sends_tool_schemas_from_turn_scope():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            tool_scope=[
+                "setup.read.workspace",
+                "setup.patch.story_config",
+            ]
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.requests
+    tool_names = [item["function"]["name"] for item in (llm.requests[0].tools or [])]
+    assert tool_names == [
+        "rp_setup__setup.read.workspace",
+        "rp_setup__setup.patch.story_config",
+    ]
 
 
 @pytest.mark.asyncio
@@ -569,6 +705,12 @@ async def test_runtime_executor_executes_tool_and_continues():
         "rp_setup__setup.patch.story_config"
     )
     assert result.structured_payload["tool_outcomes"][0]["success"] is True
+    continue_reasons = [
+        item["decision"].get("continue_reason")
+        for item in result.structured_payload["loop_trace"]
+    ]
+    assert "tool_call_batch_pending" in continue_reasons
+    assert "tool_result_follow_up" in continue_reasons
 
 
 @pytest.mark.asyncio
@@ -674,6 +816,10 @@ async def test_runtime_executor_blocks_false_success_when_repair_obligation_is_u
     assert (
         result.structured_payload["completion_guard"]["reason"]
         == "repair_obligation_unresolved"
+    )
+    assert any(
+        item["decision"].get("continue_reason") == "completion_guard_retry"
+        for item in result.structured_payload["loop_trace"]
     )
 
 
@@ -902,3 +1048,4 @@ async def test_runtime_executor_stream_preserves_usage_in_latest_response():
     assert latest_response["usage"]["prompt_tokens"] == 11
     assert latest_response["usage"]["completion_tokens"] == 7
     assert latest_response["usage"]["total_tokens"] == 18
+    assert executor.last_result.structured_payload["loop_trace"]

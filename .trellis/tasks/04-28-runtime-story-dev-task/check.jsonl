@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend RP runtime quality checklist for review."}
+{"file": ".trellis/spec/backend/rp-active-story-block-prompt-context.md", "reason": "Verify orchestrator/specialist context boundaries remain aligned."}
+{"file": ".trellis/spec/backend/rp-runtime-workspace-block-views.md", "reason": "Verify runtime workspace remains read-only/scratch and does not become durable truth."}
+{"file": ".trellis/spec/backend/rp-memory-temporal-materialization.md", "reason": "Verify memory layer ownership is preserved."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-design-gap-analysis.md", "reason": "Review implementation against task-specific gap analysis and agreed scope."}

@@ -16,6 +16,7 @@ from rp.models.story_runtime import (
     StoryArtifact,
     StoryArtifactKind,
     StoryArtifactStatus,
+    StorySegmentStructuredMetadata,
     StorySession,
 )
 from rp.models.writing_runtime import WritingPacket
@@ -24,6 +25,9 @@ from .longform_regression_service import LongformRegressionService
 from .longform_specialist_service import LongformSpecialistService
 from .builder_projection_context_service import BuilderProjectionContextService
 from .projection_state_service import ProjectionStateService
+from .recall_scene_transcript_ingestion_service import (
+    RecallSceneTranscriptIngestionService,
+)
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
 from .story_session_service import StorySessionService
 from .writing_packet_builder import WritingPacketBuilder
@@ -45,6 +49,9 @@ class StoryTurnDomainService:
         writing_worker_execution_service: WritingWorkerExecutionService,
         regression_service: LongformRegressionService,
         block_consumer_state_service: StoryBlockConsumerStateService | None = None,
+        recall_scene_transcript_ingestion_service: (
+            RecallSceneTranscriptIngestionService | None
+        ) = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
@@ -55,6 +62,9 @@ class StoryTurnDomainService:
         self._writing_worker_execution_service = writing_worker_execution_service
         self._regression_service = regression_service
         self._block_consumer_state_service = block_consumer_state_service
+        self._recall_scene_transcript_ingestion_service = (
+            recall_scene_transcript_ingestion_service
+        )
 
     def prepare_generation_inputs(
         self,
@@ -307,9 +317,14 @@ class StoryTurnDomainService:
         )
         if artifact is None:
             raise ValueError("No pending segment available to accept")
+        accepted_metadata = self._accepted_story_segment_metadata(
+            artifact=artifact,
+            patch=request.story_segment_metadata_patch,
+        )
         accepted = self._story_session_service.update_artifact(
             artifact_id=artifact.artifact_id,
             status=StoryArtifactStatus.ACCEPTED,
+            metadata=accepted_metadata,
         )
         updated_chapter = self._story_session_service.update_chapter_workspace(
             chapter_workspace_id=chapter.chapter_workspace_id,
@@ -330,6 +345,11 @@ class StoryTurnDomainService:
             accepted_artifact=accepted,
             model_id=request.model_id,
             provider_id=request.provider_id,
+        )
+        self._materialize_closed_scene_transcript_if_needed(
+            session=updated_session,
+            chapter=updated_chapter,
+            scene_ref=accepted.scene_ref,
         )
         self._story_session_service.commit()
         return LongformTurnResponse(
@@ -357,9 +377,24 @@ class StoryTurnDomainService:
             model_id=request.model_id,
             provider_id=request.provider_id,
         )
+        self._materialize_closed_scene_transcript_if_needed(
+            session=updated_session,
+            chapter=updated_chapter,
+            scene_ref=updated_chapter.current_scene_ref,
+            allow_current_scene=True,
+        )
+        closed_scene_refs = list(updated_chapter.closed_scene_refs)
+        last_closed_scene_ref = updated_chapter.last_closed_scene_ref
+        if updated_chapter.current_scene_ref:
+            last_closed_scene_ref = updated_chapter.current_scene_ref
+            if last_closed_scene_ref not in closed_scene_refs:
+                closed_scene_refs.append(last_closed_scene_ref)
         self._story_session_service.update_chapter_workspace(
             chapter_workspace_id=updated_chapter.chapter_workspace_id,
             phase=LongformChapterPhase.CHAPTER_COMPLETED,
+            current_scene_ref=None,
+            last_closed_scene_ref=last_closed_scene_ref,
+            closed_scene_refs=closed_scene_refs,
         )
         next_chapter_index = chapter.chapter_index + 1
         next_chapter = self._story_session_service.create_chapter_workspace(
@@ -477,6 +512,57 @@ class StoryTurnDomainService:
             consumer_key=consumer_key,
         )
 
+    @staticmethod
+    def _accepted_story_segment_metadata(
+        *,
+        artifact: StoryArtifact,
+        patch: StorySegmentStructuredMetadata | None,
+    ) -> dict[str, object]:
+        metadata = dict(artifact.metadata)
+        if patch is None:
+            return metadata
+        metadata.pop("foreshadow_status_updates", None)
+        metadata.update(patch.to_artifact_metadata())
+        return metadata
+
+    def _materialize_closed_scene_transcript_if_needed(
+        self,
+        *,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        scene_ref: str | None,
+        allow_current_scene: bool = False,
+    ) -> None:
+        if self._recall_scene_transcript_ingestion_service is None:
+            return
+        normalized_scene_ref = (scene_ref or "").strip()
+        if not normalized_scene_ref:
+            return
+        if normalized_scene_ref in chapter.closed_scene_refs:
+            pass
+        elif allow_current_scene and normalized_scene_ref == chapter.current_scene_ref:
+            pass
+        else:
+            return
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=chapter.chapter_index,
+        )
+        input_model = (
+            self._recall_scene_transcript_ingestion_service.build_promotion_input(
+                session_id=session.session_id,
+                story_id=session.story_id,
+                chapter_index=chapter.chapter_index,
+                scene_ref=normalized_scene_ref,
+                source_workspace_id=session.source_workspace_id,
+                discussion_entries=snapshot.discussion_entries,
+                artifacts=snapshot.artifacts,
+            )
+        )
+        self._recall_scene_transcript_ingestion_service.ingest_scene_transcript(
+            input_model
+        )
+
     def _persist_generated_artifact_impl(
         self,
         *,
@@ -499,18 +585,30 @@ class StoryTurnDomainService:
                 status=StoryArtifactStatus.SUPERSEDED,
             )
             revision = pending_artifact.revision + 1
+        create_artifact_kwargs: dict[str, str | None] = {}
+        if (
+            request.command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT
+            and pending_artifact is not None
+        ):
+            create_artifact_kwargs["scene_ref"] = pending_artifact.scene_ref
+        artifact_metadata = {
+            "command_kind": request.command_kind.value,
+            "packet_id": packet.packet_id,
+            "writer_hints": specialist_bundle.writer_hints,
+        }
+        if plan.output_kind == StoryArtifactKind.STORY_SEGMENT:
+            artifact_metadata.update(
+                specialist_bundle.story_segment_metadata.to_artifact_metadata()
+            )
         artifact = self._story_session_service.create_artifact(
             session_id=session.session_id,
             chapter_workspace_id=chapter.chapter_workspace_id,
             artifact_kind=plan.output_kind,
             status=StoryArtifactStatus.DRAFT,
             content_text=text,
-            metadata={
-                "command_kind": request.command_kind.value,
-                "packet_id": packet.packet_id,
-                "writer_hints": specialist_bundle.writer_hints,
-            },
+            metadata=artifact_metadata,
             revision=revision,
+            **create_artifact_kwargs,
         )
         next_phase = chapter.phase
         outline_draft = chapter.outline_draft_json

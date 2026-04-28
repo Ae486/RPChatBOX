@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from rp.models.memory_materialization import (
+    ACCEPTED_STORY_SEGMENT_KIND,
+    HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
+    build_recall_materialization_metadata,
+    build_recall_seed_section,
+)
 from rp.models.retrieval_records import IndexJob, SourceAsset
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import (
@@ -58,6 +64,18 @@ class RecallDetailIngestionService:
             existing_asset = self._document_service.get_source_asset(asset_id)
             section_path = f"recall.chapter.{chapter_index}.accepted_segment.{artifact.artifact_id}"
             section_title = f"Accepted Story Segment r{artifact.revision}"
+            metadata = build_recall_materialization_metadata(
+                materialization_kind=ACCEPTED_STORY_SEGMENT_KIND,
+                materialization_event=HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
+                session_id=session_id,
+                chapter_index=chapter_index,
+                domain_path=section_path,
+                extra={
+                    "artifact_id": artifact.artifact_id,
+                    "artifact_revision": artifact.revision,
+                    "artifact_kind": artifact.artifact_kind.value,
+                },
+            )
             source_asset = SourceAsset(
                 asset_id=asset_id,
                 story_id=story_id,
@@ -79,42 +97,16 @@ class RecallDetailIngestionService:
                 ingestion_status="queued",
                 mapped_targets=["recall"],
                 metadata={
-                    "layer": "recall",
-                    "source_family": "longform_story_runtime",
-                    "materialization_event": "heavy_regression.chapter_close",
-                    "materialization_kind": "accepted_story_segment",
-                    "materialized_to_recall": True,
-                    "source_type": "accepted_story_segment",
-                    "session_id": session_id,
-                    "chapter_index": chapter_index,
-                    "artifact_id": artifact.artifact_id,
-                    "artifact_revision": artifact.revision,
-                    "artifact_kind": artifact.artifact_kind.value,
-                    "domain": "chapter",
-                    "domain_path": section_path,
+                    **metadata,
                     "seed_sections": [
-                        {
-                            "section_id": f"accepted_story_segment:{artifact.artifact_id}",
-                            "title": section_title,
-                            "path": section_path,
-                            "level": 1,
-                            "text": content_text,
-                            "metadata": {
-                                "domain": "chapter",
-                                "domain_path": section_path,
-                                "tags": ["accepted_story_segment", "recall"],
-                                "layer": "recall",
-                                "source_family": "longform_story_runtime",
-                                "materialization_event": "heavy_regression.chapter_close",
-                                "materialization_kind": "accepted_story_segment",
-                                "materialized_to_recall": True,
-                                "session_id": session_id,
-                                "chapter_index": chapter_index,
-                                "source_type": "accepted_story_segment",
-                                "artifact_id": artifact.artifact_id,
-                                "artifact_revision": artifact.revision,
-                            },
-                        }
+                        build_recall_seed_section(
+                            section_id=f"accepted_story_segment:{artifact.artifact_id}",
+                            title=section_title,
+                            path=section_path,
+                            text=content_text,
+                            metadata=metadata,
+                            tags=[ACCEPTED_STORY_SEGMENT_KIND, "recall"],
+                        )
                     ],
                 },
                 created_at=existing_asset.created_at

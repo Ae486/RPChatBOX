@@ -11,8 +11,10 @@ from rp.agent_runtime.contracts import (
     SetupCognitiveStateSnapshot,
     SetupCognitiveStateSummary,
     SetupToolOutcome,
+    SetupWorkingDigest,
 )
 from rp.models.setup_agent import SetupAgentDialogueMessage
+from rp.services.setup_context_compaction_service import SetupContextCompactionService
 from rp.services.setup_context_governor import SetupContextGovernorService
 
 
@@ -56,7 +58,21 @@ def test_context_governor_keeps_recent_history_and_builds_compact_summary():
     assert compact_summary is not None
     assert compact_summary.source_message_count == 4
     assert compact_summary.draft_refs == ["draft:story_config"]
+    assert compact_summary.recovery_hints[0].ref == "draft:story_config"
     assert metadata["compacted_history_count"] == 4
+    assert metadata["raw_history_limit"] == 4
+    assert metadata["summary_strategy"] == "deterministic_prefix_summary"
+    assert metadata["summary_action"] == "rebuilt"
+
+    standard_history, _, standard_metadata = governor.govern_history(
+        history=history,
+        retained_tool_outcomes=retained_outcomes,
+        working_digest=None,
+        existing_summary=None,
+        context_profile="standard",
+    )
+    assert len(standard_history) == 6
+    assert standard_metadata["raw_history_limit"] == 6
 
 
 def test_context_governor_reuses_compact_summary_when_prefix_is_unchanged():
@@ -81,6 +97,105 @@ def test_context_governor_reuses_compact_summary_when_prefix_is_unchanged():
     )
 
     assert reused_summary is compact_summary
+
+
+def test_context_governor_validates_expert_summary_and_records_strategy():
+    def _expert_provider(_messages):
+        return {
+            "summary_lines": [f"line {index}" for index in range(8)],
+            "confirmed_points": [f"point {index}" for index in range(10)],
+            "open_threads": ["Need exact policy preset."],
+            "rejected_directions": ["Do not use generic memory."],
+            "draft_refs": ["draft:story_config"],
+            "recovery_hints": [
+                {
+                    "ref": "draft:story_config",
+                    "reason": "Need exact configured preset.",
+                    "detail": "Recover through setup.read.draft_refs.",
+                }
+            ],
+            "must_not_infer": ["Do not infer prior-stage raw discussion."],
+        }
+
+    governor = SetupContextGovernorService(
+        compaction_service=SetupContextCompactionService(
+            expert_summary_provider=_expert_provider
+        )
+    )
+
+    _, compact_summary, metadata = governor.govern_history(
+        history=_history(8),
+        retained_tool_outcomes=[],
+        working_digest=SetupWorkingDigest(draft_refs=["draft:story_config"]),
+        existing_summary=None,
+        context_profile="compact",
+        current_step="story_config",
+    )
+
+    assert compact_summary is not None
+    assert metadata["summary_strategy"] == "expert_stage_summary"
+    assert metadata["summary_action"] == "rebuilt"
+    assert metadata["fallback_reason"] is None
+    assert len(compact_summary.summary_lines) == 6
+    assert len(compact_summary.confirmed_points) == 8
+    assert compact_summary.recovery_hints[0].ref == "draft:story_config"
+
+
+def test_context_governor_falls_back_when_expert_summary_is_invalid():
+    def _invalid_expert_provider(_messages):
+        return {
+            "summary_lines": ["expert output should be rejected"],
+            "analysis": "forbidden scratchpad",
+        }
+
+    governor = SetupContextGovernorService(
+        compaction_service=SetupContextCompactionService(
+            expert_summary_provider=_invalid_expert_provider
+        )
+    )
+
+    _, compact_summary, metadata = governor.govern_history(
+        history=_history(8),
+        retained_tool_outcomes=[],
+        working_digest=None,
+        existing_summary=None,
+        context_profile="compact",
+        current_step="foundation",
+    )
+
+    assert compact_summary is not None
+    assert metadata["summary_strategy"] == "deterministic_prefix_summary"
+    assert metadata["summary_action"] == "rebuilt"
+    assert "forbidden_fields" in metadata["fallback_reason"]
+    assert compact_summary.summary_lines[0].startswith("User: user message")
+
+
+def test_context_governor_falls_back_when_expert_summary_uses_unsupported_ref():
+    def _unsupported_ref_provider(_messages):
+        return {
+            "summary_lines": ["Looks valid except for the ref."],
+            "draft_refs": ["draft:story_config_extra"],
+        }
+
+    governor = SetupContextGovernorService(
+        compaction_service=SetupContextCompactionService(
+            expert_summary_provider=_unsupported_ref_provider
+        )
+    )
+
+    _, compact_summary, metadata = governor.govern_history(
+        history=_history(8),
+        retained_tool_outcomes=[],
+        working_digest=None,
+        existing_summary=None,
+        context_profile="compact",
+        current_step="story_config",
+    )
+
+    assert compact_summary is not None
+    assert metadata["summary_strategy"] == "deterministic_prefix_summary"
+    assert "unsupported_refs" in metadata["fallback_reason"]
+    assert compact_summary.draft_refs == []
 
 
 def test_context_governor_retains_failure_before_superseded_successes():

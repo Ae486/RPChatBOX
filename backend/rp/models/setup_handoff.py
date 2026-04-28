@@ -46,17 +46,36 @@ class SetupStageChunkDescription(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SetupStageHandoffSourceBasis(BaseModel):
+    """Minimal lineage surface for one accepted prior-stage handoff."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    commit_id: str
+    snapshot_block_types: list[str] = Field(default_factory=list)
+
+
 class SetupStageHandoffPacket(BaseModel):
     """Compact prior-stage truth packet injected into later setup stages."""
 
     model_config = ConfigDict(extra="forbid")
 
+    workspace_id: str
+    from_step: SetupStepId
+    to_step: SetupStepId
     step_id: SetupStepId
     commit_id: str
     summary: str
+    summary_tier_0: str | None = None
+    summary_tier_1: str | None = None
     committed_refs: list[str] = Field(default_factory=list)
     spotlights: list[str] = Field(default_factory=list)
     chunk_descriptions: list[SetupStageChunkDescription] = Field(default_factory=list)
+    open_issues: list[str] = Field(default_factory=list)
+    retrieval_refs: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_basis: SetupStageHandoffSourceBasis
     created_at: datetime
 
 

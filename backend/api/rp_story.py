@@ -282,6 +282,20 @@ async def get_story_memory_projection(
     return {"session_id": session_id, "items": items}
 
 
+@router.get("/api/rp/story-sessions/{session_id}/memory/overview")
+async def get_story_memory_overview(
+    session_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.read_memory_overview(session_id=session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+
+
 @router.get("/api/rp/story-sessions/{session_id}/memory/blocks")
 async def get_story_memory_blocks(
     session_id: str,

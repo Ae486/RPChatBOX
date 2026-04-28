@@ -103,7 +103,13 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             scope="story",
             current_revision=5,
             data_json={"current_chapter": 1, "title": "Formal API Chapter"},
-            metadata_json={"test_marker": "api_formal_authoritative"},
+            metadata_json={
+                "test_marker": "api_formal_authoritative",
+                "read_only": True,
+                "mutation_mode": "wrong_mode_from_store",
+                "history_mode": "wrong_history_from_store",
+                "proposal_visibility": "wrong_visibility_from_store",
+            },
             latest_apply_id="apply-api-formal",
             payload_schema_ref="schema://core-state/api-chapter-current",
         )
@@ -134,7 +140,13 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             scope="chapter",
             current_revision=6,
             items_json=["Formal API outline"],
-            metadata_json={"test_marker": "api_formal_projection"},
+            metadata_json={
+                "test_marker": "api_formal_projection",
+                "read_only": False,
+                "mutation_mode": "wrong_mode_from_store",
+                "history_mode": "wrong_history_from_store",
+                "proposal_visibility": "wrong_visibility_from_store",
+            },
             last_refresh_kind="api_test_refresh",
             payload_schema_ref="schema://core-state/api-projection-slot",
         )
@@ -353,12 +365,13 @@ class _MockStoryLLMService:
     async def chat_completion(self, request):
         system_prompt = request.messages[0].content or ""
         user_payload = request.messages[1].content or ""
+        response_content: str | dict[str, object]
 
         if "longform_orchestrator" in system_prompt:
             payload = json.loads(user_payload)
             command_kind = payload["command_kind"]
             if command_kind == "generate_outline":
-                content = {
+                response_content = {
                     "output_kind": "chapter_outline",
                     "needs_retrieval": False,
                     "archival_queries": [],
@@ -368,7 +381,7 @@ class _MockStoryLLMService:
                     "notes": ["mock_orchestrator"],
                 }
             elif command_kind == "write_next_segment":
-                content = {
+                response_content = {
                     "output_kind": "story_segment",
                     "needs_retrieval": False,
                     "archival_queries": [],
@@ -378,7 +391,7 @@ class _MockStoryLLMService:
                     "notes": ["mock_orchestrator"],
                 }
             else:
-                content = {
+                response_content = {
                     "output_kind": "discussion_message",
                     "needs_retrieval": False,
                     "archival_queries": [],
@@ -389,7 +402,12 @@ class _MockStoryLLMService:
                 }
             return {
                 "choices": [
-                    {"message": {"role": "assistant", "content": json.dumps(content)}}
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(response_content),
+                        }
+                    }
                 ],
                 "usage": {
                     "prompt_tokens": 1,
@@ -403,6 +421,7 @@ class _MockStoryLLMService:
             command_kind = payload["command_kind"]
             state_patch = {}
             recall_summary = None
+            story_segment_metadata: dict[str, object] = {}
             if command_kind == "accept_pending_segment":
                 state_patch = {
                     "narrative_progress": {
@@ -422,7 +441,27 @@ class _MockStoryLLMService:
                     },
                 }
                 recall_summary = "Chapter 1: the courier steals the ledger and survives the archive pursuit."
-            content = {
+            elif command_kind == "write_next_segment":
+                story_segment_metadata = {
+                    "foreshadow_status_updates": [
+                        {
+                            "foreshadow_id": "envoy_debt",
+                            "status": "active",
+                            "summary": "  bell tower debt  ",
+                        },
+                        {
+                            "foreshadow_id": "   ",
+                            "status": "closed",
+                        },
+                        {
+                            "foreshadow_id": "envoy_debt",
+                            "status": "resolved",
+                            "summary": "bell tower debt",
+                            "resolution": " Settled at the river gate. ",
+                        },
+                    ]
+                }
+            response_content = {
                 "foundation_digest": ["Rivergate forbids open ritual fire."],
                 "blueprint_digest": [
                     "Chapter one reveals the ledger and forces an escape."
@@ -437,10 +476,16 @@ class _MockStoryLLMService:
                 "state_patch_proposals": state_patch,
                 "summary_updates": ["mock specialist digest"],
                 "recall_summary_text": recall_summary,
+                "story_segment_metadata": story_segment_metadata,
             }
             return {
                 "choices": [
-                    {"message": {"role": "assistant", "content": json.dumps(content)}}
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(response_content),
+                        }
+                    }
                 ],
                 "usage": {
                     "prompt_tokens": 1,
@@ -449,9 +494,11 @@ class _MockStoryLLMService:
                 },
             }
 
-        content = "Writer fallback output."
+        response_content = "Writer fallback output."
         return {
-            "choices": [{"message": {"role": "assistant", "content": content}}],
+            "choices": [
+                {"message": {"role": "assistant", "content": response_content}}
+            ],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
@@ -480,6 +527,72 @@ class _RecoverableStoryLLMService(_MockStoryLLMService):
             return
         async for chunk in super().chat_completion_stream(request):
             yield chunk
+
+
+def _create_story_session_with_pending_segment(client, monkeypatch) -> tuple[str, dict]:
+    client.put("/api/providers/provider-story", json=_provider_payload())
+    client.put(
+        "/api/providers/provider-story/models/model-story",
+        json=_model_payload(),
+    )
+    workspace_id = _create_ready_workspace(client)
+    monkeypatch.setattr(
+        "rp.services.story_llm_gateway.get_litellm_service",
+        lambda: _MockStoryLLMService(),
+    )
+    session_id = client.post(
+        f"/api/rp/setup/workspaces/{workspace_id}/activate"
+    ).json()["session_id"]
+
+    with client.stream(
+        "POST",
+        f"/api/rp/story-sessions/{session_id}/turn/stream",
+        json={
+            "session_id": session_id,
+            "command_kind": "generate_outline",
+            "model_id": "model-story",
+        },
+    ) as response:
+        assert response.status_code == 200
+        _ = "".join(response.iter_text())
+
+    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    outline_artifact = next(
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "chapter_outline"
+    )
+    accepted_outline = client.post(
+        f"/api/rp/story-sessions/{session_id}/turn",
+        json={
+            "session_id": session_id,
+            "command_kind": "accept_outline",
+            "model_id": "model-story",
+            "target_artifact_id": outline_artifact["artifact_id"],
+        },
+    )
+    assert accepted_outline.status_code == 200
+
+    with client.stream(
+        "POST",
+        f"/api/rp/story-sessions/{session_id}/turn/stream",
+        json={
+            "session_id": session_id,
+            "command_kind": "write_next_segment",
+            "model_id": "model-story",
+            "user_prompt": "Write the first escape segment.",
+        },
+    ) as response:
+        assert response.status_code == 200
+        _ = "".join(response.iter_text())
+
+    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    pending_segment = next(
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "story_segment" and item["status"] == "draft"
+    )
+    return session_id, pending_segment
 
 
 class _FakeLangfuseObservation:
@@ -926,6 +1039,14 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
         if item["artifact_kind"] == "story_segment" and item["status"] == "draft"
     )
     assert snapshot["chapter"]["phase"] == "segment_review"
+    assert pending_segment["metadata"]["foreshadow_status_updates"] == [
+        {
+            "foreshadow_id": "envoy_debt",
+            "status": "resolved",
+            "summary": "bell tower debt",
+            "resolution": "Settled at the river gate.",
+        }
+    ]
 
     accepted_segment = client.post(
         f"/api/rp/story-sessions/{session_id}/turn",
@@ -940,6 +1061,19 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     assert snapshot["chapter"]["phase"] == "segment_drafting"
+    accepted_story_segment = next(
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_id"] == pending_segment["artifact_id"]
+    )
+    assert accepted_story_segment["metadata"]["foreshadow_status_updates"] == [
+        {
+            "foreshadow_id": "envoy_debt",
+            "status": "resolved",
+            "summary": "bell tower debt",
+            "resolution": "Settled at the river gate.",
+        }
+    ]
     assert (
         snapshot["session"]["current_state_json"]["narrative_progress"][
             "accepted_segments"
@@ -958,10 +1092,151 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
     assert completed.status_code == 200
     assert completed.json()["current_chapter_index"] == 2
     assert completed.json()["current_phase"] == "outline_drafting"
+    completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    assert completed_snapshot["session"]["current_state_json"][
+        "foreshadow_registry"
+    ] == [
+        {
+            "foreshadow_id": "envoy_debt",
+            "status": "resolved",
+            "summary": "bell tower debt",
+            "resolution": "Settled at the river gate.",
+        }
+    ]
 
     chapter_two = client.get(f"/api/rp/story-sessions/{session_id}/chapters/2")
     assert chapter_two.status_code == 200
     assert chapter_two.json()["chapter"]["phase"] == "outline_drafting"
+
+
+def test_accept_pending_segment_patch_can_override_draft_structured_metadata(
+    client, monkeypatch
+):
+    session_id, pending_segment = _create_story_session_with_pending_segment(
+        client,
+        monkeypatch,
+    )
+
+    accepted_segment = client.post(
+        f"/api/rp/story-sessions/{session_id}/turn",
+        json={
+            "session_id": session_id,
+            "command_kind": "accept_pending_segment",
+            "model_id": "model-story",
+            "target_artifact_id": pending_segment["artifact_id"],
+            "story_segment_metadata_patch": {
+                "foreshadow_status_updates": [
+                    {
+                        "foreshadow_id": "envoy_debt",
+                        "status": "active",
+                        "summary": "stale accept patch",
+                    },
+                    {
+                        "foreshadow_id": "envoy_debt",
+                        "status": "closed",
+                        "summary": "reviewed ledger debt",
+                        "resolution": "Cleared during acceptance.",
+                    },
+                ],
+                "unsupported_family": [{"ignored": True}],
+            },
+        },
+    )
+    assert accepted_segment.status_code == 200
+
+    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    accepted_story_segment = next(
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_id"] == pending_segment["artifact_id"]
+    )
+    assert accepted_story_segment["status"] == "accepted"
+    assert accepted_story_segment["metadata"]["command_kind"] == "write_next_segment"
+    assert accepted_story_segment["metadata"]["writer_hints"] == [
+        "Keep tension immediate.",
+        "Stay concrete and lean.",
+    ]
+    assert accepted_story_segment["metadata"]["packet_id"]
+    assert "unsupported_family" not in accepted_story_segment["metadata"]
+    assert accepted_story_segment["metadata"]["foreshadow_status_updates"] == [
+        {
+            "foreshadow_id": "envoy_debt",
+            "status": "closed",
+            "summary": "reviewed ledger debt",
+            "resolution": "Cleared during acceptance.",
+        }
+    ]
+
+    completed = client.post(
+        f"/api/rp/story-sessions/{session_id}/turn",
+        json={
+            "session_id": session_id,
+            "command_kind": "complete_chapter",
+            "model_id": "model-story",
+        },
+    )
+    assert completed.status_code == 200
+
+    completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    assert completed_snapshot["session"]["current_state_json"]["foreshadow_registry"] == [
+        {
+            "foreshadow_id": "envoy_debt",
+            "status": "closed",
+            "summary": "reviewed ledger debt",
+            "resolution": "Cleared during acceptance.",
+        }
+    ]
+
+
+def test_accept_pending_segment_empty_patch_clears_draft_structured_metadata(
+    client, monkeypatch
+):
+    session_id, pending_segment = _create_story_session_with_pending_segment(
+        client,
+        monkeypatch,
+    )
+
+    accepted_segment = client.post(
+        f"/api/rp/story-sessions/{session_id}/turn",
+        json={
+            "session_id": session_id,
+            "command_kind": "accept_pending_segment",
+            "model_id": "model-story",
+            "target_artifact_id": pending_segment["artifact_id"],
+            "story_segment_metadata_patch": {
+                "foreshadow_status_updates": [],
+            },
+        },
+    )
+    assert accepted_segment.status_code == 200
+
+    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    accepted_story_segment = next(
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_id"] == pending_segment["artifact_id"]
+    )
+    assert accepted_story_segment["status"] == "accepted"
+    assert accepted_story_segment["metadata"]["command_kind"] == "write_next_segment"
+    assert accepted_story_segment["metadata"]["writer_hints"] == [
+        "Keep tension immediate.",
+        "Stay concrete and lean.",
+    ]
+    assert accepted_story_segment["metadata"]["packet_id"]
+    assert "foreshadow_status_updates" not in accepted_story_segment["metadata"]
+
+    completed = client.post(
+        f"/api/rp/story-sessions/{session_id}/turn",
+        json={
+            "session_id": session_id,
+            "command_kind": "complete_chapter",
+            "model_id": "model-story",
+        },
+    )
+    assert completed.status_code == 200
+
+    completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    assert completed_snapshot["session"]["current_state_json"]["foreshadow_registry"] == []
 
 
 def test_story_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
@@ -1031,6 +1306,37 @@ def test_story_turn_rejects_command_not_allowed_for_phase(client):
     assert (
         "not allowed during phase outline_drafting"
         in payload["detail"]["error"]["message"]
+    )
+
+
+def test_story_turn_rejects_story_segment_metadata_patch_on_non_accept_command(client):
+    workspace_id = _create_ready_workspace(client)
+    activation = client.post(f"/api/rp/setup/workspaces/{workspace_id}/activate")
+    assert activation.status_code == 200
+    session_id = activation.json()["session_id"]
+
+    response = client.post(
+        f"/api/rp/story-sessions/{session_id}/turn",
+        json={
+            "session_id": session_id,
+            "command_kind": "generate_outline",
+            "model_id": "model-story",
+            "story_segment_metadata_patch": {
+                "foreshadow_status_updates": [
+                    {
+                        "foreshadow_id": "envoy_debt",
+                        "status": "resolved",
+                    }
+                ]
+            },
+        },
+    )
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["detail"]["error"]["code"] == "story_turn_failed"
+    assert (
+        payload["detail"]["error"]["message"]
+        == "story_segment_metadata_patch is only allowed on accept_pending_segment"
     )
 
 
@@ -1232,6 +1538,7 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     session_id = seeded["session_id"]
 
     blocks = client.get(f"/api/rp/story-sessions/{session_id}/memory/blocks")
+    overview = client.get(f"/api/rp/story-sessions/{session_id}/memory/overview")
     authoritative_only = client.get(
         f"/api/rp/story-sessions/{session_id}/memory/blocks",
         params={"layer": Layer.CORE_STATE_AUTHORITATIVE.value},
@@ -1341,6 +1648,7 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     )
 
     assert blocks.status_code == 200
+    assert overview.status_code == 200
     assert authoritative_only.status_code == 200
     assert runtime_workspace_only.status_code == 200
     assert core_store_only.status_code == 200
@@ -1362,6 +1670,42 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert runtime_artifact_versions.status_code == 400
     assert runtime_discussion_provenance.status_code == 400
     assert blocks.json()["session_id"] == session_id
+    overview_payload = overview.json()
+    assert overview_payload["session_id"] == session_id
+    assert overview_payload["blocks"]["total"] == len(blocks.json()["items"])
+    assert overview_payload["blocks"]["by_layer"][
+        Layer.CORE_STATE_AUTHORITATIVE.value
+    ] == len(authoritative_only.json()["items"])
+    assert overview_payload["blocks"]["by_layer"][Layer.RUNTIME_WORKSPACE.value] == (
+        len(runtime_workspace_only.json()["items"])
+    )
+    assert overview_payload["layers"][Layer.RUNTIME_WORKSPACE.value]["history"] == (
+        "unsupported"
+    )
+    assert overview_payload["layers"][Layer.RUNTIME_WORKSPACE.value]["mutation"] == (
+        "unsupported_read_only"
+    )
+    assert overview_payload["layers"][Layer.RECALL.value]["storage_model"] == (
+        "retrieval_core"
+    )
+    assert "accepted_story_segment" in overview_payload["layers"][Layer.RECALL.value][
+        "known_source_families"
+    ]
+    assert overview_payload["proposals"]["by_status"]["review_required"] == 1
+    assert overview_payload["proposals"]["by_status"]["applied"] == 1
+    assert overview_payload["consumers"]["total"] == 3
+    assert overview_payload["consumers"]["dirty"] == 3
+    assert set(overview_payload["consumers"]["dirty_consumer_keys"]) == {
+        "story.orchestrator",
+        "story.specialist",
+        "story.writer_packet",
+    }
+    assert "authoritative_mutation_requires_proposal_apply" in overview_payload[
+        "boundaries"
+    ]
+    assert "runtime_workspace_blocks_are_read_only_current_turn_scratch" in (
+        overview_payload["boundaries"]
+    )
     assert all(
         item["layer"] == Layer.CORE_STATE_AUTHORITATIVE.value
         for item in authoritative_only.json()["items"]
@@ -1398,6 +1742,12 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert authoritative_item["metadata"]["source_table"] == (
         "rp_core_state_authoritative_objects"
     )
+    assert authoritative_item["metadata"]["read_only"] is False
+    assert authoritative_item["metadata"]["mutation_mode"] == (
+        "governed_proposal_apply"
+    )
+    assert authoritative_item["metadata"]["history_mode"] == "supported"
+    assert authoritative_item["metadata"]["proposal_visibility"] == "supported"
     assert projection_item["block_id"] == seeded["projection_block_id"]
     assert projection_item["label"] == "projection.current_outline_digest"
     assert projection_item["layer"] == Layer.CORE_STATE_PROJECTION.value
@@ -1406,6 +1756,12 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert projection_item["metadata"]["source_table"] == (
         "rp_core_state_projection_slots"
     )
+    assert projection_item["metadata"]["read_only"] is True
+    assert projection_item["metadata"]["mutation_mode"] == (
+        "unsupported_projection_read_side"
+    )
+    assert projection_item["metadata"]["history_mode"] == "supported"
+    assert projection_item["metadata"]["proposal_visibility"] == "empty"
     assert runtime_artifact_item["block_id"] == seeded["runtime_artifact_block_id"]
     assert runtime_artifact_item["label"].startswith("runtime_workspace.artifact.")
     assert runtime_artifact_item["layer"] == Layer.RUNTIME_WORKSPACE.value
@@ -1416,15 +1772,31 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert runtime_artifact_item["data_json"]["status"] == (
         StoryArtifactStatus.DRAFT.value
     )
+    assert runtime_artifact_item["data_json"]["scene_ref"] == "chapter:1:scene:1"
     assert runtime_artifact_item["metadata"]["source_table"] == "rp_story_artifacts"
+    assert runtime_artifact_item["metadata"]["scene_ref"] == "chapter:1:scene:1"
+    assert runtime_artifact_item["metadata"]["read_only"] is True
+    assert runtime_artifact_item["metadata"]["mutation_mode"] == (
+        "unsupported_runtime_workspace_scratch"
+    )
+    assert runtime_artifact_item["metadata"]["history_mode"] == "unsupported"
+    assert runtime_artifact_item["metadata"]["proposal_visibility"] == "empty"
     assert runtime_discussion_item["block_id"] == seeded["runtime_discussion_block_id"]
     assert runtime_discussion_item["label"].startswith("runtime_workspace.discussion.")
     assert runtime_discussion_item["layer"] == Layer.RUNTIME_WORKSPACE.value
     assert runtime_discussion_item["source"] == "runtime_workspace_store"
     assert runtime_discussion_item["data_json"]["role"] == "assistant"
+    assert runtime_discussion_item["data_json"]["scene_ref"] == "chapter:1:scene:1"
     assert runtime_discussion_item["metadata"]["source_table"] == (
         "rp_story_discussion_entries"
     )
+    assert runtime_discussion_item["metadata"]["scene_ref"] == "chapter:1:scene:1"
+    assert runtime_discussion_item["metadata"]["read_only"] is True
+    assert runtime_discussion_item["metadata"]["mutation_mode"] == (
+        "unsupported_runtime_workspace_scratch"
+    )
+    assert runtime_discussion_item["metadata"]["history_mode"] == "unsupported"
+    assert runtime_discussion_item["metadata"]["proposal_visibility"] == "empty"
     assert authoritative_versions.json() == {
         "session_id": session_id,
         "block_id": seeded["authoritative_block_id"],
@@ -1798,6 +2170,7 @@ def test_story_memory_routes_return_404_for_missing_session(client):
     routes = [
         ("/api/rp/story-sessions/missing-session/memory/authoritative", None),
         ("/api/rp/story-sessions/missing-session/memory/projection", None),
+        ("/api/rp/story-sessions/missing-session/memory/overview", None),
         ("/api/rp/story-sessions/missing-session/memory/blocks", None),
         ("/api/rp/story-sessions/missing-session/memory/block-consumers", None),
         ("/api/rp/story-sessions/missing-session/memory/blocks/missing-block", None),

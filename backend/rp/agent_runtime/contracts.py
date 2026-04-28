@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from rp.models.setup_workspace import SetupStepId
+
 
 class RuntimeProfile(BaseModel):
     """Fixed runtime behavior for one agent profile."""
@@ -200,6 +202,16 @@ class SetupToolOutcome(BaseModel):
     recorded_at: datetime
 
 
+class SetupCompactRecoveryHint(BaseModel):
+    """Draft-ref hint used to recover exact detail after stage-local compaction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str
+    reason: str
+    detail: str | None = None
+
+
 class SetupContextCompactSummary(BaseModel):
     """Compacted carry-forward summary for trimmed older current-step history."""
 
@@ -208,8 +220,80 @@ class SetupContextCompactSummary(BaseModel):
     source_fingerprint: str
     source_message_count: int = 0
     summary_lines: list[str] = Field(default_factory=list)
+    confirmed_points: list[str] = Field(default_factory=list)
     open_threads: list[str] = Field(default_factory=list)
+    rejected_directions: list[str] = Field(default_factory=list)
     draft_refs: list[str] = Field(default_factory=list)
+    recovery_hints: list[SetupCompactRecoveryHint] = Field(default_factory=list)
+    must_not_infer: list[str] = Field(default_factory=list)
+
+
+class SetupContextGovernanceReport(BaseModel):
+    """Transient report describing one turn's stage-local context decision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context_profile: Literal["standard", "compact"]
+    profile_reasons: list[str] = Field(default_factory=list)
+    raw_history_count: int = 0
+    raw_history_chars: int = 0
+    estimated_input_tokens: int | None = None
+    previous_prompt_tokens: int | None = None
+    previous_total_tokens: int | None = None
+    user_edit_delta_count: int = 0
+    prior_stage_handoff_count: int = 0
+    raw_history_limit: int = 0
+    kept_history_count: int = 0
+    compacted_history_count: int = 0
+    retained_tool_outcome_count: int = 0
+    summary_strategy: Literal[
+        "none",
+        "deterministic_prefix_summary",
+        "expert_stage_summary",
+    ] = "none"
+    summary_action: Literal["none", "reused_existing", "rebuilt"] = "none"
+    summary_line_count: int = 0
+    fallback_reason: str | None = None
+
+
+class SetupDraftRefReadInput(BaseModel):
+    """Read-only draft-ref recovery request for setup compact summaries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    step_id: SetupStepId
+    refs: list[str]
+    detail: Literal["summary", "full"] = "summary"
+    max_chars: int = 4000
+
+
+class SetupDraftRefReadItem(BaseModel):
+    """One read result for a requested setup draft ref."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str
+    found: bool
+    block_type: Literal[
+        "story_config",
+        "writing_contract",
+        "foundation_entry",
+        "longform_blueprint",
+    ] | None = None
+    title: str | None = None
+    summary: str | None = None
+    payload: dict[str, Any] | None = None
+
+
+class SetupDraftRefReadResult(BaseModel):
+    """Read-only result payload for compact-summary draft-ref recovery."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    items: list[SetupDraftRefReadItem] = Field(default_factory=list)
+    missing_refs: list[str] = Field(default_factory=list)
 
 
 class SetupCognitiveStateSnapshot(BaseModel):
@@ -360,6 +444,27 @@ class SetupCompletionGuard(BaseModel):
         "finalize_failure",
     ]
     finish_reason: str | None = None
+
+
+class SetupReActTraceFrame(BaseModel):
+    """Thin runtime-authored semantic trace frame for one loop decision site."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    round_no: int
+    decision_site: Literal[
+        "inspect_model_output",
+        "assess_progress",
+        "reflect_if_needed",
+        "finalize_success",
+        "finalize_failure",
+    ]
+    goal: dict[str, Any] | None = None
+    plan: dict[str, Any] | None = None
+    action: dict[str, Any] = Field(default_factory=dict)
+    observation: dict[str, Any] = Field(default_factory=dict)
+    reflection: dict[str, Any] | None = None
+    decision: dict[str, Any] = Field(default_factory=dict)
 
 
 class RpAgentTurnResult(BaseModel):

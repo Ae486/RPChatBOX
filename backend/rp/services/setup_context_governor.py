@@ -1,6 +1,8 @@
 """Current-step context governor for setup runtime-v2 turns."""
 from __future__ import annotations
 
+from typing import Any
+
 from rp.agent_runtime.contracts import (
     SetupContextCompactSummary,
     SetupCognitiveStateSnapshot,
@@ -37,10 +39,13 @@ class SetupContextGovernorService:
         working_digest: SetupWorkingDigest | None,
         existing_summary: SetupContextCompactSummary | None,
         context_profile: str,
+        current_step: str | None = None,
+        estimated_input_tokens: int | None = None,
+        previous_usage: dict[str, int] | None = None,
     ) -> tuple[
         list[SetupAgentDialogueMessage],
         SetupContextCompactSummary | None,
-        dict[str, int],
+        dict[str, Any],
     ]:
         limit = self._compaction_service.raw_history_limit(context_profile=context_profile)
         compact_summary = self._compaction_service.build_summary(
@@ -49,7 +54,9 @@ class SetupContextGovernorService:
             working_digest=working_digest,
             existing_summary=existing_summary,
             context_profile=context_profile,
+            current_step=current_step,
         )
+        summary_decision = self._compaction_service.last_summary_decision()
         kept_history = list(history[-limit:]) if len(history) > limit else list(history)
         return (
             kept_history,
@@ -58,6 +65,20 @@ class SetupContextGovernorService:
                 "raw_history_limit": limit,
                 "kept_history_count": len(kept_history),
                 "compacted_history_count": max(len(history) - len(kept_history), 0),
+                "estimated_input_tokens": estimated_input_tokens,
+                "previous_prompt_tokens": (
+                    int(previous_usage.get("prompt_tokens"))
+                    if previous_usage and previous_usage.get("prompt_tokens") is not None
+                    else None
+                ),
+                "previous_total_tokens": (
+                    int(previous_usage.get("total_tokens"))
+                    if previous_usage and previous_usage.get("total_tokens") is not None
+                    else None
+                ),
+                "summary_strategy": summary_decision.get("summary_strategy") or "none",
+                "summary_action": summary_decision.get("summary_action") or "none",
+                "fallback_reason": summary_decision.get("fallback_reason"),
             },
         )
 

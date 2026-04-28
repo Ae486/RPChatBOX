@@ -133,14 +133,12 @@ class SetupGraphRunner:
     def _compile_graph(self, checkpointer):
         builder = StateGraph(SetupGraphState)
         builder.add_node("load_workspace", self._nodes.load_workspace)
-        builder.add_node("build_context", self._nodes.build_context)
         builder.add_node("run_turn", self._nodes.run_turn)
         builder.add_node("finalize_stream", self._nodes.finalize_stream)
         builder.add_edge(START, "load_workspace")
-        builder.add_edge("load_workspace", "build_context")
         builder.add_conditional_edges(
-            "build_context",
-            self._route_after_build_context,
+            "load_workspace",
+            self._route_after_load_workspace,
             {
                 "run_turn": "run_turn",
                 "finish": END,
@@ -166,7 +164,6 @@ class SetupGraphRunner:
             "history": [item.model_dump(mode="json") for item in request.history],
             "user_edit_delta_ids": list(request.user_edit_delta_ids),
             "stream_mode": stream_mode,
-            "context_packet": {},
             "assistant_text": "",
             "finish_reason": None,
             "warnings": [],
@@ -201,7 +198,7 @@ class SetupGraphRunner:
             return None
 
     @staticmethod
-    def _route_after_build_context(state: SetupGraphState) -> str:
+    def _route_after_load_workspace(state: SetupGraphState) -> str:
         return "finish" if state.get("stream_mode") else "run_turn"
 
     @staticmethod
@@ -239,6 +236,12 @@ class SetupGraphRunner:
             "state": values,
             "cognitive_state_summary": response_payload.get("cognitive_state_summary"),
             "repair_route": response_payload.get("repair_route"),
+            "continue_reason": response_payload.get("continue_reason"),
+            "loop_trace": (
+                list(response_payload.get("loop_trace", []))
+                if isinstance(response_payload.get("loop_trace"), list)
+                else []
+            ),
             "summary": SetupGraphRunner._snapshot_summary(snapshot),
         }
 

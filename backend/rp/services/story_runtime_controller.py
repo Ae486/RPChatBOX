@@ -21,6 +21,9 @@ from rp.models.story_runtime import (
 from .memory_inspection_read_service import MemoryInspectionReadService
 from .projection_read_service import ProjectionReadService
 from .provenance_read_service import ProvenanceReadService
+from .recall_scene_transcript_ingestion_service import (
+    RecallSceneTranscriptIngestionService,
+)
 from .rp_block_read_service import RpBlockReadService
 from .story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
@@ -53,6 +56,9 @@ class StoryRuntimeController:
         story_block_mutation_service: StoryBlockMutationService | None = None,
         story_block_consumer_state_service: StoryBlockConsumerStateService
         | None = None,
+        recall_scene_transcript_ingestion_service: (
+            RecallSceneTranscriptIngestionService | None
+        ) = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._story_activation_service = story_activation_service
@@ -63,6 +69,9 @@ class StoryRuntimeController:
         self._rp_block_read_service = rp_block_read_service
         self._story_block_mutation_service = story_block_mutation_service
         self._story_block_consumer_state_service = story_block_consumer_state_service
+        self._recall_scene_transcript_ingestion_service = (
+            recall_scene_transcript_ingestion_service
+        )
 
     def activate_workspace(self, *, workspace_id: str) -> StoryActivationResult:
         return self._story_activation_service.activate_workspace(
@@ -103,6 +112,16 @@ class StoryRuntimeController:
             chapter_index=updated_session.current_chapter_index,
         )
 
+    def close_current_scene(self, *, session_id: str) -> ChapterWorkspaceSnapshot:
+        chapter = self._story_session_service.close_current_scene(session_id=session_id)
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=session_id,
+            chapter_index=chapter.chapter_index,
+        )
+        self._materialize_scene_transcript(snapshot=snapshot)
+        self._story_session_service.commit()
+        return snapshot
+
     def list_memory_authoritative(self, *, session_id: str) -> list[dict]:
         self._require_session(session_id)
         return self._memory_inspection_read_service.list_authoritative_objects(
@@ -131,6 +150,60 @@ class StoryRuntimeController:
                 source=source,
             )
         ]
+
+    def read_memory_overview(self, *, session_id: str) -> dict[str, Any]:
+        session = self._require_session(session_id)
+        chapter = self._story_session_service.get_current_chapter(session_id)
+        blocks = self._rp_block_read_service.list_blocks(session_id=session_id)
+        proposals = self._memory_inspection_read_service.list_proposals(
+            story_id=session.story_id,
+            session_id=session_id,
+        )
+        consumers = self.list_memory_block_consumers(session_id=session_id)
+        by_layer = self._count_values(block.layer.value for block in blocks)
+        by_source = self._count_values(block.source for block in blocks)
+        proposal_status_counts = self._count_values(
+            str(item.get("status") or "unknown") for item in proposals
+        )
+        dirty_consumers = [
+            item for item in consumers if bool(item.get("dirty"))
+        ]
+        return {
+            "session_id": session.session_id,
+            "story_id": session.story_id,
+            "current_chapter_index": session.current_chapter_index,
+            "current_phase": session.current_phase.value,
+            "chapter_workspace_id": (
+                chapter.chapter_workspace_id if chapter is not None else None
+            ),
+            "blocks": {
+                "total": len(blocks),
+                "by_layer": by_layer,
+                "by_source": by_source,
+            },
+            "layers": self._memory_overview_layers(by_layer),
+            "proposals": {
+                "total": len(proposals),
+                "by_status": proposal_status_counts,
+            },
+            "consumers": {
+                "total": len(consumers),
+                "dirty": len(dirty_consumers),
+                "dirty_consumer_keys": [
+                    str(item.get("consumer_key"))
+                    for item in dirty_consumers
+                    if item.get("consumer_key") is not None
+                ],
+                "items": consumers,
+            },
+            "boundaries": [
+                "authoritative_mutation_requires_proposal_apply",
+                "projection_blocks_are_read_side_maintenance_views",
+                "runtime_workspace_blocks_are_read_only_current_turn_scratch",
+                "recall_and_archival_are_retrieval_backed_not_block_native",
+                "overview_does_not_sync_or_compile_consumers",
+            ],
+        }
 
     def get_memory_block(self, *, session_id: str, block_id: str) -> dict | None:
         self._require_session(session_id)
@@ -383,6 +456,31 @@ class StoryRuntimeController:
             raise ValueError(f"StorySession not found: {session_id}")
         return session
 
+    def _materialize_scene_transcript(
+        self,
+        *,
+        snapshot: ChapterWorkspaceSnapshot,
+    ) -> None:
+        if self._recall_scene_transcript_ingestion_service is None:
+            return
+        scene_ref = (snapshot.chapter.last_closed_scene_ref or "").strip()
+        if not scene_ref:
+            return
+        input_model = (
+            self._recall_scene_transcript_ingestion_service.build_promotion_input(
+                session_id=snapshot.session.session_id,
+                story_id=snapshot.session.story_id,
+                chapter_index=snapshot.chapter.chapter_index,
+                scene_ref=scene_ref,
+                source_workspace_id=snapshot.session.source_workspace_id,
+                discussion_entries=snapshot.discussion_entries,
+                artifacts=snapshot.artifacts,
+            )
+        )
+        self._recall_scene_transcript_ingestion_service.ingest_scene_transcript(
+            input_model
+        )
+
     @staticmethod
     def _build_authoritative_ref(
         *,
@@ -409,3 +507,71 @@ class StoryRuntimeController:
             scope=block.scope,
             revision=block.revision,
         )
+
+    @staticmethod
+    def _count_values(values) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for value in values:
+            key = str(value)
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    @staticmethod
+    def _memory_overview_layers(block_counts: dict[str, int]) -> dict[str, dict]:
+        return {
+            Layer.CORE_STATE_AUTHORITATIVE.value: {
+                "semantic_layer": "Core State.authoritative_state",
+                "block_count": block_counts.get(Layer.CORE_STATE_AUTHORITATIVE.value, 0),
+                "truth_status": "authoritative_truth",
+                "storage_model": "formal_store_with_compatibility_mirror",
+                "read_surface": "memory.get_state / memory.blocks",
+                "mutation": "governed_proposal_apply",
+                "history": "supported",
+            },
+            Layer.CORE_STATE_PROJECTION.value: {
+                "semantic_layer": "Core State.derived_projection",
+                "block_count": block_counts.get(Layer.CORE_STATE_PROJECTION.value, 0),
+                "truth_status": "derived_projection",
+                "storage_model": "formal_store_with_compatibility_mirror",
+                "read_surface": "memory.get_summary / memory.blocks",
+                "mutation": "maintenance_read_side_only",
+                "history": "supported",
+            },
+            Layer.RECALL.value: {
+                "semantic_layer": "Recall Memory",
+                "block_count": block_counts.get(Layer.RECALL.value, 0),
+                "truth_status": "historical_recall",
+                "storage_model": "retrieval_core",
+                "read_surface": "memory.search_recall",
+                "mutation": "ingestion_only",
+                "history": "retrieval_backed",
+                "overview_count": "not_counted_in_this_surface",
+                "known_source_families": [
+                    "chapter_summary",
+                    "accepted_story_segment",
+                    "continuity_note",
+                    "scene_transcript",
+                    "character_long_history_summary",
+                    "retired_foreshadow_summary",
+                ],
+            },
+            Layer.ARCHIVAL.value: {
+                "semantic_layer": "Archival Knowledge",
+                "block_count": block_counts.get(Layer.ARCHIVAL.value, 0),
+                "truth_status": "source_reference_material",
+                "storage_model": "retrieval_core",
+                "read_surface": "memory.search_archival",
+                "mutation": "ingestion_only",
+                "history": "retrieval_backed",
+                "overview_count": "not_counted_in_this_surface",
+            },
+            Layer.RUNTIME_WORKSPACE.value: {
+                "semantic_layer": "Runtime Workspace",
+                "block_count": block_counts.get(Layer.RUNTIME_WORKSPACE.value, 0),
+                "truth_status": "current_turn_scratch",
+                "storage_model": "story_runtime_rows",
+                "read_surface": "memory.blocks",
+                "mutation": "unsupported_read_only",
+                "history": "unsupported",
+            },
+        }

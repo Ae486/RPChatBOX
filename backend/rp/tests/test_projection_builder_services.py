@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -16,6 +17,7 @@ from rp.models.story_runtime import (
     LongformTurnRequest,
     OrchestratorPlan,
     SpecialistResultBundle,
+    StorySegmentStructuredMetadata,
     StoryArtifactStatus,
     StoryArtifactKind,
 )
@@ -180,7 +182,10 @@ def _build_turn_domain_service(
     return StoryTurnDomainService(
         story_session_service=service,
         orchestrator_service=orchestrator_service or SimpleNamespace(),
-        specialist_service=specialist_service or SimpleNamespace(),
+        specialist_service=cast(
+            LongformSpecialistService,
+            specialist_service or SimpleNamespace(),
+        ),
         builder_projection_context_service=BuilderProjectionContextService(
             projection_state_service
         ),
@@ -349,6 +354,79 @@ def test_orchestrator_fallback_uses_projection_slots_not_writer_hints(
     assert any("Outline A" in query for query in plan.archival_queries)
 
 
+def test_story_segment_structured_metadata_normalizes_latest_foreshadow_update():
+    metadata = StorySegmentStructuredMetadata(
+        foreshadow_status_updates=[
+            {
+                "foreshadow_id": "envoy_debt",
+                "status": "active",
+                "summary": "  bell tower debt  ",
+            },
+            {
+                "foreshadow_id": "   ",
+                "status": "closed",
+            },
+            {
+                "foreshadow_id": "envoy_debt",
+                "status": "resolved",
+                "summary": "bell tower debt",
+                "resolution": " Settled at the river gate. ",
+            },
+        ]
+    )
+
+    assert metadata.to_artifact_metadata() == {
+        "foreshadow_status_updates": [
+            {
+                "foreshadow_id": "envoy_debt",
+                "status": "resolved",
+                "summary": "bell tower debt",
+                "resolution": "Settled at the river gate.",
+            }
+        ]
+    }
+
+
+def test_story_segment_structured_metadata_schema_stays_typed_and_degrades_bad_items():
+    schema = SpecialistResultBundle.model_json_schema()
+    assert (
+        schema["$defs"]["StorySegmentStructuredMetadata"]["properties"][
+            "foreshadow_status_updates"
+        ]["items"]["$ref"]
+        == "#/$defs/ForeshadowStatusUpdateMetadata"
+    )
+
+    bundle = SpecialistResultBundle.model_validate(
+        {
+            "story_segment_metadata": {
+                "foreshadow_status_updates": [
+                    {
+                        "foreshadow_id": "envoy_debt",
+                        "status": "resolved",
+                        "summary": " bell tower debt ",
+                    },
+                    "not-a-dict",
+                    {
+                        "foreshadow_id": "   ",
+                        "status": "closed",
+                    },
+                ],
+                "unsupported_family": [{"ignored": True}],
+            }
+        }
+    )
+
+    assert bundle.story_segment_metadata.to_artifact_metadata() == {
+        "foreshadow_status_updates": [
+            {
+                "foreshadow_id": "envoy_debt",
+                "status": "resolved",
+                "summary": "bell tower debt",
+            }
+        ]
+    }
+
+
 def test_story_turn_accept_outline_updates_projection_via_boundary_service(
     retrieval_session,
 ):
@@ -504,6 +582,15 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
             recent_segment_digest=["Segment A"],
             current_state_digest=["State A"],
             writer_hints=["Hint A"],
+            story_segment_metadata=StorySegmentStructuredMetadata(
+                foreshadow_status_updates=[
+                    {
+                        "foreshadow_id": "envoy_debt",
+                        "status": "resolved",
+                        "summary": "bell tower debt",
+                    }
+                ]
+            ),
         ).model_dump_json()
     )
     archival_hits = [
@@ -546,7 +633,22 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
             excerpt_text="Earlier in chapter one, the seal broke during the storm.",
             score=0.77,
             rank=1,
-            metadata={"title": "Storm Callback"},
+            metadata={
+                "title": "Storm Callback",
+                "layer": "recall",
+                "source_family": "longform_story_runtime",
+                "materialization_event": "heavy_regression.chapter_close",
+                "materialization_kind": "accepted_story_segment",
+                "materialized_to_recall": True,
+                "chapter_index": 1,
+                "artifact_id": "artifact-storm",
+                "artifact_revision": 2,
+                "asset_id": "recall_detail_artifact-storm",
+                "asset_kind": "accepted_story_segment",
+                "source_ref": (
+                    "story_session:session-1:chapter:1:artifact:artifact-storm"
+                ),
+            },
             provenance_refs=["prov:storm-callback"],
         )
     ]
@@ -635,6 +737,22 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
     assert specialist_payload["recall_hits"][0]["excerpt_text"] == (
         "Earlier in chapter one, the seal broke during the storm."
     )
+    assert (
+        specialist_payload["recall_hits"][0]["source_family"]
+        == "longform_story_runtime"
+    )
+    assert (
+        specialist_payload["recall_hits"][0]["materialization_kind"]
+        == "accepted_story_segment"
+    )
+    assert (
+        specialist_payload["recall_hits"][0]["materialization_event"]
+        == "heavy_regression.chapter_close"
+    )
+    assert (
+        specialist_payload["recall_hits"][0]["metadata"]["artifact_id"]
+        == "artifact-storm"
+    )
     assert specialist_payload["archival_block_views"][0]["source"] == "retrieval_store"
     assert (
         specialist_payload["archival_block_views"][0]["label"]
@@ -653,6 +771,14 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
         specialist_payload["recall_block_views"][0]["metadata"]["query_id"]
         == "rq-recall-1"
     )
+    assert (
+        specialist_payload["recall_block_views"][0]["metadata"]["materialization_kind"]
+        == "accepted_story_segment"
+    )
+    assert (
+        specialist_payload["recall_block_views"][0]["data_json"]["source_family"]
+        == "longform_story_runtime"
+    )
     assert "[BLOCK_PROMPT_CONTEXT]" in orchestrator_system_prompt
     assert 'label="chapter.current"' in orchestrator_system_prompt
     assert 'label="projection.current_outline_digest"' in orchestrator_system_prompt
@@ -660,3 +786,13 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
     assert 'label="chapter.current"' in specialist_system_prompt
     assert plan.notes == ["gateway"]
     assert bundle.writer_hints == ["Hint A"]
+    assert [
+        item.model_dump(mode="json", exclude_none=True)
+        for item in bundle.story_segment_metadata.foreshadow_status_updates
+    ] == [
+        {
+            "foreshadow_id": "envoy_debt",
+            "status": "resolved",
+            "summary": "bell tower debt",
+        }
+    ]

@@ -9,6 +9,7 @@ from rp.models.setup_handoff import (
     SetupContextPacket,
     SetupStageChunkDescription,
     SetupStageHandoffPacket,
+    SetupStageHandoffSourceBasis,
 )
 from rp.models.setup_workspace import SetupStepId
 from rp.services.setup_workspace_service import SetupWorkspaceService
@@ -120,7 +121,9 @@ class SetupContextBuilder:
                 continue
             handoffs.append(
                 cls._build_stage_handoff(
+                    workspace=workspace,
                     commit=commit,
+                    to_step=current_step,
                     context_profile=context_profile,
                 )
             )
@@ -141,14 +144,29 @@ class SetupContextBuilder:
     def _build_stage_handoff(
         cls,
         *,
+        workspace,
         commit,
+        to_step: SetupStepId,
         context_profile: str,
     ) -> SetupStageHandoffPacket:
         compact = context_profile == "compact"
         return SetupStageHandoffPacket(
+            workspace_id=workspace.workspace_id,
+            from_step=commit.step_id,
+            to_step=to_step,
             step_id=commit.step_id,
             commit_id=commit.commit_id,
             summary=cls._commit_summary(commit=commit, compact=compact),
+            summary_tier_0=(
+                str(commit.summary_tier_0)
+                if commit.summary_tier_0 is not None
+                else None
+            ),
+            summary_tier_1=(
+                str(commit.summary_tier_1 or commit.summary_tier_2)
+                if (commit.summary_tier_1 or commit.summary_tier_2) is not None
+                else None
+            ),
             committed_refs=list(commit.committed_refs),
             spotlights=list(commit.spotlights[:5]),
             chunk_descriptions=(
@@ -158,6 +176,22 @@ class SetupContextBuilder:
                     commit=commit,
                     compact=False,
                 )
+            ),
+            open_issues=cls._build_open_issues(commit=commit),
+            retrieval_refs=cls._build_retrieval_refs(
+                workspace=workspace,
+                commit_id=commit.commit_id,
+            ),
+            warnings=cls._build_handoff_warnings(
+                workspace=workspace,
+                proposal_id=commit.proposal_id,
+            ),
+            source_basis=SetupStageHandoffSourceBasis(
+                workspace_id=workspace.workspace_id,
+                commit_id=commit.commit_id,
+                snapshot_block_types=[
+                    str(snapshot.block_type) for snapshot in commit.snapshots
+                ],
             ),
             created_at=commit.created_at,
         )
@@ -204,6 +238,60 @@ class SetupContextBuilder:
                 )
             )
         return chunks[: (4 if compact else 8)]
+
+    @classmethod
+    def _build_open_issues(cls, *, commit) -> list[str]:
+        issues: list[str] = []
+        for snapshot in commit.snapshots:
+            cls._collect_open_issues(snapshot.payload, issues)
+        deduped: list[str] = []
+        for item in issues:
+            if item not in deduped:
+                deduped.append(item)
+        return deduped[:6]
+
+    @classmethod
+    def _collect_open_issues(cls, payload: Any, issues: list[str]) -> None:
+        if isinstance(payload, dict):
+            for key in ("open_issues", "remaining_open_issues", "unresolved_issues"):
+                values = payload.get(key)
+                if isinstance(values, list):
+                    for item in values:
+                        text = cls._coerce_preview_text(item)
+                        if text:
+                            issues.append(text)
+            for key in ("entries", "chapter_blueprints"):
+                items = payload.get(key)
+                if isinstance(items, list):
+                    for item in items[:8]:
+                        cls._collect_open_issues(item, issues)
+            for value in payload.values():
+                if isinstance(value, (dict, list)):
+                    cls._collect_open_issues(value, issues)
+            return
+        if isinstance(payload, list):
+            for item in payload[:8]:
+                cls._collect_open_issues(item, issues)
+
+    @staticmethod
+    def _build_retrieval_refs(*, workspace, commit_id: str) -> list[str]:
+        refs: list[str] = []
+        for job in workspace.retrieval_ingestion_jobs:
+            if job.commit_id != commit_id:
+                continue
+            ref = str(job.target_ref).strip()
+            if ref and ref not in refs:
+                refs.append(ref)
+        return refs[:8]
+
+    @staticmethod
+    def _build_handoff_warnings(*, workspace, proposal_id: str | None) -> list[str]:
+        if not proposal_id:
+            return []
+        for proposal in workspace.commit_proposals:
+            if proposal.proposal_id == proposal_id:
+                return list(proposal.unresolved_warnings[:4])
+        return []
 
     @classmethod
     def _foundation_chunk_descriptions(

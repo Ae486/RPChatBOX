@@ -49,7 +49,19 @@ from rp.services.provenance_read_service import ProvenanceReadService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.recall_character_long_history_ingestion_service import (
+    RecallCharacterLongHistoryIngestionService,
+)
+from rp.services.recall_continuity_note_ingestion_service import (
+    RecallContinuityNoteIngestionService,
+)
 from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
+from rp.services.recall_retired_foreshadow_ingestion_service import (
+    RecallRetiredForeshadowIngestionService,
+)
+from rp.services.recall_scene_transcript_ingestion_service import (
+    RecallSceneTranscriptIngestionService,
+)
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.rp_block_read_service import RpBlockReadService
@@ -166,10 +178,6 @@ class RpRuntimeFactory:
         )
 
     @staticmethod
-    def _use_setup_runtime_v2() -> bool:
-        return bool(get_settings().rp_setup_agent_runtime_v2_enabled)
-
-    @staticmethod
     def _use_core_state_store_write() -> bool:
         return bool(get_settings().rp_memory_core_state_store_write_enabled)
 
@@ -210,27 +218,29 @@ class RpRuntimeFactory:
             story_session_service=story_session_service
         )
 
+    def _build_setup_execution_service(
+        self,
+        *,
+        workspace_service: SetupWorkspaceService,
+        context_builder: SetupContextBuilder,
+    ) -> SetupAgentExecutionService:
+        runtime_state_service = self._build_setup_runtime_state_service()
+        return SetupAgentExecutionService(
+            workspace_service=workspace_service,
+            context_builder=context_builder,
+            runtime_executor=self._build_setup_runtime_executor(),
+            adapter=SetupRuntimeAdapter(),
+            runtime_state_service=runtime_state_service,
+        )
+
     def build_setup_agent_execution_service(self) -> SetupAgentExecutionService:
         workspace_service = self._build_setup_workspace_service()
         context_builder = self._build_setup_context_builder(
             workspace_service=workspace_service
         )
-        runtime_state_service = self._build_setup_runtime_state_service()
-        runtime_executor = (
-            self._build_setup_runtime_executor()
-            if self._use_setup_runtime_v2()
-            else None
-        )
-        adapter = SetupRuntimeAdapter() if runtime_executor is not None else None
-        return SetupAgentExecutionService(
+        return self._build_setup_execution_service(
             workspace_service=workspace_service,
             context_builder=context_builder,
-            runtime_executor=runtime_executor,
-            adapter=adapter,
-            runtime_state_service=runtime_state_service,
-            mcp_manager_factory=lambda story_id: self._build_setup_mcp_manager(
-                story_id=story_id
-            ),
         )
 
     def build_setup_graph_runner(self) -> SetupGraphRunner:
@@ -238,27 +248,13 @@ class RpRuntimeFactory:
         context_builder = self._build_setup_context_builder(
             workspace_service=workspace_service
         )
-        runtime_state_service = self._build_setup_runtime_state_service()
-        runtime_executor = (
-            self._build_setup_runtime_executor()
-            if self._use_setup_runtime_v2()
-            else None
-        )
-        adapter = SetupRuntimeAdapter() if runtime_executor is not None else None
-        execution_service = SetupAgentExecutionService(
+        execution_service = self._build_setup_execution_service(
             workspace_service=workspace_service,
             context_builder=context_builder,
-            runtime_executor=runtime_executor,
-            adapter=adapter,
-            runtime_state_service=runtime_state_service,
-            mcp_manager_factory=lambda story_id: self._build_setup_mcp_manager(
-                story_id=story_id
-            ),
         )
         return SetupGraphRunner(
             nodes=SetupGraphNodes(
                 workspace_service=workspace_service,
-                context_builder=context_builder,
                 execution_service=execution_service,
             ),
             execution_service=execution_service,
@@ -395,6 +391,15 @@ class RpRuntimeFactory:
                 self._session
             ),
             recall_detail_ingestion_service=RecallDetailIngestionService(self._session),
+            recall_continuity_note_ingestion_service=(
+                RecallContinuityNoteIngestionService(self._session)
+            ),
+            recall_character_long_history_ingestion_service=(
+                RecallCharacterLongHistoryIngestionService(self._session)
+            ),
+            recall_retired_foreshadow_ingestion_service=(
+                RecallRetiredForeshadowIngestionService(self._session)
+            ),
         )
         writing_packet_builder = WritingPacketBuilder()
         writing_worker_execution_service = WritingWorkerExecutionService()
@@ -408,6 +413,9 @@ class RpRuntimeFactory:
             writing_worker_execution_service=writing_worker_execution_service,
             regression_service=regression_service,
             block_consumer_state_service=block_consumer_state_service,
+            recall_scene_transcript_ingestion_service=(
+                RecallSceneTranscriptIngestionService(self._session)
+            ),
         )
         return turn_domain_service
 
@@ -525,6 +533,9 @@ class RpRuntimeFactory:
             rp_block_read_service=rp_block_read_service,
             story_block_mutation_service=block_mutation_service,
             story_block_consumer_state_service=block_consumer_state_service,
+            recall_scene_transcript_ingestion_service=(
+                RecallSceneTranscriptIngestionService(self._session)
+            ),
         )
 
     def build_story_graph_runner(self) -> StoryGraphRunner:

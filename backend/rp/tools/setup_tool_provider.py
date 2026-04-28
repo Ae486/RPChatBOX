@@ -1,6 +1,7 @@
 """Backend-local provider exposing setup private tools to SetupAgent."""
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -10,6 +11,9 @@ from rp.agent_runtime.contracts import (
     ChunkCandidate,
     DiscussionState,
     DraftTruthWrite,
+    SetupDraftRefReadInput,
+    SetupDraftRefReadItem,
+    SetupDraftRefReadResult,
 )
 from rp.models.setup_drafts import (
     FoundationEntry,
@@ -179,6 +183,7 @@ class SetupToolProvider:
             "setup.proposal.commit": SetupProposalCommitInput,
             "setup.read.workspace": SetupReadWorkspaceInput,
             "setup.read.step_context": SetupReadStepContextInput,
+            "setup.read.draft_refs": SetupDraftRefReadInput,
         }
 
     def list_tools(self) -> list[McpToolInfo]:
@@ -250,6 +255,11 @@ class SetupToolProvider:
                     "setup.read.step_context",
                     "Read a deterministic context packet for one setup step. Use when you need the current draft snapshot plus committed summaries and optionally selected user edit deltas. Do not use to mutate anything. Target object: SetupContextPacket. Important field: step_id.",
                     SetupReadStepContextInput,
+                ),
+                (
+                    "setup.read.draft_refs",
+                    "Read exact current-step setup draft details by compact-summary refs. Use after compaction when recovery_hints point to draft:story_config, draft:writing_contract, draft:longform_blueprint, or foundation:<entry_id>. Read-only; never use for prior-stage raw discussion or Memory OS state.",
+                    SetupDraftRefReadInput,
                 ),
             )
         ]
@@ -485,7 +495,223 @@ class SetupToolProvider:
                 step_id=input_model.step_id,
                 user_edit_delta_ids=list(input_model.user_edit_delta_ids),
             )
+        if tool_name == "setup.read.draft_refs":
+            return self._read_draft_refs(input_model=input_model)
         raise ValueError(f"Unknown setup tool: {tool_name}")
+
+    def _read_draft_refs(
+        self,
+        *,
+        input_model: SetupDraftRefReadInput,
+    ) -> SetupDraftRefReadResult:
+        if not input_model.refs:
+            raise SetupToolContractError(
+                code="setup_draft_refs_required",
+                message="setup.read.draft_refs requires at least one draft ref.",
+                error_code="SETUP_DRAFT_REFS_REQUIRED",
+                details=self._error_details(
+                    tool_name="setup.read.draft_refs",
+                    failure_origin="validation",
+                    repair_strategy="auto_repair",
+                    required_fields=["refs"],
+                ),
+            )
+
+        workspace = self._require_workspace(input_model.workspace_id)
+        max_chars = max(1, min(int(input_model.max_chars or 4000), 20000))
+        items: list[SetupDraftRefReadItem] = []
+        missing_refs: list[str] = []
+        for raw_ref in input_model.refs:
+            ref = str(raw_ref or "").strip()
+            if not ref:
+                continue
+            item = self._resolve_draft_ref(
+                workspace=workspace,
+                ref=ref,
+                detail=input_model.detail,
+                max_chars=max_chars,
+            )
+            items.append(item)
+            if not item.found:
+                missing_refs.append(ref)
+        return SetupDraftRefReadResult(
+            success=not missing_refs,
+            items=items,
+            missing_refs=missing_refs,
+        )
+
+    def _resolve_draft_ref(
+        self,
+        *,
+        workspace,
+        ref: str,
+        detail: str,
+        max_chars: int,
+    ) -> SetupDraftRefReadItem:
+        if ref == "draft:story_config":
+            return self._draft_ref_item(
+                ref=ref,
+                block_type="story_config",
+                title="Story Config Draft",
+                model=workspace.story_config_draft,
+                detail=detail,
+                max_chars=max_chars,
+            )
+        if ref == "draft:writing_contract":
+            return self._draft_ref_item(
+                ref=ref,
+                block_type="writing_contract",
+                title="Writing Contract Draft",
+                model=workspace.writing_contract_draft,
+                detail=detail,
+                max_chars=max_chars,
+            )
+        if ref == "draft:longform_blueprint":
+            return self._draft_ref_item(
+                ref=ref,
+                block_type="longform_blueprint",
+                title="Longform Blueprint Draft",
+                model=workspace.longform_blueprint_draft,
+                detail=detail,
+                max_chars=max_chars,
+            )
+        if ref.startswith("foundation:"):
+            entry_id = ref.removeprefix("foundation:").strip()
+            foundation_draft = workspace.foundation_draft
+            entry = None
+            if foundation_draft is not None:
+                entry = next(
+                    (item for item in foundation_draft.entries if item.entry_id == entry_id),
+                    None,
+                )
+            return self._draft_ref_item(
+                ref=ref,
+                block_type="foundation_entry",
+                title=(
+                    (entry.title or entry.path or entry.entry_id)
+                    if entry is not None
+                    else None
+                ),
+                model=entry,
+                detail=detail,
+                max_chars=max_chars,
+            )
+        return SetupDraftRefReadItem(ref=ref, found=False)
+
+    def _draft_ref_item(
+        self,
+        *,
+        ref: str,
+        block_type: Literal[
+            "story_config",
+            "writing_contract",
+            "foundation_entry",
+            "longform_blueprint",
+        ],
+        title: str | None,
+        model: BaseModel | None,
+        detail: str,
+        max_chars: int,
+    ) -> SetupDraftRefReadItem:
+        if model is None:
+            return SetupDraftRefReadItem(ref=ref, found=False, block_type=block_type)
+        payload = model.model_dump(mode="json", exclude_none=True)
+        return SetupDraftRefReadItem(
+            ref=ref,
+            found=True,
+            block_type=block_type,
+            title=title,
+            summary=self._draft_ref_summary(block_type=block_type, payload=payload),
+            payload=(
+                self._bounded_payload(payload=payload, max_chars=max_chars)
+                if detail == "full"
+                else None
+            ),
+        )
+
+    @classmethod
+    def _draft_ref_summary(
+        cls,
+        *,
+        block_type: str,
+        payload: dict[str, Any],
+    ) -> str:
+        if block_type == "story_config":
+            return cls._join_preview(
+                [
+                    cls._prefixed_preview("model", payload.get("model_profile_ref")),
+                    cls._prefixed_preview("worker", payload.get("worker_profile_ref")),
+                    cls._prefixed_preview("policy", payload.get("post_write_policy_preset")),
+                    cls._coerce_preview_text(payload.get("notes")),
+                ]
+            )
+        if block_type == "writing_contract":
+            return cls._join_preview(
+                [
+                    cls._prefixed_preview("pov", payload.get("pov_rules")),
+                    cls._prefixed_preview("style", payload.get("style_rules")),
+                    cls._prefixed_preview("constraints", payload.get("writing_constraints")),
+                    cls._coerce_preview_text(payload.get("notes")),
+                ]
+            )
+        if block_type == "longform_blueprint":
+            return cls._join_preview(
+                [
+                    cls._coerce_preview_text(payload.get("premise")),
+                    cls._coerce_preview_text(payload.get("central_conflict")),
+                    cls._coerce_preview_text(payload.get("chapter_strategy")),
+                ]
+            )
+        content = payload.get("content")
+        if isinstance(content, dict):
+            for key in ("summary", "description", "premise"):
+                preview = cls._coerce_preview_text(content.get(key))
+                if preview:
+                    return preview
+            for value in content.values():
+                preview = cls._coerce_preview_text(value)
+                if preview:
+                    return preview
+        return cls._join_preview(
+            [
+                cls._coerce_preview_text(payload.get("title")),
+                cls._coerce_preview_text(payload.get("path")),
+            ]
+        )
+
+    @staticmethod
+    def _bounded_payload(*, payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        if len(raw) <= max_chars:
+            return payload
+        return {
+            "_truncated": True,
+            "preview": raw[:max_chars],
+        }
+
+    @classmethod
+    def _prefixed_preview(cls, label: str, value: Any) -> str | None:
+        preview = cls._coerce_preview_text(value)
+        if not preview:
+            return None
+        return f"{label}: {preview}"
+
+    @staticmethod
+    def _coerce_preview_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, list):
+            parts = [str(item).strip() for item in value if str(item).strip()]
+            return ", ".join(parts[:3]) if parts else None
+        if isinstance(value, dict):
+            parts = [str(item).strip() for item in value.values() if str(item).strip()]
+            return ", ".join(parts[:3]) if parts else None
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _join_preview(parts: list[str | None]) -> str:
+        return " | ".join(part for part in parts if part)[:500]
 
     def _ensure_commit_targets_present(self, *, input_model: SetupProposalCommitInput) -> None:
         if input_model.target_draft_refs:

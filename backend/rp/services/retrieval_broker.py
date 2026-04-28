@@ -30,8 +30,12 @@ from rp.models.memory_crud import (
     VersionListResult,
 )
 from rp.observability.langfuse_scores import emit_retrieval_trace_scores
-from rp.services.builder_projection_context_service import BuilderProjectionContextService
-from rp.services.chapter_workspace_projection_adapter import ChapterWorkspaceProjectionAdapter
+from rp.services.builder_projection_context_service import (
+    BuilderProjectionContextService,
+)
+from rp.services.chapter_workspace_projection_adapter import (
+    ChapterWorkspaceProjectionAdapter,
+)
 from rp.services.core_state_backfill_service import CoreStateBackfillService
 from rp.services.core_state_read_service import CoreStateReadService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
@@ -64,7 +68,9 @@ class RetrievalBroker:
         langfuse_service=None,
     ) -> None:
         self._default_story_id = default_story_id
-        self._retrieval_service_factory = retrieval_service_factory or (lambda session: RetrievalService(session))
+        self._retrieval_service_factory = retrieval_service_factory or (
+            lambda session: RetrievalService(session)
+        )
         self._core_state_read_service_factory = core_state_read_service_factory or (
             lambda session: self._build_core_state_read_service(session)
         )
@@ -85,25 +91,37 @@ class RetrievalBroker:
                 )
         except SQLAlchemyError as exc:
             items: list[StateReadResultItem] = []
-            refs = input_model.refs or [
-                ObjectRef(
-                    object_id=f"{input_model.domain.value}.current",
-                    layer=Layer.CORE_STATE_AUTHORITATIVE,
-                    domain=input_model.domain,
-                    domain_path=f"{input_model.domain.value}.current",
-                    scope=input_model.scope,
-                    revision=1,
-                )
-            ]
+            refs = list(input_model.refs)
+            if not refs:
+                domain = input_model.domain
+                if domain is None:
+                    raise ValueError(
+                        "MemoryGetStateInput must include refs or domain"
+                    ) from exc
+                refs = [
+                    ObjectRef(
+                        object_id=f"{domain.value}.current",
+                        layer=Layer.CORE_STATE_AUTHORITATIVE,
+                        domain=domain,
+                        domain_path=f"{domain.value}.current",
+                        scope=input_model.scope,
+                        revision=1,
+                    )
+                ]
             for ref in refs:
                 items.append(StateReadResultItem(object_ref=ref, data={}, warnings=[]))
             return StateReadResult(
                 items=items,
-                version_refs=[f"{item.object_ref.object_id}@{item.object_ref.revision or 1}" for item in items],
+                version_refs=[
+                    f"{item.object_ref.object_id}@{item.object_ref.revision or 1}"
+                    for item in items
+                ],
                 warnings=[f"story_store_unavailable:{type(exc).__name__}"],
             )
 
-    async def get_summary(self, input_model: MemoryGetSummaryInput) -> SummaryReadResult:
+    async def get_summary(
+        self, input_model: MemoryGetSummaryInput
+    ) -> SummaryReadResult:
         try:
             with Session(get_engine()) as session:
                 service = self._projection_read_service_factory(session)
@@ -155,9 +173,11 @@ class RetrievalBroker:
         input_model: MemoryListVersionsInput,
     ) -> VersionListResult:
         with Session(get_engine()) as session:
-            service = self._projection_read_service_factory(session) if (
-                input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION
-            ) else self._core_state_read_service_factory(session)
+            service = (
+                self._projection_read_service_factory(session)
+                if (input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION)
+                else self._core_state_read_service_factory(session)
+            )
             return await service.list_versions(input_model)
 
     async def read_provenance(
@@ -165,9 +185,11 @@ class RetrievalBroker:
         input_model: MemoryReadProvenanceInput,
     ) -> ProvenanceResult:
         with Session(get_engine()) as session:
-            service = self._projection_read_service_factory(session) if (
-                input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION
-            ) else self._core_state_read_service_factory(session)
+            service = (
+                self._projection_read_service_factory(session)
+                if (input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION)
+                else self._core_state_read_service_factory(session)
+            )
             return await service.read_provenance(input_model)
 
     def _build_query(
@@ -200,7 +222,9 @@ class RetrievalBroker:
         )
         proposal_repository = ProposalRepository(session)
         core_state_store_repository = CoreStateStoreRepository(session)
-        store_read_enabled = bool(get_settings().rp_memory_core_state_store_read_enabled)
+        store_read_enabled = bool(
+            get_settings().rp_memory_core_state_store_read_enabled
+        )
         backfill_service = CoreStateBackfillService(
             story_session_service=story_session_service,
             proposal_repository=proposal_repository,
@@ -235,7 +259,9 @@ class RetrievalBroker:
                 default_story_id=self._default_story_id,
             ),
             core_state_store_repository=core_state_store_repository,
-            store_read_enabled=bool(get_settings().rp_memory_core_state_store_read_enabled),
+            store_read_enabled=bool(
+                get_settings().rp_memory_core_state_store_read_enabled
+            ),
             core_state_backfill_service=CoreStateBackfillService(
                 story_session_service=story_session_service,
                 proposal_repository=proposal_repository,
@@ -247,7 +273,9 @@ class RetrievalBroker:
         story_session_service = StorySessionService(session)
         proposal_repository = ProposalRepository(session)
         core_state_store_repository = CoreStateStoreRepository(session)
-        store_read_enabled = bool(get_settings().rp_memory_core_state_store_read_enabled)
+        store_read_enabled = bool(
+            get_settings().rp_memory_core_state_store_read_enabled
+        )
         projection_state_service = ProjectionStateService(
             story_session_service=story_session_service,
             adapter=ChapterWorkspaceProjectionAdapter(
@@ -352,7 +380,9 @@ class RetrievalBroker:
             normalize_projection_summary_id(block.label): block for block in blocks
         }
         item_by_summary_id = {
-            normalize_projection_summary_id(item.summary_id): self._summary_entry_with_block_metadata(
+            normalize_projection_summary_id(
+                item.summary_id
+            ): self._summary_entry_with_block_metadata(
                 item=item,
                 block=blocks_by_summary_id.get(
                     normalize_projection_summary_id(item.summary_id)
@@ -510,9 +540,9 @@ class RetrievalBroker:
         metadata["session_id"] = metadata.get("session_id") or block.metadata.get(
             "session_id"
         )
-        chapter_workspace_id = metadata.get("chapter_workspace_id") or block.metadata.get(
+        chapter_workspace_id = metadata.get(
             "chapter_workspace_id"
-        )
+        ) or block.metadata.get("chapter_workspace_id")
         if chapter_workspace_id is not None:
             metadata["chapter_workspace_id"] = chapter_workspace_id
         slot_name = metadata.get("slot_name") or block.metadata.get("source_field")
@@ -571,7 +601,9 @@ class RetrievalBroker:
                         result = await service.search_chunks(query)
                     trace = result.trace
                     if trace is not None and "broker_ms" not in trace.timings:
-                        trace.timings["broker_ms"] = round((perf_counter() - started) * 1000, 3)
+                        trace.timings["broker_ms"] = round(
+                            (perf_counter() - started) * 1000, 3
+                        )
                     observability = RetrievalObservabilityService(session).build_view(
                         query=query,
                         result=result,

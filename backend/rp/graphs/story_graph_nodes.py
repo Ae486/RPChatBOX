@@ -62,10 +62,25 @@ class StoryGraphNodes:
                 },
                 "status": "failed",
             }
+        command_kind = LongformTurnCommandKind(state["command_kind"])
+        if (
+            state.get("story_segment_metadata_patch") is not None
+            and command_kind != LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT
+        ):
+            return {
+                "error": {
+                    "message": (
+                        "story_segment_metadata_patch is only allowed on "
+                        "accept_pending_segment"
+                    ),
+                    "type": "story_turn_failed",
+                },
+                "status": "failed",
+            }
         try:
             validate_story_command(
                 phase=chapter.phase,
-                command_kind=LongformTurnCommandKind(state["command_kind"]),
+                command_kind=command_kind,
             )
         except ValueError as exc:
             return {
@@ -88,7 +103,19 @@ class StoryGraphNodes:
             user_prompt=state.get("user_prompt"),
             target_artifact_id=state.get("target_artifact_id"),
         )
-        return {**payload, "status": "generation_inputs_prepared"}
+        pending_artifact_id = payload.get("pending_artifact_id")
+        accepted_segment_ids = payload.get("accepted_segment_ids")
+        return {
+            "pending_artifact_id": (
+                pending_artifact_id if isinstance(pending_artifact_id, str) else None
+            ),
+            "accepted_segment_ids": (
+                [item for item in accepted_segment_ids if isinstance(item, str)]
+                if isinstance(accepted_segment_ids, list)
+                else []
+            ),
+            "status": "generation_inputs_prepared",
+        }
 
     async def orchestrator_plan(self, state: StoryGraphState) -> StoryGraphState:
         if state.get("error"):
@@ -287,6 +314,7 @@ class StoryGraphNodes:
             provider_id=state.get("provider_id"),
             user_prompt=state.get("user_prompt"),
             target_artifact_id=state.get("target_artifact_id"),
+            story_segment_metadata_patch=state.get("story_segment_metadata_patch"),
         )
 
     @staticmethod

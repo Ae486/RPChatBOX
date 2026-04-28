@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
 from config import get_settings
+from models.rp_retrieval_store import (
+    KnowledgeChunkRecord,
+    KnowledgeCollectionRecord,
+    SourceAssetRecord,
+)
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_crud import (
     MemoryGetStateInput,
@@ -16,19 +22,30 @@ from rp.models.memory_crud import (
     MemorySearchArchivalInput,
     MemorySearchRecallInput,
     RetrievalHit,
+    RetrievalQuery,
     RetrievalSearchResult,
     RetrievalTrace,
 )
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
+from rp.models.story_runtime import (
+    LongformChapterPhase,
+    StoryArtifactKind,
+    StoryArtifactStatus,
+)
+from rp.retrieval.search_utils import build_chunk_hit
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_os_service import MemoryOsService
+from rp.services.recall_continuity_note_ingestion_service import (
+    RecallContinuityNoteIngestionService,
+)
+from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
+from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
 from rp.services.story_session_service import StorySessionService
-from rp.models.story_runtime import LongformChapterPhase
 
 
 def _utcnow() -> datetime:
@@ -115,6 +132,197 @@ def _seed_story_runtime(retrieval_session) -> None:
         },
     )
     service.commit()
+
+
+def _ingest_recall_seed_asset(
+    retrieval_session,
+    *,
+    story_id: str,
+    asset_id: str,
+    text: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    collection = RetrievalCollectionService(retrieval_session).ensure_story_collection(
+        story_id=story_id,
+        scope="story",
+        collection_kind="recall",
+    )
+    section_metadata = {
+        "domain": Domain.CHAPTER.value,
+        "domain_path": f"recall.test.{asset_id}",
+        **dict(metadata or {}),
+    }
+    RetrievalDocumentService(retrieval_session).upsert_source_asset(
+        SourceAsset(
+            asset_id=asset_id,
+            story_id=story_id,
+            mode=StoryMode.LONGFORM,
+            collection_id=collection.collection_id,
+            asset_kind=str((metadata or {}).get("materialization_kind") or "legacy"),
+            source_ref=f"memory://{asset_id}",
+            title=f"Recall Seed {asset_id}",
+            parse_status="queued",
+            ingestion_status="queued",
+            mapped_targets=["recall"],
+            metadata={
+                **dict(metadata or {}),
+                "seed_sections": [
+                    {
+                        "section_id": f"seed:{asset_id}",
+                        "title": f"Recall Seed {asset_id}",
+                        "path": f"recall.test.{asset_id}",
+                        "level": 1,
+                        "text": text,
+                        "metadata": section_metadata,
+                    }
+                ],
+            },
+            created_at=_utcnow(),
+            updated_at=_utcnow(),
+        )
+    )
+    retrieval_session.flush()
+    RetrievalIngestionService(retrieval_session).ingest_asset(
+        story_id=story_id,
+        asset_id=asset_id,
+        collection_id=collection.collection_id,
+    )
+
+
+def test_build_chunk_hit_merges_asset_materialization_metadata_without_override():
+    collection = KnowledgeCollectionRecord(
+        collection_id="collection-recall-1",
+        story_id="story-1",
+        scope="story",
+        collection_kind="recall",
+    )
+    asset = SourceAssetRecord(
+        asset_id="asset-detail-1",
+        story_id="story-1",
+        mode=StoryMode.LONGFORM.value,
+        collection_id=collection.collection_id,
+        asset_kind="accepted_story_segment",
+        source_ref="story_session:session-1:chapter:4:artifact:artifact-1",
+        parse_status="completed",
+        ingestion_status="completed",
+        metadata_json={
+            "layer": "recall",
+            "source_family": "asset_family",
+            "materialization_event": "heavy_regression.chapter_close",
+            "materialization_kind": "accepted_story_segment",
+            "materialized_to_recall": True,
+            "chapter_index": 4,
+            "artifact_id": "artifact-1",
+            "artifact_revision": 2,
+        },
+    )
+    chunk = KnowledgeChunkRecord(
+        chunk_id="chunk-detail-1",
+        story_id="story-1",
+        collection_id=collection.collection_id,
+        asset_id=asset.asset_id,
+        parsed_document_id="parsed-detail-1",
+        chunk_index=1,
+        domain=Domain.CHAPTER.value,
+        domain_path="recall.chapter.4.accepted_segment.artifact-1",
+        title="Accepted Story Segment",
+        text="The accepted segment text.",
+        token_count=5,
+        metadata_json={
+            "source_family": "chunk_family",
+            "materialization_kind": "chunk_kind",
+        },
+    )
+
+    hit = build_chunk_hit(
+        query=RetrievalQuery(
+            query_id="rq-recall-1",
+            query_kind="recall",
+            story_id="story-1",
+            scope="story",
+            domains=[Domain.CHAPTER],
+            text_query="accepted segment",
+        ),
+        chunk=chunk,
+        asset=asset,
+        collection=collection,
+        score=0.8,
+        rank=1,
+    )
+
+    assert hit.metadata["source_family"] == "chunk_family"
+    assert hit.metadata["materialization_kind"] == "chunk_kind"
+    assert hit.metadata["materialization_event"] == "heavy_regression.chapter_close"
+    assert hit.metadata["materialized_to_recall"] is True
+    assert hit.metadata["chapter_index"] == 4
+    assert hit.metadata["artifact_id"] == "artifact-1"
+    assert hit.metadata["artifact_revision"] == 2
+    assert hit.metadata["asset_id"] == "asset-detail-1"
+    assert hit.metadata["asset_kind"] == "accepted_story_segment"
+    assert hit.metadata["source_ref"] == (
+        "story_session:session-1:chapter:4:artifact:artifact-1"
+    )
+
+
+def test_build_chunk_hit_keeps_legacy_recall_hit_usable_without_new_metadata():
+    collection = KnowledgeCollectionRecord(
+        collection_id="collection-recall-legacy",
+        story_id="story-1",
+        scope="story",
+        collection_kind="recall",
+    )
+    asset = SourceAssetRecord(
+        asset_id="asset-legacy-recall",
+        story_id="story-1",
+        mode=StoryMode.LONGFORM.value,
+        collection_id=collection.collection_id,
+        asset_kind="legacy_recall_note",
+        source_ref="story_session:session-1:chapter:1:legacy-note",
+        parse_status="completed",
+        ingestion_status="completed",
+        metadata_json={},
+    )
+    chunk = KnowledgeChunkRecord(
+        chunk_id="chunk-legacy-recall",
+        story_id="story-1",
+        collection_id=collection.collection_id,
+        asset_id=asset.asset_id,
+        parsed_document_id="parsed-legacy-recall",
+        chunk_index=1,
+        domain=Domain.CHAPTER.value,
+        domain_path="recall.chapter.1.legacy_note",
+        title="Legacy Recall Note",
+        text="A legacy recall note without materialization metadata.",
+        token_count=7,
+        metadata_json={},
+    )
+
+    hit = build_chunk_hit(
+        query=RetrievalQuery(
+            query_id="rq-recall-legacy",
+            query_kind="recall",
+            story_id="story-1",
+            scope="story",
+            domains=[Domain.CHAPTER],
+            text_query="legacy note",
+        ),
+        chunk=chunk,
+        asset=asset,
+        collection=collection,
+        score=0.6,
+        rank=1,
+    )
+
+    assert hit.hit_id == "chunk-legacy-recall"
+    assert hit.layer == Layer.RECALL.value
+    assert hit.metadata["asset_id"] == "asset-legacy-recall"
+    assert hit.metadata["asset_kind"] == "legacy_recall_note"
+    assert hit.metadata["source_ref"] == (
+        "story_session:session-1:chapter:1:legacy-note"
+    )
+    assert "source_family" not in hit.metadata
+    assert "materialization_kind" not in hit.metadata
+    assert "materialization_event" not in hit.metadata
 
 
 @pytest.mark.asyncio
@@ -412,6 +620,7 @@ async def test_search_and_provenance_surfaces_are_stable(retrieval_session):
     assert recall.hits == []
     assert recall.trace is not None
     assert recall.trace.route.startswith("retrieval.")
+    assert archival.trace is not None
     assert archival.hits[0].layer == "archival"
     assert archival.hits[0].query_id == archival.trace.query_id
     assert archival.hits[0].rank == 1
@@ -422,6 +631,278 @@ async def test_search_and_provenance_surfaces_are_stable(retrieval_session):
         "compatibility_mirror:story_session.current_state_json"
     ]
     assert versions.current_ref == "scene.current@1"
+
+
+@pytest.mark.asyncio
+async def test_search_recall_preserves_source_family_materialization_metadata(
+    retrieval_session,
+):
+    _seed_story_runtime(retrieval_session)
+    story_session_service = StorySessionService(retrieval_session)
+    session = story_session_service.get_latest_session_for_story("story-1")
+    assert session is not None
+    chapter = story_session_service.get_current_chapter(session.session_id)
+    assert chapter is not None
+    accepted_segment = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text=(
+            "Aurora memoryanchor accepted story detail beside the market stairs."
+        ),
+    )
+    story_session_service.commit()
+
+    RecallSummaryIngestionService(retrieval_session).ingest_chapter_summary(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=chapter.chapter_index,
+        source_workspace_id=session.source_workspace_id,
+        summary_text="Aurora memoryanchor chapter summary for the closed chapter.",
+    )
+    RecallDetailIngestionService(retrieval_session).ingest_accepted_story_segments(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=chapter.chapter_index,
+        source_workspace_id=session.source_workspace_id,
+        accepted_segments=[accepted_segment],
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id=session.story_id)
+    result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="aurora memoryanchor",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=10,
+        )
+    )
+
+    hits_by_kind = {
+        hit.metadata.get("materialization_kind"): hit for hit in result.hits
+    }
+    assert {"chapter_summary", "accepted_story_segment"} <= set(hits_by_kind)
+    summary_hit = hits_by_kind["chapter_summary"]
+    detail_hit = hits_by_kind["accepted_story_segment"]
+    assert summary_hit.metadata["layer"] == "recall"
+    assert summary_hit.metadata["source_family"] == "longform_story_runtime"
+    assert summary_hit.metadata["materialization_event"] == (
+        "heavy_regression.chapter_close"
+    )
+    assert summary_hit.metadata["materialized_to_recall"] is True
+    assert summary_hit.metadata["chapter_index"] == chapter.chapter_index
+    assert summary_hit.metadata["asset_kind"] == "chapter_summary"
+    assert detail_hit.metadata["source_family"] == "longform_story_runtime"
+    assert detail_hit.metadata["materialization_event"] == (
+        "heavy_regression.chapter_close"
+    )
+    assert detail_hit.metadata["materialized_to_recall"] is True
+    assert detail_hit.metadata["chapter_index"] == chapter.chapter_index
+    assert detail_hit.metadata["asset_kind"] == "accepted_story_segment"
+    assert detail_hit.metadata["artifact_id"] == accepted_segment.artifact_id
+    assert detail_hit.metadata["artifact_revision"] == accepted_segment.revision
+    assert detail_hit.metadata["asset_id"] == (
+        f"recall_detail_{accepted_segment.artifact_id}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_recall_applies_source_family_filters(retrieval_session):
+    _seed_story_runtime(retrieval_session)
+    story_session_service = StorySessionService(retrieval_session)
+    session = story_session_service.get_latest_session_for_story("story-1")
+    assert session is not None
+    chapter = story_session_service.get_current_chapter(session.session_id)
+    assert chapter is not None
+    accepted_segment = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="Filteranchor accepted detail names the mirrored oath.",
+    )
+    story_session_service.commit()
+
+    RecallSummaryIngestionService(retrieval_session).ingest_chapter_summary(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=chapter.chapter_index,
+        source_workspace_id=session.source_workspace_id,
+        summary_text="Filteranchor chapter one summary names the mirrored oath.",
+    )
+    RecallSummaryIngestionService(retrieval_session).ingest_chapter_summary(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=2,
+        source_workspace_id=session.source_workspace_id,
+        summary_text="Filteranchor chapter two summary names the mirrored oath.",
+    )
+    RecallDetailIngestionService(retrieval_session).ingest_accepted_story_segments(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=chapter.chapter_index,
+        source_workspace_id=session.source_workspace_id,
+        accepted_segments=[accepted_segment],
+    )
+    RecallContinuityNoteIngestionService(retrieval_session).ingest_continuity_notes(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=chapter.chapter_index,
+        source_workspace_id=session.source_workspace_id,
+        summary_updates=["Filteranchor continuity note names the mirrored oath."],
+    )
+    _ingest_recall_seed_asset(
+        retrieval_session,
+        story_id=session.story_id,
+        asset_id="asset-filteranchor-alt-family",
+        text="Filteranchor alternate family note names the mirrored oath.",
+        metadata={
+            "layer": "recall",
+            "source_family": "alternate_source_family",
+            "materialization_event": "manual.test",
+            "materialization_kind": "chapter_summary",
+            "materialized_to_recall": True,
+            "chapter_index": chapter.chapter_index,
+        },
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id=session.story_id)
+
+    summary_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="filteranchor mirrored oath",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=20,
+            filters={"materialization_kinds": ["chapter_summary"]},
+        )
+    )
+    assert summary_result.hits
+    assert {
+        hit.metadata.get("materialization_kind") for hit in summary_result.hits
+    } == {"chapter_summary"}
+
+    detail_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="filteranchor mirrored oath",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=20,
+            filters={"materialization_kinds": ["accepted_story_segment"]},
+        )
+    )
+    assert detail_result.hits
+    assert {hit.metadata.get("materialization_kind") for hit in detail_result.hits} == {
+        "accepted_story_segment"
+    }
+
+    continuity_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="filteranchor mirrored oath",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=20,
+            filters={"materialization_kinds": ["continuity_note"]},
+        )
+    )
+    assert continuity_result.hits
+    assert {
+        hit.metadata.get("materialization_kind") for hit in continuity_result.hits
+    } == {"continuity_note"}
+
+    chapter_two_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="filteranchor mirrored oath",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=20,
+            filters={"chapter_indices": [2]},
+        )
+    )
+    assert chapter_two_result.hits
+    assert {hit.metadata.get("chapter_index") for hit in chapter_two_result.hits} == {2}
+
+    source_family_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="filteranchor mirrored oath",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=20,
+            filters={"source_families": ["longform_story_runtime"]},
+        )
+    )
+    assert source_family_result.hits
+    assert {hit.metadata.get("source_family") for hit in source_family_result.hits} == {
+        "longform_story_runtime"
+    }
+
+    combined_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="filteranchor mirrored oath",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=20,
+            filters={
+                "materialization_kinds": [
+                    "chapter_summary",
+                    "accepted_story_segment",
+                ],
+                "chapter_indices": [chapter.chapter_index],
+                "source_families": ["longform_story_runtime"],
+            },
+        )
+    )
+    assert combined_result.hits
+    assert {
+        hit.metadata.get("materialization_kind") for hit in combined_result.hits
+    } == {"chapter_summary", "accepted_story_segment"}
+    assert {hit.metadata.get("chapter_index") for hit in combined_result.hits} == {
+        chapter.chapter_index
+    }
+    assert {hit.metadata.get("source_family") for hit in combined_result.hits} == {
+        "longform_story_runtime"
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_recall_filter_excludes_legacy_hit_missing_metadata(
+    retrieval_session,
+):
+    _ingest_recall_seed_asset(
+        retrieval_session,
+        story_id="story-legacy-filter",
+        asset_id="asset-legacy-filter",
+        text="Legacyfilter recall note without source family metadata.",
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id="story-legacy-filter")
+    base_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="legacyfilter recall note",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=5,
+        )
+    )
+    filtered_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="legacyfilter recall note",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=5,
+            filters={"materialization_kinds": ["chapter_summary"]},
+        )
+    )
+
+    assert [hit.metadata["asset_id"] for hit in base_result.hits] == [
+        "asset-legacy-filter"
+    ]
+    assert "materialization_kind" not in base_result.hits[0].metadata
+    assert filtered_result.hits == []
 
 
 @pytest.mark.asyncio

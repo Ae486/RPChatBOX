@@ -14,6 +14,7 @@ class StoryGraphState(TypedDict, total=False):
     provider_id: str | None
     user_prompt: str | None
     target_artifact_id: str | None
+    story_segment_metadata_patch: dict[str, Any] | None
     stream_mode: bool
     status: str
     pending_artifact_id: str | None

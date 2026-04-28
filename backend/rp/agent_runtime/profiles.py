@@ -12,25 +12,51 @@ SETUP_READ_ONLY_MEMORY_TOOLS: tuple[str, ...] = (
     "memory.read_provenance",
 )
 
-SETUP_PRIVATE_TOOLS: tuple[str, ...] = (
+SETUP_SHARED_PRIVATE_TOOLS: tuple[str, ...] = (
     "setup.discussion.update_state",
     "setup.chunk.upsert",
     "setup.truth.write",
-    "setup.patch.story_config",
-    "setup.patch.writing_contract",
-    "setup.patch.foundation_entry",
-    "setup.patch.longform_blueprint",
     "setup.question.raise",
     "setup.asset.register",
     "setup.proposal.commit",
     "setup.read.workspace",
     "setup.read.step_context",
+    "setup.read.draft_refs",
 )
+
+SETUP_STEP_PATCH_TOOLS: dict[str, tuple[str, ...]] = {
+    "story_config": ("setup.patch.story_config",),
+    "writing_contract": ("setup.patch.writing_contract",),
+    "foundation": ("setup.patch.foundation_entry",),
+    "longform_blueprint": ("setup.patch.longform_blueprint",),
+}
 
 SETUP_AGENT_VISIBLE_TOOLS: tuple[str, ...] = (
     *SETUP_READ_ONLY_MEMORY_TOOLS,
-    *SETUP_PRIVATE_TOOLS,
+    *SETUP_SHARED_PRIVATE_TOOLS,
+    *tuple(
+        tool_name
+        for tool_names in SETUP_STEP_PATCH_TOOLS.values()
+        for tool_name in tool_names
+    ),
 )
+
+
+def build_setup_agent_tool_scope(current_step: str | None) -> list[str]:
+    """Return the step-aware default tool scope for one setup turn."""
+
+    if not current_step:
+        return list(SETUP_AGENT_VISIBLE_TOOLS)
+
+    patch_tools = SETUP_STEP_PATCH_TOOLS.get(str(current_step))
+    if patch_tools is None:
+        return list(SETUP_AGENT_VISIBLE_TOOLS)
+
+    return [
+        *SETUP_READ_ONLY_MEMORY_TOOLS,
+        *SETUP_SHARED_PRIVATE_TOOLS,
+        *patch_tools,
+    ]
 
 
 def build_setup_agent_profile() -> RuntimeProfile:

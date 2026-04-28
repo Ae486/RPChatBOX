@@ -22,6 +22,9 @@ from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.recall_continuity_note_ingestion_service import (
+    RecallContinuityNoteIngestionService,
+)
 from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.retrieval_broker import RetrievalBroker
@@ -106,6 +109,7 @@ class _CapturingSpecialist:
             foundation_digest=["Found Updated"],
             current_state_digest=["phase=segment_drafting"],
             writer_hints=["Runtime Only Hint"],
+            summary_updates=["Light regression continuity note must stay transient."],
         )
 
 
@@ -114,8 +118,29 @@ class _HeavyRegressionRecallSpecialist:
         return SpecialistResultBundle(
             foundation_digest=["Found Updated"],
             current_state_digest=["phase=chapter_completed"],
+            summary_updates=[
+                "The masked envoy now knows the seal phrase.",
+                "The masked envoy now knows the seal phrase.",
+                "The bell tower debt should stay visible next chapter.",
+            ],
             recall_summary_text="Chapter one settled into a tense marketplace truce.",
         )
+
+
+class _FailIfContinuityNoteIngestionRuns(RecallContinuityNoteIngestionService):
+    def __init__(self) -> None:
+        pass
+
+    def ingest_continuity_notes(
+        self,
+        *,
+        session_id: str,
+        story_id: str,
+        chapter_index: int,
+        source_workspace_id: str,
+        summary_updates: list[str],
+    ) -> list[str]:
+        raise AssertionError("light regression must not materialize continuity notes")
 
 
 @pytest.mark.asyncio
@@ -462,6 +487,7 @@ async def test_longform_regression_light_path_deduplicates_newly_accepted_segmen
         specialist_service=specialist_service,
         proposal_workflow_service=workflow,
         legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
+        recall_continuity_note_ingestion_service=(_FailIfContinuityNoteIngestionRuns()),
     )
 
     session = story_session_service.get_session(session.session_id)
@@ -547,6 +573,9 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
             retrieval_session
         ),
         recall_detail_ingestion_service=RecallDetailIngestionService(retrieval_session),
+        recall_continuity_note_ingestion_service=(
+            RecallContinuityNoteIngestionService(retrieval_session)
+        ),
     )
 
     session = story_session_service.get_session(session.session_id)
@@ -574,12 +603,17 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
     detail_assets = [
         asset for asset in assets if asset.asset_kind == "accepted_story_segment"
     ]
+    continuity_note_assets = [
+        asset for asset in assets if asset.asset_kind == "continuity_note"
+    ]
 
     assert len(summary_assets) == 1
     assert len(detail_assets) == 2
+    assert len(continuity_note_assets) == 2
     assert {asset.asset_kind for asset in assets} == {
         "chapter_summary",
         "accepted_story_segment",
+        "continuity_note",
     }
     summary_asset = summary_assets[0]
     assert summary_asset.metadata["layer"] == "recall"
@@ -603,6 +637,29 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
     assert all(
         asset.metadata.get("materialized_to_recall") is True for asset in detail_assets
     )
+    assert {
+        asset.metadata.get("materialization_kind") for asset in continuity_note_assets
+    } == {"continuity_note"}
+    assert all(
+        asset.metadata.get("source_type") == "continuity_note"
+        for asset in continuity_note_assets
+    )
+    assert all(
+        asset.metadata.get("materialization_event") == "heavy_regression.chapter_close"
+        for asset in continuity_note_assets
+    )
+    assert all(
+        asset.metadata.get("materialized_to_recall") is True
+        for asset in continuity_note_assets
+    )
+    continuity_text = "\n".join(
+        asset.raw_excerpt or "" for asset in continuity_note_assets
+    )
+    assert "masked envoy now knows the seal phrase" in continuity_text
+    assert "bell tower debt" in continuity_text
+    assert "Draft prose must not enter settled recall" not in continuity_text
+    assert "Superseded prose must not enter settled recall" not in continuity_text
+    assert "runtime planning discussion" not in continuity_text
     assert draft_artifact.artifact_id not in {
         asset.metadata.get("artifact_id") for asset in detail_assets
     }
@@ -625,3 +682,28 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
 
     returned_asset_ids = {hit.metadata.get("asset_id") for hit in recall_result.hits}
     assert f"recall_detail_{accepted_primary.artifact_id}" in returned_asset_ids
+    returned_text = "\n".join(hit.excerpt_text for hit in recall_result.hits)
+    assert "Draft prose must not enter settled recall" not in returned_text
+    assert "runtime planning discussion" not in returned_text
+    assert all(
+        hit.metadata.get("discussion_entry_id") != discussion_entry.entry_id
+        for hit in recall_result.hits
+    )
+
+    continuity_result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="masked envoy seal phrase bell tower debt",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=5,
+        )
+    )
+    continuity_hits = [
+        hit
+        for hit in continuity_result.hits
+        if hit.metadata.get("materialization_kind") == "continuity_note"
+    ]
+    assert continuity_hits
+    assert {hit.metadata.get("asset_kind") for hit in continuity_hits} == {
+        "continuity_note"
+    }

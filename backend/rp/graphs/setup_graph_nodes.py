@@ -1,11 +1,9 @@
 """Node adapters for the phase-1 SetupGraph shell."""
 from __future__ import annotations
 
-from rp.models.setup_handoff import SetupContextBuilderInput
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_workspace import SetupStepId
 from rp.services.setup_agent_execution_service import SetupAgentExecutionService
-from rp.services.setup_context_builder import SetupContextBuilder
 from rp.services.setup_workspace_service import SetupWorkspaceService
 
 from .setup_graph_state import SetupGraphState
@@ -18,11 +16,9 @@ class SetupGraphNodes:
         self,
         *,
         workspace_service: SetupWorkspaceService,
-        context_builder: SetupContextBuilder,
         execution_service: SetupAgentExecutionService,
     ) -> None:
         self._workspace_service = workspace_service
-        self._context_builder = context_builder
         self._execution_service = execution_service
 
     def load_workspace(self, state: SetupGraphState) -> SetupGraphState:
@@ -43,25 +39,6 @@ class SetupGraphNodes:
             "current_step": workspace.current_step.value,
             "target_step": target_step,
             "status": "workspace_loaded",
-        }
-
-    def build_context(self, state: SetupGraphState) -> SetupGraphState:
-        if state.get("error"):
-            return {}
-        target_step = str(state.get("target_step") or state.get("current_step") or "")
-        packet = self._context_builder.build(
-            SetupContextBuilderInput(
-                mode=str(state.get("mode") or ""),
-                workspace_id=state["workspace_id"],
-                current_step=target_step,
-                user_prompt=str(state.get("user_prompt") or ""),
-                user_edit_delta_ids=list(state.get("user_edit_delta_ids") or []),
-                token_budget=None,
-            )
-        )
-        return {
-            "context_packet": packet.model_dump(mode="json"),
-            "status": "context_built",
         }
 
     async def run_turn(self, state: SetupGraphState) -> SetupGraphState:

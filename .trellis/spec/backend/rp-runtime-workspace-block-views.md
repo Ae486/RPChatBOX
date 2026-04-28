@@ -61,7 +61,14 @@ Runtime Workspace Block identity:
 - `data_json` must keep the raw runtime object readable without prompt rendering:
   - artifact: full artifact model dump
   - discussion entry: full discussion-entry model dump
-- `metadata` must preserve route/source/session/chapter identity and include the backing runtime row id.
+- `metadata` must preserve route/source/session/chapter identity, include the backing runtime row id, and keep the non-Recall boundary machine-checkable:
+  - `layer = "runtime_workspace"`
+  - `source_family = "runtime_workspace"`
+  - `workspace_role = "current_turn_scratch"`
+  - `materialized_to_recall = False`
+  - `recall_materialization_state = "not_recall_materialized"`
+  - `not_scene_transcript = True`
+  - `scene_transcript = False`
 
 Read-side compatibility rules:
 
@@ -84,6 +91,7 @@ Read-side compatibility rules:
 - `RpBlockReadService` lists Runtime Workspace blocks for current-chapter draft artifacts and discussion entries.
 - Accepted or superseded artifacts are excluded from Runtime Workspace Block views.
 - `layer=runtime_workspace` and `source=runtime_workspace_store` filters behave correctly.
+- Draft/discussion block metadata preserves `materialized_to_recall = False`, `recall_materialization_state = "not_recall_materialized"`, and `scene_transcript = False`.
 - Controller/API list and get routes serialize Runtime Workspace Block views correctly.
 - Runtime Workspace `/proposals` returns `[]`.
 - Runtime Workspace `/versions` and `/provenance` return `memory_block_history_unsupported`.

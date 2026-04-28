@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend RP runtime specs and quality checklist for active story changes."}
+{"file": ".trellis/spec/backend/rp-active-story-block-prompt-context.md", "reason": "Story orchestrator/specialist prompt context boundaries and Block-backed runtime context."}
+{"file": ".trellis/spec/backend/rp-active-story-block-prompt-rendering.md", "reason": "Deterministic prompt overlay rendering for orchestrator and specialist."}
+{"file": ".trellis/spec/backend/rp-active-story-block-lazy-rebuild.md", "reason": "Cached prompt overlay and block consumer sync semantics used by story runtime."}
+{"file": ".trellis/spec/backend/rp-runtime-workspace-block-views.md", "reason": "Runtime Workspace read-only boundary for draft/discussion state."}
+{"file": ".trellis/spec/backend/rp-memory-temporal-materialization.md", "reason": "Layer ownership rules for current truth, projection, historical recall, source archival, and runtime scratch."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-design-gap-analysis.md", "reason": "Task-specific design gap analysis and agreed worker/mode-profile scope."}
+{"file": "docs/research/rp-redesign/new-architecture-overview.md", "reason": "Source design for Memory OS, Orchestrator Worker, Specialist Workers, WritingPacketBuilder, and WritingWorker."}
+{"file": "docs/research/rp-redesign/x08-memory-os-redesign-draft.md", "reason": "Source design for worker as Memory OS/runtime context manager and orchestrator worker output contract."}

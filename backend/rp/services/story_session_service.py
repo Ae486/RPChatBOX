@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import cast
 from uuid import uuid4
 
+from sqlalchemy import asc, desc
 from sqlmodel import Session, select
 
 from models.rp_story_store import (
@@ -30,6 +32,10 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _build_scene_ref(*, chapter_index: int, scene_index: int) -> str:
+    return f"chapter:{chapter_index}:scene:{scene_index}"
+
+
 _UNSET = object()
 
 
@@ -40,8 +46,11 @@ class StorySessionService:
         self._session = session
 
     def list_sessions(self) -> list[StorySession]:
-        stmt = select(StorySessionRecord).order_by(StorySessionRecord.updated_at.desc())
-        return [self._record_to_story_session(record) for record in self._session.exec(stmt).all()]
+        stmt = select(StorySessionRecord).order_by(desc(StorySessionRecord.updated_at))
+        return [
+            self._record_to_story_session(record)
+            for record in self._session.exec(stmt).all()
+        ]
 
     def commit(self) -> None:
         self._session.commit()
@@ -59,7 +68,10 @@ class StorySessionService:
         stmt = select(StorySessionRecord).where(StorySessionRecord.story_id == story_id)
         if session_state is not None:
             stmt = stmt.where(StorySessionRecord.session_state == session_state.value)
-        stmt = stmt.order_by(StorySessionRecord.updated_at.desc(), StorySessionRecord.created_at.desc())
+        stmt = stmt.order_by(
+            desc(StorySessionRecord.updated_at),
+            desc(StorySessionRecord.created_at),
+        )
         record = self._session.exec(stmt).first()
         return self._record_to_story_session(record) if record is not None else None
 
@@ -124,7 +136,9 @@ class StorySessionService:
 
     def get_current_chapter(self, session_id: str) -> ChapterWorkspace | None:
         session = self._require_session_record(session_id)
-        return self.get_chapter_by_index(session_id=session_id, chapter_index=session.current_chapter_index)
+        return self.get_chapter_by_index(
+            session_id=session_id, chapter_index=session.current_chapter_index
+        )
 
     def get_current_chapter_for_story(self, story_id: str) -> ChapterWorkspace | None:
         session = self.get_latest_session_for_story(story_id)
@@ -146,7 +160,9 @@ class StorySessionService:
         record = self._session.exec(stmt).first()
         return self._record_to_chapter(record) if record is not None else None
 
-    def get_chapter_workspace(self, chapter_workspace_id: str) -> ChapterWorkspace | None:
+    def get_chapter_workspace(
+        self, chapter_workspace_id: str
+    ) -> ChapterWorkspace | None:
         record = self._session.get(ChapterWorkspaceRecord, chapter_workspace_id)
         return self._record_to_chapter(record) if record is not None else None
 
@@ -154,9 +170,11 @@ class StorySessionService:
         stmt = (
             select(ChapterWorkspaceRecord)
             .where(ChapterWorkspaceRecord.session_id == session_id)
-            .order_by(ChapterWorkspaceRecord.chapter_index.asc())
+            .order_by(asc(ChapterWorkspaceRecord.chapter_index))
         )
-        return [self._record_to_chapter(record) for record in self._session.exec(stmt).all()]
+        return [
+            self._record_to_chapter(record) for record in self._session.exec(stmt).all()
+        ]
 
     def create_chapter_workspace(
         self,
@@ -180,6 +198,13 @@ class StorySessionService:
             review_notes_json=[],
             accepted_segment_ids_json=[],
             pending_segment_artifact_id=None,
+            current_scene_ref=_build_scene_ref(
+                chapter_index=chapter_index,
+                scene_index=1,
+            ),
+            next_scene_index=2,
+            last_closed_scene_ref=None,
+            closed_scene_refs_json=[],
             created_at=now,
             updated_at=now,
         )
@@ -199,6 +224,10 @@ class StorySessionService:
         review_notes: list[str] | None = None,
         accepted_segment_ids: list[str] | None = None,
         pending_segment_artifact_id: str | None | object = _UNSET,
+        current_scene_ref: str | None | object = _UNSET,
+        next_scene_index: int | None = None,
+        last_closed_scene_ref: str | None | object = _UNSET,
+        closed_scene_refs: list[str] | None = None,
     ) -> ChapterWorkspace:
         record = self._require_chapter_record(chapter_workspace_id)
         if phase is not None:
@@ -216,7 +245,17 @@ class StorySessionService:
         if accepted_segment_ids is not None:
             record.accepted_segment_ids_json = list(accepted_segment_ids)
         if pending_segment_artifact_id is not _UNSET:
-            record.pending_segment_artifact_id = pending_segment_artifact_id
+            record.pending_segment_artifact_id = cast(
+                str | None, pending_segment_artifact_id
+            )
+        if current_scene_ref is not _UNSET:
+            record.current_scene_ref = cast(str | None, current_scene_ref)
+        if next_scene_index is not None:
+            record.next_scene_index = next_scene_index
+        if last_closed_scene_ref is not _UNSET:
+            record.last_closed_scene_ref = cast(str | None, last_closed_scene_ref)
+        if closed_scene_refs is not None:
+            record.closed_scene_refs_json = list(closed_scene_refs)
         record.updated_at = _utcnow()
         self._session.add(record)
         self._session.flush()
@@ -232,8 +271,17 @@ class StorySessionService:
         content_text: str,
         metadata: dict | None = None,
         revision: int = 1,
+        scene_ref: str | None | object = _UNSET,
     ) -> StoryArtifact:
         now = _utcnow()
+        resolved_scene_ref: str | None
+        if scene_ref is _UNSET:
+            resolved_scene_ref = None
+            if artifact_kind == StoryArtifactKind.STORY_SEGMENT:
+                chapter_record = self._require_chapter_record(chapter_workspace_id)
+                resolved_scene_ref = chapter_record.current_scene_ref
+        else:
+            resolved_scene_ref = cast(str | None, scene_ref)
         record = StoryArtifactRecord(
             artifact_id=uuid4().hex,
             session_id=session_id,
@@ -243,6 +291,7 @@ class StorySessionService:
             revision=revision,
             content_text=content_text,
             metadata_json=dict(metadata or {}),
+            scene_ref=resolved_scene_ref,
             created_at=now,
             updated_at=now,
         )
@@ -258,9 +307,12 @@ class StorySessionService:
         stmt = (
             select(StoryArtifactRecord)
             .where(StoryArtifactRecord.chapter_workspace_id == chapter_workspace_id)
-            .order_by(StoryArtifactRecord.created_at.asc())
+            .order_by(asc(StoryArtifactRecord.created_at))
         )
-        return [self._record_to_artifact(record) for record in self._session.exec(stmt).all()]
+        return [
+            self._record_to_artifact(record)
+            for record in self._session.exec(stmt).all()
+        ]
 
     def update_artifact(
         self,
@@ -293,7 +345,14 @@ class StorySessionService:
         role: str,
         content_text: str,
         linked_artifact_id: str | None = None,
+        scene_ref: str | None | object = _UNSET,
     ) -> StoryDiscussionEntry:
+        resolved_scene_ref: str | None
+        if scene_ref is _UNSET:
+            chapter_record = self._require_chapter_record(chapter_workspace_id)
+            resolved_scene_ref = chapter_record.current_scene_ref
+        else:
+            resolved_scene_ref = cast(str | None, scene_ref)
         record = StoryDiscussionEntryRecord(
             entry_id=uuid4().hex,
             session_id=session_id,
@@ -301,17 +360,45 @@ class StorySessionService:
             role=role,
             content_text=content_text,
             linked_artifact_id=linked_artifact_id,
+            scene_ref=resolved_scene_ref,
             created_at=_utcnow(),
         )
         self._session.add(record)
         self._session.flush()
         return self._record_to_discussion_entry(record)
 
-    def list_discussion_entries(self, *, chapter_workspace_id: str) -> list[StoryDiscussionEntry]:
+    def close_current_scene(self, *, session_id: str) -> ChapterWorkspace:
+        record = self._require_current_chapter_record(session_id)
+        current_scene_ref = (record.current_scene_ref or "").strip()
+        if not current_scene_ref:
+            raise ValueError(f"No current scene to close: {session_id}")
+        closed_scene_refs = list(record.closed_scene_refs_json or [])
+        if current_scene_ref not in closed_scene_refs:
+            closed_scene_refs.append(current_scene_ref)
+        next_scene_index = int(record.next_scene_index or 2)
+        if next_scene_index < 1:
+            next_scene_index = 1
+        record.closed_scene_refs_json = closed_scene_refs
+        record.last_closed_scene_ref = current_scene_ref
+        record.current_scene_ref = _build_scene_ref(
+            chapter_index=record.chapter_index,
+            scene_index=next_scene_index,
+        )
+        record.next_scene_index = next_scene_index + 1
+        record.updated_at = _utcnow()
+        self._session.add(record)
+        self._session.flush()
+        return self._record_to_chapter(record)
+
+    def list_discussion_entries(
+        self, *, chapter_workspace_id: str
+    ) -> list[StoryDiscussionEntry]:
         stmt = (
             select(StoryDiscussionEntryRecord)
-            .where(StoryDiscussionEntryRecord.chapter_workspace_id == chapter_workspace_id)
-            .order_by(StoryDiscussionEntryRecord.created_at.asc())
+            .where(
+                StoryDiscussionEntryRecord.chapter_workspace_id == chapter_workspace_id
+            )
+            .order_by(asc(StoryDiscussionEntryRecord.created_at))
         )
         return [
             self._record_to_discussion_entry(record)
@@ -327,7 +414,9 @@ class StorySessionService:
         session = self.get_session(session_id)
         if session is None:
             raise ValueError(f"StorySession not found: {session_id}")
-        chapter = self.get_chapter_by_index(session_id=session_id, chapter_index=chapter_index)
+        chapter = self.get_chapter_by_index(
+            session_id=session_id, chapter_index=chapter_index
+        )
         if chapter is None:
             raise ValueError(
                 f"ChapterWorkspace not found: session={session_id} chapter={chapter_index}"
@@ -335,7 +424,9 @@ class StorySessionService:
         return ChapterWorkspaceSnapshot(
             session=session,
             chapter=chapter,
-            artifacts=self.list_artifacts(chapter_workspace_id=chapter.chapter_workspace_id),
+            artifacts=self.list_artifacts(
+                chapter_workspace_id=chapter.chapter_workspace_id
+            ),
             discussion_entries=self.list_discussion_entries(
                 chapter_workspace_id=chapter.chapter_workspace_id
             ),
@@ -347,10 +438,28 @@ class StorySessionService:
             raise ValueError(f"StorySession not found: {session_id}")
         return record
 
-    def _require_chapter_record(self, chapter_workspace_id: str) -> ChapterWorkspaceRecord:
+    def _require_chapter_record(
+        self, chapter_workspace_id: str
+    ) -> ChapterWorkspaceRecord:
         record = self._session.get(ChapterWorkspaceRecord, chapter_workspace_id)
         if record is None:
             raise ValueError(f"ChapterWorkspace not found: {chapter_workspace_id}")
+        return record
+
+    def _require_current_chapter_record(
+        self, session_id: str
+    ) -> ChapterWorkspaceRecord:
+        session = self._require_session_record(session_id)
+        stmt = (
+            select(ChapterWorkspaceRecord)
+            .where(ChapterWorkspaceRecord.session_id == session_id)
+            .where(
+                ChapterWorkspaceRecord.chapter_index == session.current_chapter_index
+            )
+        )
+        record = self._session.exec(stmt).first()
+        if record is None:
+            raise ValueError(f"Current ChapterWorkspace not found: {session_id}")
         return record
 
     def _require_artifact_record(self, artifact_id: str) -> StoryArtifactRecord:
@@ -398,6 +507,10 @@ class StorySessionService:
                 "review_notes": record.review_notes_json,
                 "accepted_segment_ids": record.accepted_segment_ids_json,
                 "pending_segment_artifact_id": record.pending_segment_artifact_id,
+                "current_scene_ref": record.current_scene_ref,
+                "next_scene_index": record.next_scene_index,
+                "last_closed_scene_ref": record.last_closed_scene_ref,
+                "closed_scene_refs": record.closed_scene_refs_json,
                 "created_at": record.created_at,
                 "updated_at": record.updated_at,
             }
@@ -417,13 +530,16 @@ class StorySessionService:
                 "revision": record.revision,
                 "content_text": record.content_text,
                 "metadata": record.metadata_json,
+                "scene_ref": record.scene_ref,
                 "created_at": record.created_at,
                 "updated_at": record.updated_at,
             }
         )
 
     @staticmethod
-    def _record_to_discussion_entry(record: StoryDiscussionEntryRecord) -> StoryDiscussionEntry:
+    def _record_to_discussion_entry(
+        record: StoryDiscussionEntryRecord,
+    ) -> StoryDiscussionEntry:
         return StoryDiscussionEntry.model_validate(
             {
                 "entry_id": record.entry_id,
@@ -432,6 +548,7 @@ class StorySessionService:
                 "role": record.role,
                 "content_text": record.content_text,
                 "linked_artifact_id": record.linked_artifact_id,
+                "scene_ref": record.scene_ref,
                 "created_at": record.created_at,
             }
         )

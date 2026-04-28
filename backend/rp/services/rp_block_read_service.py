@@ -142,6 +142,7 @@ class RpBlockReadService:
                         "story_id": session.story_id,
                         "session_id": session.session_id,
                         "updated_at": updated_at,
+                        **self._authoritative_capability_metadata(),
                     },
                 )
             )
@@ -223,6 +224,7 @@ class RpBlockReadService:
                             "updated_at",
                             chapter.updated_at if chapter is not None else None,
                         ),
+                        **self._projection_capability_metadata(),
                     },
                 )
             )
@@ -321,6 +323,7 @@ class RpBlockReadService:
                 "session_id": row.session_id,
                 "latest_apply_id": row.latest_apply_id,
                 "updated_at": row.updated_at,
+                **RpBlockReadService._authoritative_capability_metadata(),
             },
         )
 
@@ -349,6 +352,7 @@ class RpBlockReadService:
                 "chapter_workspace_id": row.chapter_workspace_id,
                 "last_refresh_kind": row.last_refresh_kind,
                 "updated_at": row.updated_at,
+                **RpBlockReadService._projection_capability_metadata(),
             },
         )
 
@@ -382,7 +386,9 @@ class RpBlockReadService:
                 "chapter_workspace_id": artifact.chapter_workspace_id,
                 "artifact_kind": artifact.artifact_kind.value,
                 "artifact_status": artifact.status.value,
+                "scene_ref": artifact.scene_ref,
                 "updated_at": artifact.updated_at,
+                **RpBlockReadService._runtime_workspace_capability_metadata(),
             },
         )
 
@@ -418,9 +424,38 @@ class RpBlockReadService:
                 "chapter_workspace_id": entry.chapter_workspace_id,
                 "discussion_role": entry.role,
                 "linked_artifact_id": entry.linked_artifact_id,
+                "scene_ref": entry.scene_ref,
                 "created_at": entry.created_at,
+                **RpBlockReadService._runtime_workspace_capability_metadata(),
             },
         )
+
+    @staticmethod
+    def _authoritative_capability_metadata() -> dict[str, object]:
+        return {
+            "read_only": False,
+            "mutation_mode": "governed_proposal_apply",
+            "history_mode": "supported",
+            "proposal_visibility": "supported",
+        }
+
+    @staticmethod
+    def _projection_capability_metadata() -> dict[str, object]:
+        return {
+            "read_only": True,
+            "mutation_mode": "unsupported_projection_read_side",
+            "history_mode": "supported",
+            "proposal_visibility": "empty",
+        }
+
+    @staticmethod
+    def _runtime_workspace_capability_metadata() -> dict[str, object]:
+        return {
+            "read_only": True,
+            "mutation_mode": "unsupported_runtime_workspace_scratch",
+            "history_mode": "unsupported",
+            "proposal_visibility": "empty",
+        }
 
     @staticmethod
     def _section_items(section: dict[str, object]) -> list[Any]:

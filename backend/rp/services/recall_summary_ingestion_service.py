@@ -5,6 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from rp.models.memory_materialization import (
+    CHAPTER_SUMMARY_KIND,
+    HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
+    build_recall_materialization_metadata,
+    build_recall_seed_section,
+)
 from rp.models.retrieval_records import IndexJob, SourceAsset
 from rp.models.setup_workspace import StoryMode
 from .retrieval_collection_service import RetrievalCollectionService
@@ -40,6 +46,14 @@ class RecallSummaryIngestionService:
         )
         asset_id = uuid4().hex
         now = _utcnow()
+        domain_path = f"recall.chapter.{chapter_index}"
+        metadata = build_recall_materialization_metadata(
+            materialization_kind=CHAPTER_SUMMARY_KIND,
+            materialization_event=HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
+            session_id=session_id,
+            chapter_index=chapter_index,
+            domain_path=domain_path,
+        )
         asset = SourceAsset(
             asset_id=asset_id,
             story_id=story_id,
@@ -56,37 +70,16 @@ class RecallSummaryIngestionService:
             ingestion_status="queued",
             mapped_targets=["recall"],
             metadata={
-                "layer": "recall",
-                "source_family": "longform_story_runtime",
-                "materialization_event": "heavy_regression.chapter_close",
-                "materialization_kind": "chapter_summary",
-                "materialized_to_recall": True,
-                "source_type": "chapter_summary",
-                "session_id": session_id,
-                "chapter_index": chapter_index,
-                "domain": "chapter",
-                "domain_path": f"recall.chapter.{chapter_index}",
+                **metadata,
                 "seed_sections": [
-                    {
-                        "section_id": f"chapter_summary:{chapter_index}",
-                        "title": f"Chapter {chapter_index} Summary",
-                        "path": f"recall.chapter.{chapter_index}",
-                        "level": 1,
-                        "text": summary_text,
-                        "metadata": {
-                            "domain": "chapter",
-                            "domain_path": f"recall.chapter.{chapter_index}",
-                            "tags": ["chapter_summary", "recall"],
-                            "layer": "recall",
-                            "source_family": "longform_story_runtime",
-                            "materialization_event": "heavy_regression.chapter_close",
-                            "materialization_kind": "chapter_summary",
-                            "materialized_to_recall": True,
-                            "source_type": "chapter_summary",
-                            "session_id": session_id,
-                            "chapter_index": chapter_index,
-                        },
-                    }
+                    build_recall_seed_section(
+                        section_id=f"chapter_summary:{chapter_index}",
+                        title=f"Chapter {chapter_index} Summary",
+                        path=domain_path,
+                        text=summary_text,
+                        metadata=metadata,
+                        tags=[CHAPTER_SUMMARY_KIND, "recall"],
+                    )
                 ],
             },
             created_at=now,

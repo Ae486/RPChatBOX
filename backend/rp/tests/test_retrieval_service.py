@@ -15,6 +15,7 @@ from rp.models.memory_crud import (
 )
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
+from rp.retrieval.query_preprocessor import DefaultQueryPreprocessor
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
@@ -23,6 +24,47 @@ from rp.services.retrieval_service import RetrievalService
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def test_default_query_preprocessor_normalizes_recall_filter_values():
+    query = RetrievalQuery(
+        query_id="rq-filter-normalize",
+        query_kind="recall",
+        story_id=" story-filter ",
+        domains=[Domain.CHAPTER, Domain.CHAPTER],
+        text_query=" filter text ",
+        filters={
+            "materialization_kinds": [
+                " chapter_summary ",
+                "",
+                "chapter_summary",
+                "continuity_note",
+            ],
+            "source_families": [
+                " longform_story_runtime ",
+                "longform_story_runtime",
+                "alternate_source_family",
+            ],
+            "chapter_indices": [1, "2", " 2 ", "bad", None, True, "  "],
+        },
+        top_k=0,
+    )
+
+    normalized = DefaultQueryPreprocessor().preprocess(query)
+
+    assert normalized.filters["materialization_kinds"] == [
+        "chapter_summary",
+        "continuity_note",
+    ]
+    assert normalized.filters["source_families"] == [
+        "longform_story_runtime",
+        "alternate_source_family",
+    ]
+    assert normalized.filters["chapter_indices"] == [1, 2]
+    assert normalized.story_id == "story-filter"
+    assert normalized.text_query == "filter text"
+    assert normalized.domains == [Domain.CHAPTER]
+    assert normalized.top_k == 1
 
 
 class _FakeLangfuseObservation:

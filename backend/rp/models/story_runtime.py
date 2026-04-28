@@ -6,7 +6,13 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 
 class StorySessionState(StrEnum):
@@ -81,6 +87,10 @@ class ChapterWorkspace(BaseModel):
     review_notes: list[str] = Field(default_factory=list)
     accepted_segment_ids: list[str] = Field(default_factory=list)
     pending_segment_artifact_id: str | None = None
+    current_scene_ref: str | None = None
+    next_scene_index: int = 1
+    last_closed_scene_ref: str | None = None
+    closed_scene_refs: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -96,6 +106,7 @@ class StoryArtifact(BaseModel):
     revision: int
     content_text: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    scene_ref: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -109,6 +120,7 @@ class StoryDiscussionEntry(BaseModel):
     role: Literal["user", "assistant", "system"]
     content_text: str
     linked_artifact_id: str | None = None
+    scene_ref: str | None = None
     created_at: datetime
 
 
@@ -138,6 +150,7 @@ class LongformTurnRequest(BaseModel):
     provider_id: str | None = None
     user_prompt: str | None = None
     target_artifact_id: str | None = None
+    story_segment_metadata_patch: StorySegmentStructuredMetadata | None = None
 
 
 class LongformTurnResponse(BaseModel):
@@ -175,6 +188,85 @@ class OrchestratorPlan(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ForeshadowStatusUpdateMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    foreshadow_id: str | None = None
+    status: str | None = None
+    state: str | None = None
+    summary: str | None = None
+    title: str | None = None
+    description: str | None = None
+    resolution: str | None = None
+
+    def to_metadata_item(self) -> dict[str, Any] | None:
+        normalized: dict[str, Any] = {}
+        for key, value in self.model_dump(mode="json", exclude_none=True).items():
+            if isinstance(value, str):
+                stripped = value.strip()
+                if not stripped:
+                    continue
+                normalized[key] = stripped
+                continue
+            normalized[key] = value
+        foreshadow_id = normalized.get("foreshadow_id")
+        if not isinstance(foreshadow_id, str) or not foreshadow_id:
+            return None
+        if len(normalized) == 1:
+            return None
+        return normalized
+
+
+class StorySegmentStructuredMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    foreshadow_status_updates: list[ForeshadowStatusUpdateMetadata] = Field(
+        default_factory=list
+    )
+
+    @field_validator("foreshadow_status_updates", mode="before")
+    @classmethod
+    def _normalize_foreshadow_status_updates(
+        cls,
+        value: Any,
+    ) -> list[ForeshadowStatusUpdateMetadata]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[ForeshadowStatusUpdateMetadata] = []
+        for item in value:
+            if not isinstance(item, (dict, ForeshadowStatusUpdateMetadata)):
+                continue
+            try:
+                normalized.append(ForeshadowStatusUpdateMetadata.model_validate(item))
+            except ValidationError:
+                continue
+        return normalized
+
+    def to_artifact_metadata(self) -> dict[str, Any]:
+        latest_by_id: dict[str, tuple[int, dict[str, Any]]] = {}
+        sequence = 0
+        for item in self.foreshadow_status_updates:
+            normalized_item = item.to_metadata_item()
+            if normalized_item is None:
+                continue
+            latest_by_id[str(normalized_item["foreshadow_id"])] = (
+                sequence,
+                normalized_item,
+            )
+            sequence += 1
+        if not latest_by_id:
+            return {}
+        return {
+            "foreshadow_status_updates": [
+                update
+                for _, update in sorted(
+                    latest_by_id.values(),
+                    key=lambda item: item[0],
+                )
+            ]
+        }
+
+
 class SpecialistResultBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -188,3 +280,6 @@ class SpecialistResultBundle(BaseModel):
     state_patch_proposals: dict[str, Any] = Field(default_factory=dict)
     summary_updates: list[str] = Field(default_factory=list)
     recall_summary_text: str | None = None
+    story_segment_metadata: StorySegmentStructuredMetadata = Field(
+        default_factory=StorySegmentStructuredMetadata
+    )

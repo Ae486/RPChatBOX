@@ -5,7 +5,6 @@ import json
 
 from sqlmodel import Session
 
-from config import get_settings
 from datetime import datetime, timezone
 
 from models.rp_setup_store import (
@@ -261,6 +260,7 @@ def test_setup_agent_stream_turn_applies_setup_patch(client, monkeypatch):
         json={
             "workspace_id": workspace_id,
             "model_id": "model-setup",
+            "target_step": "writing_contract",
             "history": [],
             "user_prompt": "请帮我先收敛写作契约。",
         },
@@ -410,8 +410,6 @@ def test_setup_agent_turn_accepts_model_when_tool_support_inferred_from_supporte
     client,
     monkeypatch,
 ):
-    monkeypatch.setenv("RP_SETUP_AGENT_RUNTIME_V2_ENABLED", "false")
-    get_settings.cache_clear()
     monkeypatch.setattr(
         "services.model_capability_service._try_get_model_info",
         lambda **kwargs: {
@@ -622,7 +620,12 @@ def test_setup_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
     assert response_payload["turn_goal"]["current_step"] == "foundation"
     assert response_payload["working_plan"]["patch_targets"] == ["foundation_draft.entries"]
     assert response_payload["completion_guard"]["allow_finalize"] is True
+    assert response_payload["continue_reason"] is None
+    assert response_payload["loop_trace"]
     assert response_payload["tool_result_count"] == 0
+    assert payload["latest_meaningful_checkpoint"]["loop_trace"]
+    assert "context_packet" not in payload["latest_checkpoint"]["state"]
+    assert "context_packet" not in payload["latest_meaningful_checkpoint"]["state"]
     assert payload["history"]
 
 
@@ -667,13 +670,7 @@ def test_setup_turn_recovers_after_failed_stream_on_same_thread(client, monkeypa
     assert retry_response.json()["assistant_text"] == "recovered after timeout"
 
 
-def test_setup_agent_turn_uses_runtime_v2_by_default(client, monkeypatch):
-    monkeypatch.delenv("RP_SETUP_AGENT_RUNTIME_V2_ENABLED", raising=False)
-    monkeypatch.delenv(
-        "CHATBOX_BACKEND_RP_SETUP_AGENT_RUNTIME_V2_ENABLED",
-        raising=False,
-    )
-    get_settings.cache_clear()
+def test_setup_agent_turn_uses_runtime_v2(client, monkeypatch):
     client.put("/api/providers/provider-setup", json=_provider_payload())
     client.put(
         "/api/providers/provider-setup/models/model-setup",
@@ -707,8 +704,6 @@ def test_setup_agent_turn_uses_runtime_v2_by_default(client, monkeypatch):
         debug_response.json()["latest_meaningful_checkpoint"]["state"]["finish_reason"]
         == "completed_text"
     )
-
-    get_settings.cache_clear()
 
 
 def test_setup_agent_turn_passes_selected_user_edit_deltas_into_context(client, monkeypatch):
@@ -810,43 +805,3 @@ def test_setup_runtime_debug_exposes_cognitive_summary_when_present(client, monk
     latest = payload["latest_meaningful_checkpoint"]
     assert latest["cognitive_state_summary"]["invalidated"] is True
     assert latest["repair_route"] is None
-
-
-def test_setup_agent_turn_can_fallback_to_legacy_when_flag_disabled(client, monkeypatch):
-    monkeypatch.setenv("RP_SETUP_AGENT_RUNTIME_V2_ENABLED", "false")
-    get_settings.cache_clear()
-    client.put("/api/providers/provider-setup", json=_provider_payload())
-    client.put(
-        "/api/providers/provider-setup/models/model-setup",
-        json=_model_payload(),
-    )
-    workspace_id = _create_workspace(client)
-    monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
-        lambda: _CaptureStepLLMService(),
-    )
-
-    response = client.post(
-        f"/api/rp/setup/workspaces/{workspace_id}/turn",
-        json={
-            "workspace_id": workspace_id,
-            "model_id": "model-setup",
-            "target_step": "foundation",
-            "history": [],
-            "user_prompt": "请继续世界观背景。",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["assistant_text"] == "step=foundation"
-
-    debug_response = client.get(
-        f"/api/rp/setup/workspaces/{workspace_id}/runtime/debug"
-    )
-    assert debug_response.status_code == 200
-    assert (
-        debug_response.json()["latest_meaningful_checkpoint"]["state"]["finish_reason"]
-        == "legacy_tool_runtime"
-    )
-
-    get_settings.cache_clear()

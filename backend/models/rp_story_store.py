@@ -18,7 +18,7 @@ def _utcnow() -> datetime:
 _JSON_VARIANT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class StorySessionRecord(SQLModel, table=True):
+class StorySessionRecord(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = "rp_story_sessions"
 
     session_id: str = Field(primary_key=True, index=True)
@@ -45,7 +45,7 @@ class StorySessionRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class ChapterWorkspaceRecord(SQLModel, table=True):
+class ChapterWorkspaceRecord(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = "rp_chapter_workspaces"
 
     chapter_workspace_id: str = Field(primary_key=True, index=True)
@@ -74,11 +74,18 @@ class ChapterWorkspaceRecord(SQLModel, table=True):
         sa_column=Column(_JSON_VARIANT, nullable=False),
     )
     pending_segment_artifact_id: str | None = Field(default=None, index=True)
+    current_scene_ref: str | None = None
+    next_scene_index: int = 2
+    last_closed_scene_ref: str | None = None
+    closed_scene_refs_json: list[str] = Field(
+        default_factory=list,
+        sa_column=Column(_JSON_VARIANT, nullable=False),
+    )
     created_at: datetime = Field(default_factory=_utcnow, index=True)
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class StoryArtifactRecord(SQLModel, table=True):
+class StoryArtifactRecord(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = "rp_story_artifacts"
 
     artifact_id: str = Field(primary_key=True, index=True)
@@ -95,11 +102,12 @@ class StoryArtifactRecord(SQLModel, table=True):
         default_factory=dict,
         sa_column=Column(_JSON_VARIANT, nullable=False),
     )
+    scene_ref: str | None = None
     created_at: datetime = Field(default_factory=_utcnow, index=True)
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class StoryDiscussionEntryRecord(SQLModel, table=True):
+class StoryDiscussionEntryRecord(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = "rp_story_discussion_entries"
 
     entry_id: str = Field(primary_key=True, index=True)
@@ -111,10 +119,11 @@ class StoryDiscussionEntryRecord(SQLModel, table=True):
     role: str = Field(index=True)
     content_text: str
     linked_artifact_id: str | None = Field(default=None, index=True)
+    scene_ref: str | None = None
     created_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class StoryBlockConsumerStateRecord(SQLModel, table=True):
+class StoryBlockConsumerStateRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Persist the last-synced Block revision snapshot for one story consumer."""
 
     __tablename__ = "rp_story_block_consumer_states"
@@ -154,7 +163,9 @@ def _ensure_column(engine: Engine, table_name: str, column_name: str, ddl: str) 
     if column_name in columns:
         return
     with engine.begin() as connection:
-        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}"))
+        connection.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
+        )
 
 
 def ensure_story_store_compatible_schema(engine: Engine) -> None:
@@ -169,6 +180,47 @@ def ensure_story_store_compatible_schema(engine: Engine) -> None:
         return
 
     dialect = engine.dialect.name
+
+    if "rp_chapter_workspaces" in tables:
+        _ensure_column(
+            engine,
+            "rp_chapter_workspaces",
+            "current_scene_ref",
+            "VARCHAR",
+        )
+        _ensure_column(
+            engine,
+            "rp_chapter_workspaces",
+            "next_scene_index",
+            "INTEGER DEFAULT 2 NOT NULL",
+        )
+        _ensure_column(
+            engine,
+            "rp_chapter_workspaces",
+            "last_closed_scene_ref",
+            "VARCHAR",
+        )
+        _ensure_column(
+            engine,
+            "rp_chapter_workspaces",
+            "closed_scene_refs_json",
+            (
+                "JSONB DEFAULT '[]'::jsonb NOT NULL"
+                if dialect == "postgresql"
+                else "JSON DEFAULT '[]' NOT NULL"
+            ),
+        )
+
+    if "rp_story_artifacts" in tables:
+        _ensure_column(engine, "rp_story_artifacts", "scene_ref", "VARCHAR")
+
+    if "rp_story_discussion_entries" in tables:
+        _ensure_column(
+            engine,
+            "rp_story_discussion_entries",
+            "scene_ref",
+            "VARCHAR",
+        )
 
     if "rp_story_block_consumer_states" in tables:
         _ensure_column(
@@ -200,7 +252,58 @@ def ensure_story_store_compatible_schema(engine: Engine) -> None:
             "TIMESTAMP WITH TIME ZONE" if dialect == "postgresql" else "DATETIME",
         )
 
+    empty_json_array_literal = "'[]'::jsonb" if dialect == "postgresql" else "'[]'"
+
     with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE rp_chapter_workspaces "
+                "SET current_scene_ref = ('chapter:' || chapter_index || ':scene:1') "
+                "WHERE current_scene_ref IS NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE rp_chapter_workspaces "
+                "SET next_scene_index = 2 "
+                "WHERE next_scene_index IS NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE rp_chapter_workspaces "
+                f"SET closed_scene_refs_json = {empty_json_array_literal} "
+                "WHERE closed_scene_refs_json IS NULL"
+            )
+        )
+        # Legacy runtime rows predate explicit scene lifecycle, so they always
+        # belong to the deterministic first scene scaffold for their chapter.
+        connection.execute(
+            text(
+                "UPDATE rp_story_artifacts "
+                "SET scene_ref = ("
+                "SELECT ('chapter:' || rp_chapter_workspaces.chapter_index || ':scene:1') "
+                "FROM rp_chapter_workspaces "
+                "WHERE rp_chapter_workspaces.chapter_workspace_id = "
+                "rp_story_artifacts.chapter_workspace_id"
+                ") "
+                "WHERE scene_ref IS NULL "
+                "AND artifact_kind = 'story_segment'"
+            )
+        )
+        if "rp_story_discussion_entries" in tables:
+            connection.execute(
+                text(
+                    "UPDATE rp_story_discussion_entries "
+                    "SET scene_ref = ("
+                    "SELECT ('chapter:' || rp_chapter_workspaces.chapter_index || ':scene:1') "
+                    "FROM rp_chapter_workspaces "
+                    "WHERE rp_chapter_workspaces.chapter_workspace_id = "
+                    "rp_story_discussion_entries.chapter_workspace_id"
+                    ") "
+                    "WHERE scene_ref IS NULL"
+                )
+            )
         connection.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS ix_rp_story_sessions_story_state "

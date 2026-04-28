@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from models.rp_setup_store import SetupPendingUserEditDeltaRecord
+
 from rp.agent_runtime.contracts import (
     ChunkCandidate,
     DiscussionState,
@@ -180,6 +181,43 @@ def test_runtime_state_service_persists_turn_governance(retrieval_session):
     assert summary.tool_outcomes[0].updated_refs == ["draft:story_config"]
     assert summary.compact_summary is not None
     assert summary.compact_summary.open_threads == ["Need exact preset name."]
+
+
+def test_runtime_state_service_turn_governance_snapshot_excludes_loop_trace_fields(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+
+    workspace = workspace_service.create_workspace(
+        story_id="story-runtime-governance-2",
+        mode=StoryMode.LONGFORM,
+    )
+    context_packet = _build_context_packet(
+        context_builder=context_builder,
+        workspace_id=workspace.workspace_id,
+        step_id=SetupStepId.STORY_CONFIG,
+    )
+
+    runtime_state_service.persist_turn_governance(
+        workspace=workspace,
+        context_packet=context_packet,
+        step_id=SetupStepId.STORY_CONFIG,
+        working_digest=SetupWorkingDigest(current_goal="Clarify story config"),
+        tool_outcomes=[],
+        compact_summary=None,
+    )
+
+    raw_record = runtime_state_service._get_record(
+        workspace_id=workspace.workspace_id,
+        step_id=SetupStepId.STORY_CONFIG,
+    )
+
+    assert raw_record is not None
+    assert "loop_trace" not in raw_record.snapshot_json
+    assert "continue_reason" not in raw_record.snapshot_json
+    assert "context_report" not in raw_record.snapshot_json
 
 
 def test_runtime_state_service_invalidates_snapshot_after_user_edit_delta(
@@ -387,7 +425,10 @@ def test_context_builder_prefers_compact_prior_stage_handoffs_for_new_stage_cont
             domain="rule",
             path="world.magic.law",
             title="Magic Law",
-            content={"summary": "Public spellcasting is regulated by guild permits."},
+            content={
+                "summary": "Public spellcasting is regulated by guild permits.",
+                "open_issues": ["Need guild exception process."],
+            },
         ),
     )
     proposal = workspace_service.propose_commit(
@@ -441,8 +482,19 @@ def test_context_builder_prefers_compact_prior_stage_handoffs_for_new_stage_cont
         handoff.step_id.value for handoff in context_packet.prior_stage_handoffs
     ] == [SetupStepId.FOUNDATION.value]
     foundation_handoff = context_packet.prior_stage_handoffs[0]
+    assert foundation_handoff.workspace_id == workspace.workspace_id
+    assert foundation_handoff.from_step == SetupStepId.FOUNDATION
+    assert foundation_handoff.to_step == SetupStepId.LONGFORM_BLUEPRINT
     assert foundation_handoff.summary == "world.magic.law"
+    assert foundation_handoff.summary_tier_0 == "Committed 1 foundation entries"
+    assert foundation_handoff.summary_tier_1 == "world.magic.law"
     assert foundation_handoff.spotlights == ["Magic Law"]
+    assert foundation_handoff.open_issues == ["Need guild exception process."]
+    assert foundation_handoff.retrieval_refs == ["magic-law"]
+    assert foundation_handoff.warnings == []
+    assert foundation_handoff.source_basis.workspace_id == workspace.workspace_id
+    assert foundation_handoff.source_basis.commit_id
+    assert foundation_handoff.source_basis.snapshot_block_types == ["foundation"]
     assert foundation_handoff.chunk_descriptions[0].title == "Magic Law"
     assert foundation_handoff.chunk_descriptions[0].description == (
         "rule | world.magic.law - Public spellcasting is regulated by guild permits."
@@ -524,7 +576,19 @@ def test_context_builder_derives_blueprint_handoff_chunk_descriptions_from_accep
         SetupStepId.LONGFORM_BLUEPRINT.value,
     ]
     blueprint_handoff = context_packet.prior_stage_handoffs[1]
+    assert blueprint_handoff.from_step == SetupStepId.LONGFORM_BLUEPRINT
+    assert blueprint_handoff.to_step == SetupStepId.WRITING_CONTRACT
     assert blueprint_handoff.summary == "A permit clerk finds a forged license ring."
+    assert blueprint_handoff.summary_tier_0 == "Committed longform blueprint"
+    assert blueprint_handoff.summary_tier_1 == (
+        "A permit clerk finds a forged license ring."
+    )
+    assert blueprint_handoff.retrieval_refs == ["longform_blueprint"]
+    assert blueprint_handoff.warnings == []
+    assert blueprint_handoff.open_issues == []
+    assert blueprint_handoff.source_basis.snapshot_block_types == [
+        "longform_blueprint"
+    ]
     assert [chunk.title for chunk in blueprint_handoff.chunk_descriptions] == [
         "Blueprint Overview",
         "Audit Day",
@@ -580,4 +644,8 @@ def test_context_builder_drops_chunk_descriptions_when_token_budget_is_compact(
     assert context_packet.context_profile == "compact"
     assert context_packet.prior_stage_handoffs
     assert context_packet.prior_stage_handoffs[0].chunk_descriptions == []
+    assert context_packet.prior_stage_handoffs[0].retrieval_refs == ["guild-law"]
+    assert context_packet.prior_stage_handoffs[0].summary_tier_0 == (
+        "Committed 1 foundation entries"
+    )
     assert context_packet.committed_summaries == ["Committed 1 foundation entries"]

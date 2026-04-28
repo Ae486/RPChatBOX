@@ -25,6 +25,34 @@ def _normalize_string_list(raw: object) -> list[str]:
     return [str(item) for item in _dedupe_preserve_order(values)]
 
 
+def _normalize_int_list(raw: object) -> list[int]:
+    if not isinstance(raw, list):
+        return []
+    values: list[int] = []
+    for item in raw:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int):
+            values.append(item)
+            continue
+        if isinstance(item, str):
+            normalized = item.strip()
+            if not normalized:
+                continue
+            try:
+                values.append(int(normalized))
+            except ValueError:
+                continue
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
 class DefaultQueryPreprocessor:
     """Apply stable, model-free normalization to retrieval queries."""
 
@@ -32,9 +60,25 @@ class DefaultQueryPreprocessor:
         filters = dict(query.filters or {})
 
         if "knowledge_collections" in filters:
-            filters["knowledge_collections"] = _normalize_string_list(filters.get("knowledge_collections"))
+            filters["knowledge_collections"] = _normalize_string_list(
+                filters.get("knowledge_collections")
+            )
         if "mapped_targets" in filters:
-            filters["mapped_targets"] = _normalize_string_list(filters.get("mapped_targets"))
+            filters["mapped_targets"] = _normalize_string_list(
+                filters.get("mapped_targets")
+            )
+        if "materialization_kinds" in filters:
+            filters["materialization_kinds"] = _normalize_string_list(
+                filters.get("materialization_kinds")
+            )
+        if "source_families" in filters:
+            filters["source_families"] = _normalize_string_list(
+                filters.get("source_families")
+            )
+        if "chapter_indices" in filters:
+            filters["chapter_indices"] = _normalize_int_list(
+                filters.get("chapter_indices")
+            )
 
         domain_path_prefix = filters.get("domain_path_prefix")
         if isinstance(domain_path_prefix, str):
@@ -42,8 +86,16 @@ class DefaultQueryPreprocessor:
             filters["domain_path_prefix"] = normalized_prefix or None
 
         normalized_story_id = query.story_id.strip() if query.story_id.strip() else "*"
-        normalized_scope = query.scope.strip() if isinstance(query.scope, str) and query.scope.strip() else query.scope
-        normalized_text = query.text_query.strip() if isinstance(query.text_query, str) else query.text_query
+        normalized_scope = (
+            query.scope.strip()
+            if isinstance(query.scope, str) and query.scope.strip()
+            else query.scope
+        )
+        normalized_text = (
+            query.text_query.strip()
+            if isinstance(query.text_query, str)
+            else query.text_query
+        )
 
         return query.model_copy(
             update={

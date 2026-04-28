@@ -220,7 +220,13 @@ async def test_story_runtime_controller_exposes_memory_read_side(retrieval_sessi
         scope="story",
         current_revision=3,
         data_json={"current_chapter": 1, "title": "Block Store Chapter"},
-        metadata_json={"test_marker": "controller_block"},
+        metadata_json={
+            "test_marker": "controller_block",
+            "read_only": True,
+            "mutation_mode": "wrong_mode_from_store",
+            "history_mode": "wrong_history_from_store",
+            "proposal_visibility": "wrong_visibility_from_store",
+        },
         latest_apply_id="apply-controller-block",
         payload_schema_ref="schema://core-state/chapter-current",
     )
@@ -251,7 +257,13 @@ async def test_story_runtime_controller_exposes_memory_read_side(retrieval_sessi
         scope="chapter",
         current_revision=4,
         items_json=["Block outline"],
-        metadata_json={"test_marker": "controller_block_projection"},
+        metadata_json={
+            "test_marker": "controller_block_projection",
+            "read_only": False,
+            "mutation_mode": "wrong_mode_from_store",
+            "history_mode": "wrong_history_from_store",
+            "proposal_visibility": "wrong_visibility_from_store",
+        },
         last_refresh_kind="controller_test_refresh",
         payload_schema_ref="schema://core-state/projection-slot",
     )
@@ -353,6 +365,7 @@ async def test_story_runtime_controller_exposes_memory_read_side(retrieval_sessi
         session_id=session_id,
         block_id=projection_row.projection_slot_id,
     )
+    overview = controller.read_memory_overview(session_id=session_id)
 
     chapter_item = next(
         item
@@ -411,6 +424,10 @@ async def test_story_runtime_controller_exposes_memory_read_side(retrieval_sessi
             "session_id": session_id,
             "latest_apply_id": "apply-controller-block",
             "updated_at": authoritative_block["metadata"]["updated_at"],
+            "read_only": False,
+            "mutation_mode": "governed_proposal_apply",
+            "history_mode": "supported",
+            "proposal_visibility": "supported",
         },
     }
     assert projection_block == {
@@ -437,6 +454,10 @@ async def test_story_runtime_controller_exposes_memory_read_side(retrieval_sessi
             "chapter_workspace_id": chapter.chapter_workspace_id,
             "last_refresh_kind": "controller_test_refresh",
             "updated_at": projection_block["metadata"]["updated_at"],
+            "read_only": True,
+            "mutation_mode": "unsupported_projection_read_side",
+            "history_mode": "supported",
+            "proposal_visibility": "empty",
         },
     }
     assert proposal_items
@@ -482,6 +503,29 @@ async def test_story_runtime_controller_exposes_memory_read_side(retrieval_sessi
     assert projection_block_provenance.source_refs == [
         "core_state_store:projection_slot_revision"
     ]
+    assert overview["session_id"] == session_id
+    assert overview["story_id"] == session.story_id
+    assert overview["blocks"]["total"] == len(block_items)
+    assert overview["blocks"]["by_layer"][Layer.CORE_STATE_AUTHORITATIVE.value] >= 1
+    assert overview["blocks"]["by_layer"][Layer.CORE_STATE_PROJECTION.value] >= 1
+    assert overview["blocks"]["by_source"]["core_state_store"] >= 2
+    assert overview["layers"][Layer.CORE_STATE_AUTHORITATIVE.value]["mutation"] == (
+        "governed_proposal_apply"
+    )
+    assert overview["layers"][Layer.RUNTIME_WORKSPACE.value]["mutation"] == (
+        "unsupported_read_only"
+    )
+    assert overview["layers"][Layer.RECALL.value]["read_surface"] == (
+        "memory.search_recall"
+    )
+    assert overview["proposals"]["by_status"]["applied"] >= 1
+    assert overview["consumers"] == {
+        "total": 0,
+        "dirty": 0,
+        "dirty_consumer_keys": [],
+        "items": [],
+    }
+    assert "overview_does_not_sync_or_compile_consumers" in overview["boundaries"]
 
 
 @pytest.mark.asyncio
@@ -602,16 +646,32 @@ async def test_story_runtime_controller_exposes_runtime_workspace_blocks_as_read
     assert runtime_artifact_block["data_json"]["status"] == (
         StoryArtifactStatus.DRAFT.value
     )
+    assert runtime_artifact_block["data_json"]["scene_ref"] is None
     assert runtime_artifact_block["metadata"]["route"] == (
         "story_session_runtime.artifacts"
     )
+    assert runtime_artifact_block["metadata"]["scene_ref"] is None
+    assert runtime_artifact_block["metadata"]["read_only"] is True
+    assert runtime_artifact_block["metadata"]["mutation_mode"] == (
+        "unsupported_runtime_workspace_scratch"
+    )
+    assert runtime_artifact_block["metadata"]["history_mode"] == "unsupported"
+    assert runtime_artifact_block["metadata"]["proposal_visibility"] == "empty"
     assert runtime_discussion_block["data_json"]["role"] == "user"
     assert runtime_discussion_block["data_json"]["linked_artifact_id"] == (
         draft_artifact.artifact_id
     )
+    assert runtime_discussion_block["data_json"]["scene_ref"] == "chapter:1:scene:1"
     assert runtime_discussion_block["metadata"]["route"] == (
         "story_session_runtime.discussion_entries"
     )
+    assert runtime_discussion_block["metadata"]["scene_ref"] == "chapter:1:scene:1"
+    assert runtime_discussion_block["metadata"]["read_only"] is True
+    assert runtime_discussion_block["metadata"]["mutation_mode"] == (
+        "unsupported_runtime_workspace_scratch"
+    )
+    assert runtime_discussion_block["metadata"]["history_mode"] == "unsupported"
+    assert runtime_discussion_block["metadata"]["proposal_visibility"] == "empty"
     assert runtime_artifact_proposals == []
     assert runtime_discussion_proposals == []
 

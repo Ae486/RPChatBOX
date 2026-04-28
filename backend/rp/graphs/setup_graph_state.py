@@ -16,7 +16,6 @@ class SetupGraphState(TypedDict, total=False):
     user_edit_delta_ids: list[str]
     stream_mode: bool
     status: str
-    context_packet: dict[str, Any]
     assistant_text: str
     finish_reason: str | None
     warnings: list[str]

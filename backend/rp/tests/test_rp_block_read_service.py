@@ -482,6 +482,7 @@ def test_block_read_service_lists_runtime_workspace_draft_and_discussion_blocks(
     )
     assert artifact_block.data_json["status"] == StoryArtifactStatus.DRAFT.value
     assert artifact_block.data_json["content_text"] == "Pending runtime segment"
+    assert artifact_block.data_json["scene_ref"] == "chapter:1:scene:1"
     assert artifact_block.metadata["route"] == "story_session_runtime.artifacts"
     assert artifact_block.metadata["source_table"] == "rp_story_artifacts"
     assert artifact_block.metadata["layer"] == Layer.RUNTIME_WORKSPACE.value
@@ -497,6 +498,7 @@ def test_block_read_service_lists_runtime_workspace_draft_and_discussion_blocks(
     assert artifact_block.metadata["chapter_workspace_id"] == (
         chapter.chapter_workspace_id
     )
+    assert artifact_block.metadata["scene_ref"] == "chapter:1:scene:1"
 
     assert discussion_block.label == (
         f"runtime_workspace.discussion.{discussion_entry.entry_id}"
@@ -513,6 +515,7 @@ def test_block_read_service_lists_runtime_workspace_draft_and_discussion_blocks(
     assert discussion_block.data_json["linked_artifact_id"] == (
         draft_artifact.artifact_id
     )
+    assert discussion_block.data_json["scene_ref"] == "chapter:1:scene:1"
     assert discussion_block.metadata["route"] == (
         "story_session_runtime.discussion_entries"
     )
@@ -527,3 +530,4 @@ def test_block_read_service_lists_runtime_workspace_draft_and_discussion_blocks(
     assert discussion_block.metadata["not_scene_transcript"] is True
     assert discussion_block.metadata["scene_transcript"] is False
     assert discussion_block.metadata["discussion_role"] == "assistant"
+    assert discussion_block.metadata["scene_ref"] == "chapter:1:scene:1"

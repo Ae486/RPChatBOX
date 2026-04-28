@@ -63,10 +63,7 @@ class StoryBlockMutationService:
         )
         if block is None:
             return None
-        if block.layer != Layer.CORE_STATE_AUTHORITATIVE:
-            raise MemoryBlockMutationUnsupportedError(
-                "Memory block mutation only supports authoritative blocks"
-            )
+        self._ensure_block_mutable(block)
 
         canonical_target_ref = self._block_ref(block)
         operations = self._normalize_operations(
@@ -114,10 +111,7 @@ class StoryBlockMutationService:
         )
         if block is None:
             return None
-        if block.layer != Layer.CORE_STATE_AUTHORITATIVE:
-            raise MemoryBlockMutationUnsupportedError(
-                "Memory block mutation only supports authoritative blocks"
-            )
+        self._ensure_block_mutable(block)
         proposal = self._memory_inspection_read_service.get_proposal_for_authoritative_ref(
             story_id=session.story_id,
             session_id=session_id,
@@ -141,6 +135,18 @@ class StoryBlockMutationService:
         if session is None:
             raise ValueError(f"StorySession not found: {session_id}")
         return session
+
+    @staticmethod
+    def _ensure_block_mutable(block: RpBlockView) -> None:
+        if block.metadata.get("read_only") is True:
+            raise MemoryBlockMutationUnsupportedError(
+                "Memory block mutation only supports authoritative blocks; "
+                "resolved block is read-only"
+            )
+        if block.layer != Layer.CORE_STATE_AUTHORITATIVE:
+            raise MemoryBlockMutationUnsupportedError(
+                "Memory block mutation only supports authoritative blocks"
+            )
 
     def _normalize_operations(
         self,

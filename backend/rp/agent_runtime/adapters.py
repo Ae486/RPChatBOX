@@ -8,13 +8,14 @@ from rp.agent_runtime.contracts import (
     RpAgentTurnResult,
     RuntimeProfile,
     SetupContextCompactSummary,
+    SetupContextGovernanceReport,
     SetupCognitiveStateSnapshot,
     SetupCognitiveStateSummary,
     SetupToolOutcome,
     SetupWorkingDigest,
 )
 from rp.agent_runtime.profiles import (
-    SETUP_AGENT_VISIBLE_TOOLS,
+    build_setup_agent_tool_scope,
     build_setup_agent_profile,
 )
 from rp.models.setup_agent import (
@@ -53,7 +54,8 @@ class SetupRuntimeAdapter:
         working_digest: SetupWorkingDigest | None = None,
         tool_outcomes: list[SetupToolOutcome] | None = None,
         compact_summary: SetupContextCompactSummary | None = None,
-        governance_metadata: dict[str, int] | None = None,
+        governance_metadata: dict[str, Any] | None = None,
+        context_report: SetupContextGovernanceReport | None = None,
         cognitive_state: SetupCognitiveStateSnapshot | None = None,
         cognitive_state_summary: SetupCognitiveStateSummary | None = None,
     ) -> RpAgentTurnInput:
@@ -159,8 +161,13 @@ class SetupRuntimeAdapter:
                     else None
                 ),
                 "governance_metadata": dict(governance_metadata or {}),
+                "context_report": (
+                    context_report.model_dump(mode="json", exclude_none=True)
+                    if context_report is not None
+                    else None
+                ),
             },
-            tool_scope=list(SETUP_AGENT_VISIBLE_TOOLS),
+            tool_scope=build_setup_agent_tool_scope(current_step.value),
             metadata={
                 "model_name": model_name,
                 "provider": provider.model_dump(mode="json", exclude_none=True),
