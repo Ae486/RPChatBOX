@@ -310,6 +310,38 @@ def test_writing_packet_builder_uses_projection_sections_and_runtime_hints(
     assert packet.context_sections[-1]["items"] == ["Runtime Hint"]
 
 
+def test_writing_packet_builder_has_no_raw_retrieval_hit_surface(
+    retrieval_session,
+):
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    _, projection_state_service = _build_boundary_services(service)
+    context_service = BuilderProjectionContextService(projection_state_service)
+    builder = WritingPacketBuilder()
+
+    packet = builder.build(
+        session=session,
+        chapter=chapter,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            writer_instruction="Write the next segment.",
+        ),
+        projection_context_sections=context_service.build_context_sections(
+            session_id=session.session_id
+        ),
+        runtime_writer_hints=["Composed specialist continuity hint."],
+        user_instruction="Write the next segment.",
+    )
+    payload = packet.model_dump(mode="json")
+
+    assert "retrieval_hits" not in payload
+    assert "archival_hits" not in payload
+    assert "recall_hits" not in payload
+    assert packet.context_sections[-1] == {
+        "label": "writer_hints",
+        "items": ["Composed specialist continuity hint."],
+    }
+
+
 def test_projection_refresh_service_updates_settled_slots_only(retrieval_session):
     _, chapter, service = _seed_story_runtime(retrieval_session)
     refresh_service = ProjectionRefreshService(service)

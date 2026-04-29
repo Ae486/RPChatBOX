@@ -1,6 +1,6 @@
 {
   "case_id": "setup.commit.blocked.truth_write_open_issues.v1",
-  "title": "Commit proposal is blocked when truth write still has open issues",
+  "title": "Explicit commit proposal carries a warning when truth write still has open issues",
   "scope": "setup",
   "category": "commit_recovery",
   "tags": ["mvp", "deterministic", "setup-v2", "cognitive-runtime"],
@@ -67,19 +67,19 @@
         "severity": "error"
       },
       {
-        "assertion_id": "warnings_include_commit_blocked",
+        "assertion_id": "warnings_include_commit_warning",
         "source": "runtime_result",
         "type": "contains",
         "path": "warnings",
-        "expected": "commit_proposal_blocked",
+        "expected": "truth_write_open_issues_present",
         "severity": "error"
       },
       {
-        "assertion_id": "completion_guard_requires_discussion",
+        "assertion_id": "completion_guard_surfaces_open_issues",
         "source": "runtime_result",
         "type": "equals",
         "path": "structured_payload.completion_guard.reason",
-        "expected": "discussion_continues_without_commit",
+        "expected": "truth_write_still_has_open_issues",
         "severity": "error"
       },
       {
@@ -93,14 +93,14 @@
     ],
     "subjective_hooks": [],
     "expected_reason_codes": [
-      "controller.commit_proposal_blocked"
+      "controller.commit_proposal_warned"
     ],
     "expected_outcome_chain": {
       "transcript_status": "pass",
       "truth_status": "pass",
       "readiness_status": "warn"
     },
-    "expected_recommended_next_action": "tighten_commit_readiness_checks_and_review_block_messages"
+    "expected_recommended_next_action": "surface_commit_readiness_warnings_to_user_review"
   },
   "trace_hooks": {
     "capture_runtime_events": true,

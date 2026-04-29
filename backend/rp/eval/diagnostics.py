@@ -1529,6 +1529,13 @@ def _setup_reason_codes(
             codes.append("infra.provider_request_failed")
 
     warnings_text = [str(item or "") for item in warnings]
+    commit_warning_codes = {
+        "blocking_questions_present",
+        "previous_proposal_rejected",
+        "cognitive_state_invalidated",
+        "truth_write_not_ready_for_review",
+        "truth_write_open_issues_present",
+    }
     tool_error_codes = _setup_tool_error_codes(tool_results)
     if "schema_validation_failed" in tool_error_codes or any(
         "tool_schema_validation" in item for item in warnings_text
@@ -1548,9 +1555,12 @@ def _setup_reason_codes(
     ):
         codes.append("tool_execution.provider_execution_failed")
 
+    has_commit_warning = any(item in commit_warning_codes for item in warnings_text)
     if "commit_proposal_blocked" in warnings_text or repair_route == "block_commit":
         codes.append("controller.commit_proposal_blocked")
-    if completion_guard_reason == "truth_write_not_ready_for_review":
+    if has_commit_warning:
+        codes.append("controller.commit_proposal_warned")
+    if completion_guard_reason == "truth_write_not_ready_for_review" and not has_commit_warning:
         codes.append("controller.commit_proposal_blocked")
     if last_failure_category == "ask_user":
         codes.append("prompt.missing_step_targeting")
@@ -1779,6 +1789,7 @@ def _setup_recommended_next_action(
         "tool_contract.truth_write_target_ref_mismatch": "tighten_truth_write_target_ref_validation_and_add_targeted_repair_prompt",
         "tool_execution.schema_validation_failed": "strengthen_tool_argument_schema_repair_and_retry_policy",
         "controller.commit_proposal_blocked": "tighten_commit_readiness_checks_and_review_block_messages",
+        "controller.commit_proposal_warned": "surface_commit_readiness_warnings_to_user_review",
         "cognition.invalidated_by_user_edit": "refresh_runtime_private_cognition_after_user_edit_before_next_commit_attempt",
         "cognition.invalidated_by_proposal_reject": "reset_rejected_proposal_state_and_force_refinement_path",
         "retrieval_readiness.ingestion_not_completed": "complete_retrieval_ingestion_before_marking_workspace_ready",

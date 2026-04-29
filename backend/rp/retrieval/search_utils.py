@@ -17,10 +17,30 @@ from rp.models.memory_crud import RetrievalHit, RetrievalQuery
 _ASSET_METADATA_FALLBACK_FIELDS = (
     "layer",
     "source_family",
+    "source_type",
+    "source_origin",
     "materialization_event",
     "materialization_kind",
     "materialized_to_recall",
+    "materialized_to_archival",
+    "authoritative_mutation",
+    "workspace_id",
     "chapter_index",
+    "scene_ref",
+    "scene_refs",
+    "character_refs",
+    "pov_character_ref",
+    "pov_character_refs",
+    "mentioned_character_refs",
+    "foreshadow_ref",
+    "foreshadow_refs",
+    "foreshadow_status",
+    "foreshadow_statuses",
+    "branch_id",
+    "branch_ids",
+    "canon_status",
+    "canon_statuses",
+    "superseded_by",
     "artifact_id",
     "artifact_revision",
 )
@@ -106,6 +126,13 @@ def row_matches_common_filters(
     if query.query_kind == "archival" and not collection_ids:
         if collection is None or collection.collection_kind != "archival":
             return False
+    if query.query_kind == "archival":
+        if not _matches_archival_source_filters(
+            chunk=chunk,
+            asset=asset,
+            query=query,
+        ):
+            return False
     if query.query_kind == "recall":
         if collection is None or collection.collection_kind != "recall":
             return False
@@ -159,10 +186,57 @@ def _metadata_value_with_asset_fallback(
     return None
 
 
+def _metadata_or_asset_column_value(
+    *,
+    chunk: KnowledgeChunkRecord,
+    asset: SourceAssetRecord,
+    field_name: str,
+) -> Any:
+    value = _metadata_value_with_asset_fallback(
+        chunk=chunk,
+        asset=asset,
+        field_name=field_name,
+    )
+    if value is not None:
+        return value
+    if field_name == "workspace_id":
+        return asset.workspace_id
+    if field_name == "commit_id":
+        return asset.commit_id
+    return None
+
+
 def _matches_any_filter_value(value: Any, allowed_values: list[object]) -> bool:
     if not allowed_values:
         return True
-    return value in set(allowed_values)
+    if value is None:
+        return False
+    allowed_set = {str(item) for item in allowed_values}
+    if isinstance(value, list):
+        return any(str(item) in allowed_set for item in value)
+    if isinstance(value, tuple | set):
+        return any(str(item) in allowed_set for item in value)
+    return str(value) in allowed_set
+
+
+def _matches_any_metadata_field(
+    *,
+    chunk: KnowledgeChunkRecord,
+    asset: SourceAssetRecord,
+    field_names: tuple[str, ...],
+    allowed_values: list[object],
+) -> bool:
+    return any(
+        _matches_any_filter_value(
+            _metadata_value_with_asset_fallback(
+                chunk=chunk,
+                asset=asset,
+                field_name=field_name,
+            ),
+            allowed_values,
+        )
+        for field_name in field_names
+    )
 
 
 def _matches_recall_source_family_filters(
@@ -171,16 +245,55 @@ def _matches_recall_source_family_filters(
     asset: SourceAssetRecord,
     query: RetrievalQuery,
 ) -> bool:
+    filter_fields: dict[str, tuple[str, ...]] = {
+        "materialization_kinds": ("materialization_kind",),
+        "source_families": ("source_family",),
+        "chapter_indices": ("chapter_index",),
+        "scene_refs": ("scene_ref", "scene_refs"),
+        "character_refs": (
+            "character_refs",
+            "mentioned_character_refs",
+            "pov_character_ref",
+            "pov_character_refs",
+        ),
+        "pov_character_refs": ("pov_character_ref", "pov_character_refs"),
+        "foreshadow_refs": ("foreshadow_ref", "foreshadow_refs"),
+        "foreshadow_statuses": ("foreshadow_status", "foreshadow_statuses"),
+        "branch_ids": ("branch_id", "branch_ids"),
+        "canon_statuses": ("canon_status", "canon_statuses"),
+    }
+    for filter_key, metadata_fields in filter_fields.items():
+        allowed_values = list(query.filters.get(filter_key) or [])
+        if not allowed_values:
+            continue
+        if not _matches_any_metadata_field(
+            chunk=chunk,
+            asset=asset,
+            field_names=metadata_fields,
+            allowed_values=allowed_values,
+        ):
+            return False
+    return True
+
+
+def _matches_archival_source_filters(
+    *,
+    chunk: KnowledgeChunkRecord,
+    asset: SourceAssetRecord,
+    query: RetrievalQuery,
+) -> bool:
     filter_fields = {
-        "materialization_kinds": "materialization_kind",
+        "source_types": "source_type",
         "source_families": "source_family",
-        "chapter_indices": "chapter_index",
+        "source_origins": "source_origin",
+        "workspace_ids": "workspace_id",
+        "commit_ids": "commit_id",
     }
     for filter_key, metadata_field in filter_fields.items():
         allowed_values = list(query.filters.get(filter_key) or [])
         if not allowed_values:
             continue
-        value = _metadata_value_with_asset_fallback(
+        value = _metadata_or_asset_column_value(
             chunk=chunk,
             asset=asset,
             field_name=metadata_field,
@@ -231,6 +344,7 @@ def build_chunk_hit(
     metadata["char_end"] = metadata.get("char_end")
     metadata["source_ref"] = metadata.get("source_ref") or asset.source_ref
     metadata["commit_id"] = metadata.get("commit_id") or asset.commit_id
+    metadata["workspace_id"] = metadata.get("workspace_id") or asset.workspace_id
     return RetrievalHit(
         hit_id=chunk.chunk_id,
         query_id=query.query_id,

@@ -21,7 +21,11 @@ def _dedupe_preserve_order(values: Iterable[object]) -> list[object]:
 def _normalize_string_list(raw: object) -> list[str]:
     if not isinstance(raw, list):
         return []
-    values = [str(item).strip() for item in raw if str(item).strip()]
+    values = [
+        str(item).strip()
+        for item in raw
+        if item is not None and not isinstance(item, bool) and str(item).strip()
+    ]
     return [str(item) for item in _dedupe_preserve_order(values)]
 
 
@@ -53,31 +57,67 @@ def _normalize_int_list(raw: object) -> list[int]:
     return ordered
 
 
+_STRING_LIST_FILTER_KEYS = (
+    "knowledge_collections",
+    "mapped_targets",
+    "materialization_kinds",
+    "source_families",
+    "source_types",
+    "source_origins",
+    "workspace_ids",
+    "commit_ids",
+    "scene_refs",
+    "character_refs",
+    "pov_character_refs",
+    "foreshadow_refs",
+    "foreshadow_statuses",
+    "branch_ids",
+    "canon_statuses",
+)
+
+_INT_LIST_FILTER_KEYS = ("chapter_indices",)
+
+
+def _normalize_search_policy(raw: object) -> dict[str, object] | None:
+    if not isinstance(raw, dict):
+        return None
+    policy = dict(raw)
+    profile = policy.get("profile")
+    if isinstance(profile, str):
+        normalized_profile = profile.strip().lower()
+        policy["profile"] = normalized_profile or "default"
+    rerank = policy.get("rerank")
+    if isinstance(rerank, str):
+        normalized_rerank = rerank.strip().lower()
+        policy["rerank"] = (
+            normalized_rerank
+            if normalized_rerank in {"auto", "on", "off"}
+            else "auto"
+        )
+    context_budget = policy.get("context_budget")
+    if isinstance(context_budget, dict):
+        policy["context_budget"] = dict(context_budget)
+    context = policy.get("context")
+    if isinstance(context, dict):
+        policy["context"] = dict(context)
+    return policy
+
+
 class DefaultQueryPreprocessor:
     """Apply stable, model-free normalization to retrieval queries."""
 
     def preprocess(self, query: RetrievalQuery) -> RetrievalQuery:
         filters = dict(query.filters or {})
 
-        if "knowledge_collections" in filters:
-            filters["knowledge_collections"] = _normalize_string_list(
-                filters.get("knowledge_collections")
-            )
-        if "mapped_targets" in filters:
-            filters["mapped_targets"] = _normalize_string_list(
-                filters.get("mapped_targets")
-            )
-        if "materialization_kinds" in filters:
-            filters["materialization_kinds"] = _normalize_string_list(
-                filters.get("materialization_kinds")
-            )
-        if "source_families" in filters:
-            filters["source_families"] = _normalize_string_list(
-                filters.get("source_families")
-            )
-        if "chapter_indices" in filters:
-            filters["chapter_indices"] = _normalize_int_list(
-                filters.get("chapter_indices")
+        for filter_key in _STRING_LIST_FILTER_KEYS:
+            if filter_key in filters:
+                filters[filter_key] = _normalize_string_list(filters.get(filter_key))
+        for filter_key in _INT_LIST_FILTER_KEYS:
+            if filter_key in filters:
+                filters[filter_key] = _normalize_int_list(filters.get(filter_key))
+        if "search_policy" in filters:
+            filters["search_policy"] = _normalize_search_policy(
+                filters.get("search_policy")
             )
 
         domain_path_prefix = filters.get("domain_path_prefix")

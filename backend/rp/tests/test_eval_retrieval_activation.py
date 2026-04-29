@@ -95,6 +95,29 @@ async def test_eval_runner_supports_retrieval_trace_and_provenance_case(retrieva
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case_relpath",
+    [
+        ("retrieval", "search", "archival_source_filter_policy.v1.json"),
+        ("retrieval", "search", "recall_scene_policy.v1.json"),
+        ("retrieval", "search", "active_foreshadow_policy.v1.json"),
+        ("retrieval", "search", "branch_canon_isolation_policy.v1.json"),
+        ("retrieval", "search", "rag_context_budget_policy.v1.json"),
+    ],
+)
+async def test_eval_runner_supports_retrieval_policy_cases(
+    retrieval_session,
+    case_relpath,
+):
+    case = load_case(_case_path(*case_relpath))
+    result = await EvalRunner(retrieval_session).run_case(case)
+
+    assert result.run.status == "completed"
+    assert result.report["finish_reason"] == "retrieval_completed"
+    assert result.report["assertion_summary"]["fail"] == 0
+
+
+@pytest.mark.asyncio
 async def test_eval_runner_marks_ragas_dependency_missing_when_enabled(
     retrieval_session,
     monkeypatch,

@@ -36,3 +36,4 @@
 {"file": "backend/rp/services/longform_specialist_service.py", "reason": "Verify the specialist prompt and schema now expose the story-segment metadata sidecar without widening authoritative mutation semantics."}
 {"file": "backend/rp/tests/test_projection_builder_services.py", "reason": "Focused unit coverage for sidecar normalization and specialist bundle parsing."}
 {"file": "backend/tests/test_rp_story_api.py", "reason": "Focused API coverage for persisted sidecar metadata surviving accept and driving the existing complete-chapter foreshadow consumer."}
+{"file": ".trellis/spec/backend/rp-archival-knowledge-intake-contract.md", "reason": "Quality check contract for Archival intake metadata generation, seed-section parity, and no public tool/storage widening."}

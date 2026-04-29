@@ -29,6 +29,8 @@ from rp.models.setup_workspace import (
     StoryMode,
 )
 from rp.services.minimal_retrieval_ingestion_service import MinimalRetrievalIngestionService
+from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
+from rp.services.setup_commit_warning_service import collect_setup_commit_warning_codes
 from rp.services.setup_context_builder import SetupContextBuilder
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from services.database import get_engine
@@ -65,10 +67,12 @@ class SetupRuntimeController:
         workspace_service: SetupWorkspaceService,
         context_builder: SetupContextBuilder,
         retrieval_ingestion_service: MinimalRetrievalIngestionService,
+        runtime_state_service: SetupAgentRuntimeStateService | None = None,
     ) -> None:
         self._workspace_service = workspace_service
         self._context_builder = context_builder
         self._retrieval_ingestion_service = retrieval_ingestion_service
+        self._runtime_state_service = runtime_state_service
 
     def create_workspace(self, *, story_id: str, mode: StoryMode) -> SetupWorkspace:
         return self._workspace_service.create_workspace(story_id=story_id, mode=mode)
@@ -195,11 +199,21 @@ class SetupRuntimeController:
         target_draft_refs: list[str],
         reason: str | None = None,
     ) -> SetupToolResult:
+        workspace = self._workspace_service.get_workspace(workspace_id)
+        if workspace is None:
+            raise ValueError(f"SetupWorkspace not found: {workspace_id}")
+        unresolved_warnings = collect_setup_commit_warning_codes(
+            workspace=workspace,
+            runtime_state_service=self._runtime_state_service,
+            workspace_id=workspace_id,
+            step_id=step_id,
+        )
         proposal = self._workspace_service.propose_commit(
             workspace_id=workspace_id,
             step_id=step_id,
             target_draft_refs=target_draft_refs,
             reason=reason,
+            unresolved_warnings=unresolved_warnings,
         )
         return SetupToolResult(
             success=True,

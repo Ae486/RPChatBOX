@@ -1,0 +1,158 @@
+{
+  "case_id": "retrieval.search.active_foreshadow_policy.v1",
+  "title": "Recall search should target active foreshadow material without treating retired material as active",
+  "scope": "retrieval",
+  "category": "retrieval_ready",
+  "tags": ["policy", "deterministic", "retrieval-core", "foreshadow"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-active-foreshadow-policy-001",
+      "recall_seed_assets": [
+        {
+          "asset_id": "recall-foreshadow-open",
+          "title": "Open Bell Debt Foreshadow",
+          "text": "Foreshadow policy bell debt remains open and should guide the next scene.",
+          "metadata": {
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "heavy_regression.chapter_close",
+            "materialization_kind": "foreshadow_history_summary",
+            "materialized_to_recall": true,
+            "domain": "chapter",
+            "domain_path": "recall.chapter.3.foreshadow.bell_debt.open",
+            "chapter_index": 3,
+            "foreshadow_refs": ["bell_debt"],
+            "foreshadow_status": "open",
+            "canon_status": "canonical",
+            "branch_id": "main"
+          }
+        },
+        {
+          "asset_id": "recall-foreshadow-retired",
+          "title": "Retired Bell Debt Foreshadow",
+          "text": "Foreshadow policy bell debt was retired in an alternate branch ending.",
+          "metadata": {
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "heavy_regression.chapter_close",
+            "materialization_kind": "foreshadow_history_summary",
+            "materialized_to_recall": true,
+            "domain": "chapter",
+            "domain_path": "recall.chapter.3.foreshadow.bell_debt.retired",
+            "chapter_index": 3,
+            "foreshadow_refs": ["bell_debt"],
+            "foreshadow_status": "retired",
+            "canon_status": "canonical",
+            "branch_id": "main"
+          }
+        }
+      ],
+      "query": {
+        "query_kind": "recall",
+        "text_query": "foreshadow policy bell debt",
+        "domains": ["chapter"],
+        "top_k": 3,
+        "filters": {
+          "foreshadow_refs": ["bell_debt"],
+          "foreshadow_statuses": ["open"],
+          "search_policy": {
+            "profile": "longform",
+            "context": {
+              "current_chapter_index": 3
+            }
+          }
+        },
+        "search_kind": "chunks",
+        "rerank": true
+      }
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-active-foreshadow-policy-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "foreshadow_policy_seed",
+              "domain": "world",
+              "path": "world.foreshadow_policy_seed",
+              "title": "Foreshadow Policy Seed",
+              "tags": ["foreshadow"],
+              "source_refs": [],
+              "content": {
+                "summary": "Retrieval eval seed for active foreshadow policy."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:foreshadow_policy_seed"],
+          "reason": "freeze foreshadow recall fixture"
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_hits_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.hits",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "first_hit_is_open_foreshadow",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.hits[0].metadata.asset_id",
+        "expected": "recall-foreshadow-open",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "open_status_survives_hit_metadata",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.hits[0].metadata.foreshadow_status",
+        "expected": "open",
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}

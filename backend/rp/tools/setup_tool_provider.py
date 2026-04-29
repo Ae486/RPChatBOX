@@ -23,14 +23,10 @@ from rp.models.setup_drafts import (
 )
 from rp.models.setup_handoff import SetupToolResult
 from rp.models.setup_handoff import SetupContextBuilderInput
-from rp.models.setup_workspace import (
-    CommitProposalStatus,
-    QuestionSeverity,
-    QuestionStatus,
-    SetupStepId,
-)
+from rp.models.setup_workspace import QuestionSeverity, SetupStepId
 from rp.services.memory_crud_serialization_service import MemoryCrudSerializationService
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
+from rp.services.setup_commit_warning_service import collect_setup_commit_warning_codes
 from rp.services.setup_context_builder import SetupContextBuilder
 from rp.services.setup_workspace_service import SetupWorkspaceService
 
@@ -474,12 +470,13 @@ class SetupToolProvider:
             )
         if tool_name == "setup.proposal.commit":
             self._ensure_commit_targets_present(input_model=input_model)
-            self._ensure_commit_allowed(input_model=input_model)
+            unresolved_warnings = self._commit_warning_codes(input_model=input_model)
             proposal = self._workspace_service.propose_commit(
                 workspace_id=input_model.workspace_id,
                 step_id=input_model.step_id,
                 target_draft_refs=input_model.target_draft_refs,
                 reason=input_model.reason,
+                unresolved_warnings=unresolved_warnings,
             )
             return SetupToolResult(
                 success=True,
@@ -727,63 +724,14 @@ class SetupToolProvider:
             ),
         )
 
-    def _ensure_commit_allowed(self, *, input_model: SetupProposalCommitInput) -> None:
+    def _commit_warning_codes(self, *, input_model: SetupProposalCommitInput) -> list[str]:
         workspace = self._require_workspace(input_model.workspace_id)
-        self._ensure_commit_not_blocked_by_cognitive_state(
+        return collect_setup_commit_warning_codes(
+            workspace=workspace,
+            runtime_state_service=self._runtime_state_service,
             workspace_id=input_model.workspace_id,
             step_id=input_model.step_id,
         )
-
-        blocking_questions = [
-            question
-            for question in workspace.open_questions
-            if question.step_id == input_model.step_id
-            and question.status == QuestionStatus.OPEN
-            and question.severity == QuestionSeverity.BLOCKING
-        ]
-        if blocking_questions:
-            raise SetupToolContractError(
-                code="setup_commit_blocked",
-                message=(
-                    "Commit proposal is blocked because the current step still has "
-                    "blocking open questions."
-                ),
-                details=self._error_details(
-                    tool_name="setup.proposal.commit",
-                    failure_origin="policy",
-                    repair_strategy="block_commit",
-                    block_commit=True,
-                    extra={
-                        "blocking_open_question_count": len(blocking_questions),
-                        "blocking_open_question_ids": [
-                            question.question_id for question in blocking_questions
-                        ],
-                    },
-                ),
-            )
-
-        latest_proposal = self._latest_step_proposal(
-            workspace=workspace,
-            step_id=input_model.step_id,
-        )
-        if latest_proposal is not None and latest_proposal.status == CommitProposalStatus.REJECTED:
-            raise SetupToolContractError(
-                code="setup_commit_rejected_previously",
-                message=(
-                    "Commit proposal is blocked because the previous proposal for this step "
-                    "was rejected and discussion must continue first."
-                ),
-                details=self._error_details(
-                    tool_name="setup.proposal.commit",
-                    failure_origin="policy",
-                    repair_strategy="block_commit",
-                    block_commit=True,
-                    extra={
-                        "last_proposal_id": latest_proposal.proposal_id,
-                        "last_proposal_status": latest_proposal.status.value,
-                    },
-                ),
-            )
 
     def _validation_error_details(
         self,
@@ -849,78 +797,6 @@ class SetupToolProvider:
         if extra:
             details.update(extra)
         return details
-
-    def _ensure_commit_not_blocked_by_cognitive_state(
-        self,
-        *,
-        workspace_id: str,
-        step_id: SetupStepId,
-    ) -> None:
-        snapshot = self._runtime_state_service.get_snapshot(
-            workspace_id=workspace_id,
-            step_id=step_id,
-        )
-        if snapshot is None:
-            return
-
-        if snapshot.invalidated:
-            raise SetupToolContractError(
-                code="setup_commit_blocked_by_invalidated_cognitive_state",
-                message=(
-                    "Commit proposal is blocked because the current cognitive state is stale "
-                    "and must be reconciled against the latest draft first."
-                ),
-                details=self._error_details(
-                    tool_name="setup.proposal.commit",
-                    failure_origin="policy",
-                    repair_strategy="block_commit",
-                    block_commit=True,
-                    extra={
-                        "invalidation_reasons": list(snapshot.invalidation_reasons),
-                    },
-                ),
-            )
-
-        truth_write = snapshot.active_truth_write
-        if truth_write is None:
-            return
-        if not truth_write.ready_for_review:
-            raise SetupToolContractError(
-                code="setup_commit_blocked_truth_write_not_ready_for_review",
-                message=(
-                    "Commit proposal is blocked because the current draft truth write has not "
-                    "explicitly entered review-ready state yet."
-                ),
-                details=self._error_details(
-                    tool_name="setup.proposal.commit",
-                    failure_origin="policy",
-                    repair_strategy="block_commit",
-                    block_commit=True,
-                    extra={
-                        "ready_for_review": truth_write.ready_for_review,
-                    },
-                ),
-            )
-
-        if not truth_write.remaining_open_issues:
-            return
-
-        raise SetupToolContractError(
-            code="setup_commit_blocked_by_truth_write_issues",
-            message=(
-                "Commit proposal is blocked because the current draft truth write still has "
-                "open issues that must be resolved first."
-            ),
-            details=self._error_details(
-                tool_name="setup.proposal.commit",
-                failure_origin="policy",
-                repair_strategy="block_commit",
-                block_commit=True,
-                extra={
-                    "remaining_open_issues": list(truth_write.remaining_open_issues),
-                },
-            ),
-        )
 
     def _apply_truth_write(
         self,
@@ -1306,28 +1182,3 @@ class SetupToolProvider:
         if block_type not in mapping:
             raise ValueError(f"Unsupported truth write block_type: {block_type}")
         return mapping[block_type]
-
-    @staticmethod
-    def _latest_step_proposal(*, workspace, step_id: SetupStepId):
-        proposals = [
-            proposal
-            for proposal in workspace.commit_proposals
-            if proposal.step_id == step_id
-        ]
-        if not proposals:
-            return None
-        return max(
-            proposals,
-            key=lambda item: (
-                SetupToolProvider._datetime_key(item.reviewed_at),
-                SetupToolProvider._datetime_key(item.created_at),
-            ),
-        )
-
-    @staticmethod
-    def _datetime_key(value) -> float:
-        if value is None:
-            return 0.0
-        if hasattr(value, "timestamp"):
-            return float(value.timestamp())
-        return 0.0

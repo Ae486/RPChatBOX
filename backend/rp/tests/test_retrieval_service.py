@@ -16,6 +16,8 @@ from rp.models.memory_crud import (
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
 from rp.retrieval.query_preprocessor import DefaultQueryPreprocessor
+from rp.retrieval.rag_context_builder import RagContextBuilder
+from rp.retrieval.reranker import SimpleMetadataReranker
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
@@ -65,6 +67,52 @@ def test_default_query_preprocessor_normalizes_recall_filter_values():
     assert normalized.text_query == "filter text"
     assert normalized.domains == [Domain.CHAPTER]
     assert normalized.top_k == 1
+
+
+def test_default_query_preprocessor_normalizes_narrative_and_archival_filters():
+    query = RetrievalQuery(
+        query_id="rq-narrative-filter-normalize",
+        query_kind="recall",
+        story_id="story-filter",
+        text_query="filter text",
+        filters={
+            "scene_refs": [
+                " chapter:1:scene:1 ",
+                "",
+                "chapter:1:scene:1",
+                None,
+            ],
+            "character_refs": [" hero ", "villain", "hero", True],
+            "pov_character_refs": [" hero "],
+            "foreshadow_refs": [" clue-a "],
+            "foreshadow_statuses": [" open ", "open"],
+            "branch_ids": [" main "],
+            "canon_statuses": [" canonical ", "draft"],
+            "source_types": [" foundation_entry ", "foundation_entry"],
+            "source_origins": [" setup_workspace "],
+            "workspace_ids": [" workspace-1 "],
+            "commit_ids": [" commit-1 "],
+            "search_policy": {"profile": " LongForm ", "rerank": " ON "},
+        },
+    )
+
+    normalized = DefaultQueryPreprocessor().preprocess(query)
+
+    assert normalized.filters["scene_refs"] == ["chapter:1:scene:1"]
+    assert normalized.filters["character_refs"] == ["hero", "villain"]
+    assert normalized.filters["pov_character_refs"] == ["hero"]
+    assert normalized.filters["foreshadow_refs"] == ["clue-a"]
+    assert normalized.filters["foreshadow_statuses"] == ["open"]
+    assert normalized.filters["branch_ids"] == ["main"]
+    assert normalized.filters["canon_statuses"] == ["canonical", "draft"]
+    assert normalized.filters["source_types"] == ["foundation_entry"]
+    assert normalized.filters["source_origins"] == ["setup_workspace"]
+    assert normalized.filters["workspace_ids"] == ["workspace-1"]
+    assert normalized.filters["commit_ids"] == ["commit-1"]
+    assert normalized.filters["search_policy"] == {
+        "profile": "longform",
+        "rerank": "on",
+    }
 
 
 class _FakeLangfuseObservation:
@@ -559,6 +607,171 @@ async def test_simple_metadata_reranker_can_promote_metadata_aligned_hit(
     assert result.trace is not None
     assert result.trace.reranker_name == "simple_metadata"
     assert "rerank" in result.trace.pipeline_stages
+
+
+@pytest.mark.asyncio
+async def test_simple_metadata_reranker_records_narrative_scoring_trace():
+    result = RetrievalSearchResult(
+        query="scene continuity",
+        hits=[
+            RetrievalHit(
+                hit_id="chunk-generic",
+                query_id="rq-narrative-rerank",
+                layer="recall",
+                domain=Domain.CHAPTER,
+                domain_path="recall.chapter.1.generic",
+                excerpt_text="Generic continuity note.",
+                score=0.7,
+                rank=1,
+                metadata={
+                    "asset_id": "asset-generic",
+                    "canon_status": "superseded",
+                    "chapter_index": 8,
+                },
+            ),
+            RetrievalHit(
+                hit_id="chunk-scene",
+                query_id="rq-narrative-rerank",
+                layer="recall",
+                domain=Domain.CHAPTER,
+                domain_path="recall.chapter.1.scene",
+                excerpt_text="Current scene continuity note.",
+                score=0.62,
+                rank=2,
+                metadata={
+                    "asset_id": "asset-scene",
+                    "scene_ref": "chapter:1:scene:1",
+                    "character_refs": ["hero"],
+                    "canon_status": "canonical",
+                    "chapter_index": 2,
+                },
+            ),
+        ],
+        trace=RetrievalTrace(
+            trace_id="trace-narrative-rerank",
+            query_id="rq-narrative-rerank",
+            route="retrieval.hybrid.stub",
+            result_kind="chunk",
+            pipeline_stages=["retrieve", "fusion"],
+            candidate_count=2,
+            returned_count=2,
+        ),
+    )
+
+    reranked = await SimpleMetadataReranker().rerank(
+        query=RetrievalQuery(
+            query_id="rq-narrative-rerank",
+            query_kind="recall",
+            story_id="story-narrative-rerank",
+            domains=[Domain.CHAPTER],
+            text_query="scene continuity",
+            filters={
+                "scene_refs": ["chapter:1:scene:1"],
+                "character_refs": ["hero"],
+                "search_policy": {
+                    "profile": "longform",
+                    "rerank": "on",
+                    "context": {"current_chapter_index": 2},
+                },
+            },
+            top_k=2,
+            rerank=True,
+        ),
+        result=result,
+    )
+
+    assert reranked.hits[0].hit_id == "chunk-scene"
+    assert reranked.trace is not None
+    scoring = reranked.trace.details["narrative_scoring"]
+    assert scoring["profile"] == "longform"
+    rules = {item["hit_id"]: item for item in scoring["rules"]}
+    assert rules["chunk-scene"]["boosts"]["scene_match"] == 0.2
+    assert rules["chunk-scene"]["boosts"]["character_match"] == 0.12
+    assert rules["chunk-scene"]["boosts"]["chapter_distance"] == 0.08
+    assert rules["chunk-generic"]["penalties"]["non_canonical_status"] == -0.25
+
+
+def test_rag_context_builder_records_budget_selected_and_excluded_hits():
+    result = RetrievalSearchResult(
+        query="budget",
+        hits=[
+            RetrievalHit(
+                hit_id="chunk-a",
+                query_id="rq-budget",
+                layer="archival",
+                domain=Domain.WORLD_RULE,
+                domain_path="foundation.world.a",
+                excerpt_text="First selected section.",
+                score=0.9,
+                rank=1,
+                metadata={
+                    "asset_id": "asset-a",
+                    "source_family": "setup_source",
+                    "domain": "world_rule",
+                    "token_count": 3,
+                },
+            ),
+            RetrievalHit(
+                hit_id="chunk-a-dup",
+                query_id="rq-budget",
+                layer="archival",
+                domain=Domain.WORLD_RULE,
+                domain_path="foundation.world.a.dup",
+                excerpt_text="Duplicate section.",
+                score=0.8,
+                rank=2,
+                metadata={
+                    "asset_id": "asset-a",
+                    "source_family": "setup_source",
+                    "domain": "world_rule",
+                    "token_count": 2,
+                },
+            ),
+            RetrievalHit(
+                hit_id="chunk-b",
+                query_id="rq-budget",
+                layer="archival",
+                domain=Domain.WORLD_RULE,
+                domain_path="foundation.world.b",
+                excerpt_text="Over budget section.",
+                score=0.7,
+                rank=3,
+                metadata={
+                    "asset_id": "asset-b",
+                    "source_family": "setup_source",
+                    "domain": "world_rule",
+                    "token_count": 10,
+                },
+            ),
+        ],
+        trace=RetrievalTrace(
+            trace_id="trace-budget",
+            query_id="rq-budget",
+            route="retrieval.hybrid.stub",
+            result_kind="chunk",
+            filters_applied={
+                "filters": {
+                    "search_policy": {
+                        "context_budget": {
+                            "max_tokens": 6,
+                            "per_source_family": {"setup_source": 6},
+                            "per_domain": {"world_rule": 6},
+                        }
+                    }
+                }
+            },
+        ),
+    )
+
+    built = RagContextBuilder().build(result)
+
+    assert [hit.hit_id for hit in built.hits] == ["chunk-a"]
+    assert built.trace is not None
+    budget = built.trace.details["context_budget"]
+    assert budget["selected"][0]["hit_id"] == "chunk-a"
+    excluded = {item["hit_id"]: item["reason"] for item in budget["excluded"]}
+    assert excluded["chunk-a-dup"] == "duplicate_asset"
+    assert excluded["chunk-b"] == "token_budget"
 
 
 @pytest.mark.asyncio

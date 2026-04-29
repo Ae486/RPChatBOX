@@ -21,6 +21,7 @@ from models.rp_setup_store import SetupPendingUserEditDeltaRecord
 from models.rp_setup_store import SetupWorkspaceRecord
 from rp.agent_runtime.contracts import SetupCognitiveStateSnapshot
 from rp.models.memory_crud import RetrievalQuery
+from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_agent import SetupAgentTurnRequest
 from rp.models.setup_drafts import (
     FoundationEntry,
@@ -29,12 +30,14 @@ from rp.models.setup_drafts import (
     WritingContractDraft,
 )
 from rp.models.setup_handoff import ActivationCheckResult
-from rp.models.setup_workspace import SetupStepId, SetupWorkspace
+from rp.models.setup_workspace import SetupStepId, SetupWorkspace, StoryMode
 from rp.models.story_runtime import LongformChapterPhase
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from rp.retrieval.embedder import Embedder
 from rp.services.minimal_retrieval_ingestion_service import MinimalRetrievalIngestionService
 from rp.services.retrieval_maintenance_service import RetrievalMaintenanceService
+from rp.services.retrieval_collection_service import RetrievalCollectionService
+from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
 from rp.services.retrieval_service import RetrievalService
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
@@ -497,6 +500,15 @@ class EvalRunner:
                 count=max(1, failure_count),
             )
 
+        recall_seed_assets = request_payload.get("recall_seed_assets")
+        if isinstance(recall_seed_assets, list):
+            self._seed_recall_assets_for_retrieval_eval(
+                story_id=workspace.story_id,
+                workspace_id=workspace.workspace_id,
+                commit_id=commit_id,
+                assets=recall_seed_assets,
+            )
+
         if bool(case.input.env_overrides.get("run_backfill_story_embeddings")):
             maintenance_service = RetrievalMaintenanceService(self._session)
             backfill_jobs = maintenance_service.backfill_story_embeddings(story_id=workspace.story_id)
@@ -643,6 +655,85 @@ class EvalRunner:
             result.run.metadata["replay_path"] = replay_path.as_posix()
             result.report["replay_path"] = replay_path.as_posix()
         return result
+
+    def _seed_recall_assets_for_retrieval_eval(
+        self,
+        *,
+        story_id: str,
+        workspace_id: str,
+        commit_id: str,
+        assets: list[Any],
+    ) -> None:
+        """Seed explicit Recall fixtures for retrieval policy eval cases."""
+
+        collection = RetrievalCollectionService(self._session).ensure_story_collection(
+            story_id=story_id,
+            scope="story",
+            collection_kind="recall",
+        )
+        document_service = RetrievalDocumentService(self._session)
+        ingestion_service = RetrievalIngestionService(self._session)
+        now = utcnow()
+        for index, raw_asset in enumerate(assets):
+            if not isinstance(raw_asset, dict):
+                continue
+            metadata = dict(raw_asset.get("metadata") or {})
+            asset_id = str(raw_asset.get("asset_id") or f"eval-recall-{index}")
+            text = str(raw_asset.get("text") or metadata.get("text") or "")
+            if not text:
+                continue
+            domain = str(metadata.get("domain") or raw_asset.get("domain") or "chapter")
+            domain_path = str(
+                metadata.get("domain_path")
+                or raw_asset.get("domain_path")
+                or f"recall.eval.{asset_id}"
+            )
+            section_metadata = {
+                "domain": domain,
+                "domain_path": domain_path,
+                **metadata,
+            }
+            document_service.upsert_source_asset(
+                SourceAsset(
+                    asset_id=asset_id,
+                    story_id=story_id,
+                    mode=StoryMode.LONGFORM,
+                    collection_id=collection.collection_id,
+                    workspace_id=workspace_id,
+                    commit_id=commit_id,
+                    asset_kind=str(
+                        metadata.get("materialization_kind") or "recall_eval_fixture"
+                    ),
+                    source_ref=str(
+                        metadata.get("source_ref") or f"eval://recall/{asset_id}"
+                    ),
+                    title=str(raw_asset.get("title") or asset_id),
+                    parse_status="queued",
+                    ingestion_status="queued",
+                    mapped_targets=["recall"],
+                    metadata={
+                        **metadata,
+                        "seed_sections": [
+                            {
+                                "section_id": f"seed:{asset_id}",
+                                "title": str(raw_asset.get("title") or asset_id),
+                                "path": domain_path,
+                                "level": 1,
+                                "text": text,
+                                "metadata": section_metadata,
+                            }
+                        ],
+                    },
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            self._session.flush()
+            ingestion_service.ingest_asset(
+                story_id=story_id,
+                asset_id=asset_id,
+                collection_id=collection.collection_id,
+            )
 
     async def _run_activation_case(self, case: EvalCase) -> EvalRunResult:
         run_id = uuid4().hex

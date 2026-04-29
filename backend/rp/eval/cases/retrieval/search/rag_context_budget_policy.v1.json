@@ -1,0 +1,144 @@
+{
+  "case_id": "retrieval.search.rag_context_budget_policy.v1",
+  "title": "RAG context search should emit selected and excluded context budget trace",
+  "scope": "retrieval",
+  "category": "retrieval_ready",
+  "tags": ["policy", "deterministic", "retrieval-core", "context-budget"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-rag-context-budget-001",
+      "query": {
+        "query_kind": "archival",
+        "text_query": "budget policy lantern archive",
+        "domains": ["world_rule"],
+        "top_k": 3,
+        "filters": {
+          "search_policy": {
+            "profile": "longform",
+            "context_budget": {
+              "max_tokens": 80,
+              "per_source_family": {
+                "setup_source": 80
+              },
+              "per_domain": {
+                "world_rule": 80
+              }
+            }
+          }
+        },
+        "search_kind": "rag",
+        "rerank": false
+      }
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-rag-context-budget-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "budget_policy_lantern_rule",
+              "domain": "world",
+              "path": "world.budget_policy_lantern_rule",
+              "title": "Budget Policy Lantern Rule",
+              "tags": ["budget", "policy"],
+              "source_refs": [],
+              "content": {
+                "summary": "The lantern archive budget policy prefers compact setup source context."
+              }
+            },
+            {
+              "entry_id": "budget_policy_lantern_appendix",
+              "domain": "world",
+              "path": "world.budget_policy_lantern_appendix",
+              "title": "Budget Policy Lantern Appendix",
+              "tags": ["budget", "appendix"],
+              "source_refs": [],
+              "content": {
+                "summary": "A second lantern archive note exists so context composition can explain selected candidates."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": [
+            "foundation:budget_policy_lantern_rule",
+            "foundation:budget_policy_lantern_appendix"
+          ],
+          "reason": "freeze context budget fixture"
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_hits_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.hits",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "rag_stage_recorded",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.trace.pipeline_stages",
+        "expected": 3,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "context_budget_selected_exists",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.trace.details.context_budget.selected",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "context_budget_max_tokens_recorded",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.trace.details.context_budget.max_tokens",
+        "expected": 80,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}

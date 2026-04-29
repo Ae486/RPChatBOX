@@ -32,6 +32,74 @@ def _tokens(text: str) -> list[str]:
     return [token for token in _TOKEN_RE.findall(text.lower()) if token]
 
 
+def _filter_values(query: RetrievalQuery, key: str) -> list[str]:
+    raw_values = query.filters.get(key)
+    if not isinstance(raw_values, list):
+        return []
+    return [str(item) for item in raw_values if str(item)]
+
+
+def _positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _policy_context_int(query: RetrievalQuery, key: str) -> int | None:
+    direct = _positive_int(query.filters.get(key))
+    if direct is not None:
+        return direct
+    policy = query.filters.get("search_policy")
+    if not isinstance(policy, dict):
+        return None
+    policy_value = _positive_int(policy.get(key))
+    if policy_value is not None:
+        return policy_value
+    context = policy.get("context")
+    if isinstance(context, dict):
+        return _positive_int(context.get(key))
+    return None
+
+
+def _metadata_values(metadata: dict, *field_names: str) -> list[str]:
+    values: list[str] = []
+    for field_name in field_names:
+        raw_value = metadata.get(field_name)
+        if isinstance(raw_value, list | tuple | set):
+            values.extend(str(item) for item in raw_value if str(item))
+        elif raw_value is not None and str(raw_value):
+            values.append(str(raw_value))
+    return values
+
+
+def _matches_filter(metadata: dict, filter_values: list[str], *field_names: str) -> bool:
+    if not filter_values:
+        return False
+    return bool(
+        set(filter_values).intersection(set(_metadata_values(metadata, *field_names)))
+    )
+
+
+def _chapter_distance_adjustment(metadata: dict, current_chapter_index: int | None) -> float:
+    if current_chapter_index is None:
+        return 0.0
+    hit_chapter_index = _positive_int(metadata.get("chapter_index"))
+    if hit_chapter_index is None:
+        return 0.0
+    distance = abs(hit_chapter_index - current_chapter_index)
+    if distance == 0:
+        return 0.08
+    if distance == 1:
+        return 0.04
+    if distance <= 3:
+        return 0.02
+    return 0.0
+
+
 def _append_trace_metadata(
     *,
     query: RetrievalQuery,
@@ -58,6 +126,30 @@ def _append_trace_metadata(
         }
     )
     return result.model_copy(update={"trace": trace})
+
+
+def _append_narrative_scoring_trace(
+    *,
+    result: RetrievalSearchResult,
+    query: RetrievalQuery,
+    rules: list[dict],
+) -> RetrievalSearchResult:
+    if result.trace is None or not rules:
+        return result
+    policy = query.filters.get("search_policy")
+    profile = "default"
+    if isinstance(policy, dict):
+        raw_profile = policy.get("profile")
+        if isinstance(raw_profile, str) and raw_profile.strip():
+            profile = raw_profile.strip().lower()
+    details = dict(result.trace.details or {})
+    details["narrative_scoring"] = {
+        "profile": profile,
+        "rules": rules,
+    }
+    return result.model_copy(
+        update={"trace": result.trace.model_copy(update={"details": details})}
+    )
 
 
 def _append_warnings(
@@ -136,9 +228,23 @@ class SimpleMetadataReranker:
         started = time.perf_counter()
         normalized_query = (query.text_query or "").strip().lower()
         query_tokens = _tokens(normalized_query)
-        domain_path_prefix = str(query.filters.get("domain_path_prefix") or "").strip().lower()
+        domain_path_prefix = (
+            str(query.filters.get("domain_path_prefix") or "").strip().lower()
+        )
 
         scored_hits: list[tuple[float, int, RetrievalHit]] = []
+        narrative_rules: list[dict] = []
+        scene_refs = _filter_values(query, "scene_refs")
+        character_refs = _filter_values(query, "character_refs")
+        pov_character_refs = _filter_values(query, "pov_character_refs")
+        foreshadow_refs = _filter_values(query, "foreshadow_refs")
+        foreshadow_statuses = _filter_values(query, "foreshadow_statuses")
+        allowed_canon_statuses = set(_filter_values(query, "canon_statuses"))
+        allowed_branch_ids = set(_filter_values(query, "branch_ids"))
+        current_chapter_index = (
+            _policy_context_int(query, "current_chapter_index")
+            or _policy_context_int(query, "target_chapter_index")
+        )
         for index, hit in enumerate(result.hits):
             metadata = dict(hit.metadata)
             title = str(metadata.get("title") or "").lower()
@@ -146,20 +252,109 @@ class SimpleMetadataReranker:
             tags = " ".join(str(item).lower() for item in metadata.get("tags") or [])
 
             boost = 0.0
+            boosts: dict[str, float] = {}
+            penalties: dict[str, float] = {}
             if normalized_query and normalized_query in title:
                 boost += 0.12
+                boosts["title_exact"] = 0.12
             if domain_path_prefix and domain_path.startswith(domain_path_prefix):
                 boost += 0.08
+                boosts["domain_path_prefix"] = 0.08
 
             title_matches = sum(1 for token in query_tokens if token in title)
             path_matches = sum(1 for token in query_tokens if token in domain_path)
             tag_matches = sum(1 for token in query_tokens if token in tags)
-            boost += min(title_matches, 3) * 0.03
-            boost += min(path_matches, 3) * 0.02
-            boost += min(tag_matches, 2) * 0.01
+            if title_matches:
+                boosts["title_token_match"] = min(title_matches, 3) * 0.03
+                boost += boosts["title_token_match"]
+            if path_matches:
+                boosts["domain_path_token_match"] = min(path_matches, 3) * 0.02
+                boost += boosts["domain_path_token_match"]
+            if tag_matches:
+                boosts["tag_token_match"] = min(tag_matches, 2) * 0.01
+                boost += boosts["tag_token_match"]
+
+            if _matches_filter(metadata, scene_refs, "scene_ref", "scene_refs"):
+                boosts["scene_match"] = 0.2
+                boost += boosts["scene_match"]
+            if _matches_filter(
+                metadata,
+                character_refs,
+                "character_refs",
+                "mentioned_character_refs",
+                "pov_character_ref",
+                "pov_character_refs",
+            ):
+                boosts["character_match"] = 0.12
+                boost += boosts["character_match"]
+            if _matches_filter(
+                metadata,
+                pov_character_refs,
+                "pov_character_ref",
+                "pov_character_refs",
+                "character_refs",
+            ):
+                boosts["pov_character_match"] = 0.16
+                boost += boosts["pov_character_match"]
+            if _matches_filter(
+                metadata,
+                foreshadow_refs,
+                "foreshadow_ref",
+                "foreshadow_refs",
+            ):
+                boosts["foreshadow_match"] = 0.12
+                boost += boosts["foreshadow_match"]
+            if _matches_filter(
+                metadata,
+                foreshadow_statuses,
+                "foreshadow_status",
+                "foreshadow_statuses",
+            ):
+                boosts["foreshadow_status_match"] = 0.08
+                boost += boosts["foreshadow_status_match"]
+
+            chapter_distance_boost = _chapter_distance_adjustment(
+                metadata,
+                current_chapter_index,
+            )
+            if chapter_distance_boost:
+                boosts["chapter_distance"] = chapter_distance_boost
+                boost += chapter_distance_boost
+
+            canon_statuses = _metadata_values(
+                metadata,
+                "canon_status",
+                "canon_statuses",
+            )
+            if (
+                any(
+                    status in {"superseded", "rejected", "draft"}
+                    for status in canon_statuses
+                )
+                and not allowed_canon_statuses.intersection(canon_statuses)
+            ):
+                penalties["non_canonical_status"] = -0.25
+                boost += penalties["non_canonical_status"]
+            branch_ids = _metadata_values(metadata, "branch_id", "branch_ids")
+            if (
+                allowed_branch_ids
+                and branch_ids
+                and not allowed_branch_ids.intersection(branch_ids)
+            ):
+                penalties["branch_mismatch"] = -0.3
+                boost += penalties["branch_mismatch"]
 
             adjusted_score = round(float(hit.score) + boost, 6)
             scored_hits.append((adjusted_score, index, hit))
+            if boosts or penalties:
+                narrative_rules.append(
+                    {
+                        "hit_id": hit.hit_id,
+                        "boosts": boosts,
+                        "penalties": penalties,
+                        "final_adjustment": round(boost, 6),
+                    }
+                )
 
         reranked_hits = [
             hit.model_copy(update={"score": score, "rank": rank})
@@ -169,6 +364,11 @@ class SimpleMetadataReranker:
             )
         ]
         reranked_result = result.model_copy(update={"hits": reranked_hits})
+        reranked_result = _append_narrative_scoring_trace(
+            result=reranked_result,
+            query=query,
+            rules=narrative_rules,
+        )
         return _append_trace_metadata(
             query=query,
             result=reranked_result,

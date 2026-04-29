@@ -378,17 +378,17 @@ def _text_response(text: str):
         (
             _case_path("commit", "blocked_truth_write_not_ready.v1.json"),
             _CommitBlockedQuestionLLMService,
-            {"finish_reason": "awaiting_user_input", "repair_route": "block_commit", "commit_blocked": True},
+            {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
         ),
         (
             _case_path("commit", "blocked_truth_write_open_issues.v1.json"),
             _CommitBlockedQuestionLLMService,
-            {"finish_reason": "awaiting_user_input", "repair_route": "block_commit", "commit_blocked": True},
+            {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
         ),
         (
             _case_path("commit", "rejected_proposal_back_to_discussion.v1.json"),
             _RejectedProposalDiscussionLLMService,
-            {"finish_reason": "continue_discussion", "repair_route": "block_commit", "commit_blocked": True},
+            {"finish_reason": "completed_text", "repair_route": None, "commit_blocked": False},
         ),
         (
             _case_path("cognitive", "invalidate_after_user_edit.v1.json"),

@@ -11,7 +11,7 @@ from rp.agent_runtime.contracts import (
     RuntimeProfile,
     RuntimeToolResult,
 )
-from rp.agent_runtime.executor import RpAgentRuntimeExecutor
+from rp.agent_runtime.executor import RpAgentRuntimeExecutor, _RuntimeRunDriver
 
 
 def _turn_input(
@@ -108,6 +108,17 @@ def _tool_definition(name: str) -> dict:
             "parameters": {"type": "object", "properties": {}},
         },
     }
+
+
+def test_runtime_routes_invalid_next_action_to_runtime_failed():
+    state = {"next_action": "undefined_route"}
+
+    route = _RuntimeRunDriver._route_after_assess(state)
+
+    assert route == "finalize_failure"
+    assert state["next_action"] == "finalize_failure"
+    assert state["finish_reason"] == "runtime_failed"
+    assert state["error"]["type"] == "runtime_failed"
 
 
 class _FakeToolExecutor:
@@ -824,13 +835,13 @@ async def test_runtime_executor_blocks_false_success_when_repair_obligation_is_u
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_blocks_commit_when_blocking_questions_remain():
+async def test_runtime_executor_blocks_agent_initiated_commit_when_blocking_questions_remain():
     tool_executor = _FakeToolExecutor()
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
     result = await executor.run(
         _turn_input(
-            user_prompt="Please commit this step.",
+            user_prompt="Continue setup discussion.",
             tool_scope=["setup.proposal.commit"],
             context_bundle={
                 "blocking_open_question_count": 1,
@@ -848,8 +859,20 @@ async def test_runtime_executor_blocks_commit_when_blocking_questions_remain():
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_does_not_repropose_commit_after_rejection():
-    tool_executor = _FakeToolExecutor()
+async def test_runtime_executor_allows_user_requested_reproposal_after_rejection():
+    tool_executor = _FakeToolExecutor(
+        results=[
+            RuntimeToolResult(
+                call_id="call_commit",
+                tool_name="rp_setup__setup.proposal.commit",
+                success=True,
+                content_text='{"success": true, "warnings": ["previous_proposal_rejected"]}',
+                structured_payload={
+                    "result_payload": {"warnings": ["previous_proposal_rejected"]}
+                },
+            )
+        ]
+    )
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
     result = await executor.run(
@@ -867,18 +890,73 @@ async def test_runtime_executor_does_not_repropose_commit_after_rejection():
 
     assert result.status == "completed"
     assert result.finish_reason == "awaiting_user_input"
-    assert tool_executor.calls == []
-    assert "commit_proposal_blocked" in result.warnings
+    assert len(tool_executor.calls) == 1
+    assert "commit_proposal_blocked" not in result.warnings
+    assert "previous_proposal_rejected" in result.warnings
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_blocks_commit_when_cognitive_state_is_invalidated():
+async def test_runtime_executor_allows_user_requested_commit_when_cognitive_state_is_invalidated():
     tool_executor = _FakeToolExecutor()
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
     result = await executor.run(
         _turn_input(
             user_prompt="Please commit this step.",
+            tool_scope=["setup.proposal.commit"],
+            context_bundle={
+                "cognitive_state_summary": {
+                    "current_step": "story_config",
+                    "invalidated": True,
+                    "invalidation_reasons": ["user_edit_delta"],
+                }
+            },
+        ),
+        _profile(),
+        llm_service=_CommitTooEarlyThenQuestionLLM(),
+    )
+
+    assert result.status == "completed"
+    assert result.finish_reason == "awaiting_user_input"
+    assert len(tool_executor.calls) == 1
+    assert "commit_proposal_blocked" not in result.warnings
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_allows_chinese_user_requested_commit():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="请直接发起评审并提交这一阶段。",
+            tool_scope=["setup.proposal.commit"],
+            context_bundle={
+                "cognitive_state_summary": {
+                    "current_step": "story_config",
+                    "invalidated": True,
+                    "invalidation_reasons": ["user_edit_delta"],
+                }
+            },
+        ),
+        _profile(),
+        llm_service=_CommitTooEarlyThenQuestionLLM(),
+    )
+
+    assert result.status == "completed"
+    assert result.finish_reason == "awaiting_user_input"
+    assert len(tool_executor.calls) == 1
+    assert "commit_proposal_blocked" not in result.warnings
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_blocks_agent_initiated_commit_when_cognitive_state_is_invalidated():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="Continue setup discussion.",
             tool_scope=["setup.proposal.commit"],
             context_bundle={
                 "cognitive_state_summary": {

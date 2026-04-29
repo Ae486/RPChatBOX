@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from sqlmodel import select
@@ -13,6 +14,14 @@ from models.rp_setup_store import (
     SetupImportedAssetRecord,
     SetupRetrievalIngestionJobRecord,
     SetupWorkspaceRecord,
+)
+from rp.models.memory_materialization import (
+    FOUNDATION_ENTRY_SOURCE_TYPE,
+    IMPORTED_ASSET_SOURCE_TYPE,
+    LONGFORM_BLUEPRINT_SOURCE_TYPE,
+    SETUP_COMMIT_IMPORT_EVENT,
+    build_archival_seed_section,
+    build_archival_source_metadata,
 )
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
@@ -82,7 +91,8 @@ class MinimalRetrievalIngestionService:
         mime_type: str | None = None
         storage_path: str | None = None
         mapped_targets: list[str] = []
-        metadata: dict[str, object] = {
+        source_type = self._source_type_for_job(job)
+        metadata_extra: dict[str, Any] = {
             "commit_id": commit.commit_id,
             "step_id": job.step_id,
             "target_type": job.target_type,
@@ -98,21 +108,42 @@ class MinimalRetrievalIngestionService:
                 mime_type = asset_record.mime_type
                 storage_path = asset_record.local_path
                 mapped_targets = list(asset_record.mapped_targets_json or [])
-                metadata["asset_parse_status"] = asset_record.parse_status
-                metadata["parsed_payload"] = asset_record.parsed_payload_json
+                metadata_extra["asset_kind"] = asset_record.asset_kind
+                metadata_extra["asset_parse_status"] = asset_record.parse_status
+                metadata_extra["parsed_payload"] = asset_record.parsed_payload_json
 
         asset_id = (
             job.target_ref
             if job.target_type == "asset"
             else f"{commit.commit_id}:{job.target_type}:{job.target_ref}"
         )
-        seed_sections = self._build_sections(commit=commit, job=job, asset_record=asset_record)
-        raw_excerpt = seed_sections[0]["text"][:280] if seed_sections else None
+        seed_sections = self._build_sections(
+            commit=commit,
+            job=job,
+            asset_record=asset_record,
+            source_ref=source_ref,
+            source_type=source_type,
+        )
+        first_text = seed_sections[0].get("text") if seed_sections else None
+        raw_excerpt = str(first_text)[:280] if first_text is not None else None
+        first_metadata = seed_sections[0].get("metadata") if seed_sections else {}
+        first_metadata = first_metadata if isinstance(first_metadata, dict) else {}
+        domain = str(
+            first_metadata.get("domain") or self._domain_from_targets(mapped_targets)
+        )
+        domain_path = str(first_metadata.get("domain_path") or source_ref)
+        metadata = build_archival_source_metadata(
+            source_type=source_type,
+            import_event=SETUP_COMMIT_IMPORT_EVENT,
+            workspace_id=workspace.workspace_id,
+            commit_id=commit.commit_id,
+            step_id=job.step_id,
+            source_ref=source_ref,
+            domain=domain,
+            domain_path=domain_path,
+            extra=metadata_extra,
+        )
         metadata["seed_sections"] = seed_sections
-        if seed_sections:
-            first_metadata = seed_sections[0].get("metadata") or {}
-            metadata.setdefault("domain", first_metadata.get("domain"))
-            metadata.setdefault("domain_path", first_metadata.get("domain_path"))
 
         source_asset = SourceAsset(
             asset_id=asset_id,
@@ -158,41 +189,86 @@ class MinimalRetrievalIngestionService:
         commit: SetupAcceptedCommitRecord,
         job: SetupRetrievalIngestionJobRecord,
         asset_record: SetupImportedAssetRecord | None,
+        source_ref: str,
+        source_type: str,
     ) -> list[dict[str, object]]:
         if job.target_type == "foundation_entry":
             foundation = commit.snapshot_payload_json.get("foundation", {})
             for entry in foundation.get("entries", []):
                 if (entry.get("entry_id") or entry.get("path")) == job.target_ref:
-                    return [self._foundation_entry_to_section(entry)]
+                    return [
+                        self._foundation_entry_to_section(
+                            commit=commit,
+                            job=job,
+                            entry=entry,
+                            source_ref=source_ref,
+                            source_type=source_type,
+                        )
+                    ]
             return []
         if job.target_type == "blueprint":
-            return self._blueprint_to_sections(commit.snapshot_payload_json.get("longform_blueprint", {}))
+            return self._blueprint_to_sections(
+                commit=commit,
+                job=job,
+                blueprint=commit.snapshot_payload_json.get("longform_blueprint", {}),
+                source_ref=source_ref,
+                source_type=source_type,
+            )
         if job.target_type == "asset" and asset_record is not None:
-            return self._asset_to_sections(asset_record)
+            return self._asset_to_sections(
+                commit=commit,
+                job=job,
+                asset=asset_record,
+                source_ref=source_ref,
+                source_type=source_type,
+            )
         return []
 
-    def _foundation_entry_to_section(self, entry: dict) -> dict[str, object]:
+    def _foundation_entry_to_section(
+        self,
+        *,
+        commit: SetupAcceptedCommitRecord,
+        job: SetupRetrievalIngestionJobRecord,
+        entry: dict,
+        source_ref: str,
+        source_type: str,
+    ) -> dict[str, object]:
         domain = self._coarse_domain_for_foundation(entry.get("domain"))
         domain_path = f"foundation.{entry.get('domain')}.{entry.get('path')}".strip(".")
         text = self._render_payload_text(entry.get("content", {}))
         title = entry.get("title") or entry.get("path") or entry.get("entry_id")
-        return {
-            "section_id": entry.get("entry_id") or uuid4().hex,
-            "title": title,
-            "path": entry.get("path") or entry.get("entry_id") or "foundation",
-            "level": 1,
-            "text": text,
-            "metadata": {
-                "domain": domain,
-                "domain_path": domain_path,
+        metadata = self._build_archival_metadata(
+            commit=commit,
+            job=job,
+            source_ref=source_ref,
+            source_type=source_type,
+            domain=domain,
+            domain_path=domain_path,
+            extra={
                 "title": title,
-                "tags": list(entry.get("tags", [])),
                 "source_refs": list(entry.get("source_refs", [])),
-                "commit_id": entry.get("commit_id"),
+                "entry_commit_id": entry.get("commit_id"),
             },
-        }
+        )
+        return build_archival_seed_section(
+            section_id=str(entry.get("entry_id") or uuid4().hex),
+            title=str(title or "foundation"),
+            path=str(entry.get("path") or entry.get("entry_id") or "foundation"),
+            level=1,
+            text=text,
+            metadata=metadata,
+            tags=list(entry.get("tags", [])),
+        )
 
-    def _blueprint_to_sections(self, blueprint: dict) -> list[dict[str, object]]:
+    def _blueprint_to_sections(
+        self,
+        *,
+        commit: SetupAcceptedCommitRecord,
+        job: SetupRetrievalIngestionJobRecord,
+        blueprint: dict,
+        source_ref: str,
+        source_type: str,
+    ) -> list[dict[str, object]]:
         sections: list[dict[str, object]] = []
         for field_name in (
             "premise",
@@ -205,21 +281,26 @@ class MinimalRetrievalIngestionService:
         ):
             value = blueprint.get(field_name)
             if value:
+                domain_path = f"longform_blueprint.{field_name}"
+                metadata = self._build_archival_metadata(
+                    commit=commit,
+                    job=job,
+                    source_ref=source_ref,
+                    source_type=source_type,
+                    domain="chapter",
+                    domain_path=domain_path,
+                    extra={"title": field_name},
+                )
                 sections.append(
-                    {
-                        "section_id": f"blueprint:{field_name}",
-                        "title": field_name,
-                        "path": f"longform_blueprint.{field_name}",
-                        "level": 1,
-                        "text": str(value),
-                        "metadata": {
-                            "domain": "chapter",
-                            "domain_path": f"longform_blueprint.{field_name}",
-                            "title": field_name,
-                            "tags": ["blueprint"],
-                            "commit_id": blueprint.get("commit_id"),
-                        },
-                    }
+                    build_archival_seed_section(
+                        section_id=f"blueprint:{field_name}",
+                        title=field_name,
+                        path=domain_path,
+                        level=1,
+                        text=str(value),
+                        metadata=metadata,
+                        tags=["blueprint"],
+                    )
                 )
         for chapter in blueprint.get("chapter_blueprints", []):
             text = "\n".join(
@@ -233,24 +314,38 @@ class MinimalRetrievalIngestionService:
             )
             if text:
                 section_id = chapter.get("chapter_id") or uuid4().hex
+                domain_path = f"longform_blueprint.chapter.{section_id}"
+                metadata = self._build_archival_metadata(
+                    commit=commit,
+                    job=job,
+                    source_ref=source_ref,
+                    source_type=source_type,
+                    domain="chapter",
+                    domain_path=domain_path,
+                    extra={"title": chapter.get("title")},
+                )
                 sections.append(
-                    {
-                        "section_id": section_id,
-                        "title": chapter.get("title") or section_id,
-                        "path": f"longform_blueprint.chapter.{section_id}",
-                        "level": 2,
-                        "text": text,
-                        "metadata": {
-                            "domain": "chapter",
-                            "domain_path": f"longform_blueprint.chapter.{section_id}",
-                            "title": chapter.get("title"),
-                            "tags": ["blueprint", "chapter"],
-                        },
-                    }
+                    build_archival_seed_section(
+                        section_id=str(section_id),
+                        title=str(chapter.get("title") or section_id),
+                        path=domain_path,
+                        level=2,
+                        text=text,
+                        metadata=metadata,
+                        tags=["blueprint", "chapter"],
+                    )
                 )
         return sections
 
-    def _asset_to_sections(self, asset: SetupImportedAssetRecord) -> list[dict[str, object]]:
+    def _asset_to_sections(
+        self,
+        *,
+        commit: SetupAcceptedCommitRecord,
+        job: SetupRetrievalIngestionJobRecord,
+        asset: SetupImportedAssetRecord,
+        source_ref: str,
+        source_type: str,
+    ) -> list[dict[str, object]]:
         payload = asset.parsed_payload_json
         if isinstance(payload, dict):
             sections = payload.get("sections")
@@ -264,41 +359,111 @@ class MinimalRetrievalIngestionService:
                         continue
                     path = str(section.get("path") or f"asset.section.{index}")
                     title = section.get("title")
-                    normalized.append(
-                        {
-                            "section_id": str(section.get("section_id") or f"{asset.asset_id}:{index}"),
+                    raw_metadata_value = section.get("metadata")
+                    raw_metadata: dict[str, Any] = (
+                        raw_metadata_value
+                        if isinstance(raw_metadata_value, dict)
+                        else {}
+                    )
+                    domain = str(
+                        raw_metadata.get("domain")
+                        or self._domain_from_targets(asset.mapped_targets_json)
+                    )
+                    domain_path = str(raw_metadata.get("domain_path") or path)
+                    tags = list(section.get("tags") or raw_metadata.get("tags") or [])
+                    metadata = self._build_archival_metadata(
+                        commit=commit,
+                        job=job,
+                        source_ref=source_ref,
+                        source_type=source_type,
+                        domain=domain,
+                        domain_path=domain_path,
+                        extra={
+                            **raw_metadata,
                             "title": title,
-                            "path": path,
-                            "level": int(section.get("level") or 1),
-                            "text": text,
-                            "metadata": {
-                                "domain": self._domain_from_targets(asset.mapped_targets_json),
-                                "domain_path": path,
-                                "title": title,
-                                "tags": list(section.get("tags", [])),
-                                "commit_id": asset.asset_id,
-                            },
-                        }
+                            "asset_id": asset.asset_id,
+                            "asset_kind": asset.asset_kind,
+                        },
+                    )
+                    normalized.append(
+                        build_archival_seed_section(
+                            section_id=str(
+                                section.get("section_id") or f"{asset.asset_id}:{index}"
+                            ),
+                            title=str(title or path),
+                            path=path,
+                            level=int(section.get("level") or 1),
+                            text=text,
+                            metadata=metadata,
+                            tags=tags,
+                        )
                     )
                 if normalized:
                     return normalized
-        fallback_text = self._render_payload_text(payload) if payload else (asset.title or asset.source_ref)
-        return [
-            {
-                "section_id": asset.asset_id,
+        fallback_text = (
+            self._render_payload_text(payload)
+            if payload
+            else (asset.title or asset.source_ref)
+        )
+        domain = self._domain_from_targets(asset.mapped_targets_json)
+        domain_path = f"asset.{asset.asset_id}"
+        metadata = self._build_archival_metadata(
+            commit=commit,
+            job=job,
+            source_ref=source_ref,
+            source_type=source_type,
+            domain=domain,
+            domain_path=domain_path,
+            extra={
                 "title": asset.title,
-                "path": f"asset.{asset.asset_id}",
-                "level": 1,
-                "text": fallback_text,
-                "metadata": {
-                    "domain": self._domain_from_targets(asset.mapped_targets_json),
-                    "domain_path": f"asset.{asset.asset_id}",
-                    "title": asset.title,
-                    "tags": list(asset.mapped_targets_json or []),
-                    "commit_id": asset.asset_id,
-                },
-            }
+                "asset_id": asset.asset_id,
+                "asset_kind": asset.asset_kind,
+            },
+        )
+        return [
+            build_archival_seed_section(
+                section_id=asset.asset_id,
+                title=str(asset.title or asset.source_ref),
+                path=domain_path,
+                level=1,
+                text=fallback_text,
+                metadata=metadata,
+                tags=list(asset.mapped_targets_json or []),
+            )
         ]
+
+    @staticmethod
+    def _source_type_for_job(job: SetupRetrievalIngestionJobRecord) -> str:
+        if job.target_type == "foundation_entry":
+            return FOUNDATION_ENTRY_SOURCE_TYPE
+        if job.target_type == "blueprint":
+            return LONGFORM_BLUEPRINT_SOURCE_TYPE
+        if job.target_type == "asset":
+            return IMPORTED_ASSET_SOURCE_TYPE
+        return job.target_type
+
+    @staticmethod
+    def _build_archival_metadata(
+        *,
+        commit: SetupAcceptedCommitRecord,
+        job: SetupRetrievalIngestionJobRecord,
+        source_ref: str,
+        source_type: str,
+        domain: str,
+        domain_path: str,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return build_archival_source_metadata(
+            source_type=source_type,
+            import_event=SETUP_COMMIT_IMPORT_EVENT,
+            workspace_id=job.workspace_id,
+            commit_id=commit.commit_id,
+            step_id=job.step_id,
+            source_ref=source_ref,
+            domain=domain,
+            domain_path=domain_path,
+            extra=extra,
+        )
 
     @staticmethod
     def _render_payload_text(payload: object) -> str:
@@ -318,6 +483,8 @@ class MinimalRetrievalIngestionService:
     def _domain_from_targets(mapped_targets: list[str]) -> str:
         if any("character" in target for target in mapped_targets):
             return "character"
-        if any("chapter" in target or "blueprint" in target for target in mapped_targets):
+        if any(
+            "chapter" in target or "blueprint" in target for target in mapped_targets
+        ):
             return "chapter"
         return "world_rule"

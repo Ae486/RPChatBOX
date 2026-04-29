@@ -8,7 +8,11 @@ import pytest
 
 from rp.models.memory_materialization import (
     CONTINUITY_NOTE_KIND,
+    FOUNDATION_ENTRY_SOURCE_TYPE,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
+    SETUP_COMMIT_IMPORT_EVENT,
+    build_archival_seed_section,
+    build_archival_source_metadata,
     build_recall_materialization_metadata,
     build_recall_seed_section,
 )
@@ -105,4 +109,110 @@ def test_build_recall_seed_section_preserves_metadata_and_normalizes_tags():
     assert section["metadata"] == {
         **metadata,
         "tags": ["continuity_note", "recall"],
+    }
+
+
+def test_build_archival_source_metadata_generates_canonical_fields():
+    metadata = build_archival_source_metadata(
+        source_type=FOUNDATION_ENTRY_SOURCE_TYPE,
+        import_event=SETUP_COMMIT_IMPORT_EVENT,
+        workspace_id="workspace-1",
+        commit_id="commit-1",
+        step_id="foundation",
+        source_ref="setup_commit:commit-1:magic-law",
+        domain="world_rule",
+        domain_path="foundation.world.magic-law",
+        extra={
+            "title": "Magic Law",
+            "layer": "recall",
+            "source_family": "wrong_source",
+            "materialized_to_archival": False,
+            "materialized_to_recall": True,
+            "authoritative_mutation": True,
+            "source_type": "wrong_type",
+            "source_ref": "wrong_ref",
+            "domain": "character",
+            "domain_path": "wrong.path",
+        },
+    )
+
+    assert metadata == {
+        "title": "Magic Law",
+        "layer": "archival",
+        "source_family": "setup_source",
+        "import_event": "setup.commit_ingest",
+        "source_type": "foundation_entry",
+        "source_origin": "setup_workspace",
+        "materialized_to_archival": True,
+        "materialized_to_recall": False,
+        "authoritative_mutation": False,
+        "workspace_id": "workspace-1",
+        "commit_id": "commit-1",
+        "step_id": "foundation",
+        "source_ref": "setup_commit:commit-1:magic-law",
+        "domain": "world_rule",
+        "domain_path": "foundation.world.magic-law",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field_name", "overrides"),
+    [
+        ("source_type", {"source_type": "  "}),
+        ("import_event", {"import_event": ""}),
+        ("workspace_id", {"workspace_id": " "}),
+        ("commit_id", {"commit_id": ""}),
+        ("step_id", {"step_id": ""}),
+        ("source_ref", {"source_ref": ""}),
+        ("domain", {"domain": " "}),
+        ("domain_path", {"domain_path": ""}),
+    ],
+)
+def test_build_archival_source_metadata_rejects_blank_required_fields(
+    field_name,
+    overrides,
+):
+    values: dict[str, Any] = {
+        "source_type": FOUNDATION_ENTRY_SOURCE_TYPE,
+        "import_event": SETUP_COMMIT_IMPORT_EVENT,
+        "workspace_id": "workspace-1",
+        "commit_id": "commit-1",
+        "step_id": "foundation",
+        "source_ref": "setup_commit:commit-1:magic-law",
+        "domain": "world_rule",
+        "domain_path": "foundation.world.magic-law",
+    }
+    values.update(overrides)
+
+    with pytest.raises(ValueError, match=field_name):
+        build_archival_source_metadata(**values)
+
+
+def test_build_archival_seed_section_preserves_metadata_and_normalizes_tags():
+    metadata = build_archival_source_metadata(
+        source_type=FOUNDATION_ENTRY_SOURCE_TYPE,
+        import_event=SETUP_COMMIT_IMPORT_EVENT,
+        workspace_id="workspace-1",
+        commit_id="commit-1",
+        step_id="foundation",
+        source_ref="setup_commit:commit-1:magic-law",
+        domain="world_rule",
+        domain_path="foundation.world.magic-law",
+        extra={"title": "Magic Law"},
+    )
+
+    section = build_archival_seed_section(
+        section_id="foundation:magic-law",
+        title="Magic Law",
+        path="magic-law",
+        level=2,
+        text="Magic cannot open dusk-sealed gates.",
+        metadata=metadata,
+        tags=["world", "archival", "world", "  "],
+    )
+
+    assert section["level"] == 2
+    assert section["metadata"] == {
+        **metadata,
+        "tags": ["world", "archival"],
     }

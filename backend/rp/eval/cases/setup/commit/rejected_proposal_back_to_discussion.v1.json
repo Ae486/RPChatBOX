@@ -1,6 +1,6 @@
 {
   "case_id": "setup.rejected_proposal.back_to_discussion.v1",
-  "title": "After a rejected proposal the agent should continue discussion instead of reproposing commit",
+  "title": "Explicit reproposal after rejection creates a warning-backed commit proposal",
   "scope": "setup",
   "category": "commit_recovery",
   "tags": ["mvp", "deterministic", "setup-v2", "cognitive-runtime"],
@@ -37,48 +37,40 @@
   "expected": {
     "deterministic_assertions": [
       {
-        "assertion_id": "finish_is_continue_discussion",
+        "assertion_id": "finish_is_completed_text",
         "source": "runtime_result",
         "type": "equals",
         "path": "finish_reason",
-        "expected": "continue_discussion",
+        "expected": "completed_text",
         "severity": "error"
       },
       {
-        "assertion_id": "warnings_include_commit_blocked",
+        "assertion_id": "warnings_include_commit_warning",
         "source": "runtime_result",
         "type": "contains",
         "path": "warnings",
-        "expected": "commit_proposal_blocked",
+        "expected": "previous_proposal_rejected",
         "severity": "error"
       },
       {
-        "assertion_id": "completion_guard_requires_discussion",
-        "source": "runtime_result",
-        "type": "equals",
-        "path": "structured_payload.completion_guard.reason",
-        "expected": "discussion_continues_without_commit",
-        "severity": "error"
-      },
-      {
-        "assertion_id": "latest_workspace_proposal_stays_rejected",
+        "assertion_id": "latest_workspace_proposal_is_pending",
         "source": "workspace_truth",
         "type": "equals",
         "path": "commit_proposals[-1].status",
-        "expected": "rejected",
+        "expected": "pending_review",
         "severity": "error"
       }
     ],
     "subjective_hooks": [],
     "expected_reason_codes": [
-      "controller.commit_proposal_blocked"
+      "controller.commit_proposal_warned"
     ],
     "expected_outcome_chain": {
       "transcript_status": "not_applicable",
       "truth_status": "pass",
       "readiness_status": "warn"
     },
-    "expected_recommended_next_action": "tighten_commit_readiness_checks_and_review_block_messages"
+    "expected_recommended_next_action": "surface_commit_readiness_warnings_to_user_review"
   },
   "trace_hooks": {
     "capture_runtime_events": true,

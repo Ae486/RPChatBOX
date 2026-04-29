@@ -1,0 +1,10 @@
+{"file": "docs/research/rp-redesign/agent/implementation-spec/retrieval-layer-development-spec-2026-04-21.md", "reason": "Primary retrieval development spec; use as historical direction but reconcile against current code reality before implementing."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index and pre-development checklist for RP retrieval, memory, materialization, observability, and Block-compatible read surfaces."}
+{"file": ".trellis/spec/backend/rp-archival-knowledge-intake-contract.md", "reason": "Current active slice: canonical Archival Knowledge source metadata for setup commit ingestion into retrieval-core."}
+{"file": ".trellis/spec/backend/rp-memory-materialization-intake-contract.md", "reason": "Canonical Recall materialization metadata and seed-section intake rules for runtime-produced Recall assets."}
+{"file": ".trellis/spec/backend/rp-recall-source-family-retrieval-contract.md", "reason": "Recall search metadata preservation through retrieval hits, Block-compatible views, and specialist payloads."}
+{"file": ".trellis/spec/backend/rp-recall-source-family-search-filters.md", "reason": "Supported Recall filters for source families, materialization kinds, and chapter indices through the existing filters contract."}
+{"file": ".trellis/spec/backend/rp-retrieval-block-compatible-views.md", "reason": "Read-only Block-compatible projections over retrieval-backed Recall and Archival hits."}
+{"file": ".trellis/spec/backend/rp-retrieval-block-observability.md", "reason": "Retrieval observability contract for additive top-hit Block-compatible views."}
+{"file": ".trellis/spec/backend/rp-narrative-retrieval-policy-contract.md", "reason": "New active retrieval policy gap contract: broker rerank strategy, narrative filters, Archival source filters, deterministic scoring, context budget trace, and retrieval eval quality gates."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec index for any follow-up retrieval maintenance/model-configuration UI work."}

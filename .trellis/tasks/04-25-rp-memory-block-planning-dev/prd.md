@@ -953,3 +953,61 @@ Post-check learning captured on 2026-04-28:
 
 - `ruff format --check` caught one formatting-only issue in `recall_scene_transcript_ingestion_service.py`; fixed with scoped `ruff format` and re-ran the full focused gate.
 - No additional spec drift was found: the new spec already freezes the intake contract and the implementation uses that contract as the single source for canonical Recall materialization metadata.
+
+## Next Executable Slice: Archival Knowledge Intake Contract
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-archival-knowledge-intake-contract.md`
+
+Objective:
+
+- freeze the memory-layer Archival source-material metadata contract before setup/story runtime producers converge;
+- give Archival Knowledge the same single-source intake helper pattern already added for Recall materialization;
+- ensure setup commit imports write canonical metadata on parent `SourceAsset.metadata`, seed sections, and resulting retrieval chunks;
+- keep this memory-layer-only: no new public tools, no new durable `rp_blocks`, no direct Core State writes, and no new runtime producer implementation.
+
+Planned implementation direction:
+
+- extend `rp.models.memory_materialization` with:
+  - `build_archival_source_metadata(...)`;
+  - `build_archival_seed_section(...)`;
+- freeze setup-source Archival fields:
+  - `layer="archival"`;
+  - `source_family="setup_source"`;
+  - `import_event="setup.commit_ingest"`;
+  - `source_type` in `foundation_entry`, `longform_blueprint`, `imported_asset`;
+  - `materialized_to_archival=True`;
+  - `materialized_to_recall=False`;
+  - `authoritative_mutation=False`;
+- route `MinimalRetrievalIngestionService` foundation, blueprint, and imported-asset seed sections through the shared helper;
+- add focused tests proving canonical generation, conflict override, blank-field validation, and setup-to-retrieval metadata preservation.
+
+Boundaries:
+
+- Archival physical storage remains retrieval-core.
+- `memory.search_archival` remains the read surface; this slice does not widen tool inputs.
+- Imported/source material does not become Recall history and does not mutate Core State.
+- Setup runtime-private cognition is not persisted as durable story memory.
+
+Status on 2026-04-29:
+
+- added the executable Archival intake spec and registered it in backend spec index plus task implement/check context;
+- added canonical Archival metadata helpers in `rp.models.memory_materialization`;
+- routed setup commit foundation entries, longform blueprints, and imported assets through the shared helper;
+- focused coverage now proves canonical metadata generation, conflict override protection, required-field validation, setup ingestion metadata preservation on assets/seed sections/chunks for foundation entries, longform blueprints, imported assets, and `memory.search_archival` hit metadata preservation.
+
+Quality gate:
+
+- `pytest backend\rp\tests\test_memory_materialization_contract.py backend\rp\tests\test_minimal_retrieval_ingestion_service.py backend\rp\tests\test_retrieval_ingestion_service.py backend\rp\tests\test_retrieval_broker.py::test_search_and_provenance_surfaces_are_stable backend\rp\tests\test_retrieval_block_adapter_service.py -q`
+  - result: `30 passed, 1 warning`
+- `ruff check backend\rp\models\memory_materialization.py backend\rp\services\minimal_retrieval_ingestion_service.py backend\rp\tests\test_memory_materialization_contract.py backend\rp\tests\test_minimal_retrieval_ingestion_service.py`
+- `ruff format --check backend\rp\models\memory_materialization.py backend\rp\services\minimal_retrieval_ingestion_service.py backend\rp\tests\test_memory_materialization_contract.py backend\rp\tests\test_minimal_retrieval_ingestion_service.py`
+- `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\memory_materialization.py backend\rp\services\minimal_retrieval_ingestion_service.py backend\rp\tests\test_memory_materialization_contract.py backend\rp\tests\test_minimal_retrieval_ingestion_service.py`
+- `git diff --check`
+
+Post-check learning captured on 2026-04-29:
+
+- `trellis-check` found one real coverage gap: `longform_blueprint` was implemented and frozen in spec, but not covered by a setup ingestion regression. Added focused coverage for parent asset, seed section, tags, and chunk metadata.
+- The executable spec itself captures the new durable contract; no separate guide/spec update is needed beyond the new registered code-spec.
+- `MinimalRetrievalIngestionService` remains the setup-facing facade, but canonical Archival ownership fields now come from memory-layer helpers rather than setup job payloads.

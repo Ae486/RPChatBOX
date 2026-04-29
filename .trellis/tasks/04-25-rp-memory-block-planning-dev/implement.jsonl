@@ -36,3 +36,4 @@
 {"file": "backend/rp/services/longform_specialist_service.py", "reason": "Updates the specialist JSON contract wording so the runtime-owned sidecar metadata family is part of the expected bundle."}
 {"file": "backend/rp/tests/test_projection_builder_services.py", "reason": "Adds focused normalization and specialist bundle parsing coverage for the new story-segment metadata sidecar."}
 {"file": "backend/tests/test_rp_story_api.py", "reason": "Adds end-to-end write -> accept -> complete coverage proving persisted story-segment metadata feeds the existing chapter-close foreshadow consumer path."}
+{"file": ".trellis/spec/backend/rp-archival-knowledge-intake-contract.md", "reason": "Executable backend contract for canonical Archival source-material metadata and setup/source import intake semantics."}

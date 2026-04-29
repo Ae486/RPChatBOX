@@ -305,6 +305,7 @@ class SetupWorkspaceService:
         step_id: SetupStepId,
         target_draft_refs: list[str],
         reason: str | None = None,
+        unresolved_warnings: list[str] | None = None,
     ) -> CommitProposal:
         workspace = self._require_workspace_record(workspace_id)
         step_record = self._require_step_state_record(workspace_id, step_id)
@@ -318,7 +319,7 @@ class SetupWorkspaceService:
             target_draft_refs_json=list(target_draft_refs),
             review_message=f"Review requested for {step_id.value}",
             reason=reason,
-            unresolved_warnings_json=[],
+            unresolved_warnings_json=list(unresolved_warnings or []),
             suggested_ingestion_targets_json=self._suggest_ingestion_targets(
                 workspace_id=workspace_id,
                 step_id=step_id,

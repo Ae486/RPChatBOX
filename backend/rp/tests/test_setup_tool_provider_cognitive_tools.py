@@ -243,7 +243,7 @@ async def test_setup_tool_provider_truth_write_can_require_user_input(retrieval_
 
 
 @pytest.mark.asyncio
-async def test_setup_tool_provider_commit_blocks_when_truth_write_not_ready_even_without_open_issues(retrieval_session):
+async def test_setup_tool_provider_commit_warns_when_truth_write_not_ready_even_without_open_issues(retrieval_session):
     workspace_service = SetupWorkspaceService(retrieval_session)
     context_builder = SetupContextBuilder(workspace_service)
     runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
@@ -292,9 +292,14 @@ async def test_setup_tool_provider_commit_blocks_when_truth_write_not_ready_even
     )
     payload = json.loads(result["content"])
 
-    assert result["success"] is False
-    assert result["error_code"] == "SETUP_TOOL_FAILED"
-    assert payload["code"] == "setup_commit_blocked_truth_write_not_ready_for_review"
+    assert result["success"] is True
+    assert result["error_code"] is None
+    assert payload["warnings"] == ["truth_write_not_ready_for_review"]
+    refreshed = workspace_service.get_workspace(workspace.workspace_id)
+    assert refreshed is not None
+    assert refreshed.commit_proposals[-1].unresolved_warnings == [
+        "truth_write_not_ready_for_review"
+    ]
 
 
 @pytest.mark.asyncio

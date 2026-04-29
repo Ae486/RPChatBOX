@@ -1,0 +1,10 @@
+{"file": "docs/research/rp-redesign/agent/implementation-spec/retrieval-layer-development-spec-2026-04-21.md", "reason": "Check retrieval changes against the documented direction while treating current implementation as the factual baseline."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality checklist and retrieval/memory contract index for check agent verification."}
+{"file": ".trellis/spec/backend/rp-archival-knowledge-intake-contract.md", "reason": "Verify setup source ingestion preserves canonical Archival metadata and ownership boundaries."}
+{"file": ".trellis/spec/backend/rp-memory-materialization-intake-contract.md", "reason": "Verify Recall materialization metadata remains memory-owned and survives seed sections/search."}
+{"file": ".trellis/spec/backend/rp-recall-source-family-retrieval-contract.md", "reason": "Verify Recall materialization metadata survives hits, Block views, and specialist payloads."}
+{"file": ".trellis/spec/backend/rp-recall-source-family-search-filters.md", "reason": "Verify Recall source-family filters reuse the existing filters contract without synthetic metadata."}
+{"file": ".trellis/spec/backend/rp-retrieval-block-compatible-views.md", "reason": "Verify retrieval Block-compatible views are additive, read-only, and adapter-backed."}
+{"file": ".trellis/spec/backend/rp-retrieval-block-observability.md", "reason": "Verify retrieval observability top-hit block views stay additive and reuse the canonical adapter."}
+{"file": ".trellis/spec/backend/rp-narrative-retrieval-policy-contract.md", "reason": "Verify future retrieval implementation slices keep public search tools stable while adding broker rerank policy, structured filters, narrative scoring trace, context budget trace, and eval gold cases."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality checklist if retrieval maintenance/model-configuration UI surfaces are touched."}

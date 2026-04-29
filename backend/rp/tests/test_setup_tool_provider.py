@@ -40,13 +40,19 @@ class _FakeWorkspaceService:
     def __init__(self, workspace=None) -> None:
         self._workspace = workspace
         self.propose_commit_called = False
+        self.propose_commit_kwargs = None
 
     def get_workspace(self, workspace_id: str):
         return self._workspace
 
     def propose_commit(self, **kwargs):
         self.propose_commit_called = True
-        raise AssertionError("propose_commit should not be called when commit is blocked")
+        self.propose_commit_kwargs = kwargs
+        return SimpleNamespace(
+            proposal_id="proposal-created",
+            review_message="Review requested for story_config",
+            unresolved_warnings=list(kwargs.get("unresolved_warnings") or []),
+        )
 
     def rollback(self) -> None:
         return None
@@ -216,7 +222,7 @@ async def test_setup_tool_provider_draft_refs_requires_refs(retrieval_session):
 
 
 @pytest.mark.asyncio
-async def test_setup_tool_provider_blocks_commit_when_blocking_questions_exist():
+async def test_setup_tool_provider_allows_commit_with_blocking_question_warning():
     workspace = SimpleNamespace(
         open_questions=[
             SimpleNamespace(
@@ -245,15 +251,17 @@ async def test_setup_tool_provider_blocks_commit_when_blocking_questions_exist()
     )
 
     payload = json.loads(result["content"])
-    assert result["error_code"] == "SETUP_TOOL_FAILED"
-    assert payload["code"] == "setup_commit_blocked"
-    assert payload["details"]["repair_strategy"] == "block_commit"
-    assert payload["details"]["block_commit"] is True
-    assert service.propose_commit_called is False
+    assert result["success"] is True
+    assert result["error_code"] is None
+    assert payload["warnings"] == ["blocking_questions_present"]
+    assert service.propose_commit_called is True
+    assert service.propose_commit_kwargs["unresolved_warnings"] == [
+        "blocking_questions_present"
+    ]
 
 
 @pytest.mark.asyncio
-async def test_setup_tool_provider_blocks_reproposal_after_rejection():
+async def test_setup_tool_provider_allows_reproposal_with_rejection_warning():
     now = datetime.now(timezone.utc)
     workspace = SimpleNamespace(
         open_questions=[],
@@ -284,8 +292,50 @@ async def test_setup_tool_provider_blocks_reproposal_after_rejection():
     )
 
     payload = json.loads(result["content"])
-    assert result["error_code"] == "SETUP_TOOL_FAILED"
-    assert payload["code"] == "setup_commit_rejected_previously"
-    assert payload["details"]["repair_strategy"] == "block_commit"
-    assert payload["details"]["last_proposal_status"] == "rejected"
-    assert service.propose_commit_called is False
+    assert result["success"] is True
+    assert result["error_code"] is None
+    assert payload["warnings"] == ["previous_proposal_rejected"]
+    assert service.propose_commit_called is True
+    assert service.propose_commit_kwargs["unresolved_warnings"] == [
+        "previous_proposal_rejected"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setup_tool_provider_persists_commit_readiness_warnings(retrieval_session):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-commit-warnings-1",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.raise_question(
+        workspace_id=workspace.workspace_id,
+        step_id=SetupStepId.STORY_CONFIG,
+        text="Need runtime preset choice.",
+        severity=QuestionSeverity.BLOCKING,
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.proposal.commit",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "step_id": "story_config",
+            "target_draft_refs": ["draft:story_config"],
+        },
+    )
+
+    payload = json.loads(result["content"])
+    refreshed = workspace_service.get_workspace(workspace.workspace_id)
+    assert refreshed is not None
+    assert result["success"] is True
+    assert payload["warnings"] == ["blocking_questions_present"]
+    assert refreshed.commit_proposals[-1].unresolved_warnings == [
+        "blocking_questions_present"
+    ]

@@ -45,6 +45,7 @@ from rp.services.proposal_repository import ProposalRepository
 from rp.services.provenance_read_service import ProvenanceReadService
 from rp.services.projection_read_service import ProjectionReadService
 from rp.services.retrieval_observability_service import RetrievalObservabilityService
+from rp.services.retrieval_runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.retrieval_service import RetrievalService
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
@@ -202,16 +203,76 @@ class RetrievalBroker:
         top_k: int,
         filters: dict[str, object],
     ) -> RetrievalQuery:
+        normalized_filters = dict(filters)
         return RetrievalQuery(
             query_id=f"rq_{uuid.uuid4().hex[:10]}",
             query_kind=query_kind,
-            story_id=str(filters.get("story_id") or self._default_story_id or "*"),
+            story_id=str(normalized_filters.get("story_id") or self._default_story_id or "*"),
             scope=scope,
             domains=list(domains),
             text_query=text_query,
-            filters=dict(filters),
+            filters=normalized_filters,
             top_k=top_k,
-            rerank=False,
+            rerank=self._explicit_rerank_enabled(normalized_filters),
+        )
+
+    @staticmethod
+    def _search_policy(filters: dict[str, object]) -> dict[str, object]:
+        raw_policy = filters.get("search_policy")
+        return dict(raw_policy) if isinstance(raw_policy, dict) else {}
+
+    @classmethod
+    def _explicit_rerank_enabled(cls, filters: dict[str, object]) -> bool:
+        policy = cls._search_policy(filters)
+        rerank = policy.get("rerank")
+        if isinstance(rerank, str) and rerank.strip().lower() == "on":
+            return True
+        return False
+
+    @classmethod
+    def _rerank_policy_value(cls, filters: dict[str, object]) -> str:
+        policy = cls._search_policy(filters)
+        rerank = policy.get("rerank")
+        if isinstance(rerank, str) and rerank.strip().lower() in {"on", "off", "auto"}:
+            return rerank.strip().lower()
+        return "auto"
+
+    @classmethod
+    def _profile_default_rerank_enabled(cls, filters: dict[str, object]) -> bool:
+        policy = cls._search_policy(filters)
+        profile = policy.get("profile")
+        if not isinstance(profile, str):
+            return False
+        return profile.strip().lower() in {"longform", "roleplay", "trpg"}
+
+    @classmethod
+    def _query_with_runtime_search_policy(
+        cls,
+        *,
+        query: RetrievalQuery,
+        session: Session,
+    ) -> RetrievalQuery:
+        policy_value = cls._rerank_policy_value(dict(query.filters or {}))
+        if policy_value == "on":
+            return query.model_copy(update={"rerank": True})
+        if policy_value == "off":
+            return query.model_copy(update={"rerank": False})
+        if query.story_id in {"", "*"}:
+            return query.model_copy(
+                update={
+                    "rerank": cls._profile_default_rerank_enabled(
+                        dict(query.filters or {})
+                    )
+                }
+            )
+        config = RetrievalRuntimeConfigService(session).resolve_story_config(
+            story_id=query.story_id
+        )
+        return query.model_copy(
+            update={
+                "rerank": bool(config.rerank_model_id or config.rerank_provider_id)
+                or cls._profile_default_rerank_enabled(dict(query.filters or {}))
+            }
         )
 
     def _build_core_state_read_service(self, session: Session) -> CoreStateReadService:
@@ -594,6 +655,10 @@ class RetrievalBroker:
             started = perf_counter()
             try:
                 with Session(get_engine()) as session:
+                    query = self._query_with_runtime_search_policy(
+                        query=query,
+                        session=session,
+                    )
                     service = self._retrieval_service_factory(session)
                     if search_kind == "documents":
                         result = await service.search_documents(query)

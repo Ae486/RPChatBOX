@@ -1,0 +1,157 @@
+{
+  "case_id": "retrieval.search.recall_scene_policy.v1",
+  "title": "Recall search should isolate scene transcript material by scene_refs",
+  "scope": "retrieval",
+  "category": "retrieval_ready",
+  "tags": ["policy", "deterministic", "retrieval-core", "scene-recall"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-recall-scene-policy-001",
+      "recall_seed_assets": [
+        {
+          "asset_id": "recall-scene-harbor",
+          "title": "Harbor Scene Transcript",
+          "text": "Scene policy harbor oath transcript says the hero lit the harbor lamp.",
+          "metadata": {
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "scene.close",
+            "materialization_kind": "scene_transcript",
+            "materialized_to_recall": true,
+            "domain": "chapter",
+            "domain_path": "recall.chapter.2.scene.harbor",
+            "chapter_index": 2,
+            "scene_refs": ["chapter:2:scene:harbor"],
+            "character_refs": ["hero"],
+            "canon_status": "canonical",
+            "branch_id": "main"
+          }
+        },
+        {
+          "asset_id": "recall-scene-market",
+          "title": "Market Scene Transcript",
+          "text": "Scene policy market oath transcript mentions the same lamp at noon.",
+          "metadata": {
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "scene.close",
+            "materialization_kind": "scene_transcript",
+            "materialized_to_recall": true,
+            "domain": "chapter",
+            "domain_path": "recall.chapter.2.scene.market",
+            "chapter_index": 2,
+            "scene_refs": ["chapter:2:scene:market"],
+            "character_refs": ["merchant"],
+            "canon_status": "canonical",
+            "branch_id": "main"
+          }
+        }
+      ],
+      "query": {
+        "query_kind": "recall",
+        "text_query": "scene policy harbor oath lamp",
+        "domains": ["chapter"],
+        "top_k": 3,
+        "filters": {
+          "scene_refs": ["chapter:2:scene:harbor"],
+          "search_policy": {
+            "profile": "longform",
+            "context": {
+              "current_chapter_index": 2
+            }
+          }
+        },
+        "search_kind": "chunks",
+        "rerank": true
+      }
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-recall-scene-policy-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "scene_policy_seed",
+              "domain": "world",
+              "path": "world.scene_policy_seed",
+              "title": "Scene Policy Seed",
+              "tags": ["scene"],
+              "source_refs": [],
+              "content": {
+                "summary": "Retrieval eval seed for scene recall policy."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:scene_policy_seed"],
+          "reason": "freeze scene recall fixture"
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_hits_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.hits",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "first_hit_is_harbor_scene",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.hits[0].metadata.asset_id",
+        "expected": "recall-scene-harbor",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "scene_filter_recorded",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.trace.filters_applied.filters.scene_refs[0]",
+        "expected": "chapter:2:scene:harbor",
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}

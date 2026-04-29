@@ -378,6 +378,58 @@ def test_setup_agent_turn_creates_commit_proposal(client, monkeypatch):
     assert proposals[0]["step_id"] == "writing_contract"
 
 
+def test_setup_commit_proposal_api_persists_runtime_warning(client):
+    workspace_id = _create_workspace(client)
+    with Session(get_engine()) as session:
+        session.add(
+            SetupAgentRuntimeStateRecord(
+                runtime_state_id="runtime-state-commit-warning",
+                workspace_id=workspace_id,
+                step_id="story_config",
+                state_version=1,
+                snapshot_json={
+                    "workspace_id": workspace_id,
+                    "current_step": "story_config",
+                    "state_version": 1,
+                    "invalidated": False,
+                    "invalidation_reasons": [],
+                    "source_basis": {
+                        "workspace_version": 1,
+                        "draft_fingerprint": None,
+                        "pending_user_edit_delta_ids": [],
+                        "last_proposal_status": None,
+                        "current_step": "story_config",
+                    },
+                    "active_truth_write": {
+                        "write_id": "truth-api-warning",
+                        "current_step": "story_config",
+                        "block_type": "story_config",
+                        "operation": "merge",
+                        "payload": {"notes": "drafted but not reviewed"},
+                        "ready_for_review": False,
+                        "remaining_open_issues": [],
+                    },
+                },
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        f"/api/rp/setup/workspaces/{workspace_id}/commit-proposals",
+        json={
+            "step_id": "story_config",
+            "target_draft_refs": ["draft:story_config"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["warnings"] == ["truth_write_not_ready_for_review"]
+    workspace = client.get(f"/api/rp/setup/workspaces/{workspace_id}").json()
+    assert workspace["commit_proposals"][-1]["unresolved_warnings"] == [
+        "truth_write_not_ready_for_review"
+    ]
+
+
 def test_setup_agent_turn_rejects_model_without_agent_capability(client):
     client.put("/api/providers/provider-setup", json=_provider_payload())
     client.put(

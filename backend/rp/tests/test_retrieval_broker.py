@@ -189,6 +189,65 @@ def _ingest_recall_seed_asset(
     )
 
 
+def _ingest_archival_seed_asset(
+    retrieval_session,
+    *,
+    story_id: str,
+    asset_id: str,
+    text: str,
+    metadata: dict[str, Any],
+    workspace_id: str | None = None,
+    commit_id: str | None = None,
+) -> None:
+    collection = RetrievalCollectionService(retrieval_session).ensure_story_collection(
+        story_id=story_id,
+        scope="story",
+        collection_kind="archival",
+    )
+    section_metadata = {
+        "domain": Domain.WORLD_RULE.value,
+        "domain_path": f"foundation.world.{asset_id}",
+        **dict(metadata),
+    }
+    RetrievalDocumentService(retrieval_session).upsert_source_asset(
+        SourceAsset(
+            asset_id=asset_id,
+            story_id=story_id,
+            mode=StoryMode.LONGFORM,
+            collection_id=collection.collection_id,
+            workspace_id=workspace_id,
+            commit_id=commit_id,
+            asset_kind=str(metadata.get("source_type") or "source_material"),
+            source_ref=f"memory://{asset_id}",
+            title=f"Archival Seed {asset_id}",
+            parse_status="queued",
+            ingestion_status="queued",
+            mapped_targets=["foundation"],
+            metadata={
+                **dict(metadata),
+                "seed_sections": [
+                    {
+                        "section_id": f"seed:{asset_id}",
+                        "title": f"Archival Seed {asset_id}",
+                        "path": f"foundation.world.{asset_id}",
+                        "level": 1,
+                        "text": text,
+                        "metadata": section_metadata,
+                    }
+                ],
+            },
+            created_at=_utcnow(),
+            updated_at=_utcnow(),
+        )
+    )
+    retrieval_session.flush()
+    RetrievalIngestionService(retrieval_session).ingest_asset(
+        story_id=story_id,
+        asset_id=asset_id,
+        collection_id=collection.collection_id,
+    )
+
+
 def test_build_chunk_hit_merges_asset_materialization_metadata_without_override():
     collection = KnowledgeCollectionRecord(
         collection_id="collection-recall-1",
@@ -634,6 +693,200 @@ async def test_search_and_provenance_surfaces_are_stable(retrieval_session):
 
 
 @pytest.mark.asyncio
+async def test_memory_search_policy_controls_broker_rerank_flag(retrieval_session):
+    captured_queries: list[RetrievalQuery] = []
+
+    class StubRetrievalService:
+        async def search_chunks(self, query):
+            captured_queries.append(query)
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[],
+                trace=RetrievalTrace(
+                    trace_id=f"trace-{len(captured_queries)}",
+                    query_id=query.query_id,
+                    route="retrieval.stub",
+                    result_kind="chunk",
+                    filters_applied={"rerank": query.rerank},
+                ),
+            )
+
+    broker = RetrievalBroker(
+        default_story_id="story-rerank-policy",
+        retrieval_service_factory=lambda session: StubRetrievalService(),
+    )
+
+    await broker.search_recall(
+        MemorySearchRecallInput(
+            query="rerank on",
+            domains=[Domain.CHAPTER],
+            filters={"search_policy": {"rerank": "on"}},
+        )
+    )
+    await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="rerank off",
+            domains=[Domain.WORLD_RULE],
+            filters={"search_policy": {"rerank": "off"}},
+        )
+    )
+    await broker.search_recall(
+        MemorySearchRecallInput(
+            query="rerank profile default",
+            domains=[Domain.CHAPTER],
+            filters={"search_policy": {"profile": "longform", "rerank": "auto"}},
+        )
+    )
+
+    assert captured_queries[0].rerank is True
+    assert captured_queries[1].rerank is False
+    assert captured_queries[2].rerank is True
+
+
+@pytest.mark.asyncio
+async def test_memory_search_policy_profile_default_enables_rerank_without_story_config(
+    retrieval_session,
+):
+    captured_queries: list[RetrievalQuery] = []
+
+    class StubRetrievalService:
+        async def search_chunks(self, query):
+            captured_queries.append(query)
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[],
+                trace=RetrievalTrace(
+                    trace_id="trace-profile-default",
+                    query_id=query.query_id,
+                    route="retrieval.stub",
+                    result_kind="chunk",
+                    filters_applied={"rerank": query.rerank},
+                ),
+            )
+
+    broker = RetrievalBroker(
+        retrieval_service_factory=lambda session: StubRetrievalService(),
+    )
+
+    await broker.search_recall(
+        MemorySearchRecallInput(
+            query="profile default rerank",
+            domains=[Domain.CHAPTER],
+            filters={"search_policy": {"profile": "longform", "rerank": "auto"}},
+        )
+    )
+
+    assert captured_queries[0].story_id == "*"
+    assert captured_queries[0].rerank is True
+
+
+@pytest.mark.asyncio
+async def test_search_archival_applies_source_metadata_filters(retrieval_session):
+    _ingest_archival_seed_asset(
+        retrieval_session,
+        story_id="story-archival-filter",
+        asset_id="asset-foundation-entry",
+        text="Archivalfilter foundation entry about the dusk gate.",
+        workspace_id="workspace-archival-filter",
+        commit_id="commit-foundation",
+        metadata={
+            "layer": "archival",
+            "source_family": "setup_source",
+            "source_type": "foundation_entry",
+            "source_origin": "setup_workspace",
+            "workspace_id": "workspace-archival-filter",
+            "commit_id": "commit-foundation",
+        },
+    )
+    _ingest_archival_seed_asset(
+        retrieval_session,
+        story_id="story-archival-filter",
+        asset_id="asset-blueprint",
+        text="Archivalfilter longform blueprint about the dusk gate.",
+        workspace_id="workspace-archival-filter",
+        commit_id="commit-blueprint",
+        metadata={
+            "layer": "archival",
+            "source_family": "setup_source",
+            "source_type": "longform_blueprint",
+            "source_origin": "setup_workspace",
+            "workspace_id": "workspace-archival-filter",
+            "commit_id": "commit-blueprint",
+        },
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id="story-archival-filter")
+    source_type_result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="archivalfilter dusk gate",
+            domains=[Domain.WORLD_RULE],
+            top_k=10,
+            filters={"source_types": ["longform_blueprint"]},
+        )
+    )
+    commit_result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="archivalfilter dusk gate",
+            domains=[Domain.WORLD_RULE],
+            top_k=10,
+            filters={
+                "source_origins": ["setup_workspace"],
+                "workspace_ids": ["workspace-archival-filter"],
+                "commit_ids": ["commit-foundation"],
+            },
+        )
+    )
+
+    assert source_type_result.hits
+    assert {hit.metadata["source_type"] for hit in source_type_result.hits} == {
+        "longform_blueprint"
+    }
+    assert commit_result.hits
+    assert {hit.metadata["commit_id"] for hit in commit_result.hits} == {
+        "commit-foundation"
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_archival_filters_fallback_to_asset_columns(retrieval_session):
+    _ingest_archival_seed_asset(
+        retrieval_session,
+        story_id="story-archival-column-fallback",
+        asset_id="asset-foundation-column-fallback",
+        text="Archivalfilter column fallback about the dusk gate.",
+        workspace_id="workspace-column-fallback",
+        commit_id="commit-column-fallback",
+        metadata={
+            "layer": "archival",
+            "source_family": "setup_source",
+            "source_type": "foundation_entry",
+            "source_origin": "setup_workspace",
+        },
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id="story-archival-column-fallback")
+    result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="archivalfilter dusk gate",
+            domains=[Domain.WORLD_RULE],
+            top_k=10,
+            filters={
+                "workspace_ids": ["workspace-column-fallback"],
+                "commit_ids": ["commit-column-fallback"],
+            },
+        )
+    )
+
+    assert [hit.metadata["asset_id"] for hit in result.hits] == [
+        "asset-foundation-column-fallback"
+    ]
+    assert result.hits[0].metadata["workspace_id"] == "workspace-column-fallback"
+    assert result.hits[0].metadata["commit_id"] == "commit-column-fallback"
+
+
+@pytest.mark.asyncio
 async def test_search_recall_preserves_source_family_materialization_metadata(
     retrieval_session,
 ):
@@ -865,6 +1118,69 @@ async def test_search_recall_applies_source_family_filters(retrieval_session):
     assert {hit.metadata.get("source_family") for hit in combined_result.hits} == {
         "longform_story_runtime"
     }
+
+
+@pytest.mark.asyncio
+async def test_search_recall_applies_narrative_metadata_filters(retrieval_session):
+    _ingest_recall_seed_asset(
+        retrieval_session,
+        story_id="story-narrative-filter",
+        asset_id="asset-scene-one",
+        text="Narrativefilter scene one detail about the harbor oath.",
+        metadata={
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_kind": "scene_transcript",
+            "materialized_to_recall": True,
+            "chapter_index": 1,
+            "scene_refs": ["chapter:1:scene:1"],
+            "pov_character_refs": ["hero"],
+            "foreshadow_ref": "harbor-oath",
+            "foreshadow_statuses": ["open"],
+            "canon_statuses": ["canonical"],
+            "branch_ids": ["main"],
+        },
+    )
+    _ingest_recall_seed_asset(
+        retrieval_session,
+        story_id="story-narrative-filter",
+        asset_id="asset-scene-two",
+        text="Narrativefilter scene two detail about the harbor oath.",
+        metadata={
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_kind": "scene_transcript",
+            "materialized_to_recall": True,
+            "chapter_index": 1,
+            "scene_ref": "chapter:1:scene:2",
+            "character_refs": ["villain"],
+            "foreshadow_refs": ["harbor-oath"],
+            "foreshadow_status": "retired",
+            "canon_status": "canonical",
+            "branch_id": "main",
+        },
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id="story-narrative-filter")
+    result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="narrativefilter harbor oath",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=10,
+            filters={
+                "scene_refs": ["chapter:1:scene:1"],
+                "character_refs": ["hero"],
+                "foreshadow_statuses": ["open"],
+                "canon_statuses": ["canonical"],
+                "branch_ids": ["main"],
+            },
+        )
+    )
+
+    assert [hit.metadata["asset_id"] for hit in result.hits] == ["asset-scene-one"]
+    assert result.hits[0].metadata["scene_refs"] == ["chapter:1:scene:1"]
 
 
 @pytest.mark.asyncio

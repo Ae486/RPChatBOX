@@ -30,6 +30,7 @@
 | [RP Memory Visibility Overview](./rp-memory-visibility-overview.md) | Read-only active-story memory overview that exposes layer capabilities, block counts, proposal state, consumer dirty state, and boundary markers | Active |
 | [RP Memory Block Capability Metadata](./rp-memory-block-capability-metadata.md) | Machine-checkable Block view capability metadata and read-only mutation guard enforcement across Core State, Runtime Workspace, and retrieval-backed views | Active |
 | [RP Memory Materialization Intake Contract](./rp-memory-materialization-intake-contract.md) | Canonical Recall materialization metadata and seed-section intake contract that memory freezes before upstream runtime producers converge | Active |
+| [RP Archival Knowledge Intake Contract](./rp-archival-knowledge-intake-contract.md) | Canonical Archival source-material metadata and seed-section intake contract for setup/source imports before upstream producers converge | Active |
 | [RP Memory OS Block Rollout](./rp-memory-os-block-rollout.md) | Overall rollout contract from Core State Block integration to full Memory OS containerization | Active |
 | [RP Memory Tool Chain Block Compatibility](./rp-memory-tool-chain-block-compatibility.md) | Compatibility gate that keeps the public memory tool chain stable after Core State Block integration | Active |
 | [RP Memory Container Gap Inventory](./rp-memory-container-gap-inventory.md) | Phase C decision gate that proves whether a new durable container layer is actually required | Active |
@@ -45,6 +46,7 @@
 | [RP Recall Source Family Search Filters](./rp-recall-source-family-search-filters.md) | Reuse `memory.search_recall(..., filters=...)` to target specific Recall source families, materialization kinds, and chapter indices | Active |
 | [RP Recall Scene Transcript Promotion](./rp-recall-scene-transcript-promotion.md) | Freeze the closed-scene transcript promotion contract so Runtime Workspace discussion never becomes Recall history by accident | Active |
 | [RP Runtime Scene Lifecycle](./rp-runtime-scene-lifecycle.md) | Add explicit runtime scene identity and close-trigger scaffolding before transcript promotion or Core State scene materialization | Active |
+| [RP Narrative Retrieval Policy Contract](./rp-narrative-retrieval-policy-contract.md) | Freeze the narrative-aware search policy, filters, rerank strategy, scoring trace, context budget, and eval gaps for longform/RP retrieval | Active |
 | [RP Retrieval Block-Compatible Views](./rp-retrieval-block-compatible-views.md) | Additive read-only Block-compatible views over recall/archival retrieval hits for runtime payloads | Active |
 | [RP Retrieval Block Observability](./rp-retrieval-block-observability.md) | Additive retrieval observability field that exposes top-hit Block-compatible views without changing search results | Active |
 | [RP Runtime Workspace Block Views](./rp-runtime-workspace-block-views.md) | Read-only Runtime Workspace Block views over current-chapter draft artifacts and discussion entries | Active |
@@ -73,6 +75,7 @@
 - [ ] If the change adds or modifies active-story memory overview / capability visibility surfaces, read [RP Memory Visibility Overview](./rp-memory-visibility-overview.md).
 - [ ] If the change adds or modifies Block read-only, mutation, history, or proposal capability metadata, read [RP Memory Block Capability Metadata](./rp-memory-block-capability-metadata.md).
 - [ ] If the change adds or modifies Recall materialization metadata, seed-section metadata, or memory intake semantics for runtime-produced material, read [RP Memory Materialization Intake Contract](./rp-memory-materialization-intake-contract.md).
+- [ ] If the change adds or modifies Archival Knowledge source-material metadata, seed-section metadata, or setup/source import semantics, read [RP Archival Knowledge Intake Contract](./rp-archival-knowledge-intake-contract.md).
 - [ ] If the change adjusts overall Memory OS Block sequencing, read [RP Memory OS Block Rollout](./rp-memory-os-block-rollout.md).
 - [ ] If the change touches memory tool/provider compatibility after Block integration, read [RP Memory Tool Chain Block Compatibility](./rp-memory-tool-chain-block-compatibility.md).
 - [ ] If the change decides whether a new durable Memory OS container layer is needed, read [RP Memory Container Gap Inventory](./rp-memory-container-gap-inventory.md).
@@ -88,6 +91,7 @@
 - [ ] If the change narrows Recall search by source family or materialization metadata, read [RP Recall Source Family Search Filters](./rp-recall-source-family-search-filters.md).
 - [ ] If the change promotes closed-scene transcript history into Recall, read [RP Recall Scene Transcript Promotion](./rp-recall-scene-transcript-promotion.md).
 - [ ] If the change adds runtime scene identity, scene-close trigger behavior, or scene refs on runtime rows, read [RP Runtime Scene Lifecycle](./rp-runtime-scene-lifecycle.md).
+- [ ] If the change adjusts longform/RP retrieval filters, rerank strategy, narrative scoring, context budget, or retrieval eval quality gates, read [RP Narrative Retrieval Policy Contract](./rp-narrative-retrieval-policy-contract.md).
 - [ ] If the change adapts recall/archival retrieval results into Block-compatible runtime views, read [RP Retrieval Block-Compatible Views](./rp-retrieval-block-compatible-views.md).
 - [ ] If the change adjusts retrieval observability or Langfuse payloads to expose Block-compatible views, read [RP Retrieval Block Observability](./rp-retrieval-block-observability.md).
 - [ ] If the change exposes Runtime Workspace draft/discussion state through `/memory/blocks`, read [RP Runtime Workspace Block Views](./rp-runtime-workspace-block-views.md).
@@ -110,6 +114,7 @@
 - [ ] Memory overview stays read-only, reuses existing read surfaces, and reports adapter/read-only boundaries without adding mutation or retrieval dependencies.
 - [ ] Block capability metadata is generated by read adapters, overrides conflicting stored metadata, and read-only Blocks are rejected before mutation normalization.
 - [ ] Recall materialization metadata is generated by the memory intake helper, keeps canonical fields on parent assets and seed sections, and prevents upstream metadata from redefining memory-layer ownership.
+- [ ] Archival Knowledge intake metadata is generated by the memory intake helper, keeps canonical fields on parent assets and seed sections, and prevents setup/source metadata from redefining memory-layer ownership.
 - [ ] Public memory tool/provider contracts remain stable after Block integration unless a spec explicitly widens them.
 - [ ] Retrieval-backed Block-compatible views stay additive/read-only and do not replace public search results or active-story Core State `block_context`.
 - [ ] Retrieval observability Block fields reuse the canonical retrieval Block adapter and stay additive to existing hit-centric payloads.
@@ -126,6 +131,7 @@
 - [ ] Recall source-family filters reuse the existing `filters` contract and do not fabricate metadata for legacy hits.
 - [ ] Scene transcript promotion requires explicit closed-scene identity and filtered source material; raw discussion rows never become Recall history by default.
 - [ ] Runtime scene lifecycle seeds deterministic `scene_ref`, rotates only through explicit close behavior, and does not materialize Recall/Core State scene history by accident.
+- [ ] Narrative retrieval policy keeps public memory search tools stable, resolves broker rerank strategy explicitly, uses structured filters instead of caller-side post-filtering, and emits ranking/budget trace for longform/RP context composition.
 - [ ] SetupAgent loop routing, `continue_reason`, `finish_reason`, and runtime trace stay semantically aligned; `next_action` remains an internal graph-route token rather than a user-facing outcome contract.
 - [ ] `SetupAgentExecutionService` text and stream entrypoints reuse the same outer-harness preflight and runtime-v2 launch boundaries; drift is limited to the true run vs run_stream split.
 - [ ] Lint/format and relevant scoped type checks pass.

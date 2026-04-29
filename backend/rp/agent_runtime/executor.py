@@ -96,6 +96,24 @@ class RpAgentRuntimeExecutor:
 class _RuntimeRunDriver:
     """Per-run LangGraph driver and node implementation."""
 
+    _INSPECT_ROUTES = {
+        "execute_tools",
+        "reflect_if_needed",
+        "finalize_success",
+        "finalize_failure",
+    }
+    _ASSESS_ROUTES = {
+        "derive_turn_goal",
+        "reflect_if_needed",
+        "finalize_success",
+        "finalize_failure",
+    }
+    _REFLECT_ROUTES = {
+        "derive_turn_goal",
+        "finalize_success",
+        "finalize_failure",
+    }
+
     def __init__(
         self,
         *,
@@ -329,10 +347,13 @@ class _RuntimeRunDriver:
             goal = SetupTurnGoal(
                 current_step=current_step,
                 goal_type="prepare_commit_intent",
-                goal_summary="Check whether the current step is converged enough for a commit proposal.",
+                goal_summary=(
+                    "Prepare the explicit user-requested commit proposal and surface "
+                    "readiness concerns as warnings instead of blocking the request."
+                ),
                 success_criteria=[
-                    "Verify there are no unresolved blocking questions.",
-                    "Only call setup.proposal.commit when the step is actually ready.",
+                    "Carry unresolved blockers or stale-state concerns as commit warnings.",
+                    "Call setup.proposal.commit when the user explicitly requests commit.",
                 ],
             )
         elif not current_snapshot:
@@ -954,6 +975,9 @@ class _RuntimeRunDriver:
             round_no=int(state.get("round_no") or 0),
         )
         warnings = list(state.get("warnings", []))
+        for item in self._tool_result_warning_codes(latest_batch):
+            if item not in warnings:
+                warnings.append(item)
         if decision.get("warning"):
             warnings.append(str(decision["warning"]))
         for item in decision.get("warnings") or []:
@@ -1128,17 +1152,48 @@ class _RuntimeRunDriver:
         )
         return update
 
-    @staticmethod
-    def _route_after_inspect(state: RpAgentRunState) -> str:
-        return str(state.get("next_action") or "finalize_success")
+    @classmethod
+    def _route_after_inspect(cls, state: RpAgentRunState) -> str:
+        return cls._safe_route(
+            state,
+            allowed=cls._INSPECT_ROUTES,
+            default="finalize_success",
+        )
+
+    @classmethod
+    def _route_after_assess(cls, state: RpAgentRunState) -> str:
+        return cls._safe_route(
+            state,
+            allowed=cls._ASSESS_ROUTES,
+            default="finalize_failure",
+        )
+
+    @classmethod
+    def _route_after_reflect(cls, state: RpAgentRunState) -> str:
+        return cls._safe_route(
+            state,
+            allowed=cls._REFLECT_ROUTES,
+            default="finalize_failure",
+        )
 
     @staticmethod
-    def _route_after_assess(state: RpAgentRunState) -> str:
-        return str(state.get("next_action") or "finalize_failure")
+    def _safe_route(
+        state: RpAgentRunState,
+        *,
+        allowed: set[str],
+        default: str,
+    ) -> str:
+        next_action = str(state.get("next_action") or default)
+        if next_action in allowed:
+            return next_action
 
-    @staticmethod
-    def _route_after_reflect(state: RpAgentRunState) -> str:
-        return str(state.get("next_action") or "finalize_failure")
+        state["finish_reason"] = "runtime_failed"
+        state["error"] = {
+            "message": f"Runtime selected unsupported next_action: {next_action}",
+            "type": "runtime_failed",
+        }
+        state["next_action"] = "finalize_failure"
+        return "finalize_failure"
 
     async def _emit_event(
         self,
@@ -1290,8 +1345,8 @@ class _RuntimeRunDriver:
                 "If pending_obligation is repair_tool_call, do not stop with explanation alone.\n"
                 "If pending_obligation is ask_user_for_missing_info, your next visible reply must ask "
                 "the missing question explicitly.\n"
-                "If reflection_ticket says block_commit, do not call setup.proposal.commit in this turn.\n"
-                "If cognitive_state_summary.invalidated is true, refresh discussion/chunk state before commit.\n"
+                "If reflection_ticket says block_commit, do not call setup.proposal.commit unless the user explicitly asked to commit/freeze/review now.\n"
+                "If cognitive_state_summary.invalidated is true and the user did not explicitly ask to commit, refresh discussion/chunk state before commit.\n"
                 "If working_digest exists, treat it as thin step-local control state only.\n"
                 "If tool_outcomes exist, use the outcomes but not the historical tool-call process.\n"
                 "If compact_summary exists, treat it as carry-forward context for trimmed older current-step discussion.\n"
@@ -1316,7 +1371,21 @@ class _RuntimeRunDriver:
     @staticmethod
     def _user_requests_commit(user_prompt: str) -> bool:
         lowered = user_prompt.lower()
-        return any(keyword in lowered for keyword in ("commit", "review", "freeze"))
+        return any(
+            keyword in lowered
+            for keyword in (
+                "commit",
+                "review",
+                "freeze",
+                "提交",
+                "评审",
+                "审核",
+                "冻结",
+                "确认提交",
+                "发起评审",
+                "发起审核",
+            )
+        )
 
     @staticmethod
     def _patch_targets_for_step(current_step: str) -> list[str]:
@@ -1668,6 +1737,8 @@ class _RuntimeRunDriver:
     ) -> bool:
         if not any(self._is_commit_proposal_tool(call.tool_name) for call in runtime_tool_calls):
             return False
+        if self._user_requests_commit(self._turn_input(state).user_visible_request):
+            return False
         context_bundle = self._context_bundle(self._turn_input(state))
         return (
             ReflectionTriggerPolicy.blocked_commit_ticket(
@@ -1680,6 +1751,21 @@ class _RuntimeRunDriver:
     @staticmethod
     def _is_commit_proposal_tool(tool_name: str) -> bool:
         return tool_name.endswith("setup.proposal.commit")
+
+    @staticmethod
+    def _tool_result_warning_codes(tool_results: list[RuntimeToolResult]) -> list[str]:
+        warnings: list[str] = []
+        for result in tool_results:
+            payload = result.structured_payload or {}
+            for key in ("result_payload", "content_payload"):
+                content = payload.get(key)
+                if not isinstance(content, dict):
+                    continue
+                for item in content.get("warnings") or []:
+                    warning = str(item or "").strip()
+                    if warning and warning not in warnings:
+                        warnings.append(warning)
+        return warnings
 
     @staticmethod
     def _normalize_message_dict(message: dict[str, Any]) -> dict[str, Any]:

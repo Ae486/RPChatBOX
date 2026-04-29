@@ -121,11 +121,15 @@ class RpRuntimeFactory:
         *,
         workspace_service: SetupWorkspaceService,
         context_builder: SetupContextBuilder,
+        runtime_state_service: SetupAgentRuntimeStateService | None = None,
     ) -> SetupRuntimeController:
         return SetupRuntimeController(
             workspace_service=workspace_service,
             context_builder=context_builder,
             retrieval_ingestion_service=MinimalRetrievalIngestionService(self._session),
+            runtime_state_service=(
+                runtime_state_service or self._build_setup_runtime_state_service()
+            ),
         )
 
     def build_setup_runtime_controller(self) -> SetupRuntimeController:
@@ -136,6 +140,7 @@ class RpRuntimeFactory:
         return self._build_setup_runtime_controller(
             workspace_service=workspace_service,
             context_builder=context_builder,
+            runtime_state_service=self._build_setup_runtime_state_service(),
         )
 
     def _build_setup_mcp_manager(self, *, story_id: str) -> McpManager:

@@ -51,7 +51,7 @@ Authority order for future work on this task:
 | Slice 3: prior-stage handoff / no raw previous discussion in new stage | Main spec slice 3; user requirement on stage context hygiene | `.trellis/spec/backend/rp-setup-agent-prior-stage-handoff-context.md`; `backend/rp/models/setup_handoff.py`; `backend/rp/services/setup_context_builder.py`; `backend/rp/services/setup_agent_prompt_service.py` | Mostly landed | Prior-stage context still comes only from accepted commits, raw previous discussion is still excluded, and the handoff packet now carries stage-scoped summary tiers, open issues, retrieval refs, warnings, and source basis. Remaining gap is the later foundation-chunk contract, not the basic handoff packet. |
 | User-edit invalidation / reconcile | Main spec section 10 | `backend/rp/services/setup_agent_runtime_state_service.py`; `backend/rp/agent_runtime/executor.py`; `backend/rp/tests/test_setup_agent_runtime_state_service.py` | Mostly landed | User edit deltas can invalidate setup cognition and route the loop through `reconcile_after_user_edit`. |
 | Slice 4: foundation chunk contract | Main spec slice 4; retrieval-friendly truth-unit chunking | `backend/rp/models/setup_drafts.py` | Deferred | Current `FoundationEntry` is still the older `entry_id/domain/path/title/tags/source_refs/content` shape. The tiered chunk contract from the main spec is not implemented, but this is intentionally deferred because the current phase is focused on agent-body capabilities rather than retrieval/truth-surface redesign. |
-| Slice 5: explicit user commit always allowed + warning payload | Main spec slice 5; user commit authority requirement | Current flow centered on `setup.proposal.commit`, `SetupRuntimeController`, and `SetupWorkspaceService` | Not landed | There is no `CommitWarningPayload` contract yet. Runtime still contains `block_commit` / `reassess_commit_readiness` semantics around commit proposal. |
+| Slice 5: explicit user commit always allowed + warning payload | Main spec slice 5; user commit authority requirement | Current flow centered on `setup.proposal.commit`, `SetupRuntimeController`, and `SetupWorkspaceService` | Partial | Lightweight path landed: `setup.proposal.commit` now creates proposals with existing `unresolved_warnings` instead of provider-level hard blocks for weak readiness, and runtime pre-blocking is bypassed only when the user explicitly asks to commit/review/freeze. Full `CommitWarningPayload`, handoff risk snapshot, and richer unresolved-issue payload remain deferred. |
 | Slice 5: preset stage progression through commit + handoff | Main spec slice 5; setup lifecycle requirement | `backend/rp/services/setup_workspace_service.py` (`_STEP_ORDER`, `accept_commit`, `_advance_current_step`) | Partial | Preset progression already exists as a workflow skeleton, but it is not yet fused with the new warning-payload and handoff-packet contract. |
 | Stage-aware tool visibility | Main spec section 13; mature tool-governance practice | `.trellis/spec/backend/rp-setup-agent-stage-aware-tool-scope.md`; `backend/rp/agent_runtime/profiles.py`; `backend/rp/agent_runtime/adapters.py` | Landed (minimal) | Shared setup tools plus current-step patch-family narrowing is in place. |
 | Runtime-v2 only convergence | Main spec priority item 9; cleanup of transitional runtime split | `.trellis/spec/backend/rp-setup-agent-runtime-v2-only-convergence.md`; `backend/rp/services/setup_agent_execution_service.py`; `backend/rp/runtime/rp_runtime_factory.py` | Mostly landed | The legacy main-path split is removed, but this is outer-harness cleanup, not proof that the core main spec is done. |
@@ -71,17 +71,17 @@ These items must be treated as live execution-control issues, not as optional cl
   - main development spec must match the executable spec and current code
   - `RepairDecisionPolicy.assess(...)` remains the current runtime anchor
 
-### 4.2 Continue / Finish Taxonomy Needs One Truth Table
+### 4.2 Continue / Finish Taxonomy Is Resolved
 
-- Main spec currently presents a higher-level conceptual continue taxonomy.
-- Executable loop spec has already frozen the runtime-local taxonomy used by code and tests.
+- Main spec now treats `.trellis/spec/backend/rp-setup-agent-loop-semantics-react-trace.md` as the runtime-local truth table for `continue_reason` and `finish_reason`.
+- Older conceptual labels are mapped to runtime surfaces instead of maintained as a second enum:
+  - same-turn continuation -> `continue_reason`
+  - failure flavor -> `repair_route`
+  - user-edit / reconciliation intent -> `turn_goal.goal_type` or `pending_obligation.obligation_type`
+  - terminal turn outcome -> `finish_reason`
+  - commit / warning / handoff outcomes -> later outer-harness slices
 
-This is not necessarily a bug, but it is dual truth.
-
-Required follow-up:
-
-- either update the main spec taxonomy to match executable runtime semantics
-- or add an explicit mapping table between conceptual reasons and runtime reasons
+- Runtime route fallback now treats unsupported `next_action` as `runtime_failed` and routes to `finalize_failure`, matching the executable loop spec's "graph route is not semantic outcome" boundary.
 
 ### 4.3 Commit Authority Contract Is Still Behind The Main Spec
 
@@ -91,13 +91,14 @@ Main spec requires:
 - weak readiness only yields warnings / unresolved issue payload
 - stage progression still happens through commit + handoff
 
-Current implementation still centers on:
+Current implementation now partially centers on:
 
 - commit proposal
-- readiness reflection
-- `block_commit` / `reassess_commit_readiness` semantics
+- existing `unresolved_warnings`
+- readiness reflection for agent-initiated premature commit
+- `block_commit` / `reassess_commit_readiness` semantics when the user did not explicitly request commit
 
-This is not yet the main-spec commit contract.
+This is not yet the full main-spec commit contract because there is still no dedicated `CommitWarningPayload` / handoff-risk snapshot.
 
 ### 4.4 Handoff Packet Authority Is Now Good Enough For The Next Slice
 

@@ -1,0 +1,179 @@
+{
+  "case_id": "retrieval.search.branch_canon_isolation_policy.v1",
+  "title": "Recall search should isolate canonical main-branch material by structured filters",
+  "scope": "retrieval",
+  "category": "retrieval_ready",
+  "tags": ["policy", "deterministic", "retrieval-core", "branch-canon"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "minimal_retrieval_ingestion_service.ingest_commit",
+    "graph_id": "retrieval_core",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-retrieval-branch-canon-policy-001",
+      "recall_seed_assets": [
+        {
+          "asset_id": "recall-canon-main",
+          "title": "Canonical Main Branch Harbor Oath",
+          "text": "Branch canon policy harbor oath is canonical on the main branch.",
+          "metadata": {
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "heavy_regression.chapter_close",
+            "materialization_kind": "accepted_story_segment",
+            "materialized_to_recall": true,
+            "domain": "chapter",
+            "domain_path": "recall.chapter.4.branch.main.canonical",
+            "chapter_index": 4,
+            "branch_id": "main",
+            "canon_status": "canonical"
+          }
+        },
+        {
+          "asset_id": "recall-superseded-main",
+          "title": "Superseded Main Branch Harbor Oath",
+          "text": "Branch canon policy harbor oath was superseded on the main branch.",
+          "metadata": {
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "heavy_regression.chapter_close",
+            "materialization_kind": "accepted_story_segment",
+            "materialized_to_recall": true,
+            "domain": "chapter",
+            "domain_path": "recall.chapter.4.branch.main.superseded",
+            "chapter_index": 4,
+            "branch_id": "main",
+            "canon_status": "superseded"
+          }
+        },
+        {
+          "asset_id": "recall-canon-alt",
+          "title": "Canonical Alt Branch Harbor Oath",
+          "text": "Branch canon policy harbor oath is canonical on an alternate branch.",
+          "metadata": {
+            "layer": "recall",
+            "source_family": "longform_story_runtime",
+            "materialization_event": "heavy_regression.chapter_close",
+            "materialization_kind": "accepted_story_segment",
+            "materialized_to_recall": true,
+            "domain": "chapter",
+            "domain_path": "recall.chapter.4.branch.alt.canonical",
+            "chapter_index": 4,
+            "branch_id": "alt",
+            "canon_status": "canonical"
+          }
+        }
+      ],
+      "query": {
+        "query_kind": "recall",
+        "text_query": "branch canon policy harbor oath",
+        "domains": ["chapter"],
+        "top_k": 5,
+        "filters": {
+          "branch_ids": ["main"],
+          "canon_statuses": ["canonical"],
+          "search_policy": {
+            "profile": "longform",
+            "context": {
+              "current_chapter_index": 4
+            }
+          }
+        },
+        "search_kind": "chunks",
+        "rerank": true
+      }
+    },
+    "workspace_seed": {
+      "story_id": "story-case-retrieval-branch-canon-policy-001",
+      "mode": "longform",
+      "current_step": "foundation",
+      "drafts": {
+        "foundation": {
+          "entries": [
+            {
+              "entry_id": "branch_canon_policy_seed",
+              "domain": "world",
+              "path": "world.branch_canon_policy_seed",
+              "title": "Branch Canon Policy Seed",
+              "tags": ["branch", "canon"],
+              "source_refs": [],
+              "content": {
+                "summary": "Retrieval eval seed for branch and canon isolation."
+              }
+            }
+          ]
+        }
+      },
+      "accepted_proposals": [
+        {
+          "step_id": "foundation",
+          "target_draft_refs": ["foundation:branch_canon_policy_seed"],
+          "reason": "freeze branch canon recall fixture"
+        }
+      ]
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "finish_is_retrieval_completed",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "finish_reason",
+        "expected": "retrieval_completed",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "query_hits_exist",
+        "source": "retrieval_result",
+        "type": "count_gte",
+        "path": "query_result.hits",
+        "expected": 1,
+        "severity": "error"
+      },
+      {
+        "assertion_id": "first_hit_is_canonical_main",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.hits[0].metadata.asset_id",
+        "expected": "recall-canon-main",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "canonical_filter_recorded",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.trace.filters_applied.filters.canon_statuses[0]",
+        "expected": "canonical",
+        "severity": "error"
+      },
+      {
+        "assertion_id": "main_branch_filter_recorded",
+        "source": "retrieval_result",
+        "type": "equals",
+        "path": "query_result.trace.filters_applied.filters.branch_ids[0]",
+        "expected": "main",
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": []
+  },
+  "trace_hooks": {
+    "capture_runtime_events": false,
+    "capture_graph_debug": false,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": ["finish_reason", "assertion_pass_rate"],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {}
+}
