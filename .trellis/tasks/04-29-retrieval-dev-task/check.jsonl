@@ -7,4 +7,6 @@
 {"file": ".trellis/spec/backend/rp-retrieval-block-compatible-views.md", "reason": "Verify retrieval Block-compatible views are additive, read-only, and adapter-backed."}
 {"file": ".trellis/spec/backend/rp-retrieval-block-observability.md", "reason": "Verify retrieval observability top-hit block views stay additive and reuse the canonical adapter."}
 {"file": ".trellis/spec/backend/rp-narrative-retrieval-policy-contract.md", "reason": "Verify future retrieval implementation slices keep public search tools stable while adding broker rerank policy, structured filters, narrative scoring trace, context budget trace, and eval gold cases."}
+{"file": ".trellis/spec/backend/rp-memory-graph-projection.md", "reason": "Verify GraphRAG / Memory Graph Projection implementation against storage, job, inspection API, query expansion, model config, and frontend inspection contracts."}
+{"file": ".trellis/tasks/04-29-retrieval-dev-task/research/memory-graph-projection-decision-log.md", "reason": "Verify GraphRAG / Memory Graph Projection work stays within the confirmed task-level decisions and first-stage boundaries."}
 {"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality checklist if retrieval maintenance/model-configuration UI surfaces are touched."}

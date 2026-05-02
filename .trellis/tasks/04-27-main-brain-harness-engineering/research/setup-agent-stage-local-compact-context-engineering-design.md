@@ -38,11 +38,11 @@ Related task artifact:
 ### What to borrow
 
 - Borrow Claude Code's ordering principle: compact belongs immediately before model-call assembly, not inside generic memory/state mutation. For RP, this maps to `SetupContextPacket -> govern_history -> runtime overlay -> final request messages`.
-- Borrow progressive cost tiers, but compress them into RP's simpler needs: first drop/retain by deterministic caps, then retain final tool outcomes, then summarize only dropped current-step prefix, and only later consider LLM expert compact.
-- Borrow the "no tools compact expert" idea. A compact pass must be text/JSON-only and unable to mutate `SetupWorkspace`, call setup tools, or run retrieval.
+- Borrow progressive cost tiers, but compress them into RP's simpler needs: first drop/retain by deterministic caps, then retain final tool outcomes, then summarize only dropped current-step prefix, and only then use a no-tools compact prompt pass if deterministic summary quality needs it.
+- Borrow the "no tools compact summarizer" idea. A compact pass must be text/JSON-only and unable to mutate `SetupWorkspace`, call setup tools, or run retrieval.
 - Borrow Pi's explicit pre-LLM transform boundary: RP should continue treating context engineering as a transform over turn inputs before provider messages are built.
-- Borrow structured update summaries from Pi for any future expert compact: keep previous compact summary, update it with only newly dropped messages, preserve decisions, constraints, exact refs, blockers, and next focus.
-- Borrow Claude Code's separation between internal analysis and retained summary: an expert compact prompt may ask for analysis internally, but only validated summary fields should enter `compact_summary`.
+- Borrow structured update summaries from Pi for any future compact prompt pass: keep previous compact summary, update it with only newly dropped messages, preserve decisions, constraints, exact refs, blockers, and next focus.
+- Borrow Claude Code's separation between internal analysis and retained summary: a compact prompt pass may ask for analysis internally, but only validated summary fields should enter `compact_summary`.
 
 ### What not to borrow
 
@@ -51,7 +51,7 @@ Related task artifact:
 - Do not turn `context_report` into prompt content or durable cognition. It should remain debug/eval/result observability.
 - Do not add another durable setup-memory table. The existing `SetupAgentRuntimeStateRecord.snapshot_json` boundary is enough for digest/tool outcomes/compact summary.
 - Do not preserve raw tool retry chains. Keep final outcomes, updated refs, error code, relevance, and short summary only.
-- Do not use an expert compact model for MVP if deterministic prefix summary is enough. A helper model is useful for quality, but it adds failure mode, cost, latency, and validation needs.
+- Do not use a compact prompt pass for MVP if deterministic prefix summary is enough. A helper model is useful for quality, but it adds failure mode, cost, latency, and validation needs.
 
 ### RP-specific lightweight design
 
@@ -79,12 +79,12 @@ MVP policy:
 
 - Keep deterministic compact summary as default.
 - Add explicit `compact_mode` / `summary_action` observability only if current `context_report` needs clearer downstream naming.
-- Add expert compact behind a strategy flag only when eval shows deterministic summaries lose important current-step context.
-- If expert compact is added, it should update only `SetupContextCompactSummary` fields or a strict extension of that model; it should not write draft, cognition, handoff, or Memory OS state.
+- Add compact prompt summarization behind a strategy flag only when eval shows deterministic summaries lose important current-step context.
+- If compact prompt summarization is added, it should update only `SetupContextCompactSummary` fields or a strict extension of that model; it should not write draft, cognition, handoff, or Memory OS state.
 
-### Compact expert prompt-role recommendations
+### Compact prompt pass recommendations
 
-Role name: `SetupStageCompactExpert`.
+Role marker: `SetupStageCompactPrompt`.
 
 Prompt constraints:
 
@@ -106,7 +106,7 @@ Prompt constraints:
 Example role contract:
 
 ```text
-You are SetupStageCompactExpert. Produce a compact carry-forward summary for older current-step setup discussion. Do not call tools. Do not write drafts. Do not decide readiness or commit. Preserve only facts, decisions, open threads, draft refs, and unresolved blockers needed for the next SetupAgent turn in this same stage. Output JSON only.
+You are SetupStageCompactPrompt. Produce a compact carry-forward summary for older current-step setup discussion. Do not call tools. Do not write drafts. Do not decide readiness or commit. Preserve only facts, decisions, open threads, draft refs, and unresolved blockers needed for the next SetupAgent turn in this same stage. Output JSON only.
 ```
 
 ### Open decisions
@@ -115,7 +115,7 @@ You are SetupStageCompactExpert. Produce a compact carry-forward summary for old
 - Whether `SetupContextCompactSummary` needs v2 fields (`discarded_directions`, `pending_decisions`, `must_not_infer`) or whether these should stay in `working_digest`.
 - Whether context budget should remain threshold-based (`history_count`, chars, user-edit count) or add actual token estimation later.
 - Whether `context_report` needs a stable public debug/eval schema beyond the current contract fields.
-- Whether expert compact should run synchronously in the setup turn or asynchronously after turn completion and be reused next turn.
+- Whether compact prompt summarization should run synchronously in the setup turn or asynchronously after turn completion and be reused next turn.
 - How eval should measure compact quality: missing open issues, stale draft refs, hallucinated facts, repeated user questions, or wrong commit readiness.
 
 ## Caveats / Not Found

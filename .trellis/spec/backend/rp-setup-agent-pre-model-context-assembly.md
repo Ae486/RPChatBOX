@@ -48,8 +48,8 @@
   - `kept_history_count: int`
   - `compacted_history_count: int`
   - `retained_tool_outcome_count: int`
-  - `summary_strategy: Literal["none", "deterministic_prefix_summary", "expert_stage_summary"]`
-  - `summary_action: Literal["none", "reused_existing", "rebuilt"]`
+  - `summary_strategy: Literal["none", "deterministic_prefix_summary", "compact_prompt_summary"]`
+  - `summary_action: Literal["none", "reused_existing", "updated_existing", "rebuilt"]`
   - `summary_line_count: int`
   - `fallback_reason: str | None`
 - `SetupContextGovernorService.govern_history(...) -> tuple[list[SetupAgentDialogueMessage], SetupContextCompactSummary | None, dict[str, int]]`
@@ -116,7 +116,7 @@
 - Layer 2: `SetupContextGovernorService.govern_history(...)`
   - receives raw request history
   - runs stage-local context engineering only for the current step
-  - performs pressure assessment, raw-window retention, tool-outcome retention, deterministic or expert compact summary, and draft-ref recovery hint preparation
+  - performs pressure assessment, raw-window retention, tool-outcome retention, deterministic or compact-prompt summary, and draft-ref recovery hint preparation
   - returns governed raw history, `compact_summary`, and `governance_metadata`
 - Layer 3: `SetupRuntimeAdapter.build_turn_input(...)`
   - joins context packet, stage-local governance artifacts, context-decision report, step readiness facts, proposal status, and runtime-private cognition into `RpAgentTurnInput.context_bundle`
@@ -228,7 +228,7 @@
   - what message/token/usage signal caused that profile
   - how much raw history was kept vs compacted
   - whether the compact summary was reused vs rebuilt
-  - whether the strategy was deterministic or expert compact, and why fallback happened if any
+  - whether the strategy was deterministic or compact-prompt, and why fallback happened if any
   - how many retained tool outcomes and prior-stage handoffs participated in the turn
 - `context_report` may be exposed in:
   - `RpAgentTurnInput.context_bundle`
@@ -266,10 +266,11 @@
 - runtime overlay payload is empty -> `_build_request_messages(...)` must not insert a second system message
 - retained tool outcomes exist from previous turns -> they may appear in runtime overlay, but not inside `SetupContextPacket`
 - latest same-turn tool batch exists -> raw tool result messages may be visible to the next same-turn round, but they must not be copied into persistent stage-local snapshot fields by this slice
-- compact summary is present and equals the existing summary fingerprint -> `context_report.summary_action = "reused_existing"`
-- compact summary is present and differs from the existing summary fingerprint -> `context_report.summary_action = "rebuilt"`
-- expert compact succeeds -> `context_report.summary_strategy = "expert_stage_summary"`
-- expert compact fails validation or is disabled -> deterministic fallback is allowed, but `context_report.fallback_reason` must explain it
+- compact summary is present and equals the existing dropped-prefix fingerprint -> `context_report.summary_action = "reused_existing"`
+- compact summary is present and extends an existing valid prefix summary -> `context_report.summary_action = "updated_existing"`
+- compact summary is present but cannot reuse an existing prefix -> `context_report.summary_action = "rebuilt"`
+- compact prompt pass succeeds -> `context_report.summary_strategy = "compact_prompt_summary"`
+- compact prompt pass fails validation or is disabled -> deterministic fallback is allowed, but `context_report.fallback_reason` must explain it
 - no dropped history exists -> `context_report.summary_strategy = "none"` and `summary_action = "none"`
 - a developer tries to reuse raw request history to reconstruct prior-stage truth -> invalid; prior-stage truth must still come from accepted handoff packets only
 
@@ -279,7 +280,7 @@
 - Good: a compacted turn preserves `compact_summary.recovery_hints` and the model can use `setup.read.draft_refs` for exact current-draft details rather than relying on stale raw discussion.
 - Good: a `foundation` turn can use previous `foundation` usage from the same workspace as calibration, while a separate workspace's large previous turn does not force this turn into `compact`.
 - Base: a small `story_config` turn stays `standard`, keeps the short raw history, has no `compact_summary`, and still inserts runtime overlay after the stable system prompt.
-- Bad: stuffing runtime control state into `SetupContextPacket`, duplicating the full packet again inside the runtime overlay, replaying old tool retry process as if it were reusable context, or letting compact expert output mutate business truth.
+- Bad: stuffing runtime control state into `SetupContextPacket`, duplicating the full packet again inside the runtime overlay, replaying old tool retry process as if it were reusable context, or letting compact prompt output mutate business truth.
 - Bad: using one execution service's most recent runtime result globally so unrelated workspaces or setup steps inherit each other's observed token pressure.
 
 ### 6. Tests Required
@@ -312,7 +313,7 @@
 - Keep historical tool retry/process traces in prompt-visible context because they happened "recently".
 - Treat `context_report` as another prompt-injection surface instead of a debug/eval/result surface.
 - Let pre-model context assembly quietly widen durable setup persistence.
-- Let compact expert become another tool-using agent loop inside pre-model assembly.
+- Let compact prompt become another tool-using agent loop inside pre-model assembly.
 - Treat response-side token usage as enough to protect the next pre-model request without any pre-call estimate.
 
 #### Correct
@@ -324,5 +325,5 @@
 - Keep `governance_metadata` as raw counts and keep the richer context-decision explanation in transient `context_report`.
 - Keep request-assembly artifacts transient and outside durable setup cognition snapshots.
 - Scope observed previous usage to the same workspace and setup step before it can influence context-profile selection.
-- Keep compact expert as a no-tools JSON summarizer inside stage-local context engineering, with deterministic fallback.
+- Keep compact prompt as a no-tools JSON summarizer inside stage-local context engineering, with deterministic fallback.
 - Use draft refs plus `setup.read.draft_refs` for detail recovery instead of stuffing all draft details into prompt context.

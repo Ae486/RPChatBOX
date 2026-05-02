@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -18,6 +19,7 @@ def _turn_input(
     *,
     stream: bool = False,
     user_prompt: str = "Please help with setup.",
+    conversation_messages: list[dict[str, Any]] | None = None,
     context_bundle: dict | None = None,
     tool_scope: list[str] | None = None,
 ) -> RpAgentTurnInput:
@@ -73,7 +75,7 @@ def _turn_input(
         provider_id="provider-1",
         stream=stream,
         user_visible_request=user_prompt,
-        conversation_messages=[],
+        conversation_messages=list(conversation_messages or []),
         context_bundle=runtime_context,
         tool_scope=tool_scope or ["setup.patch.story_config"],
         metadata={
@@ -99,13 +101,96 @@ def _profile() -> RuntimeProfile:
     )
 
 
+def _compact_exact_detail_context() -> dict[str, Any]:
+    return {
+        "compact_summary": {
+            "source_fingerprint": "fp-compact",
+            "source_message_count": 8,
+            "summary_lines": ["Older foundation discussion was compacted."],
+            "draft_refs": ["foundation:magic-law"],
+            "recovery_hints": [
+                {
+                    "ref": "foundation:magic-law",
+                    "reason": "Exact magic-law detail lives in the draft.",
+                }
+            ],
+        },
+        "context_report": {
+            "context_profile": "compact",
+            "profile_reasons": ["history_count_threshold"],
+            "raw_history_count": 12,
+            "raw_history_chars": 4800,
+            "user_edit_delta_count": 0,
+            "prior_stage_handoff_count": 1,
+            "raw_history_limit": 4,
+            "kept_history_count": 4,
+            "compacted_history_count": 8,
+            "retained_tool_outcome_count": 0,
+            "summary_strategy": "deterministic_prefix_summary",
+            "summary_action": "rebuilt",
+            "summary_line_count": 1,
+        },
+    }
+
+
+def _draft_ref_read_result() -> RuntimeToolResult:
+    return RuntimeToolResult(
+        call_id="call_read",
+        tool_name="rp_setup__setup.read.draft_refs",
+        success=True,
+        content_text=json.dumps(
+            {
+                "success": True,
+                "items": [
+                    {
+                        "ref": "foundation:magic-law",
+                        "found": True,
+                        "payload": {
+                            "content": "Public spellcasting is regulated by guild permits."
+                        },
+                    }
+                ],
+                "missing_refs": [],
+            }
+        ),
+        structured_payload={
+            "content_payload": {
+                "items": [
+                    {
+                        "ref": "foundation:magic-law",
+                        "found": True,
+                    }
+                ],
+                "missing_refs": [],
+            }
+        },
+    )
+
+
 def _tool_definition(name: str) -> dict:
+    if name.endswith("setup.truth.write"):
+        parameters = {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string"},
+                "step_id": {"type": "string"},
+                "truth_write": {
+                    "type": "object",
+                    "properties": {
+                        "block_type": {"type": "string"},
+                        "payload": {"type": "object"},
+                    },
+                },
+            },
+        }
+    else:
+        parameters = {"type": "object", "properties": {}}
     return {
         "type": "function",
         "function": {
             "name": name,
             "description": "test tool",
-            "parameters": {"type": "object", "properties": {}},
+            "parameters": parameters,
         },
     }
 
@@ -124,7 +209,7 @@ def test_runtime_routes_invalid_next_action_to_runtime_failed():
 class _FakeToolExecutor:
     def __init__(self, *, results: list[RuntimeToolResult] | None = None) -> None:
         self._results = list(results or [])
-        self.calls = []
+        self.calls: list[tuple[Any, list[str]]] = []
 
     def get_openai_tool_definitions(
         self, *, visible_tool_names: list[str]
@@ -217,7 +302,7 @@ class _TextOnlyLLM:
 
 class _RecordingTextOnlyLLM:
     def __init__(self) -> None:
-        self.requests = []
+        self.requests: list[Any] = []
 
     async def chat_completion(self, request):
         self.requests.append(request)
@@ -227,6 +312,284 @@ class _RecordingTextOnlyLLM:
                     "message": {
                         "role": "assistant",
                         "content": "Recorded direct answer.",
+                    }
+                }
+            ]
+        }
+
+
+class _CompactExactDetailTextThenReadLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "The exact magic-law content is permits only.",
+                        }
+                    }
+                ]
+            }
+        if self.round == 2:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_read",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": "workspace-1",
+                                                "step_id": "foundation",
+                                                "refs": ["foundation:magic-law"],
+                                                "detail": "full",
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Read result says the exact magic-law content is guild permits.",
+                    }
+                }
+            ]
+        }
+
+
+class _CompactExactDetailReadThenTextLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_read",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": "workspace-1",
+                                                "step_id": "foundation",
+                                                "refs": ["foundation:magic-law"],
+                                                "detail": "full",
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "The exact magic-law content is guild permits.",
+                    }
+                }
+            ]
+        }
+
+
+class _CompactExactDetailMutateThenReadLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_write",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.truth.write",
+                                        "arguments": json.dumps(
+                                            {
+                                                "truth_write": {
+                                                    "write_id": "write-1",
+                                                    "target_ref": "foundation:magic-law",
+                                                    "operation": "merge",
+                                                    "payload_json": json.dumps(
+                                                        {"notes": "guessed from compact"}
+                                                    ),
+                                                    "remaining_open_issues": [],
+                                                    "ready_for_review": True,
+                                                }
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        if self.round == 2:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_read",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": "workspace-1",
+                                                "step_id": "foundation",
+                                                "refs": ["foundation:magic-law"],
+                                                "detail": "full",
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "I read the draft ref before mutating.",
+                    }
+                }
+            ]
+        }
+
+
+class _CompactExactDetailMixedReadMutationThenReadLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_read_mixed",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": "workspace-1",
+                                                "step_id": "foundation",
+                                                "refs": ["foundation:magic-law"],
+                                                "detail": "full",
+                                            }
+                                        ),
+                                    },
+                                },
+                                {
+                                    "id": "call_write_mixed",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.truth.write",
+                                        "arguments": json.dumps(
+                                            {
+                                                "truth_write": {
+                                                    "write_id": "write-1",
+                                                    "target_ref": "foundation:magic-law",
+                                                    "operation": "merge",
+                                                    "payload_json": json.dumps(
+                                                        {"notes": "mixed batch"}
+                                                    ),
+                                                    "remaining_open_issues": [],
+                                                    "ready_for_review": True,
+                                                }
+                                            }
+                                        ),
+                                    },
+                                },
+                            ],
+                        }
+                    }
+                ]
+            }
+        if self.round == 2:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_read",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": "workspace-1",
+                                                "step_id": "foundation",
+                                                "refs": ["foundation:magic-law"],
+                                                "detail": "full",
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "I separated read observation from mutation.",
                     }
                 }
             ]
@@ -271,6 +634,110 @@ class _ToolThenTextLLM:
                     "message": {
                         "role": "assistant",
                         "content": "Tool succeeded and I finished the answer.",
+                    }
+                }
+            ]
+        }
+
+
+class _SlimTruthWriteThenTextLLM:
+    def __init__(self) -> None:
+        self.round = 0
+        self.requests: list[Any] = []
+
+    async def chat_completion(self, request):
+        self.requests.append(request)
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_truth_write",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.truth.write",
+                                        "arguments": json.dumps(
+                                            {
+                                                "truth_write": {
+                                                    "write_id": "write-1",
+                                                    "target_ref": "",
+                                                    "operation": "merge",
+                                                    "payload_json": json.dumps(
+                                                        {"notes": "draft notes"}
+                                                    ),
+                                                    "remaining_open_issues": [],
+                                                    "ready_for_review": True,
+                                                }
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Wrote draft truth.",
+                    }
+                }
+            ]
+        }
+
+
+class _InvalidPayloadJsonTruthWriteLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_truth_write",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.truth.write",
+                                        "arguments": json.dumps(
+                                            {
+                                                "truth_write": {
+                                                    "write_id": "write-1",
+                                                    "target_ref": "",
+                                                    "operation": "merge",
+                                                    "payload_json": "{not valid json",
+                                                    "remaining_open_issues": [],
+                                                    "ready_for_review": True,
+                                                }
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "I need to repair the malformed payload JSON.",
                     }
                 }
             ]
@@ -425,6 +892,20 @@ class _ExplainInsteadOfRepairLLM:
                     "message": {
                         "role": "assistant",
                         "content": "I know the patch field is missing, so I cannot continue yet.",
+                    }
+                }
+            ]
+        }
+
+
+class _RepeatedQuestionLLM:
+    async def chat_completion(self, request):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Which style rules do you want me to lock in for this draft?",
                     }
                 }
             ]
@@ -663,6 +1144,130 @@ async def test_runtime_executor_places_runtime_overlay_after_system_prompt():
 
 
 @pytest.mark.asyncio
+async def test_runtime_executor_guards_text_until_compact_draft_ref_is_read():
+    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
+    llm = _CompactExactDetailTextThenReadLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+            context_bundle=_compact_exact_detail_context(),
+            tool_scope=["setup.read.draft_refs"],
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.round == 3
+    assert result.assistant_text == (
+        "Read result says the exact magic-law content is guild permits."
+    )
+    assert len(tool_executor.calls) == 1
+    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup.read.draft_refs"
+    assert result.structured_payload["action_expectation"] is None
+    trace = result.structured_payload["loop_trace"]
+    assert any(
+        item["decision"].get("continue_reason") == "completion_guard_retry"
+        and item["decision"].get("action_expectation", {}).get("expectation_type")
+        == "read_draft_refs"
+        for item in trace
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_clears_compact_expectation_after_read_observation():
+    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
+    llm = _CompactExactDetailReadThenTextLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+            context_bundle=_compact_exact_detail_context(),
+            tool_scope=["setup.read.draft_refs"],
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.round == 2
+    assert len(tool_executor.calls) == 1
+    assert result.structured_payload["action_expectation"] is None
+    assert "required_draft_ref_read_missing" not in result.warnings
+    trace = result.structured_payload["loop_trace"]
+    assert any(
+        item["decision"].get("action_expectation", {}).get("expectation_type")
+        == "read_draft_refs"
+        for item in trace
+    )
+    assert trace[-1]["decision"].get("action_expectation") is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_blocks_mutation_before_compact_draft_ref_read():
+    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
+    llm = _CompactExactDetailMutateThenReadLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+            context_bundle=_compact_exact_detail_context(),
+            tool_scope=["setup.truth.write", "setup.read.draft_refs"],
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.round == 3
+    executed_tool_names = [call.tool_name for call, _ in tool_executor.calls]
+    assert executed_tool_names == ["rp_setup__setup.read.draft_refs"]
+    assert "required_draft_ref_read_missing" in result.warnings
+    trace = result.structured_payload["loop_trace"]
+    assert any(
+        item["decision"].get("continue_reason") == "completion_guard_retry"
+        and item["action"].get("tool_names") == ["rp_setup__setup.truth.write"]
+        for item in trace
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_blocks_mixed_read_and_mutation_batch_before_observation():
+    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
+    llm = _CompactExactDetailMixedReadMutationThenReadLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+            context_bundle=_compact_exact_detail_context(),
+            tool_scope=["setup.truth.write", "setup.read.draft_refs"],
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.round == 3
+    executed_tool_names = [call.tool_name for call, _ in tool_executor.calls]
+    assert executed_tool_names == ["rp_setup__setup.read.draft_refs"]
+    trace = result.structured_payload["loop_trace"]
+    assert any(
+        item["decision"].get("continue_reason") == "completion_guard_retry"
+        and item["action"].get("tool_names")
+        == [
+            "rp_setup__setup.read.draft_refs",
+            "rp_setup__setup.truth.write",
+        ]
+        for item in trace
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_executor_only_sends_tool_schemas_from_turn_scope():
     tool_executor = _FakeToolExecutor()
     llm = _RecordingTextOnlyLLM()
@@ -686,6 +1291,221 @@ async def test_runtime_executor_only_sends_tool_schemas_from_turn_scope():
         "rp_setup__setup.read.workspace",
         "rp_setup__setup.patch.story_config",
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_exposes_slim_strict_truth_write_schema_only_for_strict_enabled_model():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            tool_scope=[
+                "setup.truth.write",
+                "setup.patch.story_config",
+            ]
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    tools = {
+        item["function"]["name"]: item["function"]
+        for item in (llm.requests[0].tools or [])
+    }
+    truth_write = tools["rp_setup__setup.truth.write"]
+    patch_story_config = tools["rp_setup__setup.patch.story_config"]
+
+    assert truth_write["strict"] is True
+    parameters = truth_write["parameters"]
+    assert parameters["additionalProperties"] is False
+    assert parameters["required"] == ["truth_write"]
+    assert set(parameters["properties"]) == {"truth_write"}
+    nested = parameters["properties"]["truth_write"]
+    assert nested["additionalProperties"] is False
+    assert "payload_json" in nested["required"]
+    assert "payload_json" in nested["properties"]
+    assert nested["properties"]["target_ref"]["type"] == "string"
+    assert "current_step" not in nested["properties"]
+    assert "block_type" not in nested["properties"]
+    assert "workspace_id" not in parameters["properties"]
+    assert "step_id" not in parameters["properties"]
+    assert "strict" not in patch_story_config
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_exposes_slim_truth_write_schema_without_strict_for_other_models():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+    turn_input = _turn_input(tool_scope=["setup.truth.write"])
+    turn_input.metadata["model_name"] = "glm-5"
+
+    result = await executor.run(
+        turn_input,
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    function = (llm.requests[0].tools or [])[0]["function"]
+    parameters = function["parameters"]
+    assert "strict" not in function
+    assert parameters["additionalProperties"] is False
+    assert parameters["required"] == ["truth_write"]
+    assert set(parameters["properties"]) == {"truth_write"}
+    truth_write = parameters["properties"]["truth_write"]
+    assert truth_write["additionalProperties"] is False
+    assert "payload_json" in truth_write["required"]
+    assert "payload_json" in truth_write["properties"]
+    assert truth_write["properties"]["target_ref"]["type"] == "string"
+    assert "current_step" not in truth_write["properties"]
+    assert "block_type" not in truth_write["properties"]
+    assert "workspace_id" not in parameters["properties"]
+    assert "step_id" not in parameters["properties"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_removes_inherited_strict_for_non_strict_models():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    driver = _RuntimeRunDriver(
+        llm_service=llm,
+        tool_executor=tool_executor,
+        profile=_profile(),
+    )
+    turn_input = _turn_input(tool_scope=["setup.truth.write"])
+    turn_input.metadata["model_name"] = "gemini-2.5-flash"
+    inherited_strict_tool = _tool_definition("rp_setup__setup.truth.write")
+    inherited_strict_tool["function"]["strict"] = True
+
+    tools = driver._model_facing_tool_definitions(
+        [inherited_strict_tool],
+        turn_input=turn_input,
+    )
+
+    function = tools[0]["function"]
+    assert "strict" not in function
+    assert function["parameters"]["required"] == ["truth_write"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_falls_back_to_full_truth_write_schema_without_runtime_defaults():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+    turn_input = _turn_input(
+        tool_scope=["setup.truth.write"],
+        context_bundle={
+            "current_step": "unknown_step",
+            "context_packet": {
+                "current_step": "unknown_step",
+            },
+        },
+    )
+
+    result = await executor.run(
+        turn_input,
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    function = (llm.requests[0].tools or [])[0]["function"]
+    parameters = function["parameters"]
+    assert "strict" not in function
+    assert "workspace_id" in parameters["properties"]
+    assert "step_id" in parameters["properties"]
+    truth_write = parameters["properties"]["truth_write"]
+    assert "block_type" in truth_write["properties"]
+    assert "payload_json" not in truth_write["properties"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_rehydrates_slim_truth_write_arguments_before_execution():
+    tool_executor = _FakeToolExecutor()
+    llm = _SlimTruthWriteThenTextLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(tool_scope=["setup.truth.write"]),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert tool_executor.calls
+    call, _visible_tool_names = tool_executor.calls[0]
+    assert call.tool_name == "rp_setup__setup.truth.write"
+    assert call.arguments["workspace_id"] == "workspace-1"
+    assert call.arguments["step_id"] == "story_config"
+    assert call.arguments["user_edit_delta_ids"] == []
+    truth_write = call.arguments["truth_write"]
+    assert truth_write["current_step"] == "story_config"
+    assert truth_write["block_type"] == "story_config"
+    assert truth_write["payload"] == {"notes": "draft notes"}
+    assert "payload_json" not in truth_write
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_normalizes_empty_slim_truth_write_target_ref_to_none():
+    tool_executor = _FakeToolExecutor()
+    llm = _SlimTruthWriteThenTextLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(tool_scope=["setup.truth.write"]),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    truth_write = tool_executor.calls[0][0].arguments["truth_write"]
+    assert truth_write["target_ref"] is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_keeps_invalid_payload_json_as_tool_failure():
+    tool_executor = _FakeToolExecutor(
+        results=[
+            RuntimeToolResult(
+                call_id="call_truth_write",
+                tool_name="rp_setup__setup.truth.write",
+                success=False,
+                content_text=json.dumps(
+                    {
+                        "code": "schema_validation_failed",
+                        "details": {
+                            "errors": [
+                                {
+                                    "type": "extra_forbidden",
+                                    "loc": ["truth_write", "payload_json"],
+                                }
+                            ]
+                        },
+                    }
+                ),
+                error_code="SCHEMA_VALIDATION_FAILED",
+            )
+        ]
+    )
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(tool_scope=["setup.truth.write"]),
+        _profile(),
+        llm_service=_InvalidPayloadJsonTruthWriteLLM(),
+    )
+
+    assert result.status == "failed"
+    assert tool_executor.calls
+    truth_write = tool_executor.calls[0][0].arguments["truth_write"]
+    assert truth_write["payload_json"] == "{not valid json"
+    assert "payload" not in truth_write
+    assert result.tool_results[0].success is False
+    assert result.tool_results[0].error_code == "SCHEMA_VALIDATION_FAILED"
 
 
 @pytest.mark.asyncio
@@ -832,6 +1652,53 @@ async def test_runtime_executor_blocks_false_success_when_repair_obligation_is_u
         item["decision"].get("continue_reason") == "completion_guard_retry"
         for item in result.structured_payload["loop_trace"]
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_blocks_repeated_question_at_initial_text_completion():
+    tool_executor = _FakeToolExecutor()
+    profile = _profile().model_copy(update={"max_rounds": 2})
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            conversation_messages=[
+                {
+                    "role": "assistant",
+                    "content": "Which style rules do you want me to lock in for this draft?",
+                }
+            ],
+            context_bundle={
+                "working_digest": {
+                    "open_questions": ["Need the exact style rules."],
+                }
+            },
+        ),
+        profile,
+        llm_service=_RepeatedQuestionLLM(),
+    )
+
+    assert result.status == "failed"
+    assert result.finish_reason == "max_rounds_exceeded"
+    assert (
+        result.structured_payload["completion_guard"]["reason"]
+        == "repeated_question_without_progress"
+    )
+    trace = result.structured_payload["loop_trace"]
+    assert any(
+        item["decision_site"] == "inspect_model_output"
+        and item["action"]["kind"] == "assistant_text"
+        and item["action"]["assistant_text_kind"] == "question"
+        and item["decision"].get("continue_reason") == "completion_guard_retry"
+        for item in trace
+    )
+    assert any(
+        item["decision_site"] == "reflect_if_needed"
+        and item["decision"].get("continue_reason") == "reflection_retry"
+        for item in trace
+    )
+    assert trace[-1]["decision_site"] == "finalize_failure"
+    assert trace[-1]["decision"]["finish_reason"] == "max_rounds_exceeded"
 
 
 @pytest.mark.asyncio

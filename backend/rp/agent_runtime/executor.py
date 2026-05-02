@@ -5,7 +5,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, cast
 
 from models.chat import ChatCompletionRequest, ChatMessage, ProviderConfig
 from services.langfuse_service import get_langfuse_service
@@ -14,6 +14,7 @@ from .contracts import (
     RpAgentTurnInput,
     RpAgentTurnResult,
     RuntimeProfile,
+    SetupActionExpectation,
     SetupContextCompactSummary,
     RuntimeToolCall,
     RuntimeToolResult,
@@ -30,6 +31,7 @@ from .contracts import (
 from .events import RuntimeEvent, TypedSseEventAdapter
 from .graph import build_runtime_graph
 from .policies import (
+    ActionDecisionPolicy,
     CompletionGuardPolicy,
     FinishPolicy,
     ReflectionTriggerPolicy,
@@ -39,6 +41,15 @@ from .policies import (
 from .state import RpAgentRunState
 from .tools import RuntimeToolExecutor
 from rp.services.setup_context_governor import SetupContextGovernorService
+
+SETUP_TRUTH_WRITE_QUALIFIED_TOOL_NAME = "rp_setup__setup.truth.write"
+SETUP_TRUTH_WRITE_RAW_TOOL_NAME = "setup.truth.write"
+SETUP_TRUTH_WRITE_BLOCK_TYPE_BY_STEP = {
+    "story_config": "story_config",
+    "writing_contract": "writing_contract",
+    "foundation": "foundation_entry",
+    "longform_blueprint": "longform_blueprint",
+}
 
 _SENTINEL = object()
 
@@ -223,6 +234,7 @@ class _RuntimeRunDriver:
             "last_failure": None,
             "reflection_ticket": None,
             "completion_guard": None,
+            "action_expectation": None,
             "cognitive_state": self._context_bundle(turn_input).get("cognitive_state"),
             "cognitive_state_summary": self._context_bundle(turn_input).get(
                 "cognitive_state_summary"
@@ -475,6 +487,10 @@ class _RuntimeRunDriver:
         return {
             "status": "planned",
             "working_plan": plan.model_dump(mode="json", exclude_none=True),
+            "action_expectation": self._build_action_expectation_payload(
+                state,
+                working_plan=plan,
+            ),
             "working_digest": self._build_working_digest_payload(
                 state,
                 working_plan=plan,
@@ -485,8 +501,11 @@ class _RuntimeRunDriver:
         turn_input = self._turn_input(state)
         visible_tool_names = self._visible_tool_names(turn_input)
         tool_definitions = (
-            self._tool_executor.get_openai_tool_definitions(
-                visible_tool_names=visible_tool_names
+            self._model_facing_tool_definitions(
+                self._tool_executor.get_openai_tool_definitions(
+                    visible_tool_names=visible_tool_names
+                ),
+                turn_input=turn_input,
             )
             if self._profile.supports_tools
             else []
@@ -515,6 +534,153 @@ class _RuntimeRunDriver:
             "tool_definitions": tool_definitions,
             "latest_request": request.model_dump(mode="json", exclude_none=True),
         }
+
+    def _model_facing_tool_definitions(
+        self,
+        tool_definitions: list[dict[str, Any]],
+        *,
+        turn_input: RpAgentTurnInput,
+    ) -> list[dict[str, Any]]:
+        return [
+            self._adapt_truth_write_tool_definition(tool, turn_input=turn_input)
+            for tool in tool_definitions
+        ]
+
+    def _adapt_truth_write_tool_definition(
+        self,
+        tool: dict[str, Any],
+        *,
+        turn_input: RpAgentTurnInput,
+    ) -> dict[str, Any]:
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            return tool
+        if function.get("name") != SETUP_TRUTH_WRITE_QUALIFIED_TOOL_NAME:
+            return tool
+        if not self._truth_write_runtime_defaults(turn_input):
+            return tool
+
+        adapted = dict(tool)
+        adapted_function = dict(function)
+        adapted_function.pop("strict", None)
+        if self._strict_truth_write_pilot_enabled(turn_input):
+            adapted_function["strict"] = True
+        adapted_function["parameters"] = self._slim_truth_write_parameters_schema()
+        description = str(adapted_function.get("description") or "")
+        adapted_function["description"] = (
+            f"{description} Runtime fills workspace_id, step_id, current_step, "
+            "block_type, and user_edit_delta_ids. Provide payload_json as a JSON "
+            "object string for the draft payload."
+        ).strip()
+        adapted["function"] = adapted_function
+        return adapted
+
+    @staticmethod
+    def _strict_truth_write_pilot_enabled(turn_input: RpAgentTurnInput) -> bool:
+        model_name = str(
+            turn_input.metadata.get("model_name") or turn_input.model_id or ""
+        ).lower()
+        # The slim model-facing schema is the common base path. The strict flag
+        # is a separate enhancement kept on the model families verified by the
+        # real-chain pilot until registry capability metadata can replace this
+        # conservative name gate.
+        return "gpt" in model_name or "codex" in model_name
+
+    @staticmethod
+    def _slim_truth_write_parameters_schema() -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "truth_write": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "write_id": {
+                            "type": "string",
+                            "description": "Stable id for this draft write attempt.",
+                        },
+                        "target_ref": {
+                            "type": "string",
+                            "description": (
+                                "Target draft ref, or an empty string when creating "
+                                "a new target."
+                            ),
+                        },
+                        "operation": {
+                            "type": "string",
+                            "enum": ["create", "merge", "replace"],
+                        },
+                        "payload_json": {
+                            "type": "string",
+                            "description": (
+                                "A JSON object string matching the current setup "
+                                "draft payload to write."
+                            ),
+                        },
+                        "remaining_open_issues": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "ready_for_review": {"type": "boolean"},
+                    },
+                    "required": [
+                        "write_id",
+                        "target_ref",
+                        "operation",
+                        "payload_json",
+                        "remaining_open_issues",
+                        "ready_for_review",
+                    ],
+                }
+            },
+            "required": ["truth_write"],
+        }
+
+    def _truth_write_runtime_defaults(
+        self,
+        turn_input: RpAgentTurnInput,
+    ) -> dict[str, Any] | None:
+        context_bundle = dict(turn_input.context_bundle or {})
+        context_packet = context_bundle.get("context_packet")
+        if not isinstance(context_packet, dict):
+            context_packet = {}
+        current_step = str(
+            context_bundle.get("current_step")
+            or context_packet.get("current_step")
+            or ""
+        ).strip()
+        block_type = SETUP_TRUTH_WRITE_BLOCK_TYPE_BY_STEP.get(current_step)
+        workspace_id = str(
+            turn_input.workspace_id or context_packet.get("workspace_id") or ""
+        ).strip()
+        if not workspace_id or not current_step or not block_type:
+            return None
+        return {
+            "workspace_id": workspace_id,
+            "step_id": current_step,
+            "truth_write_current_step": current_step,
+            "truth_write_block_type": block_type,
+            "user_edit_delta_ids": self._context_packet_user_edit_delta_ids(
+                context_packet
+            ),
+        }
+
+    @staticmethod
+    def _context_packet_user_edit_delta_ids(
+        context_packet: dict[str, Any],
+    ) -> list[str]:
+        deltas = context_packet.get("user_edit_deltas")
+        if not isinstance(deltas, list):
+            return []
+        ids: list[str] = []
+        for item in deltas:
+            if not isinstance(item, dict):
+                continue
+            raw_id = item.get("delta_id") or item.get("id") or item.get("edit_delta_id")
+            if raw_id:
+                ids.append(str(raw_id))
+        return ids
 
     async def _call_model(self, state: RpAgentRunState) -> RpAgentRunState:
         request = ChatCompletionRequest.model_validate(state["latest_request"])
@@ -670,7 +836,10 @@ class _RuntimeRunDriver:
                 arguments=self._tool_arguments(call),
                 source_round=int(state.get("round_no") or 0),
             )
-            for call in message_payload.get("tool_calls", [])
+            # Some OpenAI-compatible providers serialize a plain assistant reply as
+            # ``tool_calls: null`` rather than omitting the field. Treat that as no
+            # tool call so text-only turn completion can finalize normally.
+            for call in (message_payload.get("tool_calls") or [])
             if isinstance(call, dict)
         ]
         normalized_messages = list(state.get("normalized_messages", []))
@@ -728,6 +897,38 @@ class _RuntimeRunDriver:
             )
             return update
         if runtime_tool_calls:
+            action_expectation = self._action_expectation(state)
+            violation = ActionDecisionPolicy.tool_batch_violation(
+                expectation=action_expectation,
+                tool_names=[call.tool_name for call in runtime_tool_calls],
+            )
+            if violation is not None:
+                update["pending_tool_calls"] = []
+                update["reflection_ticket"] = SetupReflectionTicket(
+                    trigger="tool_failure",
+                    summary=(
+                        "The current compacted setup context requires setup.read.draft_refs "
+                        "before answering or mutating exact draft detail."
+                    ),
+                    required_decision="retry",
+                ).model_dump(mode="json", exclude_none=True)
+                update["completion_guard"] = {
+                    "allow_finalize": False,
+                    "reason": str(violation["reason"]),
+                    "required_action": "retry",
+                }
+                update["warnings"] = list(state.get("warnings", [])) + [
+                    "required_draft_ref_read_missing"
+                ]
+                update["continue_reason"] = "completion_guard_retry"
+                update["next_action"] = "reflect_if_needed"
+                update["loop_trace"] = self._append_loop_trace(
+                    state,
+                    update,
+                    decision_site="inspect_model_output",
+                    tool_names=[call.tool_name for call in runtime_tool_calls],
+                )
+                return update
             update["reflection_ticket"] = None
             update["continue_reason"] = "tool_call_batch_pending"
             update["next_action"] = "execute_tools"
@@ -742,7 +943,10 @@ class _RuntimeRunDriver:
             assistant_text=assistant_text,
             pending_obligation=self._pending_obligation(state),
             reflection_ticket=self._reflection_ticket(state),
+            action_expectation=self._action_expectation(state),
             cognitive_state_summary=self._cognitive_state_summary(state),
+            prior_assistant_questions=self._recent_assistant_questions(state),
+            working_digest=self._working_digest(state),
         )
         update["completion_guard"] = decision.get("completion_guard")
         if "pending_obligation" in decision:
@@ -783,23 +987,32 @@ class _RuntimeRunDriver:
         run_id = str(state["run_id"])
 
         for call in call_batch:
-            aggregated_invocations.append(call.model_dump(mode="json", exclude_none=True))
+            executable_call = self._normalize_tool_call_for_execution(
+                call,
+                turn_input=turn_input,
+            )
+            aggregated_invocations.append(
+                executable_call.model_dump(mode="json", exclude_none=True)
+            )
             await self._emit_event(
                 run_id=run_id,
                 event_type="tool_started",
-                payload={"call_id": call.call_id, "tool_name": call.tool_name},
+                payload={
+                    "call_id": executable_call.call_id,
+                    "tool_name": executable_call.tool_name,
+                },
             )
             with self._langfuse.start_as_current_observation(
-                name=f"rp.runtime.tool:{call.tool_name}",
+                name=f"rp.runtime.tool:{executable_call.tool_name}",
                 as_type="tool",
                 input={
-                    "tool_name": call.tool_name,
-                    "arguments": dict(call.arguments),
+                    "tool_name": executable_call.tool_name,
+                    "arguments": dict(executable_call.arguments),
                     "visible_tool_names": list(visible_tool_names),
                 },
             ) as tool_observation:
                 result = await self._tool_executor.execute_tool_call(
-                    call,
+                    executable_call,
                     visible_tool_names=visible_tool_names,
                 )
                 tool_observation.update(
@@ -842,6 +1055,52 @@ class _RuntimeRunDriver:
             "tool_results": aggregated_results,
             "latest_tool_batch": latest_batch,
         }
+
+    def _normalize_tool_call_for_execution(
+        self,
+        call: RuntimeToolCall,
+        *,
+        turn_input: RpAgentTurnInput,
+    ) -> RuntimeToolCall:
+        if call.tool_name not in {
+            SETUP_TRUTH_WRITE_QUALIFIED_TOOL_NAME,
+            SETUP_TRUTH_WRITE_RAW_TOOL_NAME,
+        }:
+            return call
+        defaults = self._truth_write_runtime_defaults(turn_input)
+        if defaults is None:
+            return call
+        arguments = dict(call.arguments or {})
+        raw_truth_write = arguments.get("truth_write")
+        if not isinstance(raw_truth_write, dict):
+            return call
+        truth_write = dict(raw_truth_write)
+        payload_json = truth_write.pop("payload_json", _SENTINEL)
+        if payload_json is not _SENTINEL and "payload" not in truth_write:
+            try:
+                parsed_payload = json.loads(str(payload_json))
+            except json.JSONDecodeError:
+                # Keep the invalid field so provider-side pydantic validation
+                # produces a deterministic tool failure instead of succeeding
+                # with an empty payload.
+                truth_write["payload_json"] = payload_json
+            else:
+                truth_write["payload"] = (
+                    parsed_payload if isinstance(parsed_payload, dict) else parsed_payload
+                )
+        if truth_write.get("target_ref") == "":
+            truth_write["target_ref"] = None
+        truth_write["current_step"] = defaults["truth_write_current_step"]
+        truth_write["block_type"] = defaults["truth_write_block_type"]
+        truth_write.setdefault("metadata", {})
+        truth_write.setdefault("provenance", {})
+        truth_write.setdefault("remaining_open_issues", [])
+        truth_write.setdefault("ready_for_review", False)
+        arguments["workspace_id"] = defaults["workspace_id"]
+        arguments["step_id"] = defaults["step_id"]
+        arguments["user_edit_delta_ids"] = defaults["user_edit_delta_ids"]
+        arguments["truth_write"] = truth_write
+        return call.model_copy(update={"arguments": arguments})
 
     def _apply_tool_results(self, state: RpAgentRunState) -> RpAgentRunState:
         normalized_messages = list(state.get("normalized_messages", []))
@@ -899,6 +1158,14 @@ class _RuntimeRunDriver:
                 item.model_dump(mode="json", exclude_none=True)
                 for item in merged_tool_outcomes
             ],
+            "action_expectation": self._build_action_expectation_payload(
+                state,
+                tool_results=[
+                    RuntimeToolResult.model_validate(item)
+                    for item in state.get("tool_results", [])
+                    if isinstance(item, dict)
+                ],
+            ),
             "working_digest": self._build_working_digest_payload(
                 state,
                 cognitive_state=(
@@ -925,6 +1192,7 @@ class _RuntimeRunDriver:
                 assistant_text=str(state.get("assistant_text") or ""),
                 pending_obligation=self._pending_obligation(state),
                 reflection_ticket=self._reflection_ticket(state),
+                action_expectation=self._action_expectation(state),
                 cognitive_state_summary=self._cognitive_state_summary(state),
                 prior_assistant_questions=self._recent_assistant_questions(state),
                 working_digest=self._working_digest(state),
@@ -932,6 +1200,7 @@ class _RuntimeRunDriver:
             update: RpAgentRunState = {
                 "status": "assessed",
                 "completion_guard": decision.get("completion_guard"),
+                "action_expectation": self._build_action_expectation_payload(state),
                 "continue_reason": None,
             }
             if "pending_obligation" in decision:
@@ -1005,6 +1274,14 @@ class _RuntimeRunDriver:
                     if isinstance(decision.get("last_failure"), dict)
                     else state.get("repair_route")
                 ),
+                "action_expectation": self._build_action_expectation_payload(
+                    state,
+                    pending_obligation=(
+                        SetupPendingObligation.model_validate(decision["pending_obligation"])
+                        if isinstance(decision.get("pending_obligation"), dict)
+                        else None
+                    ),
+                ),
                 "continue_reason": None,
                 "working_digest": self._build_working_digest_payload(
                     state,
@@ -1042,6 +1319,7 @@ class _RuntimeRunDriver:
             "warnings": warnings,
             "error": decision.get("error"),
             "last_failure": decision.get("last_failure"),
+            "action_expectation": self._build_action_expectation_payload(state),
             "working_digest": self._build_working_digest_payload(state),
         }
         failure_update["loop_trace"] = self._append_loop_trace(
@@ -1070,6 +1348,7 @@ class _RuntimeRunDriver:
                 "warnings": warnings,
                 "reflection_ticket": None,
                 "continue_reason": "reflection_retry",
+                "action_expectation": self._build_action_expectation_payload(state),
                 "working_digest": self._build_working_digest_payload(
                     state,
                     reflection_ticket=None,
@@ -1089,6 +1368,7 @@ class _RuntimeRunDriver:
             "warnings": warnings,
             "error": decision.get("error"),
             "reflection_ticket": None,
+            "action_expectation": self._build_action_expectation_payload(state),
             "working_digest": self._build_working_digest_payload(
                 state,
                 reflection_ticket=None,
@@ -1280,6 +1560,7 @@ class _RuntimeRunDriver:
                 "last_failure": state.get("last_failure"),
                 "reflection_ticket": state.get("reflection_ticket"),
                 "completion_guard": state.get("completion_guard"),
+                "action_expectation": state.get("action_expectation"),
                 "cognitive_state": state.get("cognitive_state"),
                 "cognitive_state_summary": state.get("cognitive_state_summary"),
                 "working_digest": (
@@ -1331,6 +1612,7 @@ class _RuntimeRunDriver:
                 for item in self._tool_outcomes(state)
             ],
             "compact_summary": state.get("compact_summary"),
+            "action_expectation": state.get("action_expectation"),
         }
         if all(value in (None, {}, []) for value in payload.values()):
             return None
@@ -1351,6 +1633,7 @@ class _RuntimeRunDriver:
                 "If tool_outcomes exist, use the outcomes but not the historical tool-call process.\n"
                 "If compact_summary exists, treat it as carry-forward context for trimmed older current-step discussion.\n"
                 "If compact_summary recovery_hints point to draft refs and exact detail is needed, call setup.read.draft_refs.\n"
+                "If action_expectation requires setup.read.draft_refs, call that read tool before answering or writing exact draft details.\n"
                 f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
             ),
         )
@@ -1454,6 +1737,42 @@ class _RuntimeRunDriver:
         if not isinstance(payload, dict):
             return None
         return SetupContextCompactSummary.model_validate(payload)
+
+    @staticmethod
+    def _action_expectation(state: RpAgentRunState) -> SetupActionExpectation | None:
+        payload = state.get("action_expectation")
+        if not isinstance(payload, dict):
+            return None
+        return SetupActionExpectation.model_validate(payload)
+
+    def _build_action_expectation_payload(
+        self,
+        state: RpAgentRunState,
+        *,
+        working_plan: SetupWorkingPlan | None = None,
+        pending_obligation: SetupPendingObligation | None | object = _SENTINEL,
+        tool_results: list[RuntimeToolResult] | None = None,
+    ) -> dict[str, Any] | None:
+        resolved_pending_obligation = (
+            self._pending_obligation(state)
+            if pending_obligation is _SENTINEL
+            else cast(SetupPendingObligation | None, pending_obligation)
+        )
+        expectation = ActionDecisionPolicy.assess(
+            user_prompt=str(self._turn_input(state).user_visible_request or ""),
+            turn_goal=self._turn_goal_model(state),
+            working_plan=working_plan or self._working_plan_model(state),
+            pending_obligation=resolved_pending_obligation,
+            compact_summary=self._compact_summary(state),
+            tool_results=(
+                self._all_tool_results(state) if tool_results is None else tool_results
+            ),
+        )
+        return (
+            expectation.model_dump(mode="json", exclude_none=True)
+            if expectation is not None
+            else None
+        )
 
     def _recent_assistant_questions(self, state: RpAgentRunState) -> list[str]:
         turn_input = self._turn_input(state)
@@ -1618,7 +1937,7 @@ class _RuntimeRunDriver:
         decision_site: str,
         tool_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        merged_state: RpAgentRunState = dict(state)
+        merged_state = cast(RpAgentRunState, dict(state))
         merged_state.update(update)
         existing = list(state.get("loop_trace", []))
         frame = self._build_loop_trace_frame(
@@ -1663,13 +1982,16 @@ class _RuntimeRunDriver:
             for ref in self._tool_outcome_from_result(result).updated_refs:
                 if ref not in updated_refs:
                     updated_refs.append(ref)
+        turn_goal_payload = state.get("turn_goal")
+        working_plan_payload = state.get("working_plan")
+        reflection_ticket_payload = state.get("reflection_ticket")
         return SetupReActTraceFrame(
             round_no=int(state.get("round_no") or 0),
             decision_site=decision_site,
-            goal=(dict(state.get("turn_goal")) if isinstance(state.get("turn_goal"), dict) else None),
+            goal=dict(turn_goal_payload) if isinstance(turn_goal_payload, dict) else None,
             plan=(
-                dict(state.get("working_plan"))
-                if isinstance(state.get("working_plan"), dict)
+                dict(working_plan_payload)
+                if isinstance(working_plan_payload, dict)
                 else None
             ),
             action={
@@ -1684,8 +2006,8 @@ class _RuntimeRunDriver:
                 "warnings": list(state.get("warnings", [])),
             },
             reflection=(
-                dict(state.get("reflection_ticket"))
-                if isinstance(state.get("reflection_ticket"), dict)
+                dict(reflection_ticket_payload)
+                if isinstance(reflection_ticket_payload, dict)
                 else None
             ),
             decision={
@@ -1693,6 +2015,7 @@ class _RuntimeRunDriver:
                 "continue_reason": state.get("continue_reason"),
                 "finish_reason": state.get("finish_reason"),
                 "repair_route": state.get("repair_route"),
+                "action_expectation": state.get("action_expectation"),
             },
         )
 
@@ -1711,6 +2034,15 @@ class _RuntimeRunDriver:
     def _latest_tool_batch_results(state: RpAgentRunState) -> list[RuntimeToolResult]:
         results: list[RuntimeToolResult] = []
         for item in state.get("latest_tool_batch", []):
+            if not isinstance(item, dict):
+                continue
+            results.append(RuntimeToolResult.model_validate(item))
+        return results
+
+    @staticmethod
+    def _all_tool_results(state: RpAgentRunState) -> list[RuntimeToolResult]:
+        results: list[RuntimeToolResult] = []
+        for item in state.get("tool_results", []):
             if not isinstance(item, dict):
                 continue
             results.append(RuntimeToolResult.model_validate(item))
@@ -1737,7 +2069,9 @@ class _RuntimeRunDriver:
     ) -> bool:
         if not any(self._is_commit_proposal_tool(call.tool_name) for call in runtime_tool_calls):
             return False
-        if self._user_requests_commit(self._turn_input(state).user_visible_request):
+        if self._user_requests_commit(
+            str(self._turn_input(state).user_visible_request or "")
+        ):
             return False
         context_bundle = self._context_bundle(self._turn_input(state))
         return (

@@ -276,11 +276,11 @@ The new work is mostly naming, ordering, reporting, and policy hardening around 
 Before implementation, the user should review these decisions:
 
 1. Is "SetupAgent Stage-Local Harness Semantics" the right next slice name and boundary?
-2. Should compact-expert LLM summarization be specified now as an interface with deterministic fallback, or implemented immediately in the same slice?
+2. Should compact prompt LLM summarization be specified now as an interface with deterministic fallback, or implemented immediately in the same slice?
 3. Should stage skill/resource injection remain a contract-only placeholder in this slice, or should the first longform stage skill be included?
 
 My recommendation:
 
-- Implement compact as contract + fallback first, because current deterministic summary is not a real compact expert and rushing it will blur design.
+- Implement compact as contract + fallback first, because current deterministic summary is not a real compact prompt summary and rushing it will blur design.
 - Keep skills as contract + prompt extraction path first, unless the next implementation slice specifically targets skills.
 - Prioritize context transform, tool outcome policy, tool semantics, and trace report because they improve the agent body without adding a heavy state subsystem.

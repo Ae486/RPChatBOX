@@ -30,6 +30,7 @@ class RpAgentRunState(TypedDict, total=False):
     last_failure: dict[str, Any] | None
     reflection_ticket: dict[str, Any] | None
     completion_guard: dict[str, Any] | None
+    action_expectation: dict[str, Any] | None
     cognitive_state: dict[str, Any] | None
     cognitive_state_summary: dict[str, Any] | None
     working_digest: dict[str, Any] | None

@@ -215,6 +215,11 @@
 - `inspect_model_output` without tool calls must always go through completion-guard semantics:
   - finalize successfully when the guard allows it
   - otherwise reflect/retry
+- The `inspect_model_output` completion-guard call must receive the same guard evidence used by the later no-latest-tool `assess_progress` branch:
+  - prior assistant questions from current conversation history
+  - current `working_digest`
+  - current action expectation when present
+  This prevents an initial text-only response from bypassing repeated-question or compact-readback guards that would have fired after an observation cycle.
 - `assess_progress` without a latest tool batch uses the same completion-guard path.
 - Pure-text termination remains valid, but only through an explicit `finish_reason` such as:
   - `awaiting_user_input`
@@ -277,7 +282,7 @@
 - no tool calls, assistant text is ordinary text, no blocking obligation, current cognitive state is clean -> `next_action = "finalize_success"`, `finish_reason = "completed_text"`
 - no tool calls, assistant text is ordinary text, but current cognitive state is invalidated / not review-ready / still has open issues -> `next_action = "finalize_success"`, `finish_reason = "continue_discussion"`
 - no tool calls while `pending_obligation.obligation_type == "repair_tool_call"` remains unresolved -> `continue_reason = "completion_guard_retry"`, `next_action = "reflect_if_needed"`, must not finalize
-- same normalized user-facing question repeats without new progress -> `continue_reason = "completion_guard_retry"`, `completion_guard.reason = "repeated_question_without_progress"`, `next_action = "reflect_if_needed"`
+- same normalized user-facing question repeats without new progress, including on the first text-only model response before any tool call -> `continue_reason = "completion_guard_retry"`, `completion_guard.reason = "repeated_question_without_progress"`, `next_action = "reflect_if_needed"`
 - latest tool batch succeeds under round budget -> `continue_reason = "tool_result_follow_up"`, `next_action = "derive_turn_goal"`
 - latest tool batch fails with recoverable failure and no reflection ticket -> `continue_reason = "tool_failure_follow_up"`, `repair_route` derives from `last_failure.failure_category`, `next_action = "derive_turn_goal"`
 - latest tool batch fails with `block_commit` / commit-readiness reflection route -> `continue_reason = "commit_reassess_reflection"`, `next_action = "reflect_if_needed"`
@@ -300,6 +305,7 @@
   - assert the semantic loop-to-graph mapping remains intact for inspect -> execute-tools, inspect -> reflect, inspect -> finalize, assess -> derive-goal, assess -> reflect, and reflect -> derive-goal routes
   - assert `loop_trace` is present in final structured payload and carries `continue_reason` / `finish_reason` without dropping existing cognition fields
   - assert typed-SSE event names remain unchanged and trace is additive rather than replacing current event types
+  - assert an initial text-only repeated question is blocked at `inspect_model_output`, reflected, and finalized with an explicit failure when the round budget is exhausted
 - `backend/rp/tests/test_setup_agent_runtime_policies.py`
   - assert `completed_text`, `awaiting_user_input`, and `continue_discussion` remain correctly separated
   - assert repeated-question-without-progress routes through `completion_guard_retry`

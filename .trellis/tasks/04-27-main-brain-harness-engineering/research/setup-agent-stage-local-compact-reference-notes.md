@@ -179,7 +179,7 @@ This means:
 - keep `SetupContextPacket -> govern_history -> runtime overlay -> final request messages` as the main transform path
 - extend current compaction/governor code with explicit decision reporting
 - keep deterministic compact summary as the current implementation path
-- keep room for a later expert compact strategy without redesigning the boundary
+- keep room for a later no-tools compact prompt strategy without redesigning the boundary
 - feed context-decision artifacts into runtime result / eval / debug only
 
 ### Do Not

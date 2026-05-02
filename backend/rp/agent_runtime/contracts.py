@@ -249,9 +249,14 @@ class SetupContextGovernanceReport(BaseModel):
     summary_strategy: Literal[
         "none",
         "deterministic_prefix_summary",
-        "expert_stage_summary",
+        "compact_prompt_summary",
     ] = "none"
-    summary_action: Literal["none", "reused_existing", "rebuilt"] = "none"
+    summary_action: Literal[
+        "none",
+        "reused_existing",
+        "updated_existing",
+        "rebuilt",
+    ] = "none"
     summary_line_count: int = 0
     fallback_reason: str | None = None
 
@@ -444,6 +449,19 @@ class SetupCompletionGuard(BaseModel):
         "finalize_failure",
     ]
     finish_reason: str | None = None
+
+
+class SetupActionExpectation(BaseModel):
+    """Turn-local action expectation derived from high-certainty setup context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expectation_type: Literal["read_draft_refs"]
+    reason: str
+    required_tools: list[str] = Field(default_factory=list)
+    draft_refs: list[str] = Field(default_factory=list)
+    allow_text_finalize: bool = False
+    requires_observation_first: bool = True
 
 
 class SetupReActTraceFrame(BaseModel):

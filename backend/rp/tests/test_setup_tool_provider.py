@@ -81,6 +81,107 @@ async def test_setup_tool_provider_schema_validation_returns_machine_readable_de
 
 
 @pytest.mark.asyncio
+async def test_setup_tool_provider_truth_write_still_requires_provider_contract_fields():
+    provider = SetupToolProvider(
+        workspace_service=_FakeWorkspaceService(),
+        context_builder=_DummyContextBuilder(),
+        runtime_state_service=_DummyRuntimeStateService(),
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.truth.write",
+        arguments={
+            "workspace_id": "workspace-1",
+            "truth_write": {
+                "write_id": "write-1",
+                "current_step": SetupStepId.STORY_CONFIG.value,
+                "operation": "merge",
+                "payload": {"notes": "draft notes"},
+            },
+        },
+    )
+
+    payload = json.loads(result["content"])
+    assert result["error_code"] == "SCHEMA_VALIDATION_FAILED"
+    assert payload["details"]["tool_name"] == "setup.truth.write"
+    assert payload["details"]["repair_strategy"] == "auto_repair"
+    assert set(payload["details"]["required_fields"]) == {
+        "truth_write.block_type",
+        "step_id",
+    }
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "required_fields"),
+    [
+        (
+            "setup.patch.foundation_entry",
+            {"workspace_id": "workspace-1"},
+            ["entry"],
+        ),
+        (
+            "setup.patch.longform_blueprint",
+            {"workspace_id": "workspace-1"},
+            ["patch"],
+        ),
+        (
+            "setup.question.raise",
+            {
+                "workspace_id": "workspace-1",
+                "step_id": "foundation",
+                "severity": "blocking",
+            },
+            ["text"],
+        ),
+        (
+            "setup.asset.register",
+            {
+                "workspace_id": "workspace-1",
+                "step_id": "foundation",
+                "asset_kind": "reference",
+            },
+            ["source_ref"],
+        ),
+        (
+            "setup.proposal.commit",
+            {
+                "workspace_id": "workspace-1",
+                "step_id": "foundation",
+            },
+            ["target_draft_refs"],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_setup_tool_provider_key_tools_return_repairable_schema_errors(
+    tool_name,
+    arguments,
+    required_fields,
+):
+    provider = SetupToolProvider(
+        workspace_service=_FakeWorkspaceService(),
+        context_builder=_DummyContextBuilder(),
+        runtime_state_service=_DummyRuntimeStateService(),
+    )
+
+    result = await provider.call_tool(
+        tool_name=tool_name,
+        arguments=arguments,
+    )
+
+    payload = json.loads(result["content"])
+    assert result["success"] is False
+    assert result["error_code"] == "SCHEMA_VALIDATION_FAILED"
+    assert payload["code"] == "schema_validation_failed"
+    assert payload["details"]["tool_name"] == tool_name
+    assert payload["details"]["failure_origin"] == "validation"
+    assert payload["details"]["repair_strategy"] == "auto_repair"
+    assert payload["details"]["required_fields"] == required_fields
+    assert payload["details"]["errors"]
+    assert payload["details"]["provided_fields"] == sorted(arguments.keys())
+
+
+@pytest.mark.asyncio
 async def test_setup_tool_provider_reads_stage_local_draft_refs(retrieval_session):
     workspace_service = SetupWorkspaceService(retrieval_session)
     context_builder = SetupContextBuilder(workspace_service)

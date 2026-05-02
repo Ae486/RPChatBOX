@@ -4,13 +4,17 @@ from __future__ import annotations
 from rp.agent_runtime.contracts import (
     RuntimeProfile,
     RuntimeToolResult,
+    SetupActionExpectation,
     SetupCognitiveStateSummary,
+    SetupCompactRecoveryHint,
+    SetupContextCompactSummary,
     SetupPendingObligation,
     SetupReflectionTicket,
     SetupToolOutcome,
     SetupWorkingDigest,
 )
 from rp.agent_runtime.policies import (
+    ActionDecisionPolicy,
     CompletionGuardPolicy,
     ReflectionTriggerPolicy,
     RepairDecisionPolicy,
@@ -27,6 +31,197 @@ def _profile() -> RuntimeProfile:
         recovery_policy="setup_agent_v1",
         finish_policy="assistant_text_or_failure",
     )
+
+
+def _compact_summary() -> SetupContextCompactSummary:
+    return SetupContextCompactSummary(
+        source_fingerprint="fp-compact",
+        source_message_count=8,
+        summary_lines=["Earlier current-step discussion was compacted."],
+        draft_refs=["foundation:magic-law"],
+        recovery_hints=[
+            SetupCompactRecoveryHint(
+                ref="foundation:magic-law",
+                reason="Exact magic-law detail was moved into the draft.",
+            )
+        ],
+    )
+
+
+def test_action_decision_policy_requires_draft_ref_read_for_exact_compact_detail():
+    expectation = ActionDecisionPolicy.assess(
+        user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+        turn_goal=None,
+        working_plan=None,
+        pending_obligation=None,
+        compact_summary=_compact_summary(),
+        tool_results=[],
+    )
+
+    assert expectation is not None
+    assert expectation.expectation_type == "read_draft_refs"
+    assert expectation.required_tools == ["setup.read.draft_refs"]
+    assert expectation.draft_refs == ["foundation:magic-law"]
+    assert expectation.allow_text_finalize is False
+
+
+def test_action_decision_policy_ignores_general_opinion_prompt():
+    expectation = ActionDecisionPolicy.assess(
+        user_prompt="你对这个设定方向有什么看法？",
+        turn_goal=None,
+        working_plan=None,
+        pending_obligation=None,
+        compact_summary=_compact_summary(),
+        tool_results=[],
+    )
+
+    assert expectation is None
+
+
+def test_action_decision_policy_clears_after_successful_draft_ref_read():
+    expectation = ActionDecisionPolicy.assess(
+        user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+        turn_goal=None,
+        working_plan=None,
+        pending_obligation=None,
+        compact_summary=_compact_summary(),
+        tool_results=[
+            RuntimeToolResult(
+                call_id="call_read",
+                tool_name="rp_setup__setup.read.draft_refs",
+                success=True,
+                content_text='{"success": true}',
+                structured_payload={
+                    "content_payload": {
+                        "items": [
+                            {
+                                "ref": "foundation:magic-law",
+                                "found": True,
+                            }
+                        ]
+                    }
+                },
+            )
+        ],
+    )
+
+    assert expectation is None
+
+
+def test_action_decision_policy_clears_after_content_text_nested_draft_ref_read():
+    expectation = ActionDecisionPolicy.assess(
+        user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+        turn_goal=None,
+        working_plan=None,
+        pending_obligation=None,
+        compact_summary=_compact_summary(),
+        tool_results=[
+            RuntimeToolResult(
+                call_id="call_read",
+                tool_name="rp_setup__setup.read.draft_refs",
+                success=True,
+                content_text=(
+                    '{"success": true, "content_payload": {"items": ['
+                    '{"ref": "foundation:magic-law", "found": true}'
+                    "]}}"
+                ),
+            )
+        ],
+    )
+
+    assert expectation is None
+
+
+def test_action_decision_policy_keeps_expectation_when_read_does_not_observe_expected_ref():
+    expectation = ActionDecisionPolicy.assess(
+        user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+        turn_goal=None,
+        working_plan=None,
+        pending_obligation=None,
+        compact_summary=_compact_summary(),
+        tool_results=[
+            RuntimeToolResult(
+                call_id="call_read",
+                tool_name="rp_setup__setup.read.draft_refs",
+                success=True,
+                content_text='{"success": true, "items": []}',
+                structured_payload={"content_payload": {"items": []}},
+            )
+        ],
+    )
+
+    assert expectation is not None
+    assert expectation.draft_refs == ["foundation:magic-law"]
+
+
+def test_action_decision_policy_blocks_mutation_batch_before_required_read():
+    expectation = SetupActionExpectation(
+        expectation_type="read_draft_refs",
+        reason="compact_recovery_requires_draft_ref_read",
+        required_tools=["setup.read.draft_refs"],
+        draft_refs=["foundation:magic-law"],
+    )
+
+    violation = ActionDecisionPolicy.tool_batch_violation(
+        expectation=expectation,
+        tool_names=["rp_setup__setup.truth.write"],
+    )
+
+    assert violation is not None
+    assert violation["reason"] == "required_draft_ref_read_missing"
+
+
+def test_action_decision_policy_allows_read_only_batch_for_required_read():
+    expectation = SetupActionExpectation(
+        expectation_type="read_draft_refs",
+        reason="compact_recovery_requires_draft_ref_read",
+        required_tools=["setup.read.draft_refs"],
+        draft_refs=["foundation:magic-law"],
+    )
+
+    violation = ActionDecisionPolicy.tool_batch_violation(
+        expectation=expectation,
+        tool_names=["rp_setup__setup.read.draft_refs"],
+    )
+
+    assert violation is None
+
+
+def test_action_decision_policy_blocks_mixed_read_and_mutation_batch():
+    expectation = SetupActionExpectation(
+        expectation_type="read_draft_refs",
+        reason="compact_recovery_requires_draft_ref_read",
+        required_tools=["setup.read.draft_refs"],
+        draft_refs=["foundation:magic-law"],
+    )
+
+    violation = ActionDecisionPolicy.tool_batch_violation(
+        expectation=expectation,
+        tool_names=[
+            "rp_setup__setup.read.draft_refs",
+            "rp_setup__setup.truth.write",
+        ],
+    )
+
+    assert violation is not None
+    assert violation["reason"] == "required_draft_ref_read_missing"
+
+
+def test_completion_guard_blocks_text_when_action_expectation_requires_read():
+    decision = CompletionGuardPolicy.assess(
+        assistant_text="The full draft detail is that spellcasting needs permits.",
+        pending_obligation=None,
+        reflection_ticket=None,
+        action_expectation=SetupActionExpectation(
+            expectation_type="read_draft_refs",
+            reason="compact_recovery_requires_draft_ref_read",
+            required_tools=["setup.read.draft_refs"],
+            draft_refs=["foundation:magic-law"],
+        ),
+    )
+
+    assert decision["allow_finalize"] is False
+    assert decision["completion_guard"]["reason"] == "required_draft_ref_read_missing"
 
 
 def test_tool_failure_classifier_prefers_structured_error_payload():

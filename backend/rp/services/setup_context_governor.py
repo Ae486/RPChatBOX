@@ -41,7 +41,61 @@ class SetupContextGovernorService:
         context_profile: str,
         current_step: str | None = None,
         estimated_input_tokens: int | None = None,
-        previous_usage: dict[str, int] | None = None,
+        previous_usage: dict[str, int | None] | None = None,
+    ) -> tuple[
+        list[SetupAgentDialogueMessage],
+        SetupContextCompactSummary | None,
+        dict[str, Any],
+    ]:
+        return self._govern_history_sync(
+            history=history,
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            existing_summary=existing_summary,
+            context_profile=context_profile,
+            current_step=current_step,
+            estimated_input_tokens=estimated_input_tokens,
+            previous_usage=previous_usage,
+        )
+
+    async def govern_history_async(
+        self,
+        *,
+        history: list[SetupAgentDialogueMessage],
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        existing_summary: SetupContextCompactSummary | None,
+        context_profile: str,
+        current_step: str | None = None,
+        estimated_input_tokens: int | None = None,
+        previous_usage: dict[str, int | None] | None = None,
+    ) -> tuple[
+        list[SetupAgentDialogueMessage],
+        SetupContextCompactSummary | None,
+        dict[str, Any],
+    ]:
+        return await self._govern_history_async(
+            history=history,
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            existing_summary=existing_summary,
+            context_profile=context_profile,
+            current_step=current_step,
+            estimated_input_tokens=estimated_input_tokens,
+            previous_usage=previous_usage,
+        )
+
+    def _govern_history_sync(
+        self,
+        *,
+        history: list[SetupAgentDialogueMessage],
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        existing_summary: SetupContextCompactSummary | None,
+        context_profile: str,
+        current_step: str | None = None,
+        estimated_input_tokens: int | None = None,
+        previous_usage: dict[str, int | None] | None = None,
     ) -> tuple[
         list[SetupAgentDialogueMessage],
         SetupContextCompactSummary | None,
@@ -58,6 +112,12 @@ class SetupContextGovernorService:
         )
         summary_decision = self._compaction_service.last_summary_decision()
         kept_history = list(history[-limit:]) if len(history) > limit else list(history)
+        previous_prompt_tokens = (
+            previous_usage.get("prompt_tokens") if previous_usage else None
+        )
+        previous_total_tokens = (
+            previous_usage.get("total_tokens") if previous_usage else None
+        )
         return (
             kept_history,
             compact_summary,
@@ -67,13 +127,70 @@ class SetupContextGovernorService:
                 "compacted_history_count": max(len(history) - len(kept_history), 0),
                 "estimated_input_tokens": estimated_input_tokens,
                 "previous_prompt_tokens": (
-                    int(previous_usage.get("prompt_tokens"))
-                    if previous_usage and previous_usage.get("prompt_tokens") is not None
+                    int(previous_prompt_tokens)
+                    if previous_prompt_tokens is not None
                     else None
                 ),
                 "previous_total_tokens": (
-                    int(previous_usage.get("total_tokens"))
-                    if previous_usage and previous_usage.get("total_tokens") is not None
+                    int(previous_total_tokens)
+                    if previous_total_tokens is not None
+                    else None
+                ),
+                "summary_strategy": summary_decision.get("summary_strategy") or "none",
+                "summary_action": summary_decision.get("summary_action") or "none",
+                "fallback_reason": summary_decision.get("fallback_reason"),
+            },
+        )
+
+    async def _govern_history_async(
+        self,
+        *,
+        history: list[SetupAgentDialogueMessage],
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        existing_summary: SetupContextCompactSummary | None,
+        context_profile: str,
+        current_step: str | None = None,
+        estimated_input_tokens: int | None = None,
+        previous_usage: dict[str, int | None] | None = None,
+    ) -> tuple[
+        list[SetupAgentDialogueMessage],
+        SetupContextCompactSummary | None,
+        dict[str, Any],
+    ]:
+        limit = self._compaction_service.raw_history_limit(context_profile=context_profile)
+        compact_summary = await self._compaction_service.build_summary_async(
+            history=history,
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            existing_summary=existing_summary,
+            context_profile=context_profile,
+            current_step=current_step,
+        )
+        summary_decision = self._compaction_service.last_summary_decision()
+        kept_history = list(history[-limit:]) if len(history) > limit else list(history)
+        previous_prompt_tokens = (
+            previous_usage.get("prompt_tokens") if previous_usage else None
+        )
+        previous_total_tokens = (
+            previous_usage.get("total_tokens") if previous_usage else None
+        )
+        return (
+            kept_history,
+            compact_summary,
+            {
+                "raw_history_limit": limit,
+                "kept_history_count": len(kept_history),
+                "compacted_history_count": max(len(history) - len(kept_history), 0),
+                "estimated_input_tokens": estimated_input_tokens,
+                "previous_prompt_tokens": (
+                    int(previous_prompt_tokens)
+                    if previous_prompt_tokens is not None
+                    else None
+                ),
+                "previous_total_tokens": (
+                    int(previous_total_tokens)
+                    if previous_total_tokens is not None
                     else None
                 ),
                 "summary_strategy": summary_decision.get("summary_strategy") or "none",

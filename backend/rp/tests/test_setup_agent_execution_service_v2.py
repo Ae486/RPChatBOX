@@ -198,6 +198,53 @@ class _DraftRefRecoveryLLM:
         return None
 
 
+class _CompactPromptLLM:
+    def __init__(self, *, invalid_json: bool = False) -> None:
+        self.invalid_json = invalid_json
+        self.requests: list[Any] = []
+
+    async def chat_completion(self, request):
+        self.requests.append(request)
+        visible_text = _messages_text(request.messages)
+        assert "SetupStageCompactPrompt" in visible_text
+        assert request.tools is None
+        prompt_payload = json.loads(str(request.messages[1].content or "{}"))
+        draft_refs = list(prompt_payload.get("draft_refs") or [])
+        if self.invalid_json:
+            content = "not json"
+        else:
+            content = json.dumps(
+                {
+                    "summary_lines": ["Prompt-pass compacted older setup discussion."],
+                    "confirmed_points": ["Keep compact as context engineering."],
+                    "open_threads": ["Need next setup focus."],
+                    "rejected_directions": ["Do not add a separate compact agent."],
+                    "draft_refs": draft_refs,
+                    "recovery_hints": [
+                        {
+                            "ref": draft_refs[0],
+                            "reason": "Recover exact draft detail if needed.",
+                            "detail": "Use setup.read.draft_refs.",
+                        }
+                    ]
+                    if draft_refs
+                    else [],
+                    "must_not_infer": ["Do not infer old raw discussion details."],
+                },
+                sort_keys=True,
+            )
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": content,
+                    }
+                }
+            ]
+        }
+
+
 def test_setup_runtime_factory_always_uses_runtime_v2(retrieval_session):
     service = RpRuntimeFactory(retrieval_session).build_setup_agent_execution_service()
     runner = RpRuntimeFactory(retrieval_session).build_setup_graph_runner()
@@ -299,19 +346,22 @@ def test_setup_agent_execution_service_reports_observed_usage_pressure():
     assert "observed_usage_threshold" in reasons
 
 
-def test_setup_agent_execution_service_v2_builds_governed_history_for_compact_turn(
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_v2_builds_governed_history_for_compact_turn(
     retrieval_session,
 ):
     workspace_service = SetupWorkspaceService(retrieval_session)
     context_builder = SetupContextBuilder(workspace_service)
     runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
     adapter = SetupRuntimeAdapter()
+    llm = _CompactPromptLLM()
     service = SetupAgentExecutionService(
         workspace_service=workspace_service,
         context_builder=context_builder,
         adapter=adapter,
         runtime_executor=None,
         runtime_state_service=runtime_state_service,
+        llm_service=llm,
     )
     workspace = workspace_service.create_workspace(
         story_id="story-governed-history-1",
@@ -331,7 +381,7 @@ def test_setup_agent_execution_service_v2_builds_governed_history_for_compact_tu
         user_edit_delta_ids=["delta-1", "delta-2", "delta-3"],
     )
 
-    turn_input, context_packet = service._build_runtime_v2_turn_input(
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
         adapter=adapter,
         request=request,
         workspace=workspace,
@@ -344,7 +394,13 @@ def test_setup_agent_execution_service_v2_builds_governed_history_for_compact_tu
         ),
     )
 
+    compact_request_text = _messages_text(llm.requests[0].messages)
     assert context_packet.context_profile == "compact"
+    assert len(llm.requests) == 1
+    assert "history message 0" in compact_request_text
+    assert "history message 5" in compact_request_text
+    assert "history message 6" not in compact_request_text
+    assert llm.requests[0].tools is None
     assert len(turn_input.conversation_messages) == 4
     assert turn_input.conversation_messages[0]["content"] == "history message 6"
     assert turn_input.conversation_messages[-1]["content"] == "history message 9"
@@ -361,7 +417,7 @@ def test_setup_agent_execution_service_v2_builds_governed_history_for_compact_tu
     assert "user_edit_threshold" in turn_input.context_bundle["context_report"]["profile_reasons"]
     assert turn_input.context_bundle["context_report"]["estimated_input_tokens"] is not None
     assert turn_input.context_bundle["context_report"].get("previous_prompt_tokens") is None
-    assert turn_input.context_bundle["context_report"]["summary_strategy"] == "deterministic_prefix_summary"
+    assert turn_input.context_bundle["context_report"]["summary_strategy"] == "compact_prompt_summary"
     assert turn_input.context_bundle["context_report"]["summary_action"] == "rebuilt"
 
 
@@ -373,12 +429,14 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
     context_builder = SetupContextBuilder(workspace_service)
     runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
     adapter = SetupRuntimeAdapter()
+    compact_llm = _CompactPromptLLM()
     service = SetupAgentExecutionService(
         workspace_service=workspace_service,
         context_builder=context_builder,
         adapter=adapter,
         runtime_executor=None,
         runtime_state_service=runtime_state_service,
+        llm_service=compact_llm,
     )
     workspace = workspace_service.create_workspace(
         story_id="story-compact-draft-ref-recovery-1",
@@ -439,7 +497,7 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
         user_edit_delta_ids=["delta-1", "delta-2", "delta-3"],
     )
 
-    turn_input, context_packet = service._build_runtime_v2_turn_input(
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
         adapter=adapter,
         request=request,
         workspace=workspace,
@@ -454,6 +512,7 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
 
     compact_summary = turn_input.context_bundle["compact_summary"]
     assert context_packet.context_profile == "compact"
+    assert len(compact_llm.requests) == 1
     assert len(turn_input.conversation_messages) == 4
     assert all(
         old_raw_marker not in str(message.get("content") or "")
@@ -494,19 +553,22 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
     ]
 
 
-def test_setup_agent_execution_service_v2_surfaces_previous_usage_pressure(
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_v2_surfaces_previous_usage_pressure(
     retrieval_session,
 ):
     workspace_service = SetupWorkspaceService(retrieval_session)
     context_builder = SetupContextBuilder(workspace_service)
     runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
     adapter = SetupRuntimeAdapter()
+    llm = _CompactPromptLLM()
     service = SetupAgentExecutionService(
         workspace_service=workspace_service,
         context_builder=context_builder,
         adapter=adapter,
         runtime_executor=None,
         runtime_state_service=runtime_state_service,
+        llm_service=llm,
     )
     workspace = workspace_service.create_workspace(
         story_id="story-observed-usage-1",
@@ -538,7 +600,7 @@ def test_setup_agent_execution_service_v2_surfaces_previous_usage_pressure(
         user_edit_delta_ids=[],
     )
 
-    turn_input, context_packet = service._build_runtime_v2_turn_input(
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
         adapter=adapter,
         request=request,
         workspace=workspace,
@@ -553,12 +615,14 @@ def test_setup_agent_execution_service_v2_surfaces_previous_usage_pressure(
 
     report = turn_input.context_bundle["context_report"]
     assert context_packet.context_profile == "compact"
+    assert len(llm.requests) == 0
     assert "observed_usage_threshold" in report["profile_reasons"]
     assert report["previous_prompt_tokens"] == 1901
     assert report["previous_total_tokens"] == 1909
 
 
-def test_setup_agent_execution_service_v2_does_not_share_observed_usage_across_workspaces(
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_v2_does_not_share_observed_usage_across_workspaces(
     retrieval_session,
 ):
     workspace_service = SetupWorkspaceService(retrieval_session)
@@ -606,7 +670,7 @@ def test_setup_agent_execution_service_v2_does_not_share_observed_usage_across_w
         user_edit_delta_ids=[],
     )
 
-    turn_input, context_packet = service._build_runtime_v2_turn_input(
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
         adapter=adapter,
         request=request,
         workspace=target_workspace,
@@ -626,7 +690,8 @@ def test_setup_agent_execution_service_v2_does_not_share_observed_usage_across_w
     assert report.get("previous_total_tokens") is None
 
 
-def test_setup_agent_execution_service_v2_uses_target_step_for_tool_scope(
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_v2_uses_target_step_for_tool_scope(
     retrieval_session,
 ):
     workspace_service = SetupWorkspaceService(retrieval_session)
@@ -653,7 +718,7 @@ def test_setup_agent_execution_service_v2_uses_target_step_for_tool_scope(
         user_edit_delta_ids=[],
     )
 
-    turn_input, _ = service._build_runtime_v2_turn_input(
+    turn_input, _ = await service._build_runtime_v2_turn_input(
         adapter=adapter,
         request=request,
         workspace=workspace,
@@ -725,7 +790,8 @@ def test_setup_agent_execution_service_prepare_turn_launch_reuses_shared_preflig
     assert launch.provider == provider
 
 
-def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stream_flag(
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stream_flag(
     retrieval_session,
     monkeypatch,
 ):
@@ -771,7 +837,7 @@ def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stream_fla
     )
 
     launch = service._prepare_turn_launch(request)
-    prepared = service._prepare_runtime_v2_launch(
+    prepared = await service._prepare_runtime_v2_launch(
         adapter=adapter,
         launch=launch,
         stream=True,
@@ -783,3 +849,62 @@ def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stream_fla
     assert "setup.patch.story_config" not in prepared.turn_input.tool_scope
     assert prepared.context_packet.workspace_id == workspace.workspace_id
     assert prepared.profile.profile_id == "setup_agent"
+
+
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_v2_falls_back_when_compact_prompt_fails(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    adapter = SetupRuntimeAdapter()
+    llm = _CompactPromptLLM(invalid_json=True)
+    service = SetupAgentExecutionService(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        adapter=adapter,
+        runtime_executor=None,
+        runtime_state_service=runtime_state_service,
+        llm_service=llm,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-compact-prompt-fallback-1",
+        mode=StoryMode.LONGFORM,
+    )
+    request = SetupAgentTurnRequest(
+        workspace_id=workspace.workspace_id,
+        model_id="model-1",
+        user_prompt="Continue with a compact history.",
+        history=[
+            SetupAgentDialogueMessage(
+                role="user" if index % 2 == 0 else "assistant",
+                content=f"fallback history message {index}",
+            )
+            for index in range(10)
+        ],
+        user_edit_delta_ids=["delta-1", "delta-2", "delta-3"],
+    )
+
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
+        adapter=adapter,
+        request=request,
+        workspace=workspace,
+        model_name="gpt-4o-mini",
+        provider=ProviderConfig(
+            type="openai",
+            api_key="sk-test",
+            api_url="https://example.com/v1",
+            custom_headers={},
+        ),
+    )
+
+    report = turn_input.context_bundle["context_report"]
+    compact_summary = turn_input.context_bundle["compact_summary"]
+    assert context_packet.context_profile == "compact"
+    assert len(llm.requests) == 1
+    assert report["summary_strategy"] == "deterministic_prefix_summary"
+    assert report["summary_action"] == "rebuilt"
+    assert report["fallback_reason"] is not None
+    assert compact_summary is not None
+    assert compact_summary["summary_lines"][0].startswith("User: fallback history")

@@ -1,6 +1,6 @@
 # RP Setup Agent Stage-Local Context Governance
 
-> Executable contract for SetupAgent runtime-v2 stage-local context engineering: thin working digest, retained tool outcomes, compacted older step history, draft-ref recovery, compact-expert summarization, and minimal no-progress guards.
+> Executable contract for SetupAgent runtime-v2 stage-local context engineering: thin working digest, retained tool outcomes, compacted older step history, draft-ref recovery, no-tools compact prompt summarization, and minimal no-progress guards.
 
 ## Scenario: SetupAgent Compacts Current-Stage Context Without Replacing Draft Truth
 
@@ -11,7 +11,7 @@
 - This slice is stage-local context engineering. It does not change `SetupWorkspace` business truth, prior-stage handoff packets, Memory OS, cross-stage retrieval contracts, or user manual commit authority.
 - This slice must not introduce a new durable setup-memory subsystem. Runtime-private governance state stays inside the existing `SetupAgentRuntimeStateRecord.snapshot_json`.
 - Source policy:
-  - Borrow directly from Claude Code / CC: compact runs before model-call assembly, compact experts are no-tools summarizers, and summary reasoning is stripped before reinjection.
+  - Borrow directly from Claude Code / CC: compact runs before model-call assembly, compact summarization is a no-tools prompt pass, and summary reasoning is stripped before reinjection.
   - Borrow directly from Pi: compact belongs in an explicit pre-LLM context transform boundary.
   - Lighten for RP setup: no disk-spilled generic tool-result store, no full session tree compaction, no prompt-cache edit layer, and no generic coding-agent file tracking.
   - Customize for RP setup: draft refs are the recovery surface because stable setup truth is already written into drafts.
@@ -80,15 +80,16 @@
     - `working_digest: SetupWorkingDigest | None`
     - `existing_summary: SetupContextCompactSummary | None`
     - `context_profile: Literal["standard", "compact"]`
-- `SetupContextCompactionService.build_expert_prompt(...) -> list[ChatMessage]`
+- `SetupContextCompactionService.build_compact_prompt(...) -> list[ChatMessage]`
   - inputs:
     - `dropped_history: list[SetupAgentDialogueMessage]`
+    - `newly_compacted_history: list[SetupAgentDialogueMessage] | None`
     - `existing_summary: SetupContextCompactSummary | None`
     - `working_digest: SetupWorkingDigest | None`
     - `retained_tool_outcomes: list[SetupToolOutcome]`
     - `current_step: SetupStepId`
     - `draft_refs: list[str]`
-- `SetupContextCompactionService.validate_expert_summary(...) -> SetupContextCompactSummary`
+- `SetupContextCompactionService.validate_compact_prompt_summary(...) -> SetupContextCompactSummary`
   - inputs:
     - `payload: dict[str, Any]`
     - `source_fingerprint: str`
@@ -167,10 +168,14 @@
   - `standard` profile keeps the last `6` history messages raw
   - `compact` profile keeps the last `4` history messages raw
   - older messages are excluded from raw prompt history and may only survive through `compact_summary`
-- `SetupContextCompactionService.build_summary(...)` must rebuild only when the dropped-history prefix changes:
-  - fingerprint source = dropped-history prefix only
-  - if `existing_summary.source_fingerprint` and `existing_summary.source_message_count` still match the dropped prefix, reuse it
+- `SetupContextCompactionService.build_summary(...)` must compact incrementally:
+  - fingerprint source = full dropped-history prefix only
   - if no dropped history exists, return `None`
+  - if `existing_summary.source_fingerprint` and `existing_summary.source_message_count` exactly match the full dropped prefix, reuse it
+  - if `existing_summary.source_message_count` is smaller than the full dropped prefix and the earlier prefix still matches `existing_summary.source_fingerprint`, update from the previous summary plus only the newly dropped messages after `existing_summary.source_message_count`
+  - otherwise rebuild from the full dropped prefix
+  - first compact is therefore from the beginning of the current-stage raw history; later compacts are previous-summary-plus-delta updates
+  - the recent raw window remains uncompressed and prompt-visible according to the active profile keep policy
 - `compact_summary` must stay thin:
   - `summary_lines` max `6`
   - `confirmed_points` max `8`
@@ -181,16 +186,18 @@
   - `must_not_infer` max `4`
   - it must not replay long verbatim discussion blocks
   - it must not own `current_goal`, `next_focus`, or `commit_blockers`; those remain `working_digest`
-- Compact expert policy:
-  - role name: `SetupStageCompactExpert`
-  - it is a prompt role/helper call, not a new autonomous agent, not a new durable state subsystem, and not a draft writer
-  - it must receive only current-step dropped messages plus bounded prior compact summary, digest, tool outcomes, current step id, and draft refs
+- Compact prompt pass policy:
+  - role marker: `SetupStageCompactPrompt`
+  - it is a no-tools model prompt pass inside context engineering, not a new autonomous agent, not a new durable state subsystem, and not a draft writer
+  - it must receive the current-step dropped-history fingerprint metadata, bounded prior compact summary, only newly compacted current-step messages when an incremental update is possible, digest, tool outcomes, current step id, and draft refs
+  - when an existing summary is still a valid prefix, the compact prompt must update that summary with the newly compacted messages instead of regenerating unrelated older history
+  - when no valid previous summary exists, the compact prompt may compact the full dropped-history prefix
   - it must output strict JSON matching `SetupContextCompactSummary` fields
   - it must not call tools, write drafts, propose commits, mutate cognition, or reconstruct prior-stage raw discussion
   - it may internally reason, but any analysis/scratchpad text must be stripped before validation and persistence
   - it must update an existing compact summary when one exists instead of regenerating unrelated history from scratch
-  - if expert compact fails validation or model invocation, runtime must fall back to deterministic compact summary and record the fallback in `context_report`
-- Expert compact is not CC full autocompact:
+  - if the compact prompt pass fails validation or model invocation, runtime must fall back to deterministic compact summary and record the fallback in `context_report`
+- Compact prompt pass is not CC full autocompact:
   - copy CC's no-tools summarizer role and analysis-stripping pattern
   - copy Pi's explicit pre-LLM transform boundary
   - do not copy CC's generic full-session/file-edit summary sections, prompt-cache editing, or disk-backed tool result budget
@@ -215,6 +222,11 @@
   - no new setup runtime table
   - `SetupAgentRuntimeStateRecord.snapshot_json` remains the only persistence surface for digest / tool outcomes / compact summary
 - `context_report` must stay outside `SetupAgentRuntimeStateRecord.snapshot_json`
+- `SetupContextGovernanceReport.summary_action` must distinguish:
+  - `none`: no compact summary exists
+  - `reused_existing`: full dropped prefix was already summarized
+  - `updated_existing`: previous summary matched an earlier dropped prefix and was updated with newly compacted messages
+  - `rebuilt`: no valid previous-summary prefix could be reused
 - `persist_turn_governance(...)` runs after each runtime-v2 turn and updates the current-step snapshot without clearing existing discussion/chunk/truth state.
 - Minimal no-progress guard is required:
   - if the assistant emits the same normalized user-facing question that already exists in recent assistant history and the current turn produced no new tool progress, finalization must be blocked with a repeat-question guard
@@ -232,11 +244,13 @@
 - previous model usage from another workspace or setup step crosses threshold -> ignore it for this turn's compact decision and do not surface previous token counts in `context_report`
 - user edit delta count crosses threshold -> select compact profile with reason `user_edit_threshold`
 - dropped-history prefix exists and matches stored compact fingerprint -> reuse existing `compact_summary`
-- dropped-history prefix exists and does not match stored compact fingerprint -> rebuild `compact_summary` with the configured strategy
-- expert compact succeeds and validates -> persist/expose the validated `compact_summary` only
-- expert compact returns non-JSON, forbidden fields, unsupported refs, or oversized lists -> fall back to deterministic compact summary and record fallback in `context_report`
-- expert compact attempts tool use or draft mutation -> reject the expert result and fall back to deterministic compact summary
-- expert compact is disabled by config/profile -> use deterministic compact summary and report strategy `deterministic_prefix_summary`
+- dropped-history prefix extends a stored compact fingerprint -> update existing `compact_summary` with only the newly compacted messages and report `summary_action="updated_existing"`
+- dropped-history prefix exists but does not match stored compact fingerprint -> rebuild `compact_summary` with the configured strategy
+- compact prompt pass succeeds and validates -> persist/expose the validated `compact_summary` only
+- incremental compact prompt pass succeeds and validates -> persist/expose a summary whose `source_fingerprint` and `source_message_count` match the full dropped-history prefix, not only the delta
+- compact prompt pass returns non-JSON, forbidden fields, unsupported refs, or oversized lists -> fall back to deterministic compact summary and record fallback in `context_report`
+- compact prompt pass attempts tool use or draft mutation -> reject the compact-prompt result and fall back to deterministic compact summary
+- compact prompt provider is disabled/unavailable -> use deterministic compact summary and report strategy `deterministic_prefix_summary`
 - retained outcomes exceed `6` after merge -> prune successes first, preserve unresolved failures
 - tool result has no meaningful `updated_refs` and is a non-failure read/tool artifact -> it may be dropped from retained cross-turn outcomes
 - `setup.read.draft_refs` receives an empty `refs` list -> validation error `setup_draft_refs_required`
@@ -251,18 +265,21 @@
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a long `foundation` discussion keeps the last 4 raw messages, carries earlier discussion through one expert-validated compact summary, preserves one unresolved `setup.truth.write` failure outcome, records `foundation:magic-law` as a draft ref with a recovery hint, and injects a thin digest that says what still blocks review.
+- Good: a long `foundation` discussion keeps the last 4 raw messages, carries earlier discussion through one validated compact prompt summary, preserves one unresolved `setup.truth.write` failure outcome, records `foundation:magic-law` as a draft ref with a recovery hint, and injects a thin digest that says what still blocks review.
+- Good: after an earlier compact summarized messages `0..3`, a later turn drops messages `0..5`; runtime keeps recent raw messages visible and updates the compact summary from previous summary plus newly compacted messages `4..5` instead of sending the whole `0..5` prefix to the compact prompt pass again.
 - Good: after compaction, the model needs the exact guild-law detail, calls `setup.read.draft_refs` with `refs=["foundation:magic-law"]`, and receives the current draft entry instead of relying on old raw chat text.
 - Base: a short `story_config` turn with 2 prior messages keeps the full raw history, has no compact summary, and carries no retained outcomes.
-- Base: expert compact is disabled or unavailable, so deterministic summary rebuilds the compact summary and `context_report.summary_strategy` records the fallback.
-- Bad: replaying the entire current-step transcript every turn, storing tool retry chains as prompt-visible history, using `working_digest` as if it were the stage compaction artifact, or making the compact expert write draft truth directly.
+- Base: compact prompt provider is disabled or unavailable, so deterministic summary rebuilds the compact summary and `context_report.summary_strategy` records the fallback.
+- Bad: replaying the entire current-step transcript every turn, storing tool retry chains as prompt-visible history, using `working_digest` as if it were the stage compaction artifact, or making the compact prompt pass write draft truth directly.
 
 ### 6. Tests Required
 
 - `backend/rp/tests/test_setup_context_governor.py`
   - assert `standard` keeps the last 6 raw history messages and `compact` keeps the last 4
   - assert dropped history produces a reusable compact summary fingerprint
-  - assert expert compact output is validated, capped, and falls back to deterministic summary on invalid payload
+  - assert existing prefix summary is updated incrementally when new messages are compacted after the previous summary
+  - assert compact prompt output is validated, capped, and falls back to deterministic summary on invalid payload
+  - assert incremental compact prompt receives previous summary plus the newly compacted messages, while keeping the recent raw window out of the prompt input
   - assert retained outcomes keep unresolved failures and prune duplicate/superseded successes
   - assert initial digest stays thin and deterministic
 - `backend/rp/tests/test_setup_tool_provider.py`
@@ -293,7 +310,7 @@
 - Persist `context_report` as if it were durable stage cognition.
 - Add a second durable state layer just to remember setup-stage conversation.
 - Introduce semantic "similar-question" or "stall-intent" classifiers without eval evidence and without a mature reference pattern.
-- Let the compact expert call setup tools, write drafts, decide commit readiness, or reconstruct previous-stage raw discussion.
+- Let the compact prompt pass call setup tools, write drafts, decide commit readiness, or reconstruct previous-stage raw discussion.
 - Copy CC's full coding-agent compact schema into RP setup even though RP setup truth is already recoverable through drafts.
 - Store all draft details inside `compact_summary` instead of storing refs and using `setup.read.draft_refs` for recovery.
 
@@ -304,6 +321,6 @@
 - Compact only older current-step raw history, keep recent raw turns visible, and persist everything inside the existing runtime snapshot.
 - Keep compact decision reporting transient and observable without turning it into durable setup memory.
 - Keep the current no-progress guard narrow: exact normalized repeat-question and repeated failure signature only; leave broader stall policy to later eval-driven work.
-- Run compact as pre-model context engineering: pressure check, raw-window retention, outcome pruning, optional expert summary, runtime overlay assembly.
+- Run compact as pre-model context engineering: pressure check, raw-window retention, outcome pruning, optional compact prompt summary, runtime overlay assembly.
 - Use `setup.read.draft_refs` as the stage-local detail recovery tool after compaction.
 - Borrow mature framework mechanics where they fit, lighten generic coding-agent features, and customize recovery around RP setup drafts.

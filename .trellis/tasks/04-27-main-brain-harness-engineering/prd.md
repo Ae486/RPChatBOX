@@ -79,7 +79,7 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
 - The retrieval index should distinguish embedded text, filter metadata, and rerank/display payload. Not every field should be embedded, and not every field should be model-authored.
 - Compact is stage-local context engineering, not a generic state-management layer. Stage transitions already use handoff packets for large context cuts; compact inside this task should focus on one current setup stage.
 - SetupAgent compact should borrow mature framework mechanics where they fit, lighten generic coding-agent features, and customize recovery around RP setup drafts:
-  - borrow from Claude Code / CC: pre-model context compression, no-tools compact expert, analysis stripped from retained summary, and post-compact recovery thinking
+  - borrow from Claude Code / CC: pre-model context compression, no-tools compact prompt summarization, analysis stripped from retained summary, and post-compact recovery thinking
   - borrow from `pi-mono`: explicit `transformContext -> convertToLlm` style pre-LLM boundary
   - do not copy CC's full coding-agent five-layer stack, file tracking, prompt-cache editing, or full-session coding summary schema
   - add a stage-local draft recovery tool (`setup.read.draft_refs`) so compact summaries can keep refs/hints instead of storing all draft details
@@ -101,7 +101,7 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
 - The target is not to copy a coding agent wholesale. The target is to extract reusable loop semantics and adapt them to setup's prestory business boundary.
 - Stage handoff context should prefer `committed truth + compacted summaries + retrieval-friendly chunk descriptions` over raw prior discussion logs.
 - The current compact slice should treat `working_digest` and `compact_summary` as separate surfaces: digest is live control state; compact summary is older current-step context carry-forward with draft refs and recovery hints.
-- Compact expert work should be a helper prompt role (`SetupStageCompactExpert`) with strict JSON output and no tools, not a second autonomous agent loop.
+- Compact prompt work should be a no-tools helper pass (`SetupStageCompactPrompt`) with strict JSON output, not a second autonomous agent loop.
 
 ### Current Agent Body Assessment
 
@@ -279,7 +279,7 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
   - explicit user commit must be allowed even when content is blank or incomplete
   - draft is user-editable and user edits should be tracked as deltas; those edits invalidate/reconcile setup cognition
   - stage progression must follow the preset setup sequence and must pass through commit; arbitrary stage switching is invalid because the next stage depends on previous-stage summary/handoff data
-  - stage-local compact is a context-engineering pipeline: context pressure, raw-window retention, tool-outcome pruning, optional compact expert summary, draft-ref recovery, runtime overlay, and transient context report
+  - stage-local compact is a context-engineering pipeline: context pressure, raw-window retention, tool-outcome pruning, optional compact prompt summary, draft-ref recovery, runtime overlay, and transient context report
   - `setup.read.draft_refs` is required as a stage-local retrieval tool for recovering exact draft details after compaction
   - compact and digest stay separate: compact preserves older context; digest controls current work
 - Remaining key decisions:
@@ -311,21 +311,194 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
   - `Stage-Local Compact Context Engineering`
 - This slice implements:
   - compact as stage-local context engineering
-  - compact expert prompt role with deterministic fallback
+  - compact prompt pass with deterministic fallback
   - draft-ref recovery through `setup.read.draft_refs`
   - message/token/observed-usage context pressure reporting
+- Follow-up slice: `Real-Model Compact Recovery Behavior Eval`.
+  - Purpose: verify the behavior condition, not a blanket "compact means readback" rule.
+  - Trigger condition under test:
+    - the current setup task requires exact draft detail
+    - that exact detail is absent from visible raw history, prompt summaries, and compact summary prose
+    - visible context provides only a recovery handle such as `foundation:magic-law`
+  - Expected behavior:
+    - the setup agent calls `setup.read.draft_refs` with the relevant ref before using or writing the missing exact detail
+    - the post-readback answer/action uses the tool result, not stale raw discussion or guessed summary text
+  - Failure behavior:
+    - direct answer without readback when exact detail is required
+    - hallucinated or guessed detail
+    - test invalidation if the exact detail leaked into first-round prompt-visible context
+  - Test strategy:
+    - keep the existing deterministic harness test as the engineering-closed-loop proof
+    - add a behavior/eval-style test that can run against a real configured setup model when available
+    - make the real chain interaction-based rather than seed-only: first turn uses the real model to write the exact detail into draft, then a later compact turn asks for that exact detail when only the draft ref/hint is visible
+    - keep model/provider-dependent execution opt-in or gracefully skipped when no real setup model config exists
+  - Implementation note:
+    - the opt-in test supports env-seeded temporary provider/model config, and also supports a manually selected existing local registry model id for developer-run validation
+    - real-model execution exposed one runtime compatibility issue: plain assistant responses may contain `tool_calls=null`; runtime must normalize this to no tool call
+    - real-model execution also exercised the existing repair loop: the model initially omitted required fields for `setup.truth.write`, then the runtime repaired and completed the draft write before compact recovery
 - Deferred out of this slice:
   - `Foundation Chunk Contract And Retrieval-Friendly Truth Surface`
   - explicit user-commit warning payload
   - skills runtime
   - more outer-harness cleanup
 
+### Slim Truth-Write Structured Output Surface (2026-04-30)
+
+- Added executable spec:
+  - `.trellis/spec/backend/rp-setup-agent-strict-truth-write-tool-pilot.md`
+- Goal:
+  - optimize the model-facing `setup.truth.write` surface before expanding structured-output adapters to other setup tools
+  - make the common base path strongly constrained even when a model/provider does not support strict tools
+  - remove runtime-owned fields from the model burden where safe
+  - keep provider-side `SetupTruthWriteInput` and pydantic validation unchanged as final authority
+- Implemented behavior:
+  - all model families receive a slim `setup.truth.write` schema when runtime defaults are available
+  - GPT/Codex-family model names additionally receive `function.strict = true`
+  - model-facing required payload is reduced to `truth_write`
+  - model supplies `truth_write.payload_json`; runtime parses it back into provider-side `truth_write.payload`
+  - runtime injects `workspace_id`, `step_id`, `truth_write.current_step`, `truth_write.block_type`, and `user_edit_delta_ids` before provider execution
+  - model-facing `truth_write.target_ref` is a portable string field; `""` means no target and runtime normalizes it to provider-side `None`
+  - if runtime defaults are unavailable, runtime falls back to the existing full provider schema without `strict = true`
+- Real-model matrix findings:
+  - `gpt-4o-mini`: strict write plus compact readback passed
+  - `gpt-5`: strict write plus compact readback passed
+  - `gpt-5.4`: selected provider rejected the request with `blocked_invalid_request`, so it is an infra/provider result rather than a model capability pass
+  - `glm-5`: request reached the model, but it did not emit a real OpenAI tool call for strict write in the dedicated test; in compact recovery it also failed to call `setup.read.draft_refs`
+  - `deepseek-ai/DeepSeek-V3`: request reached the model, but it did not emit a real OpenAI tool call for strict write
+  - `gemini-2.5-pro`: selected provider returned 403
+  - `gemini-2.5-flash-lite`: selected provider returned an HTML/IP block page
+  - Bohe `gemini-2.5-flash`: non-strict slim schema path passed after removing the nullable union from `target_ref`
+- Resulting decision:
+  - do not default `function.strict = true` to every OpenAI-compatible model
+  - keep strict flags gated by observed model-family evidence until the model registry grows explicit strict-tool capability metadata
+  - keep the slim model-facing schema as the common base path when runtime defaults can be determined
+  - keep Pydantic validation and one bounded repair retry active for all models
+
+### Action Decision Policy / Observe-Act Guard (2026-04-30)
+
+- Added executable spec:
+  - `.trellis/spec/backend/rp-setup-agent-action-decision-policy.md`
+- Added reference note:
+  - `.trellis/tasks/04-27-main-brain-harness-engineering/research/setup-agent-action-decision-reference-notes.md`
+- Goal:
+  - make the existing SetupAgent loop better at deciding when text is enough and when a tool observation is required first
+  - keep the implementation lightweight and project-specific
+  - avoid a new durable state-management layer or broad semantic planner
+- Source synthesis:
+  - Claude Code: explicit continue/stop sites and guard-triggered retry
+  - Pi mono: small loop hooks and pre-provider context transform boundary
+  - LangGraph: graph remains execution substrate, while setup semantics stay explicit above graph routes
+  - OpenAI / Anthropic SDK docs: action guardrails and trace surfaces belong around the agent loop rather than inside business truth
+- MVP enforcement:
+  - when compacted current-step context only exposes draft refs/recovery hints
+  - and the user asks for exact/full/concrete draft detail
+  - and no same-turn successful `setup.read.draft_refs` observation exists
+  - the runtime blocks text-only finalization and mutation tool batches until `setup.read.draft_refs` runs first
+- Explicit exclusions:
+  - no generic "similar task" classifier
+  - no forced tool call for design/opinion questions
+  - no persistent `action_expectation`
+  - no replacement for existing repair / reflection / completion policies
+- Trellis-check result:
+  - fixed readback observation parsing so `setup.read.draft_refs` can clear the expectation when the expected ref is present in either structured payloads or nested JSON `content_text`
+  - fixed turn-local expectation recomputation so an explicit empty same-turn `tool_results` list does not fall back to older tool history
+  - added regression coverage for nested `content_text` readback and mismatched successful readback
+  - verification passed for targeted tests, ruff, scoped mypy, and diff whitespace; full `backend/rp/tests` timed out after 10 minutes and was not used as slice evidence
+
+### Incremental Stage Compact Summary (2026-05-01)
+
+- Current slice:
+  - implement compact as a light context-engineering transform, not a new state-management layer
+  - first compact summarizes the dropped current-stage prefix from the beginning
+  - later compacts update the previous compact summary with only newly dropped messages after the previous summary boundary
+  - the recent raw window remains prompt-visible and is not duplicated into compact summary
+  - exact token usage from LiteLLM/OpenAI-compatible response `usage` remains an observed signal for the next turn; pre-call estimates remain only a safety heuristic because exact usage arrives after model response
+- Sources:
+  - user-confirmed requirement: compact should summarize prompt context according to a preset compression instruction and hand the result to context engineering
+  - LangChain summarization middleware: trigger plus keep-window policy
+  - OpenAI Agents SDK sessions/context: pre-model context trimming/compaction boundaries
+  - Pi mono: previous-summary update and `transformContext -> convertToLlm`
+  - Claude Code: no-tools compact summarization and recent context retained around summary
+- Exclusions:
+  - no new memory table
+  - no new generic middleware framework
+  - no cross-stage handoff redesign
+  - no Foundation Chunk Contract implementation in this slice
+- Implemented behavior:
+  - `SetupContextCompactionService` now detects whether an existing `compact_summary` is an exact dropped-prefix match, a valid earlier prefix, or a mismatch
+  - exact dropped-prefix match reports `summary_action="reused_existing"`
+  - valid earlier prefix reports `summary_action="updated_existing"` and sends only newly compacted current-step messages to the compact prompt pass
+  - mismatch reports `summary_action="rebuilt"` and compacts from the full dropped prefix
+  - deterministic incremental fallback merges existing summary fields with the newly compacted message summary while preserving source fingerprint/count for the full dropped prefix
+  - compact prompt includes dropped-prefix fingerprint metadata and excludes the recent raw window from incremental prompt input
+  - `SetupContextGovernanceReport.summary_action` includes `updated_existing`
+- Trellis-check result:
+  - fixed scoped mypy issue in `SetupContextGovernorService` previous-usage token metadata handling
+  - tightened deterministic summary ordering so first compact and rebuild start from the dropped-prefix beginning
+  - added focused tests for first compact start, incremental update, prefix mismatch rebuild, and compact prompt delta boundary
+  - verification passed for targeted pytest (`23 passed`), ruff, scoped mypy, and diff whitespace
+
+### Compact Prompt Pass And Toolset Audit (2026-05-02)
+
+- Source alignment:
+  - user-confirmed direction: compact is context engineering, should be a direct compression prompt pass, and should not introduce another expert/agent layer
+  - Claude Code source borrowing: no-tools compact summarization before model-call assembly, with retained summary fields only
+  - Pi mono source borrowing: pre-LLM context transform boundary and previous-summary-plus-delta update style
+  - project-specific adaptation: exact draft detail recovery remains `setup.read.draft_refs`, not full-detail storage inside `compact_summary`
+- Implemented / aligned behavior:
+  - executable specs and task research now use `SetupStageCompactPrompt` / `compact_prompt_summary` instead of `SetupStageCompactExpert` / `expert_stage_summary`
+  - `SetupContextGovernanceReport.summary_action` includes `updated_existing`
+  - compact prompt pass remains no-tools, JSON-only, capped/validated, and falls back to deterministic summary on model/validation failure
+  - fixed `SetupAgentExecutionService` / `SetupContextGovernorService` previous-usage typing so `prompt_tokens`, `completion_tokens`, and `total_tokens` remain `int | None` at the boundary while mypy stays clean
+  - fixed the opt-in real-model test fixture so an existing local registry model config still re-seeds provider/model entries after per-test registry service reset; this removes full-file `Model not found` cross-test interference without changing the setup agent runtime path
+  - Trellis-check tightened the same fixture so full env-seeded provider/model config takes precedence over an existing local registry model id, and incomplete local registry entries cannot re-seed an empty `api_key` or `model_name`
+- Toolset audit result:
+  - `setup.read.draft_refs` is already registered in `SetupToolProvider`, included in shared setup tool scope, read-only, bounded by `detail` and `max_chars`, and covered by provider tests
+  - stage-aware tool scope already narrows only patch-family tools while keeping shared cognitive/read/commit tools visible
+  - no extra tool-semantics layer or repair framework is needed in this slice
+- Verification:
+  - `python -m pytest backend/rp/tests/test_setup_context_governor.py backend/rp/tests/test_setup_agent_execution_service_v2.py -q` -> `24 passed`
+  - `python -m pytest backend/rp/tests/test_setup_tool_provider.py backend/rp/tests/test_setup_agent_runtime_executor.py backend/rp/tests/test_setup_agent_runtime_policies.py backend/rp/tests/test_setup_agent_real_model_compact_recovery.py -q` -> `61 passed, 3 skipped`
+  - `python -m pytest backend/rp/tests/test_setup_agent_tool_scope.py backend/rp/tests/test_setup_tool_provider.py -q` -> `11 passed`
+  - opt-in real-model end-to-end chain with local `gpt-4o-mini` registry entry:
+    - `CHATBOX_RUN_REAL_SETUP_AGENT_COMPACT_EVAL=1 ... python -m pytest backend/rp/tests/test_setup_agent_real_model_compact_recovery.py -q` -> `2 passed, 1 skipped`
+    - asserted real-model draft write, compact prompt hiding the exact detail, visible `foundation:magic-law` recovery handle, `setup.read.draft_refs` tool-call before using the missing detail, final answer populated from the tool result, and no exact detail leak into `compact_summary`
+  - default no-real-env behavior:
+    - `python -m pytest backend/rp/tests/test_setup_agent_real_model_compact_recovery.py -q` -> `3 skipped`
+  - scoped `ruff`, scoped `mypy --follow-imports=skip`, and `git diff --check` passed
+
+### Light Agent-Body Hardening (2026-05-02)
+
+- Source alignment:
+  - existing SetupAgent loop/ReAct trace spec: no-tool text completion is only one guarded loop branch, not proof of step completion
+  - Claude Code / Pi mono / OpenAI Agents SDK borrowing: keep stop/continue and trace decisions explicit, but do not introduce another planner or durable state layer
+  - existing structured-output schema repair spec and prior strict truth-write pilot: pydantic validation remains the final correctness source; provider/model strictness is only an enhancement
+- Implemented behavior:
+  - `inspect_model_output` now passes prior assistant questions and `working_digest` into `CompletionGuardPolicy`, matching the existing `assess_progress` branch
+  - repeated user-facing questions can no longer bypass the repeated-question guard on the first text-only model response
+  - loop trace coverage now proves the bad path: `inspect_model_output -> reflect_if_needed -> finalize_failure` with `max_rounds_exceeded`
+  - high-risk non-`setup.truth.write` tools now have provider-level schema repair spot-checks:
+    - `setup.patch.foundation_entry`
+    - `setup.patch.longform_blueprint`
+    - `setup.question.raise`
+    - `setup.asset.register`
+    - `setup.proposal.commit`
+- Explicit exclusions:
+  - no new generic repair framework
+  - no new state-management layer
+  - no change to user draft edit invalidation / recovery; that remains deferred for the user's follow-up explanation
+- Verification:
+  - `python -m pytest backend/rp/tests/test_setup_agent_runtime_executor.py backend/rp/tests/test_setup_agent_runtime_policies.py backend/rp/tests/test_setup_tool_provider.py -q` -> `67 passed, 1 warning`
+  - `python -m ruff check backend/rp/agent_runtime/executor.py backend/rp/tests/test_setup_agent_runtime_executor.py backend/rp/tests/test_setup_tool_provider.py` -> passed
+  - `python -m mypy --follow-imports=skip backend/rp/agent_runtime/executor.py backend/rp/tests/test_setup_agent_runtime_executor.py backend/rp/tests/test_setup_tool_provider.py` -> passed
+
 ### Research References
 
 - [`research/harness-engineering-openai-anthropic.md`](research/harness-engineering-openai-anthropic.md) — baseline for OpenAI/Anthropic harness-engineering vocabulary.
 - [`research/current-agent-gap-analysis.md`](research/current-agent-gap-analysis.md) — current gap analysis for skills, tools, mode profile, and harness layering.
 - [`research/setup-agent-main-spec-alignment-checklist.md`](research/setup-agent-main-spec-alignment-checklist.md) — frozen alignment note for main spec vs executable specs vs current implementation, including hard conflicts and next-slice boundary.
-- [`research/setup-agent-stage-local-compact-context-engineering-design.md`](research/setup-agent-stage-local-compact-context-engineering-design.md) — source synthesis for compact as stage-local context engineering, including CC/Pi borrowing, RP lightweight boundaries, compact expert role, and draft-ref recovery.
+- [`research/setup-agent-stage-local-compact-context-engineering-design.md`](research/setup-agent-stage-local-compact-context-engineering-design.md) — source synthesis for compact as stage-local context engineering, including CC/Pi borrowing, RP lightweight boundaries, compact prompt pass, and draft-ref recovery.
+- [`research/setup-agent-action-decision-reference-notes.md`](research/setup-agent-action-decision-reference-notes.md) — source synthesis for the lightweight action decision policy and compact readback observe-act guard.
 
 ### Output Artifacts
 

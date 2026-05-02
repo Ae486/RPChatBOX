@@ -15,6 +15,8 @@
 | [RP Setup Agent Pre-Model Context Assembly](./rp-setup-agent-pre-model-context-assembly.md) | Deterministic `SetupContextPacket -> governed history -> runtime overlay -> final request messages` contract for setup turns | Active |
 | [RP Setup Agent Stage-Aware Tool Scope](./rp-setup-agent-stage-aware-tool-scope.md) | Shared tools plus current-step patch-family narrowing for setup-turn tool visibility | Active |
 | [RP Setup Agent Structured Output Schema Repair](./rp-setup-agent-structured-output-schema-repair.md) | Machine-readable pydantic validation errors, one bounded schema repair retry, and deterministic blocking of false-success turn completion | Active |
+| [RP Setup Agent Slim Truth Write Tool Surface](./rp-setup-agent-strict-truth-write-tool-pilot.md) | Common slim `setup.truth.write` model-facing schema, runtime-owned argument injection, and strict-tool flags as verified enhancement before provider validation | Active |
+| [RP Setup Agent Action Decision Policy](./rp-setup-agent-action-decision-policy.md) | Lightweight runtime-authored action expectations that force draft-ref readback before exact compacted setup detail is used | Active |
 | [RP Setup Agent Loop Semantics ReAct Trace](./rp-setup-agent-loop-semantics-react-trace.md) | Explicit turn-loop order, continue/finish taxonomy, and thin runtime-authored ReAct trace above the current LangGraph graph | Active |
 | [RP Setup Agent Runtime-V2 Only Convergence](./rp-setup-agent-runtime-v2-only-convergence.md) | Remove the transitional setup legacy runtime path and keep every setup entrypoint on the runtime-v2 engine | Active |
 | [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md) | Keep the outer SetupGraph shell focused on checkpoint/routing and remove duplicate setup context assembly from the shell layer | Active |
@@ -47,6 +49,7 @@
 | [RP Recall Scene Transcript Promotion](./rp-recall-scene-transcript-promotion.md) | Freeze the closed-scene transcript promotion contract so Runtime Workspace discussion never becomes Recall history by accident | Active |
 | [RP Runtime Scene Lifecycle](./rp-runtime-scene-lifecycle.md) | Add explicit runtime scene identity and close-trigger scaffolding before transcript promotion or Core State scene materialization | Active |
 | [RP Narrative Retrieval Policy Contract](./rp-narrative-retrieval-policy-contract.md) | Freeze the narrative-aware search policy, filters, rerank strategy, scoring trace, context budget, and eval gaps for longform/RP retrieval | Active |
+| [RP Memory Graph Projection](./rp-memory-graph-projection.md) | Parallel GraphRAG / knowledge-graph projection over Archival-first memory material with PostgreSQL MVP storage, graph extraction jobs, inspection API, query expansion, and frontend validation view | Active |
 | [RP Retrieval Block-Compatible Views](./rp-retrieval-block-compatible-views.md) | Additive read-only Block-compatible views over recall/archival retrieval hits for runtime payloads | Active |
 | [RP Retrieval Block Observability](./rp-retrieval-block-observability.md) | Additive retrieval observability field that exposes top-hit Block-compatible views without changing search results | Active |
 | [RP Runtime Workspace Block Views](./rp-runtime-workspace-block-views.md) | Read-only Runtime Workspace Block views over current-chapter draft artifacts and discussion entries | Active |
@@ -60,6 +63,8 @@
 - [ ] If the change touches SetupAgent pre-model context assembly, runtime overlay insertion, or final request message ordering, read [RP Setup Agent Pre-Model Context Assembly](./rp-setup-agent-pre-model-context-assembly.md).
 - [ ] If the change touches SetupAgent per-step tool visibility, narrowed allowed-tool scope, or patch-family exposure, read [RP Setup Agent Stage-Aware Tool Scope](./rp-setup-agent-stage-aware-tool-scope.md).
 - [ ] If the change touches SetupAgent pydantic validation payloads, schema repair retry behavior, or false-success blocking after tool validation failure, read [RP Setup Agent Structured Output Schema Repair](./rp-setup-agent-structured-output-schema-repair.md).
+- [ ] If the change touches SetupAgent `setup.truth.write` model-facing tool schema, strict tool flags, or runtime-owned truth-write argument injection, read [RP Setup Agent Slim Truth Write Tool Surface](./rp-setup-agent-strict-truth-write-tool-pilot.md).
+- [ ] If the change touches SetupAgent action selection, text-finalization guards, compact recovery readback, or tool-batch blocking before required observations, read [RP Setup Agent Action Decision Policy](./rp-setup-agent-action-decision-policy.md).
 - [ ] If the change touches SetupAgent turn-loop order, graph-route meaning, runtime trace, or continue/finish semantics, read [RP Setup Agent Loop Semantics ReAct Trace](./rp-setup-agent-loop-semantics-react-trace.md).
 - [ ] If the change touches SetupAgent runtime entrypoint wiring, factory convergence, or removal of the transitional legacy runtime path, read [RP Setup Agent Runtime-V2 Only Convergence](./rp-setup-agent-runtime-v2-only-convergence.md).
 - [ ] If the change touches the phase-1 SetupGraph shell, stream checkpoint seeding, or graph-level duplication of setup context assembly, read [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md).
@@ -92,6 +97,7 @@
 - [ ] If the change promotes closed-scene transcript history into Recall, read [RP Recall Scene Transcript Promotion](./rp-recall-scene-transcript-promotion.md).
 - [ ] If the change adds runtime scene identity, scene-close trigger behavior, or scene refs on runtime rows, read [RP Runtime Scene Lifecycle](./rp-runtime-scene-lifecycle.md).
 - [ ] If the change adjusts longform/RP retrieval filters, rerank strategy, narrative scoring, context budget, or retrieval eval quality gates, read [RP Narrative Retrieval Policy Contract](./rp-narrative-retrieval-policy-contract.md).
+- [ ] If the change adds or modifies GraphRAG / knowledge-graph projection storage, graph extraction jobs, graph inspection APIs, graph query expansion, or relationship-network inspection views, read [RP Memory Graph Projection](./rp-memory-graph-projection.md).
 - [ ] If the change adapts recall/archival retrieval results into Block-compatible runtime views, read [RP Retrieval Block-Compatible Views](./rp-retrieval-block-compatible-views.md).
 - [ ] If the change adjusts retrieval observability or Langfuse payloads to expose Block-compatible views, read [RP Retrieval Block Observability](./rp-retrieval-block-observability.md).
 - [ ] If the change exposes Runtime Workspace draft/discussion state through `/memory/blocks`, read [RP Runtime Workspace Block Views](./rp-runtime-workspace-block-views.md).
@@ -132,6 +138,8 @@
 - [ ] Scene transcript promotion requires explicit closed-scene identity and filtered source material; raw discussion rows never become Recall history by default.
 - [ ] Runtime scene lifecycle seeds deterministic `scene_ref`, rotates only through explicit close behavior, and does not materialize Recall/Core State scene history by accident.
 - [ ] Narrative retrieval policy keeps public memory search tools stable, resolves broker rerank strategy explicitly, uses structured filters instead of caller-side post-filtering, and emits ranking/budget trace for longform/RP context composition.
+- [ ] Memory Graph Projection stays parallel-first, keeps retrieval-core and public memory tools stable, requires evidence-backed graph facts, and exposes full graph details only through inspection surfaces.
 - [ ] SetupAgent loop routing, `continue_reason`, `finish_reason`, and runtime trace stay semantically aligned; `next_action` remains an internal graph-route token rather than a user-facing outcome contract.
+- [ ] SetupAgent action expectations stay turn-transient, high-certainty only, and do not become durable setup state or broad semantic planning.
 - [ ] `SetupAgentExecutionService` text and stream entrypoints reuse the same outer-harness preflight and runtime-v2 launch boundaries; drift is limited to the true run vs run_stream split.
 - [ ] Lint/format and relevant scoped type checks pass.

@@ -164,6 +164,34 @@ Retrieval model choice is story scoped:
 - `RetrievalRuntimeConfigService` overlays story runtime config on top of setup defaults.
 - Flutter setup/story pages share a model config page for agent and retrieval model selection.
 
+## GraphRAG / Knowledge Graph Direction
+
+This task treats GraphRAG as a parallel, additive relation-aware retrieval path, not a replacement for retrieval-core or the existing memory surfaces.
+
+Detailed decision log:
+
+- `.trellis/tasks/04-29-retrieval-dev-task/research/memory-graph-projection-decision-log.md`
+
+Executable backend spec:
+
+- `.trellis/spec/backend/rp-memory-graph-projection.md`
+
+### Confirmed working agreements
+
+- Primary product goal: relation-aware creative retrieval and relationship-network reasoning.
+- First-stage coverage starts with `Archival Knowledge` because setup commit fills it first; the design must remain reusable for `Recall Memory`.
+- Public tool surface stays singular: do not add a `memory.search_graph` tool. Routing and graph use stay inside retrieval policy / broker logic.
+- First-stage storage uses PostgreSQL-backed lightweight graph projection. Do not introduce Neo4j or another standalone graph database in the MVP.
+- Graph extraction runs asynchronously after setup commit ingestion as a maintenance job that reads archival material and emits graph projection rows.
+- Initial extraction granularity is section/chunk-level candidates, followed by entity normalization and relation merge. Asset-level summaries are a later add-on, not a first-stage requirement.
+- Graph outputs are candidate facts only. They must carry evidence pointers, confidence, `source_layer` / `source_type` / `source_ref`, and remain `source_reference` rather than canon.
+- Graph is a query-time candidate expansion layer, not the final answer source. Final retrieval must still return to evidence chunks and unified rerank.
+- Query-time behavior should default to deterministic graph traversal / rerank, with LLM fallback only for ambiguous entity linking, path explanation, or consistency checks.
+- Graph extraction failure only affects graph projection; archival retrieval must continue to work, and failures go to observability / maintenance.
+- Phase 1 requires an internal inspection API for nodes, edges, evidence, and extraction state. No product UI is required yet.
+- Relation taxonomy is frozen and intentionally small at first; raw relation text is retained for debug and future expansion.
+- Phase 1 entity taxonomy is limited to setup/Archival stable entities: `character`, `place`, `faction_or_org`, `rule`, `object_or_artifact`, and `term_or_concept`. `scene`, `event`, and `foreshadow` are reserved for later Recall expansion.
+
 ## Requirements
 
 - Preserve retrieval-core as the physical source of truth for Recall and Archival search material unless a later task proves a different physical model is required.

@@ -59,6 +59,7 @@
   - raw pydantic `errors`
   - flat `provided_fields`
 - The provider must not collapse schema validation into free-form prose only.
+- This contract applies to the setup tool provider generally, not only to the previously optimized `setup.truth.write` path. High-risk write/question/commit tools must expose the same machine-readable repair shape when required fields are missing.
 
 #### 3.2 Missing Fields Must Derive From Deterministic Paths
 
@@ -108,6 +109,12 @@
 ### 4. Validation & Error Matrix
 
 - pydantic missing field on `setup.patch.story_config` with only `workspace_id` provided -> provider emits `SCHEMA_VALIDATION_FAILED`, `repair_strategy = auto_repair`, `required_fields` includes `patch`, and `provided_fields` includes `workspace_id`
+- pydantic missing required fields on key non-`setup.truth.write` tools -> provider emits the same repairable schema error shape:
+  - `setup.patch.foundation_entry` missing `entry`
+  - `setup.patch.longform_blueprint` missing `patch`
+  - `setup.question.raise` missing `text`
+  - `setup.asset.register` missing `source_ref`
+  - `setup.proposal.commit` missing `target_draft_refs`
 - structured payload already contains `details.required_fields` -> runtime uses that list directly
 - structured payload omits `required_fields` but keeps raw `errors` -> runtime derives nested field paths from `errors`
 - first schema validation failure in one turn -> warning `tool_schema_validation_retry`, `pending_obligation = repair_tool_call`, turn continues
@@ -127,6 +134,7 @@
   - assert schema validation payload contains `repair_strategy = auto_repair`
   - assert `required_fields` includes the missing path
   - assert `provided_fields` reflects what the model actually supplied
+  - assert representative non-`setup.truth.write` setup tools return the same repairable schema error contract for missing required fields
 - `backend/rp/tests/test_setup_agent_runtime_policies.py`
   - assert `missing_required_fields(...)` can derive nested field paths from raw `errors` when `required_fields` is absent
   - assert second schema retry attempt finalizes with `tool_schema_validation_failed`

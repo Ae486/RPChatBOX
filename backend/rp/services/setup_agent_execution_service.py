@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 from typing import Any, AsyncIterator
 
+from models.chat import ChatCompletionRequest
 from rp.agent_runtime.adapters import SetupRuntimeAdapter
 from rp.agent_runtime.contracts import (
     RpAgentTurnResult,
@@ -24,6 +26,7 @@ from rp.models.setup_handoff import SetupContextBuilderInput
 from rp.models.setup_workspace import SetupStepId
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
+from rp.services.setup_context_compaction_service import SetupContextCompactionService
 from rp.services.setup_context_governor import SetupContextGovernorService
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from services.litellm_service import LiteLLMService, get_litellm_service
@@ -73,6 +76,7 @@ class SetupAgentExecutionService:
     _COMPACT_OBSERVED_PROMPT_TOKEN_THRESHOLD = 1800
     _COMPACT_OBSERVED_TOTAL_TOKEN_THRESHOLD = 2400
     _COMPACT_USER_EDIT_THRESHOLD = 3
+    _COMPACT_PROMPT_MAX_TOKENS = 1200
 
     def __init__(
         self,
@@ -267,20 +271,23 @@ class SetupAgentExecutionService:
         usage = latest_response.get("usage")
         if not isinstance(usage, dict):
             return None
+        prompt_tokens_raw: Any = usage.get("prompt_tokens")
+        completion_tokens_raw: Any = usage.get("completion_tokens")
+        total_tokens_raw: Any = usage.get("total_tokens")
         return {
             "prompt_tokens": (
-                int(usage.get("prompt_tokens"))
-                if usage.get("prompt_tokens") is not None
+                int(prompt_tokens_raw)
+                if prompt_tokens_raw is not None
                 else None
             ),
             "completion_tokens": (
-                int(usage.get("completion_tokens"))
-                if usage.get("completion_tokens") is not None
+                int(completion_tokens_raw)
+                if completion_tokens_raw is not None
                 else None
             ),
             "total_tokens": (
-                int(usage.get("total_tokens"))
-                if usage.get("total_tokens") is not None
+                int(total_tokens_raw)
+                if total_tokens_raw is not None
                 else None
             ),
         }
@@ -439,7 +446,7 @@ class SetupAgentExecutionService:
                 "user_prompt": launch.request.user_prompt,
             },
         ) as observation:
-            prepared = self._prepare_runtime_v2_launch(
+            prepared = await self._prepare_runtime_v2_launch(
                 adapter=adapter,
                 launch=launch,
                 stream=False,
@@ -484,7 +491,7 @@ class SetupAgentExecutionService:
                 "stream": True,
             },
         ) as observation:
-            prepared = self._prepare_runtime_v2_launch(
+            prepared = await self._prepare_runtime_v2_launch(
                 adapter=adapter,
                 launch=launch,
                 stream=True,
@@ -514,14 +521,14 @@ class SetupAgentExecutionService:
                     )
                 )
 
-    def _prepare_runtime_v2_launch(
+    async def _prepare_runtime_v2_launch(
         self,
         *,
         adapter: SetupRuntimeAdapter,
         launch: _SetupTurnLaunch,
         stream: bool,
     ) -> _PreparedRuntimeV2Launch:
-        turn_input, context_packet = self._build_runtime_v2_turn_input(
+        turn_input, context_packet = await self._build_runtime_v2_turn_input(
             adapter=adapter,
             request=launch.request,
             workspace=launch.workspace,
@@ -551,7 +558,7 @@ class SetupAgentExecutionService:
             else 0,
         }
 
-    def _build_runtime_v2_turn_input(
+    async def _build_runtime_v2_turn_input(
         self,
         *,
         adapter: SetupRuntimeAdapter,
@@ -628,8 +635,15 @@ class SetupAgentExecutionService:
             if cognitive_state_summary is not None
             else None
         )
+        context_governor = self._context_governor
+        if context_packet.context_profile == "compact":
+            context_governor = self._build_compact_prompt_governor(
+                model_name=model_name,
+                model_id=request.model_id,
+                provider=provider,
+            )
         governed_history, compact_summary, governance_metadata = (
-            self._context_governor.govern_history(
+            await context_governor.govern_history_async(
                 history=list(request.history),
                 retained_tool_outcomes=retained_tool_outcomes,
                 working_digest=working_digest,
@@ -664,6 +678,59 @@ class SetupAgentExecutionService:
             cognitive_state_summary=cognitive_state_summary,
         )
         return turn_input, context_packet
+
+    def _build_compact_prompt_governor(
+        self,
+        *,
+        model_name: str,
+        model_id: str,
+        provider,
+    ) -> SetupContextGovernorService:
+        compaction_service = SetupContextCompactionService(
+            compact_prompt_provider=lambda messages: self._run_compact_prompt_pass(
+                messages=messages,
+                model_name=model_name,
+                model_id=model_id,
+                provider=provider,
+            )
+        )
+        return SetupContextGovernorService(compaction_service=compaction_service)
+
+    async def _run_compact_prompt_pass(
+        self,
+        *,
+        messages,
+        model_name: str,
+        model_id: str,
+        provider,
+    ) -> dict[str, Any]:
+        request = ChatCompletionRequest(
+            model=model_name,
+            model_id=model_id,
+            messages=messages,
+            stream=False,
+            provider=provider,
+            max_tokens=self._COMPACT_PROMPT_MAX_TOKENS,
+        )
+        response = await self._llm_service.chat_completion(request)
+        content = self._extract_compact_prompt_content(response)
+        return json.loads(content)
+
+    @staticmethod
+    def _extract_compact_prompt_content(response: dict[str, Any]) -> str:
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("compact_prompt_missing_choices")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise ValueError("compact_prompt_invalid_choice")
+        message = first.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("compact_prompt_missing_message")
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        raise ValueError("compact_prompt_missing_content")
 
     def _persist_runtime_v2_governance(
         self,
