@@ -347,7 +347,9 @@ def test_graph_queue_failure_does_not_fail_setup_archival_ingestion(
     assert graph_jobs == []
 
 
-def test_setup_stage_payload_ingestion_reads_canonical_stage_snapshot(retrieval_session):
+def test_setup_stage_payload_ingestion_reads_canonical_stage_snapshot(
+    retrieval_session,
+):
     _seed_workspace(retrieval_session)
     retrieval_session.add(
         SetupAcceptedCommitRecord(
@@ -371,9 +373,7 @@ def test_setup_stage_payload_ingestion_reads_canonical_stage_snapshot(retrieval_
                                     "section_id": "summary",
                                     "title": "Summary",
                                     "kind": "text",
-                                    "content": {
-                                        "text": "Elven oaths bind dusk gates."
-                                    },
+                                    "content": {"text": "Elven oaths bind dusk gates."},
                                 },
                                 {
                                     "section_id": "customs",
@@ -425,13 +425,130 @@ def test_setup_stage_payload_ingestion_reads_canonical_stage_snapshot(retrieval_
     assert asset is not None
     assert asset.metadata_json["step_id"] == "world_background"
     assert asset.metadata_json["domain_path"] == "world_background.race.elf"
-    assert asset.metadata_json["seed_sections"][0]["path"] == (
-        "world_background.race.elf"
+    assert len(asset.metadata_json["seed_sections"]) == 2
+    assert {section["path"] for section in asset.metadata_json["seed_sections"]} == {
+        "world_background.race.elf.summary",
+        "world_background.race.elf.customs",
+    }
+    assert {
+        section["metadata"]["entry_domain_path"]
+        for section in asset.metadata_json["seed_sections"]
+    } == {"world_background.race.elf"}
+    assert {
+        section["metadata"]["committed_ref"]
+        for section in asset.metadata_json["seed_sections"]
+    } == {
+        "foundation:world_background:race_elf:summary",
+        "foundation:world_background:race_elf:customs",
+    }
+    assert {
+        section["metadata"]["stage_ref"]
+        for section in asset.metadata_json["seed_sections"]
+    } == {
+        "stage:world_background:race_elf:summary",
+        "stage:world_background:race_elf:customs",
+    }
+    assert (
+        "Elven oaths bind dusk gates."
+        in asset.metadata_json["seed_sections"][0]["text"]
     )
-    assert "Elven oaths bind dusk gates." in asset.metadata_json["seed_sections"][0]["text"]
-    assert "Moonlit treaties" in asset.metadata_json["seed_sections"][0]["text"]
+    assert "Moonlit treaties" in asset.metadata_json["seed_sections"][1]["text"]
     assert chunks
-    assert chunks[0].domain_path == "world_background.race.elf"
+    assert {chunk.domain_path for chunk in chunks} == {
+        "world_background.race.elf.summary",
+        "world_background.race.elf.customs",
+    }
+    assert {chunk.metadata_json["entry_id"] for chunk in chunks} == {"race_elf"}
+    assert {chunk.metadata_json["committed_ref"] for chunk in chunks} == {
+        "foundation:world_background:race_elf:summary",
+        "foundation:world_background:race_elf:customs",
+    }
+
+
+def test_setup_stage_section_ingestion_mechanically_splits_oversized_text(
+    retrieval_session,
+):
+    _seed_workspace(retrieval_session)
+    long_text = "\n".join(
+        [
+            "A luminous forest oath line " + ("x" * 420),
+            "A cedar witness line " + ("y" * 420),
+            "A dusk-gate clause line " + ("z" * 420),
+        ]
+    )
+    retrieval_session.add(
+        SetupAcceptedCommitRecord(
+            commit_id="commit-stage-world-background-long",
+            workspace_id="workspace-archival",
+            proposal_id="proposal-stage-world-background-long",
+            step_id="world_background",
+            committed_refs_json=["stage:world_background:race_elf"],
+            snapshot_payload_json={
+                "world_background": {
+                    "stage_id": "world_background",
+                    "entries": [
+                        {
+                            "entry_id": "race_elf",
+                            "entry_type": "race",
+                            "semantic_path": "world_background.race.elf",
+                            "title": "Elf",
+                            "sections": [
+                                {
+                                    "section_id": "lore",
+                                    "title": "Lore",
+                                    "kind": "text",
+                                    "content": {"text": long_text},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+    )
+    retrieval_session.add(
+        SetupRetrievalIngestionJobRecord(
+            job_id="setup-job-stage-world-background-long",
+            workspace_id="workspace-archival",
+            commit_id="commit-stage-world-background-long",
+            step_id="world_background",
+            target_type="foundation_entry",
+            target_ref="race_elf",
+            state="queued",
+        )
+    )
+    retrieval_session.commit()
+
+    MinimalRetrievalIngestionService(retrieval_session).ingest_commit(
+        workspace_id="workspace-archival",
+        commit_id="commit-stage-world-background-long",
+    )
+
+    chunks = retrieval_session.exec(
+        select(KnowledgeChunkRecord).where(
+            KnowledgeChunkRecord.asset_id
+            == "commit-stage-world-background-long:foundation_entry:race_elf"
+        )
+    ).all()
+
+    assert len(chunks) > 1
+    assert {chunk.domain_path for chunk in chunks} == {"world_background.race.elf.lore"}
+    assert {chunk.metadata_json["entry_id"] for chunk in chunks} == {"race_elf"}
+    assert {chunk.metadata_json["section_id"] for chunk in chunks} == {
+        "foundation:world_background:race_elf:lore"
+    }
+    assert {chunk.metadata_json["setup_section_id"] for chunk in chunks} == {"lore"}
+    assert {chunk.metadata_json["committed_ref"] for chunk in chunks} == {
+        "foundation:world_background:race_elf:lore"
+    }
+    assert {chunk.metadata_json["stage_ref"] for chunk in chunks} == {
+        "stage:world_background:race_elf:lore"
+    }
+    assert {chunk.metadata_json["chunking_strategy"] for chunk in chunks} <= {
+        "section_aligned",
+        "sliding_window",
+        "fixed_slice",
+    }
 
 
 def test_setup_blueprint_ingestion_generates_archival_metadata(retrieval_session):

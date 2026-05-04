@@ -112,20 +112,35 @@ Goal:
 
 - Generate deterministic read model over accepted setup stage snapshots.
 - Support exact/path/filter/lexical direct read separate from semantic retrieval.
+- Keep committed foundation reads separate from editable draft reads.
 
 Implementation:
 
 - Build index rows from accepted snapshots.
 - Add search/read helpers.
 - Keep this as a structural index, not an embedding/RAG replacement.
+- Add read-only setup tools:
+  - `setup.truth_index.search` for small lexical/path/filter candidate refs.
+  - `setup.truth_index.read_refs` for bounded exact committed payload reads.
+- Default reads use the latest accepted commit per canonical stage; explicit `commit_id` can target a specific accepted snapshot.
+- Supported committed refs:
+  - `foundation:<stage_id>`
+  - `foundation:<stage_id>:<entry_id>`
+  - `foundation:<stage_id>:<entry_id>:<section_id>`
+  - `stage:<stage_id>:<entry_id>` and section variants as aliases for committed proposal refs.
 
 Verification:
 
 - Search by title/alias/tag/path.
 - Exact read by ref.
 - Rebuild from accepted snapshot.
+- No reads from uncommitted draft changes or raw prior discussion.
 
 ## Slice 4: Retrieval Materialization From Entry/Section Tree
+
+Executable spec:
+
+- `.trellis/spec/backend/rp-setup-retrieval-seed-materialization.md`
 
 Goal:
 
@@ -135,7 +150,7 @@ Goal:
 Implementation:
 
 - Derive seed sections from stage entry/section tree.
-- Split oversized sections mechanically by paragraph/window.
+- Reuse retrieval-core's existing paragraph/window chunker for oversized section text instead of adding a setup-side splitter.
 - Preserve stage/entry/section anchors in diagnostics.
 
 Verification:

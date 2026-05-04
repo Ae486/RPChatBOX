@@ -41,3 +41,15 @@
 {"file": "backend/rp/tests/test_setup_agent_tool_scope.py", "reason": "Slice 2A check: proves canonical stages map to the intended legacy patch-family tool scopes"}
 {"file": "backend/rp/tests/test_setup_agent_execution_service_v2.py", "reason": "Slice 2A check: proves runtime-v2 turn input carries current_stage metadata and stage-aware tool scope"}
 {"file": ".trellis/tasks/04-27-main-brain-harness-engineering/research/setup-stage-module-draft-slice-plan.md", "reason": "Slice 2A check: confirms setup write tools remain deferred to Slice 2B"}
+{"file": ".trellis/spec/backend/rp-setup-agent-strict-truth-write-tool-pilot.md", "reason": "Slice 2B check: verify stage-native writes reuse the existing slim setup.truth.write structured-output surface"}
+{"file": "backend/rp/tools/setup_tool_provider.py", "reason": "Slice 2B/Slice 3 check: verify stage_draft truth writes, stage-ref commit routing, and setup.truth_index tool dispatch"}
+{"file": "backend/rp/agent_runtime/profiles.py", "reason": "Slice 2B/Slice 3 check: verify canonical stage scopes hide legacy patch tools and keep truth index read tools visible"}
+{"file": ".trellis/spec/backend/rp-setup-truth-index-foundation.md", "reason": "Slice 3 check: verify committed foundation truth index stays deterministic, exact-readable, and separate from editable draft refs"}
+{"file": "backend/rp/services/setup_truth_index_service.py", "reason": "Slice 3 check: verify latest-commit selection, lexical filters, foundation refs, stage aliases, and bounded exact reads"}
+{"file": "backend/rp/tests/test_setup_truth_index_service.py", "reason": "Slice 3 check: verify rebuild/search/read coverage for committed setup truth index"}
+{"file": ".trellis/spec/backend/rp-setup-retrieval-seed-materialization.md", "reason": "Slice 4 check: verify accepted setup entry/section trees become retrieval seed sections without agent rewrite"}
+{"file": "backend/rp/services/minimal_retrieval_ingestion_service.py", "reason": "Slice 4 check: verify stage section seed rendering, setup anchors, and retrieval-core mechanical chunking boundary"}
+{"file": "backend/rp/tests/test_minimal_retrieval_ingestion_service.py", "reason": "Slice 4 check: verify section-level seed materialization, oversized split preservation, and legacy foundation compatibility"}
+{"file": "lib/models/rp_setup.dart", "reason": "Slice 5 check: verify Flutter model parses current_stage, stage_plan, stage_states, and draft_blocks while preserving legacy fields"}
+{"file": "lib/pages/prestory_setup_page.dart", "reason": "Slice 5 check: verify setup page renders from backend stage plan/draft blocks with MVP-only UI changes"}
+{"file": "test/unit/models/rp_setup_test.dart", "reason": "Slice 5 check: verify frontend stage contract parsing and legacy fallback behavior"}

@@ -22,6 +22,8 @@
 | [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md) | Keep the outer SetupGraph shell focused on checkpoint/routing and remove duplicate setup context assembly from the shell layer | Active |
 | [RP Setup Agent Execution Service Outer-Harness Thin Boundary](./rp-setup-agent-execution-service-outer-harness-thin-boundary.md) | Keep `SetupAgentExecutionService` on one shared preflight/launch boundary and prevent text/stream public-path drift | Active |
 | [RP Setup Stage Module Draft Foundation Contract](./rp-setup-stage-module-draft-foundation-contract.md) | Canonical setup stage modules, reusable mode plans, data-driven draft blocks, and committed foundation truth source boundaries | Active |
+| [RP Setup Truth Index Foundation](./rp-setup-truth-index-foundation.md) | Deterministic direct search/read model over accepted setup stage snapshots, separate from editable draft reads and semantic retrieval | Active |
+| [RP Setup Retrieval Seed Materialization](./rp-setup-retrieval-seed-materialization.md) | Deterministic retrieval seed sections derived from committed setup entry/section trees, with mechanical chunk splitting handled by retrieval-core | Active |
 | [RP Core State Block Envelope](./rp-core-state-block-envelope.md) | Read-only Block envelope over RP Core State formal store and compatibility mirrors | Active |
 | [RP Authoritative Block Governed Mutation](./rp-authoritative-block-governed-mutation.md) | Block-addressed authoritative mutation entry that normalizes into the existing proposal/apply workflow | Active |
 | [RP Authoritative Block Proposal Review Apply Visibility](./rp-authoritative-block-proposal-review-apply-visibility.md) | Block-scoped proposal detail and manual apply continuation over the existing proposal/apply persistence | Active |
@@ -73,6 +75,8 @@
 - [ ] If the change touches the phase-1 SetupGraph shell, stream checkpoint seeding, or graph-level duplication of setup context assembly, read [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md).
 - [ ] If the change touches `SetupAgentExecutionService` public turn entrypoints, shared preflight, or text/stream launch drift, read [RP Setup Agent Execution Service Outer-Harness Thin Boundary](./rp-setup-agent-execution-service-outer-harness-thin-boundary.md).
 - [ ] If the change touches setup lifecycle granularity, stage modules, mode stage plans, setup draft block storage, or committed setup foundation truth surfaces, read [RP Setup Stage Module Draft Foundation Contract](./rp-setup-stage-module-draft-foundation-contract.md).
+- [ ] If the change touches deterministic direct reads over accepted setup stage snapshots, committed foundation refs, or setup truth index search/read tools, read [RP Setup Truth Index Foundation](./rp-setup-truth-index-foundation.md).
+- [ ] If the change touches setup accepted commit ingestion into retrieval seed sections, section-level chunk materialization, or setup retrieval anchor metadata, read [RP Setup Retrieval Seed Materialization](./rp-setup-retrieval-seed-materialization.md).
 - [ ] If the change touches RP memory/Core State, read [RP Core State Block Envelope](./rp-core-state-block-envelope.md).
 - [ ] If the change adds or modifies block-addressed authoritative mutation, read [RP Authoritative Block Governed Mutation](./rp-authoritative-block-governed-mutation.md).
 - [ ] If the change adds or modifies block-scoped proposal review/apply visibility, read [RP Authoritative Block Proposal Review Apply Visibility](./rp-authoritative-block-proposal-review-apply-visibility.md).
@@ -133,6 +137,7 @@
 - [ ] Retrieval-backed Block-compatible views stay additive/read-only and do not replace public search results or active-story Core State `block_context`.
 - [ ] Retrieval observability Block fields reuse the canonical retrieval Block adapter and stay additive to existing hit-centric payloads.
 - [ ] Runtime Workspace Block views stay read-only/session-scoped and do not widen mutation/history support.
+- [ ] Setup retrieval seed materialization keeps accepted setup entry/section trees as the semantic source, preserves setup anchors on emitted sections/chunks, and leaves mechanical paragraph/window splitting to retrieval-core.
 - [ ] Recall detail retention preserves settled prose through retrieval-core without treating drafts as history or replacing chapter summaries.
 - [ ] Character long-history retention is rooted in authoritative `character_state_digest` snapshots and does not overload `summary_updates` or runtime scratch.
 - [ ] Retired-foreshadow retention is rooted in authoritative terminal `foreshadow_registry` snapshots and does not infer retirement from `summary_updates` or runtime scratch.

@@ -562,6 +562,79 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
   - retrieval seed materialization from entry/section tree
   - frontend data-driven rendering
 
+### Setup Stage-Native Write Tool Slice (2026-05-04)
+
+- Implemented slice:
+  - Slice 2B: stage-native setup write tools through the existing `setup.truth.write` path
+- Source alignment:
+  - user-confirmed direction: do not add another broad write tool when `setup.truth.write` already carries the structured-output, pydantic validation, and repair surface
+  - existing Slice 1/2A code: canonical stages and draft blocks are now present, but write tools still needed to stop targeting old `foundation_draft`
+- Slice 2B behavior:
+  - `setup.truth.write` supports `block_type="stage_draft"` with runtime/current-stage `stage_id`
+  - entry payloads create/merge/replace one `SetupDraftEntry` inside `draft_blocks[stage_id]`
+  - full-block payloads validate and replace/merge a whole `SetupStageDraftBlock`
+  - canonical stage tool scopes keep shared `setup.truth.write` visible and hide legacy `setup.patch.*` tools by default
+  - `setup.proposal.commit` routes canonical `draft:<stage_id>` and `stage:<stage_id>:<entry_id>` refs to `propose_stage_commit(...)`
+- Verification:
+  - covered by `backend/rp/tests/test_setup_tool_provider.py` and `backend/rp/tests/test_setup_agent_tool_scope.py`
+
+### Setup Truth Index Foundation Slice (2026-05-04)
+
+- Added executable backend spec:
+  - `.trellis/spec/backend/rp-setup-truth-index-foundation.md`
+- Implemented slice:
+  - Slice 3: deterministic direct search/read model over accepted setup stage snapshots
+- Source alignment:
+  - user-confirmed direction: committed foundation truth can be indexed by deterministic backend logic, but the agent must not rewrite accepted draft after commit
+  - existing setup commit model: accepted snapshots already preserve stage block JSON, commit id, refs, and timestamps
+- Slice 3 behavior:
+  - add `SetupTruthIndexRow`, filters, search/read input and result models
+  - add `SetupTruthIndexService.rebuild/search/read_refs`
+  - add read-only tools `setup.truth_index.search` and `setup.truth_index.read_refs`
+  - default reads use latest accepted commit per canonical stage; explicit `commit_id` can target older committed snapshots
+  - exact reads support `foundation:<stage_id>`, entry/section refs, and `stage:<stage_id>:...` aliases
+- Verification:
+  - covered by `backend/rp/tests/test_setup_truth_index_service.py`, `backend/rp/tests/test_setup_tool_provider.py`, and `backend/rp/tests/test_setup_agent_tool_scope.py`
+
+### Setup Retrieval Seed Materialization Slice (2026-05-04)
+
+- Added executable backend spec:
+  - `.trellis/spec/backend/rp-setup-retrieval-seed-materialization.md`
+- Implemented slice:
+  - Slice 4: deterministic retrieval seed sections from accepted setup entry/section trees
+- Source alignment:
+  - user-confirmed boundary: after commit, backend/retrieval may materialize accepted structured draft content; no post-commit agent/LLM rewrite
+  - existing retrieval-core source: `Parser` already consumes `seed_sections`, and `Chunker` already handles paragraph/fixed-window/sliding-window splits
+- Slice 4 behavior:
+  - canonical stage entries now emit one seed section per renderable setup draft section
+  - source asset metadata remains entry-level while produced chunks use section-level `domain_path`
+  - seed/chunk metadata preserves `stage_id`, `entry_id`, `entry_type`, entry path, section id/title/kind, retrieval role, committed refs, and stage alias refs
+  - oversized setup section text is emitted once and then mechanically split by retrieval-core, preserving setup anchors on produced chunks
+  - legacy foundation entries without sections remain entry-level compatible
+- Verification:
+  - `python -m pytest backend/rp/tests/test_minimal_retrieval_ingestion_service.py -q` -> `6 passed, 1 warning`
+  - `python -m pytest backend/rp/tests/test_setup_stage_module_draft_contract.py backend/rp/tests/test_minimal_retrieval_ingestion_service.py backend/rp/tests/test_setup_truth_index_service.py backend/rp/tests/test_setup_tool_provider.py backend/rp/tests/test_setup_agent_tool_scope.py -q` -> `55 passed, 1 warning`
+  - scoped `ruff check`, `ruff format --check`, and `mypy --follow-imports=skip --check-untyped-defs` passed on changed backend code/tests
+
+### Setup Frontend Data-Driven Stage Rendering Slice (2026-05-04)
+
+- Implemented slice:
+  - Slice 5: frontend data-driven setup stage rendering
+- Source alignment:
+  - user-confirmed requirement: setup UI stages must match backend canonical stages instead of several UX stages sharing the old backend `foundation` bucket
+  - existing backend slices: workspace payload now exposes `current_stage`, `stage_plan`, `stage_states`, and `draft_blocks`
+  - scope constraint: keep UI at MVP/manual-test level, not a broad visual redesign
+- Slice 5 behavior:
+  - `RpSetupWorkspace` parses `current_stage`, `stage_plan`, `stage_states`, and generic stage draft blocks
+  - prestory setup page renders the stage rail and inspector from backend stage plan and stage draft blocks
+  - generic entry/section draft blocks are displayed before falling back to legacy fixed draft fields
+  - target-step selection uses canonical current stage when present and legacy step ids only as compatibility fallback
+  - roleplay/TRPG future stage ids have metadata fallback so mode-specific plans can render without rewriting the page
+- Verification:
+  - `flutter test test/unit/models/rp_setup_test.dart` -> `2 passed`
+  - `flutter analyze lib/models/rp_setup.dart lib/pages/prestory_setup_page.dart test/unit/models/rp_setup_test.dart` -> `No issues found`
+  - full Flutter analyze was not used as this slice gate because the existing app still has unrelated historical analyzer issues
+
 ### Output Artifacts
 
 - [`docs/research/rp-redesign/agent/development-spec/setup-agent-loop-react-lifecycle-development-spec.md`](../../../docs/research/rp-redesign/agent/development-spec/setup-agent-loop-react-lifecycle-development-spec.md) — development spec for the next SetupAgent loop / ReAct / context lifecycle slice.

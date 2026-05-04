@@ -45,6 +45,8 @@ def test_world_background_stage_tool_scope_uses_stage_native_truth_write_only():
     tool_scope = build_setup_agent_tool_scope("world_background")
 
     assert "setup.read.draft_refs" in tool_scope
+    assert "setup.truth_index.search" in tool_scope
+    assert "setup.truth_index.read_refs" in tool_scope
     assert "setup.truth.write" in tool_scope
     assert "setup.patch.foundation_entry" not in tool_scope
     assert "setup.patch.story_config" not in tool_scope
