@@ -14,15 +14,25 @@ from models.rp_core_state_store import (
     CoreStateProjectionSlotRecord,
     CoreStateProjectionSlotRevisionRecord,
 )
-from rp.models.dsl import Domain, Layer
+from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.memory_contract_registry import (
+    MemoryDirtyTarget,
+    MemoryRuntimeIdentity,
+    MemorySourceRef,
+)
 from rp.models.memory_crud import ProposalSubmitInput
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.projection_refresh import (
+    ProjectionRefreshRequest,
+    ProjectionRefreshServiceError,
+)
 from rp.models.story_runtime import LongformChapterPhase, SpecialistResultBundle
 from rp.services.chapter_workspace_projection_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection_refresh_service import ProjectionRefreshService
 from rp.services.projection_state_service import ProjectionStateService
@@ -37,6 +47,57 @@ from rp.services.story_state_apply_service import StoryStateApplyService
 def _build_dual_write_service(retrieval_session) -> CoreStateDualWriteService:
     return CoreStateDualWriteService(
         repository=CoreStateStoreRepository(retrieval_session)
+    )
+
+
+def _projection_identity() -> MemoryRuntimeIdentity:
+    return MemoryRuntimeIdentity(
+        story_id="story-g-dual",
+        session_id="session-g-dual",
+        branch_head_id="branch-head-g-dual",
+        turn_id="turn-g-dual",
+        runtime_profile_snapshot_id="profile-snapshot-g-dual",
+    )
+
+
+def _projection_source_ref(*, revision: int) -> ObjectRef:
+    return ObjectRef(
+        object_id="chapter.current",
+        layer=Layer.CORE_STATE_AUTHORITATIVE,
+        domain=Domain.CHAPTER,
+        domain_path="chapter.current",
+        scope="story",
+        revision=revision,
+    )
+
+
+def _projection_refresh_request(
+    *,
+    base_revision: int | None = None,
+    source_revision: int | None = None,
+    dirty_targets: list[MemoryDirtyTarget] | None = None,
+) -> ProjectionRefreshRequest:
+    source_authoritative_refs = []
+    if source_revision is not None:
+        source_authoritative_refs = [_projection_source_ref(revision=source_revision)]
+    return ProjectionRefreshRequest(
+        identity=_projection_identity(),
+        refresh_actor="worker.reviewer",
+        refresh_reason="post_write",
+        refresh_source_kind="post_write",
+        refresh_source_ref="proposal-1",
+        base_revision=base_revision,
+        source_authoritative_refs=source_authoritative_refs,
+        source_refs=[
+            MemorySourceRef(
+                source_type="retrieval_card",
+                source_id="R1",
+                layer="runtime_workspace",
+                domain="chapter",
+                block_id="chapter.runtime",
+            )
+        ],
+        dirty_targets=dirty_targets or [],
     )
 
 
@@ -233,6 +294,89 @@ async def test_proposal_apply_service_write_switch_uses_formal_store_as_source(
     )
 
 
+@pytest.mark.asyncio
+async def test_proposal_apply_service_write_switch_seeds_before_base_revision_check(
+    retrieval_session,
+):
+    session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    dual_write_service = _build_dual_write_service(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    workflow = ProposalWorkflowService(
+        proposal_repository=repository,
+        proposal_apply_service=ProposalApplyService(
+            story_session_service=story_session_service,
+            proposal_repository=repository,
+            story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=dual_write_service,
+            core_state_store_write_switch_enabled=True,
+        ),
+        post_write_apply_handler=PostWriteApplyHandler(),
+    )
+
+    receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id=session.story_id,
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Seeded Before Check"},
+                }
+            ],
+            base_refs=[
+                {
+                    "object_id": "chapter.current",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.CHAPTER,
+                    "domain_path": "chapter.current",
+                    "scope": "story",
+                    "revision": 1,
+                }
+            ],
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="test",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.NOTIFY_APPLY,
+        ),
+    )
+
+    current_row = retrieval_session.exec(
+        select(CoreStateAuthoritativeObjectRecord).where(
+            CoreStateAuthoritativeObjectRecord.session_id == session.session_id,
+            CoreStateAuthoritativeObjectRecord.object_id == "chapter.current",
+        )
+    ).one()
+    revisions = retrieval_session.exec(
+        select(CoreStateAuthoritativeRevisionRecord)
+        .where(
+            CoreStateAuthoritativeRevisionRecord.session_id == session.session_id,
+            CoreStateAuthoritativeRevisionRecord.object_id == "chapter.current",
+        )
+        .order_by(CoreStateAuthoritativeRevisionRecord.revision.asc())
+    ).all()
+    apply_receipt = repository.list_apply_receipts_for_proposal(receipt.proposal_id)[0]
+
+    assert receipt.status == "applied"
+    assert apply_receipt.apply_backend == "core_state_store"
+    assert apply_receipt.revision_after_json["chapter.current"] == 2
+    assert current_row.current_revision == 2
+    assert current_row.data_json["title"] == "Seeded Before Check"
+    assert [item.revision for item in revisions] == [1, 2]
+    assert revisions[0].revision_source_kind == "write_switch_seed"
+    assert revisions[1].revision_source_kind == "proposal_apply"
+
+
 def test_projection_refresh_service_dual_writes_formal_projection_store(
     retrieval_session,
 ):
@@ -296,6 +440,224 @@ def test_projection_refresh_service_dual_writes_formal_projection_store(
     )
     assert revisions[0].metadata_json["projection_role"] == "current_projection"
     assert revisions[0].metadata_json["authoritative_mutation"] is False
+
+
+def test_projection_refresh_service_records_freshness_metadata_and_dirty_targets(
+    retrieval_session,
+):
+    session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    dual_write_service = _build_dual_write_service(retrieval_session)
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
+    refresh_service = ProjectionRefreshService(
+        story_session_service,
+        core_state_dual_write_service=dual_write_service,
+    )
+    request = _projection_refresh_request(
+        base_revision=1,
+        source_revision=1,
+        dirty_targets=[
+            MemoryDirtyTarget(
+                target_kind="packet_window",
+                target_id="writer.packet.current",
+                domain="chapter",
+                reason="projection_refresh",
+            )
+        ],
+    )
+
+    updated_chapter = refresh_service.refresh_from_bundle(
+        chapter=chapter,
+        bundle=SpecialistResultBundle(
+            foundation_digest=["New Found"],
+            blueprint_digest=["New Blueprint"],
+            current_outline_digest=["New Outline"],
+            recent_segment_digest=["New Segment"],
+            current_state_digest=["New State"],
+        ),
+        refresh_request=request,
+    )
+
+    outline_row = retrieval_session.exec(
+        select(CoreStateProjectionSlotRecord).where(
+            CoreStateProjectionSlotRecord.chapter_workspace_id
+            == updated_chapter.chapter_workspace_id,
+            CoreStateProjectionSlotRecord.summary_id
+            == "projection.current_outline_digest",
+        )
+    ).one()
+    revision_row = retrieval_session.exec(
+        select(CoreStateProjectionSlotRevisionRecord)
+        .where(
+            CoreStateProjectionSlotRevisionRecord.chapter_workspace_id
+            == updated_chapter.chapter_workspace_id,
+            CoreStateProjectionSlotRevisionRecord.summary_id
+            == "projection.current_outline_digest",
+        )
+        .order_by(CoreStateProjectionSlotRevisionRecord.revision.desc())
+    ).first()
+    assert revision_row is not None
+
+    assert outline_row.current_revision == 2
+    assert outline_row.metadata_json["refresh_actor"] == "worker.reviewer"
+    assert outline_row.metadata_json["refresh_reason"] == "post_write"
+    assert outline_row.metadata_json["base_revision"] == 1
+    assert outline_row.metadata_json["projection_dirty_state"] == "dirty"
+    assert outline_row.metadata_json["source_authoritative_refs"][0]["revision"] == 1
+    assert (
+        outline_row.metadata_json["source_refs"][0]["source_type"] == "retrieval_card"
+    )
+    assert (
+        outline_row.metadata_json["dirty_targets"][0]["target_kind"] == "packet_window"
+    )
+    assert revision_row.metadata_json["refresh_actor"] == "worker.reviewer"
+    assert revision_row.revision == 2
+    assert revision_row.metadata_json["base_revision"] == 1
+
+
+def test_projection_refresh_service_rejects_stale_base_revision_before_write(
+    retrieval_session,
+):
+    _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    dual_write_service = _build_dual_write_service(retrieval_session)
+    session = story_session_service.get_session(chapter.session_id)
+    assert session is not None
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
+    refresh_service = ProjectionRefreshService(
+        story_session_service,
+        core_state_dual_write_service=dual_write_service,
+    )
+
+    with pytest.raises(ProjectionRefreshServiceError) as exc:
+        refresh_service.refresh_from_bundle(
+            chapter=chapter,
+            bundle=SpecialistResultBundle(
+                foundation_digest=["New Found"],
+                blueprint_digest=["New Blueprint"],
+                current_outline_digest=["New Outline"],
+                recent_segment_digest=["New Segment"],
+                current_state_digest=["New State"],
+            ),
+            refresh_request=_projection_refresh_request(
+                base_revision=0,
+                source_revision=1,
+            ),
+        )
+
+    assert exc.value.code == "projection_refresh_base_revision_conflict"
+
+
+def test_projection_refresh_service_rejects_stale_source_revision_before_write(
+    retrieval_session,
+):
+    _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    dual_write_service = _build_dual_write_service(retrieval_session)
+    session = story_session_service.get_session(chapter.session_id)
+    assert session is not None
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
+    refresh_service = ProjectionRefreshService(
+        story_session_service,
+        core_state_dual_write_service=dual_write_service,
+    )
+
+    with pytest.raises(ProjectionRefreshServiceError) as exc:
+        refresh_service.refresh_from_bundle(
+            chapter=chapter,
+            bundle=SpecialistResultBundle(
+                foundation_digest=["New Found"],
+                blueprint_digest=["New Blueprint"],
+                current_outline_digest=["New Outline"],
+                recent_segment_digest=["New Segment"],
+                current_state_digest=["New State"],
+            ),
+            refresh_request=_projection_refresh_request(
+                base_revision=1,
+                source_revision=2,
+            ),
+        )
+
+    assert exc.value.code == "projection_refresh_source_revision_conflict"
+
+
+def test_projection_refresh_service_emits_shared_event_when_identity_is_supplied(
+    retrieval_session,
+):
+    _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    event_service = MemoryChangeEventService()
+    refresh_service = ProjectionRefreshService(
+        story_session_service,
+        memory_change_event_service=event_service,
+    )
+    request = _projection_refresh_request(
+        dirty_targets=[
+            MemoryDirtyTarget(
+                target_kind="packet_window",
+                target_id="writer.packet.current",
+                domain="chapter",
+                reason="projection_refresh",
+            )
+        ],
+    )
+
+    refresh_service.refresh_from_bundle(
+        chapter=chapter,
+        bundle=SpecialistResultBundle(
+            foundation_digest=["New Found"],
+            blueprint_digest=["New Blueprint"],
+            current_outline_digest=["New Outline"],
+            recent_segment_digest=["New Segment"],
+            current_state_digest=["New State"],
+        ),
+        refresh_request=request,
+    )
+
+    assert request.identity is not None
+    events = event_service.list_events(identity=request.identity)
+    assert len(events) == 1
+    assert events[0].event_kind == "projection_refreshed"
+    assert events[0].dirty_targets[0].target_kind == "packet_window"
+
+
+def test_projection_refresh_service_allows_repeated_shared_events_for_same_identity(
+    retrieval_session,
+):
+    _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    event_service = MemoryChangeEventService()
+    refresh_service = ProjectionRefreshService(
+        story_session_service,
+        memory_change_event_service=event_service,
+    )
+    request = _projection_refresh_request()
+
+    refresh_service.refresh_from_bundle(
+        chapter=chapter,
+        bundle=SpecialistResultBundle(
+            foundation_digest=["New Found"],
+            blueprint_digest=["New Blueprint"],
+            current_outline_digest=["New Outline"],
+            recent_segment_digest=["New Segment"],
+            current_state_digest=["New State"],
+        ),
+        refresh_request=request,
+    )
+    refresh_service.refresh_from_bundle(
+        chapter=chapter,
+        bundle=SpecialistResultBundle(
+            foundation_digest=["New Found"],
+            blueprint_digest=["New Blueprint"],
+            current_outline_digest=["New Outline"],
+            recent_segment_digest=["New Segment"],
+            current_state_digest=["New State"],
+        ),
+        refresh_request=request,
+    )
+
+    events = event_service.list_events(identity=request.identity)
+    assert len(events) == 2
+    assert events[0].event_id != events[1].event_id
+    assert [event.event_kind for event in events] == [
+        "projection_refreshed",
+        "projection_refreshed",
+    ]
 
 
 def test_projection_state_service_dual_writes_lifecycle_projection_updates(

@@ -38,6 +38,8 @@
 | [RP Archival Knowledge Intake Contract](./rp-archival-knowledge-intake-contract.md) | Canonical Archival source-material metadata and seed-section intake contract for setup/source imports before upstream producers converge | Active |
 | [RP Memory Contract Registry Identity Event Skeleton](./rp-memory-contract-registry-identity-event-skeleton.md) | First memory strengthening contract slice for domain/block registry, runtime identity spine, and lightweight memory change events | Active |
 | [RP Runtime Workspace Turn Material Store](./rp-runtime-workspace-turn-material-store.md) | Typed current-turn Runtime Workspace material store contract for retrieval cards, usage records, rule cards, candidates, evidence, packet refs, and traces | Active |
+| [RP Memory Change Event Spine](./rp-memory-change-event-spine.md) | Reusable lightweight memory event recording and dirty-target query spine for trace, invalidation, branch-ready identity, and Runtime Workspace publishing | Active |
+| [RP Core State Base Revision Conflict Enforcement](./rp-core-state-base-revision-conflict-enforcement.md) | Fail-closed apply-side enforcement for authoritative base revisions so stale proposals cannot overwrite newer truth | Active |
 | [RP Memory OS Block Rollout](./rp-memory-os-block-rollout.md) | Overall rollout contract from Core State Block integration to full Memory OS containerization | Active |
 | [RP Memory Tool Chain Block Compatibility](./rp-memory-tool-chain-block-compatibility.md) | Compatibility gate that keeps the public memory tool chain stable after Core State Block integration | Active |
 | [RP Memory Container Gap Inventory](./rp-memory-container-gap-inventory.md) | Phase C decision gate that proves whether a new durable container layer is actually required | Active |
@@ -48,6 +50,7 @@
 | [RP Story Segment Structured Metadata Authoring](./rp-story-segment-structured-metadata-authoring.md) | Freeze the specialist-owned structured metadata sidecar that persists on draft story segments before chapter-close consumers read it | Active |
 | [RP Story Segment Accept Metadata Promotion](./rp-story-segment-accept-metadata-promotion.md) | Allow `ACCEPT_PENDING_SEGMENT` to promote or override whitelisted structured metadata families on accepted story segments through a typed request patch | Active |
 | [RP Memory Temporal Materialization](./rp-memory-temporal-materialization.md) | RP-specific ownership and materialization rules for current truth, hot projections, history, source knowledge, and runtime scratch | Active |
+| [RP Projection Refresh Write Contract](./rp-projection-refresh-write-contract.md) | Projection refresh write contract for derived Core State current-view metadata, freshness checks, and dirty markers | Active |
 | [RP Recall Source Family Retrieval Contract](./rp-recall-source-family-retrieval-contract.md) | Preserve Recall materialization source-family metadata through search hits, Block-compatible views, and specialist payloads | Active |
 | [RP Recall Continuity Note Retention](./rp-recall-continuity-note-retention.md) | Materialize heavy-regression summary updates into Recall continuity notes without promoting runtime scratch or mutating Core State | Active |
 | [RP Recall Source Family Search Filters](./rp-recall-source-family-search-filters.md) | Reuse `memory.search_recall(..., filters=...)` to target specific Recall source families, materialization kinds, and chapter indices | Active |
@@ -91,6 +94,9 @@
 - [ ] If the change adds or modifies Archival Knowledge source-material metadata, seed-section metadata, or setup/source import semantics, read [RP Archival Knowledge Intake Contract](./rp-archival-knowledge-intake-contract.md).
 - [ ] If the change adds or modifies memory domain/block registry, story-runtime memory identity, or memory change event contracts, read [RP Memory Contract Registry Identity Event Skeleton](./rp-memory-contract-registry-identity-event-skeleton.md).
 - [ ] If the change adds or modifies Runtime Workspace typed turn materials, material lifecycle, retrieval-card material, usage records, rule cards, worker candidates, evidence bundles, packet refs, or token usage metadata, read [RP Runtime Workspace Turn Material Store](./rp-runtime-workspace-turn-material-store.md).
+- [ ] If the change adds or modifies shared memory change event recording, event queries, dirty-target readback, or Runtime Workspace event publishing, read [RP Memory Change Event Spine](./rp-memory-change-event-spine.md).
+- [ ] If the change adds or modifies projection refresh write metadata, freshness checks, dirty markers, or event emission, read [RP Projection Refresh Write Contract](./rp-projection-refresh-write-contract.md).
+- [ ] If the change adds or modifies authoritative proposal apply revision checks or stale base revision enforcement, read [RP Core State Base Revision Conflict Enforcement](./rp-core-state-base-revision-conflict-enforcement.md).
 - [ ] If the change adjusts overall Memory OS Block sequencing, read [RP Memory OS Block Rollout](./rp-memory-os-block-rollout.md).
 - [ ] If the change touches memory tool/provider compatibility after Block integration, read [RP Memory Tool Chain Block Compatibility](./rp-memory-tool-chain-block-compatibility.md).
 - [ ] If the change decides whether a new durable Memory OS container layer is needed, read [RP Memory Container Gap Inventory](./rp-memory-container-gap-inventory.md).
@@ -133,6 +139,8 @@
 - [ ] Archival Knowledge intake metadata is generated by the memory intake helper, keeps canonical fields on parent assets and seed sections, and prevents setup/source metadata from redefining memory-layer ownership.
 - [ ] Memory contract registry remains declarative/versioned, includes the confirmed bootstrap domains, and carries full story/branch/turn/profile identity on memory events without becoming an alternate truth store.
 - [ ] Runtime Workspace typed turn materials carry full memory runtime identity, validate domains through the registry, enforce turn-scoped short ids, and remain temporary material rather than Core State / Recall / Archival truth.
+- [ ] Memory change events are recorded through a shared lightweight spine when needed, stay full-identity scoped, validate domains through the registry, expose dirty targets, and do not become an event-sourced truth store.
+- [ ] Apply-side base revision conflict enforcement rejects stale authoritative proposals before mutation and preserves current legacy behavior only when no base refs are supplied.
 - [ ] Public memory tool/provider contracts remain stable after Block integration unless a spec explicitly widens them.
 - [ ] Retrieval-backed Block-compatible views stay additive/read-only and do not replace public search results or active-story Core State `block_context`.
 - [ ] Retrieval observability Block fields reuse the canonical retrieval Block adapter and stay additive to existing hit-centric payloads.
@@ -155,4 +163,5 @@
 - [ ] SetupAgent loop routing, `continue_reason`, `finish_reason`, and runtime trace stay semantically aligned; `next_action` remains an internal graph-route token rather than a user-facing outcome contract.
 - [ ] SetupAgent action expectations stay turn-transient, high-certainty only, and do not become durable setup state or broad semantic planning.
 - [ ] `SetupAgentExecutionService` text and stream entrypoints reuse the same outer-harness preflight and runtime-v2 launch boundaries; drift is limited to the true run vs run_stream split.
+- [ ] Projection refresh remains a derived current-view write, records freshness / source / dirty metadata, and rejects stale base revisions before mutating the formal projection row.
 - [ ] Lint/format and relevant scoped type checks pass.

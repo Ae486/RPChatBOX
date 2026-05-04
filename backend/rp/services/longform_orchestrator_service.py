@@ -76,8 +76,10 @@ class LongformOrchestratorService:
                 )
             )
             if block_context is not None:
-                prompt_overlay = self._story_block_prompt_render_service.render_prompt_overlay(
-                    context=block_context
+                prompt_overlay = (
+                    self._story_block_prompt_render_service.render_prompt_overlay(
+                        context=block_context
+                    )
                 )
         if block_context is not None:
             projection_snapshot = {
@@ -226,6 +228,20 @@ class LongformOrchestratorService:
                     or "Rewrite the pending segment while preserving chapter continuity."
                 ),
                 notes=["fallback_plan"],
+            )
+        if command_kind in {
+            LongformTurnCommandKind.ACCEPT_OUTLINE,
+            LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+            LongformTurnCommandKind.COMPLETE_CHAPTER,
+        }:
+            return OrchestratorPlan(
+                output_kind=StoryArtifactKind.STORY_SEGMENT,
+                needs_retrieval=False,
+                archival_queries=[],
+                recall_queries=[],
+                specialist_focus=["deterministic post-write regression"],
+                writer_instruction="Apply deterministic post-write regression without retrieval.",
+                notes=["fallback_plan", "deterministic_post_write"],
             )
         return OrchestratorPlan(
             output_kind=StoryArtifactKind.STORY_SEGMENT,

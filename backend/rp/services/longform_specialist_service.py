@@ -79,20 +79,21 @@ class LongformSpecialistService:
         memory_os = self._memory_os_factory(session.story_id)
         archival_hits = []
         recall_hits = []
-        for query in plan.archival_queries:
-            if not query:
-                continue
-            result = await memory_os.search_archival(
-                MemorySearchArchivalInput(query=query, top_k=3)
-            )
-            archival_hits.extend(result.hits)
-        for query in plan.recall_queries:
-            if not query:
-                continue
-            result = await memory_os.search_recall(
-                MemorySearchRecallInput(query=query, top_k=3, scope="story")
-            )
-            recall_hits.extend(result.hits)
+        if plan.needs_retrieval:
+            for query in plan.archival_queries:
+                if not query:
+                    continue
+                result = await memory_os.search_archival(
+                    MemorySearchArchivalInput(query=query, top_k=3)
+                )
+                archival_hits.extend(result.hits)
+            for query in plan.recall_queries:
+                if not query:
+                    continue
+                result = await memory_os.search_recall(
+                    MemorySearchRecallInput(query=query, top_k=3, scope="story")
+                )
+                recall_hits.extend(result.hits)
         archival_payload_hits = archival_hits[:4]
         recall_payload_hits = recall_hits[:4]
         archival_block_views = self._retrieval_block_adapter_service.build_block_views(

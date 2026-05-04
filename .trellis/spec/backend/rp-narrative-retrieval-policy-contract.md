@@ -193,6 +193,10 @@ trace.details["context_budget"] = {
 - Context composition must not let `WritingPacketBuilder` consume raw retrieval hits directly.
 - Retrieval-backed Block-compatible views remain additive/read-only. Do not attach retrieval hits to the active-story Block consumer registry as if they were current Core State.
 - Retrieval policy owns search/filter/ranking/budget/explanation. Runtime/story owns the actual retrieval intent and upstream metadata production. Memory owns canonical materialization/source metadata.
+- Story-runtime specialist retrieval must honor `OrchestratorPlan.needs_retrieval`:
+  - when `needs_retrieval=False`, specialist-side retrieval composition must not call `memory.search_archival` or `memory.search_recall`, even if query lists are non-empty;
+  - deterministic post-write commands such as `ACCEPT_OUTLINE`, `ACCEPT_PENDING_SEGMENT`, and `COMPLETE_CHAPTER` should not use fallback retrieval unless a later spec explicitly introduces a retrieval-backed maintenance policy;
+  - tests must not reach provider embedding / HTTP clients for deterministic accept or metadata-promotion paths.
 
 ### 4. Validation & Error Matrix
 
@@ -253,6 +257,9 @@ trace.details["context_budget"] = {
   - selected/excluded trace is emitted;
   - duplicate assets and source-family/domain/token budget exclusions are visible;
   - `WritingPacketBuilder` tests prove it consumes composed specialist context, not raw retrieval hits.
+- Story-runtime retrieval gating:
+  - fallback plans for deterministic accept / complete commands set `needs_retrieval=False`;
+  - specialist analysis skips Memory OS calls when `needs_retrieval=False`.
 - Eval:
   - add retrieval eval gold cases for scene recall, archival source filtering, active vs retired foreshadow, branch/canon isolation, and context budget composition;
   - optional RAGAS metrics may remain additive but cannot be the only quality gate for narrative retrieval.

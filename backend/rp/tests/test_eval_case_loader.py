@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 from rp.eval.case_loader import load_case
 
@@ -55,3 +58,23 @@ def test_load_case_from_json(tmp_path):
     assert case.case_id == "setup.commit_proposal.writing_contract.ready.v1"
     assert case.runtime_target.graph_id == "setup_v2"
 
+
+def test_eval_diagnostics_import_does_not_eagerly_load_ragas():
+    backend_root = Path(__file__).resolve().parents[2]
+    script = (
+        "import sys; "
+        "import rp.eval.diagnostics; "
+        "loaded = any(name == 'ragas' or name.startswith('ragas.') "
+        "for name in sys.modules); "
+        "raise SystemExit(1 if loaded else 0)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=backend_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
