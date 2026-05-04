@@ -196,7 +196,7 @@ def _tool_definition(name: str) -> dict:
 
 
 def test_runtime_routes_invalid_next_action_to_runtime_failed():
-    state = {"next_action": "undefined_route"}
+    state: dict[str, Any] = {"next_action": "undefined_route"}
 
     route = _RuntimeRunDriver._route_after_assess(state)
 
@@ -447,7 +447,9 @@ class _CompactExactDetailMutateThenReadLLM:
                                                     "target_ref": "foundation:magic-law",
                                                     "operation": "merge",
                                                     "payload_json": json.dumps(
-                                                        {"notes": "guessed from compact"}
+                                                        {
+                                                            "notes": "guessed from compact"
+                                                        }
                                                     ),
                                                     "remaining_open_issues": [],
                                                     "ready_for_review": True,
@@ -750,6 +752,7 @@ class _SchemaRepairLLM:
 
     async def chat_completion(self, request):
         self.round += 1
+        arguments: dict[str, Any]
         if self.round == 1:
             arguments = {"workspace_id": "workspace-1"}
         elif self.round == 2:
@@ -1052,7 +1055,10 @@ async def test_runtime_executor_returns_direct_answer_without_tools():
     assert result.structured_payload["context_report"] is None
     assert result.structured_payload["continue_reason"] is None
     assert result.structured_payload["loop_trace"]
-    assert result.structured_payload["loop_trace"][-1]["decision"]["finish_reason"] == "completed_text"
+    assert (
+        result.structured_payload["loop_trace"][-1]["decision"]["finish_reason"]
+        == "completed_text"
+    )
 
 
 @pytest.mark.asyncio
@@ -1447,6 +1453,44 @@ async def test_runtime_executor_rehydrates_slim_truth_write_arguments_before_exe
     assert truth_write["block_type"] == "story_config"
     assert truth_write["payload"] == {"notes": "draft notes"}
     assert "payload_json" not in truth_write
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_rehydrates_stage_truth_write_arguments_before_execution():
+    tool_executor = _FakeToolExecutor()
+    llm = _SlimTruthWriteThenTextLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            tool_scope=["setup.truth.write"],
+            context_bundle={
+                "current_step": "foundation",
+                "current_stage": "world_background",
+                "context_packet": {
+                    "workspace_id": "workspace-1",
+                    "current_step": "foundation",
+                    "current_stage": "world_background",
+                    "current_draft_snapshot": {},
+                    "user_edit_deltas": [{"delta_id": "delta-stage-1"}],
+                },
+            },
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert tool_executor.calls
+    truth_write = tool_executor.calls[0][0].arguments["truth_write"]
+    assert tool_executor.calls[0][0].arguments["step_id"] == "foundation"
+    assert tool_executor.calls[0][0].arguments["user_edit_delta_ids"] == [
+        "delta-stage-1"
+    ]
+    assert truth_write["current_step"] == "world_background"
+    assert truth_write["block_type"] == "stage_draft"
+    assert truth_write["stage_id"] == "world_background"
+    assert truth_write["payload"] == {"notes": "draft notes"}
 
 
 @pytest.mark.asyncio

@@ -108,6 +108,10 @@
 - Local setup tool `setup.read.draft_refs`
   - input schema: `SetupDraftRefReadInput`
   - output schema: `SetupDraftRefReadResult`
+  - stage-aware refs supported during canonical setup migration:
+    - `draft:<stage_id>` reads the whole current staged draft block from `SetupWorkspace.draft_blocks`
+    - `stage:<stage_id>:<entry_id>` reads one staged entry
+    - `stage:<stage_id>:<entry_id>:<section_id>` reads one staged entry section
 - `SetupAgentRuntimeStateService.persist_turn_governance(...) -> SetupCognitiveStateSnapshot`
   - inputs:
     - `workspace`
@@ -147,6 +151,7 @@
   - it exists because `compact_summary` carries refs and recovery hints, not every draft detail
   - it must be visible to SetupAgent as a read-only setup tool
   - it must not read prior-stage raw discussion or Memory OS state
+  - it must preserve old refs such as `draft:story_config`, `draft:writing_contract`, `draft:longform_blueprint`, and `foundation:<entry_id>` until write tools migrate to canonical stage refs
 - Stage-local context remains step-scoped:
   - `context_packet.current_draft_snapshot`
   - `context_packet.user_edit_deltas`

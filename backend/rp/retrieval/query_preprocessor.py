@@ -90,9 +90,7 @@ def _normalize_search_policy(raw: object) -> dict[str, object] | None:
     if isinstance(rerank, str):
         normalized_rerank = rerank.strip().lower()
         policy["rerank"] = (
-            normalized_rerank
-            if normalized_rerank in {"auto", "on", "off"}
-            else "auto"
+            normalized_rerank if normalized_rerank in {"auto", "on", "off"} else "auto"
         )
     context_budget = policy.get("context_budget")
     if isinstance(context_budget, dict):
@@ -119,6 +117,23 @@ class DefaultQueryPreprocessor:
             filters["search_policy"] = _normalize_search_policy(
                 filters.get("search_policy")
             )
+        intent = filters.get("intent")
+        if isinstance(intent, str):
+            normalized_intent = intent.strip().lower()
+            filters["intent"] = (
+                normalized_intent
+                if normalized_intent
+                in {
+                    "fact_lookup",
+                    "relation_lookup",
+                    "broad_context",
+                    "consistency_check",
+                }
+                else None
+            )
+        for boolean_filter_key in ("need_evidence", "need_relationship_view"):
+            if boolean_filter_key in filters:
+                filters[boolean_filter_key] = filters.get(boolean_filter_key) is True
 
         domain_path_prefix = filters.get("domain_path_prefix")
         if isinstance(domain_path_prefix, str):

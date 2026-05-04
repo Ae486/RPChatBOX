@@ -29,13 +29,22 @@
   - `writing_contract -> ("setup.patch.writing_contract",)`
   - `foundation -> ("setup.patch.foundation_entry",)`
   - `longform_blueprint -> ("setup.patch.longform_blueprint",)`
+- canonical stage compatibility is additive during migration:
+  - `world_background -> ("setup.patch.foundation_entry",)` for the legacy compatibility path
+  - `character_design -> ("setup.patch.foundation_entry",)` for the legacy compatibility path
+  - stage-native write tooling is deferred to a later slice
+- after Slice 2B stage-native write migration:
+  - known canonical stages map to no legacy patch-family tools by default
+  - stage draft writes go through shared `setup.truth.write`, which remains visible for every known stage
+  - legacy `SetupStepId` values still expose their old patch-family tools for compatibility when no canonical `current_stage` is available
 - `SETUP_AGENT_VISIBLE_TOOLS: tuple[str, ...]`
   - remains the conservative full-union fallback
 - `build_setup_agent_tool_scope(current_step: str | None) -> list[str]`
+  - accepts either a legacy step id or a canonical stage id string
 - `build_setup_agent_profile() -> RuntimeProfile`
   - keeps the full-union fallback in `visible_tool_names`
 - `SetupRuntimeAdapter.build_turn_input(...)`
-  - must set `RpAgentTurnInput.tool_scope` from `build_setup_agent_tool_scope(current_step.value)`
+  - must set `RpAgentTurnInput.tool_scope` from the current stage when available, otherwise from the legacy current step
 
 ### 3. Contracts
 
@@ -65,6 +74,11 @@
 - If `current_step` is absent or not mapped in `SETUP_STEP_PATCH_TOOLS`, `build_setup_agent_tool_scope(...)` must return the full `SETUP_AGENT_VISIBLE_TOOLS`.
 - This fallback exists to prevent accidental tool starvation during partial rollout, future step additions, or malformed step state.
 - Known-step behavior must stay deterministic and minimal; unknown-step behavior may stay conservative.
+- For canonical stages during this migration slice, tool scope must stay conservative and step-compatible:
+  - when the stage has not yet received a native write tool, keep the mapped legacy patch family visible
+  - do not remove shared setup tools
+  - do not add a new dynamic tool-resolution layer
+- After canonical stage-native write is implemented, known canonical stages should not expose old patch-family tools by default. This prevents the model from writing `world_background` or `character_design` back into the old `foundation` bucket. Shared `setup.truth.write` is the stage write surface.
 
 #### 3.4 Tool Scope Is Turn Input State, Not MCP Registry Truth
 
@@ -89,6 +103,8 @@
 - `current_step = "writing_contract"` -> `tool_scope` contains shared tools plus `setup.patch.writing_contract`, and excludes the other three patch tools
 - `current_step = "foundation"` -> `tool_scope` contains shared tools plus `setup.patch.foundation_entry`, and excludes the other three patch tools
 - `current_step = "longform_blueprint"` -> `tool_scope` contains shared tools plus `setup.patch.longform_blueprint`, and excludes the other three patch tools
+- `current_step = "world_background"` after Slice 2B -> `tool_scope` contains shared tools including `setup.truth.write` and excludes all legacy `setup.patch.*` tools
+- `current_step = "character_design"` after Slice 2B -> `tool_scope` contains shared tools including `setup.truth.write` and excludes all legacy `setup.patch.*` tools
 - `current_step` is unknown or missing -> `tool_scope` falls back to full `SETUP_AGENT_VISIBLE_TOOLS`
 - narrowing happens for one turn only -> MCP/local tool registry contents remain unchanged
 - a shared tool such as `setup.proposal.commit` is needed during any known step -> it remains visible because it is part of `SETUP_SHARED_PRIVATE_TOOLS`
@@ -103,6 +119,7 @@
 
 - `backend/rp/tests/test_setup_agent_tool_scope.py`
   - assert each known step gets shared tools plus only its mapped patch tool
+  - assert canonical stages get shared tools, `setup.truth.write`, and no legacy patch-family tools after Slice 2B
   - assert unknown step falls back to `SETUP_AGENT_VISIBLE_TOOLS`
 - `backend/rp/tests/test_setup_agent_execution_service_v2.py`
   - assert runtime-v2 turn input for a known step uses the narrowed `tool_scope`

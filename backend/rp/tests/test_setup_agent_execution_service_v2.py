@@ -1,4 +1,5 @@
 """Factory wiring tests for the setup runtime-v2 execution path."""
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ from rp.agent_runtime.tools import RuntimeToolExecutor
 from rp.models.setup_drafts import FoundationEntry
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_handoff import SetupContextBuilderInput
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from rp.agent_runtime.adapters import SetupRuntimeAdapter
@@ -118,8 +120,7 @@ class _DraftRefRecoveryLLM:
             assert "foundation:magic-law" in visible_text
             assert "recovery_hints" in visible_text
             assert (
-                "If compact_summary recovery_hints point to draft refs"
-                in visible_text
+                "If compact_summary recovery_hints point to draft refs" in visible_text
             )
             assert any(
                 "setup.read.draft_refs" in item["function"]["name"]
@@ -325,7 +326,7 @@ def test_setup_agent_execution_service_reports_observed_usage_pressure():
         history=[],
         user_edit_delta_ids=[],
     )
-    previous_usage = {
+    previous_usage: dict[str, int | None] = {
         "prompt_tokens": 1900,
         "completion_tokens": 10,
         "total_tokens": 1910,
@@ -404,20 +405,38 @@ async def test_setup_agent_execution_service_v2_builds_governed_history_for_comp
     assert len(turn_input.conversation_messages) == 4
     assert turn_input.conversation_messages[0]["content"] == "history message 6"
     assert turn_input.conversation_messages[-1]["content"] == "history message 9"
-    assert "setup.patch.foundation_entry" in turn_input.tool_scope
+    assert "setup.truth.write" in turn_input.tool_scope
+    assert "setup.patch.foundation_entry" not in turn_input.tool_scope
     assert "setup.patch.story_config" not in turn_input.tool_scope
     assert "setup.patch.longform_blueprint" not in turn_input.tool_scope
     assert turn_input.context_bundle["governance_metadata"]["raw_history_limit"] == 4
     assert turn_input.context_bundle["governance_metadata"]["kept_history_count"] == 4
-    assert turn_input.context_bundle["governance_metadata"]["compacted_history_count"] == 6
+    assert (
+        turn_input.context_bundle["governance_metadata"]["compacted_history_count"] == 6
+    )
     assert turn_input.context_bundle["compact_summary"] is not None
     assert turn_input.context_bundle["context_report"] is not None
     assert turn_input.context_bundle["context_report"]["context_profile"] == "compact"
-    assert "history_count_threshold" in turn_input.context_bundle["context_report"]["profile_reasons"]
-    assert "user_edit_threshold" in turn_input.context_bundle["context_report"]["profile_reasons"]
-    assert turn_input.context_bundle["context_report"]["estimated_input_tokens"] is not None
-    assert turn_input.context_bundle["context_report"].get("previous_prompt_tokens") is None
-    assert turn_input.context_bundle["context_report"]["summary_strategy"] == "compact_prompt_summary"
+    assert (
+        "history_count_threshold"
+        in turn_input.context_bundle["context_report"]["profile_reasons"]
+    )
+    assert (
+        "user_edit_threshold"
+        in turn_input.context_bundle["context_report"]["profile_reasons"]
+    )
+    assert (
+        turn_input.context_bundle["context_report"]["estimated_input_tokens"]
+        is not None
+    )
+    assert (
+        turn_input.context_bundle["context_report"].get("previous_prompt_tokens")
+        is None
+    )
+    assert (
+        turn_input.context_bundle["context_report"]["summary_strategy"]
+        == "compact_prompt_summary"
+    )
     assert turn_input.context_bundle["context_report"]["summary_action"] == "rebuilt"
 
 
@@ -735,6 +754,55 @@ async def test_setup_agent_execution_service_v2_uses_target_step_for_tool_scope(
     assert "setup.patch.foundation_entry" not in turn_input.tool_scope
 
 
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_v2_uses_current_stage_metadata(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    adapter = SetupRuntimeAdapter()
+    service = SetupAgentExecutionService(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        adapter=adapter,
+        runtime_executor=None,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-turn-input-1",
+        mode=StoryMode.LONGFORM,
+    )
+    request = SetupAgentTurnRequest(
+        workspace_id=workspace.workspace_id,
+        model_id="model-1",
+        user_prompt="Continue world setup.",
+        history=[],
+        user_edit_delta_ids=[],
+    )
+
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
+        adapter=adapter,
+        request=request,
+        workspace=workspace,
+        model_name="gpt-4o-mini",
+        provider=ProviderConfig(
+            type="openai",
+            api_key="sk-test",
+            api_url="https://example.com/v1",
+            custom_headers={},
+        ),
+    )
+
+    assert context_packet.current_stage == SetupStageId.WORLD_BACKGROUND
+    assert turn_input.context_bundle["current_step"] == "foundation"
+    assert turn_input.context_bundle["current_stage"] == "world_background"
+    assert turn_input.context_bundle["stage_state"]["stage_id"] == "world_background"
+    assert "setup.truth.write" in turn_input.tool_scope
+    assert "setup.patch.foundation_entry" not in turn_input.tool_scope
+    assert "setup.patch.story_config" not in turn_input.tool_scope
+
+
 def test_setup_agent_execution_service_prepare_turn_launch_reuses_shared_preflight(
     retrieval_session,
     monkeypatch,
@@ -824,7 +892,9 @@ async def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stre
         api_url="https://example.com/v1",
         custom_headers={},
     )
-    monkeypatch.setattr(service, "_ensure_agent_model_compatible", lambda model_id: None)
+    monkeypatch.setattr(
+        service, "_ensure_agent_model_compatible", lambda model_id: None
+    )
     monkeypatch.setattr(
         service,
         "_resolve_provider",
@@ -845,7 +915,8 @@ async def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stre
 
     assert prepared.turn_input.stream is True
     assert prepared.turn_input.context_bundle["current_step"] == "foundation"
-    assert "setup.patch.foundation_entry" in prepared.turn_input.tool_scope
+    assert "setup.truth.write" in prepared.turn_input.tool_scope
+    assert "setup.patch.foundation_entry" not in prepared.turn_input.tool_scope
     assert "setup.patch.story_config" not in prepared.turn_input.tool_scope
     assert prepared.context_packet.workspace_id == workspace.workspace_id
     assert prepared.profile.profile_id == "setup_agent"

@@ -59,6 +59,10 @@ def create_db_and_tables() -> None:
         IndexJobRecord,
         KnowledgeChunkRecord,
         KnowledgeCollectionRecord,
+        MemoryGraphEdgeRecord,
+        MemoryGraphEvidenceRecord,
+        MemoryGraphExtractionJobRecord,
+        MemoryGraphNodeRecord,
         ParsedDocumentRecord,
         SourceAssetRecord,
         ensure_retrieval_store_compatible_schema,
@@ -123,6 +127,10 @@ def create_db_and_tables() -> None:
         KnowledgeChunkRecord,
         EmbeddingRecordRecord,
         IndexJobRecord,
+        MemoryGraphNodeRecord,
+        MemoryGraphEdgeRecord,
+        MemoryGraphEvidenceRecord,
+        MemoryGraphExtractionJobRecord,
     )
     engine = get_engine()
     SQLModel.metadata.create_all(engine)

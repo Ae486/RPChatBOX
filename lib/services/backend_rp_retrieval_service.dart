@@ -25,6 +25,40 @@ class BackendRpRetrievalService {
     );
   }
 
+  Future<RpMemoryGraphMaintenanceSnapshot> getGraphMaintenance(
+    String storyId,
+  ) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/retrieval/stories/$storyId/graph/maintenance',
+    );
+    _ensureSuccess(response, action: 'get memory graph maintenance');
+    return RpMemoryGraphMaintenanceSnapshot.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpMemoryGraphNeighborhoodResponse> getGraphNeighborhood(
+    String storyId, {
+    String? nodeId,
+    int maxDepth = 1,
+    int maxNodes = 30,
+    int maxEdges = 50,
+  }) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/retrieval/stories/$storyId/graph/neighborhood',
+      queryParameters: {
+        if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
+        'max_depth': maxDepth,
+        'max_nodes': maxNodes,
+        'max_edges': maxEdges,
+      },
+    );
+    _ensureSuccess(response, action: 'get memory graph neighborhood');
+    return RpMemoryGraphNeighborhoodResponse.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
   Future<List<RpRetrievalIndexJob>> reindexStory(
     String storyId, {
     String? collectionId,

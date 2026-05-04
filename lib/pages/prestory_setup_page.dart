@@ -25,6 +25,10 @@ class PrestorySetupPage extends StatefulWidget {
 }
 
 class _PrestorySetupPageState extends State<PrestorySetupPage> {
+  static const int _memoryGraphMaxDepth = 1;
+  static const int _memoryGraphMaxNodes = 30;
+  static const int _memoryGraphMaxEdges = 50;
+
   final _service = BackendRpSetupService();
   final _retrievalService = BackendRpRetrievalService();
   final _storyService = BackendStoryService();
@@ -35,6 +39,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
   RpSetupWorkspace? _currentWorkspace;
   RpActivationCheckResult? _lastActivationCheck;
   RpRetrievalStoryMaintenanceSnapshot? _retrievalMaintenance;
+  RpMemoryGraphMaintenanceSnapshot? _memoryGraphMaintenance;
+  RpMemoryGraphNeighborhoodResponse? _memoryGraphNeighborhood;
   _SetupWizardStage _selectedStage = _SetupWizardStage.worldBackground;
   String? _selectedProviderId;
   String? _selectedModelId;
@@ -42,13 +48,23 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
   String? _selectedRetrievalEmbeddingModelId;
   String? _selectedRetrievalRerankProviderId;
   String? _selectedRetrievalRerankModelId;
+  String? _selectedGraphExtractionProviderId;
+  String? _selectedGraphExtractionModelId;
   String? _retrievalMaintenanceError;
+  String? _memoryGraphMaintenanceError;
+  String? _memoryGraphNeighborhoodError;
+  String? _selectedMemoryGraphNodeId;
+  String? _selectedMemoryGraphEdgeId;
   String? _retrievalMaintenanceActionLabel;
   bool _isLoading = true;
   bool _isLoadingRetrievalMaintenance = false;
+  bool _isLoadingMemoryGraphMaintenance = false;
+  bool _isLoadingMemoryGraphNeighborhood = false;
   bool _isRunningRetrievalMaintenanceAction = false;
   bool _isSending = false;
   int _retrievalMaintenanceRequestToken = 0;
+  int _memoryGraphMaintenanceRequestToken = 0;
+  int _memoryGraphNeighborhoodRequestToken = 0;
 
   @override
   void initState() {
@@ -79,10 +95,18 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         setState(() {
           _retrievalMaintenance = null;
           _retrievalMaintenanceError = null;
+          _memoryGraphMaintenance = null;
+          _memoryGraphNeighborhood = null;
+          _memoryGraphMaintenanceError = null;
+          _memoryGraphNeighborhoodError = null;
+          _selectedMemoryGraphNodeId = null;
+          _selectedMemoryGraphEdgeId = null;
           _selectedRetrievalEmbeddingProviderId = null;
           _selectedRetrievalEmbeddingModelId = null;
           _selectedRetrievalRerankProviderId = null;
           _selectedRetrievalRerankModelId = null;
+          _selectedGraphExtractionProviderId = null;
+          _selectedGraphExtractionModelId = null;
         });
       }
       _syncSelectedStage(force: true);
@@ -117,6 +141,16 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         ),
       ];
       _currentWorkspace = workspace;
+      if (workspaceChanged) {
+        _retrievalMaintenance = null;
+        _retrievalMaintenanceError = null;
+        _memoryGraphMaintenance = null;
+        _memoryGraphNeighborhood = null;
+        _memoryGraphMaintenanceError = null;
+        _memoryGraphNeighborhoodError = null;
+        _selectedMemoryGraphNodeId = null;
+        _selectedMemoryGraphEdgeId = null;
+      }
     });
     if (!preserveStage || workspaceChanged) {
       _syncSelectedStage(force: true);
@@ -207,6 +241,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         _selectedRetrievalEmbeddingModelId = null;
         _selectedRetrievalRerankProviderId = null;
         _selectedRetrievalRerankModelId = null;
+        _selectedGraphExtractionProviderId = null;
+        _selectedGraphExtractionModelId = null;
       });
       return;
     }
@@ -224,6 +260,12 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       providerCandidates: _retrievalRerankProviders(),
       modelCandidatesForProvider: _retrievalRerankModelsForProvider,
     );
+    final graphSelection = _normalizeRetrievalSelection(
+      providerId: config['graph_extraction_provider_id']?.toString(),
+      modelId: config['graph_extraction_model_id']?.toString(),
+      providerCandidates: _graphExtractionProviders(),
+      modelCandidatesForProvider: _graphExtractionModelsForProvider,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -231,6 +273,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       _selectedRetrievalEmbeddingModelId = embeddingSelection.modelId;
       _selectedRetrievalRerankProviderId = rerankSelection.providerId;
       _selectedRetrievalRerankModelId = rerankSelection.modelId;
+      _selectedGraphExtractionProviderId = graphSelection.providerId;
+      _selectedGraphExtractionModelId = graphSelection.modelId;
     });
   }
 
@@ -309,6 +353,12 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         _currentWorkspace = workspace;
         _retrievalMaintenance = null;
         _retrievalMaintenanceError = null;
+        _memoryGraphMaintenance = null;
+        _memoryGraphNeighborhood = null;
+        _memoryGraphMaintenanceError = null;
+        _memoryGraphNeighborhoodError = null;
+        _selectedMemoryGraphNodeId = null;
+        _selectedMemoryGraphEdgeId = null;
       });
       _syncSelectedStage(force: true);
       _syncRetrievalModelSelections();
@@ -359,6 +409,25 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         .toList();
   }
 
+  List<String> _graphExtractionProviders() {
+    return globalModelServiceManager
+        .getEnabledProviders()
+        .where(
+          (provider) =>
+              _graphExtractionModelsForProvider(provider.id).isNotEmpty,
+        )
+        .map((provider) => provider.id)
+        .toList();
+  }
+
+  List<ModelConfig> _graphExtractionModelsForProvider(String providerId) {
+    return globalModelServiceManager
+        .getModelsByProvider(providerId)
+        .where((item) => item.isEnabled)
+        .where(_isGraphExtractionCandidateModel)
+        .toList();
+  }
+
   bool _isEmbeddingCandidateModel(ModelConfig model) {
     final lowerName = model.modelName.toLowerCase();
     return model.isEmbeddingModel ||
@@ -371,11 +440,23 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     return model.isRerankModel || model.isCrossEncoderRerankModel;
   }
 
+  bool _isGraphExtractionCandidateModel(ModelConfig model) {
+    if (model.isEmbeddingModel ||
+        model.isRerankModel ||
+        model.isCrossEncoderRerankModel) {
+      return false;
+    }
+    final mode = model.resolvedMode;
+    return mode == null || mode == 'chat' || mode == 'responses';
+  }
+
   Future<void> _persistRetrievalStoryConfig({
     required String? embeddingProviderId,
     required String? embeddingModelId,
     required String? rerankProviderId,
     required String? rerankModelId,
+    required String? graphExtractionProviderId,
+    required String? graphExtractionModelId,
   }) async {
     final workspace = _currentWorkspace;
     if (workspace == null) return;
@@ -389,6 +470,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       'retrieval_embedding_model_id': embeddingModelId,
       'retrieval_rerank_provider_id': rerankProviderId,
       'retrieval_rerank_model_id': rerankModelId,
+      'graph_extraction_provider_id': graphExtractionProviderId,
+      'graph_extraction_model_id': graphExtractionModelId,
     };
 
     if (current['retrieval_embedding_provider_id']?.toString() ==
@@ -397,7 +480,11 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
             embeddingModelId &&
         current['retrieval_rerank_provider_id']?.toString() ==
             rerankProviderId &&
-        current['retrieval_rerank_model_id']?.toString() == rerankModelId) {
+        current['retrieval_rerank_model_id']?.toString() == rerankModelId &&
+        current['graph_extraction_provider_id']?.toString() ==
+            graphExtractionProviderId &&
+        current['graph_extraction_model_id']?.toString() ==
+            graphExtractionModelId) {
       return;
     }
 
@@ -422,7 +509,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
               '这里选择当前 setup 讨论轮次使用的 agent 模型，只影响前端当前工作区的对话发送。',
           retrievalSectionTitle: 'Retrieval 外部模型',
           retrievalSectionDescription:
-              'Embedding 影响入库向量化，Rerank 影响检索重排；修改后会写入当前 workspace 的 story_config。',
+              'Embedding 影响入库向量化，Rerank 影响检索重排，Graph Extraction 影响异步关系抽取；修改后会写入当前 workspace 的 story_config。',
           agentProviders: _agentProviders(),
           agentModelsForProvider: _agentModelsForProvider,
           initialAgentProviderId: _selectedProviderId,
@@ -435,16 +522,25 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
               _retrievalEmbeddingModelsForProvider,
           retrievalRerankProviderIds: _retrievalRerankProviders(),
           retrievalRerankModelsForProvider: _retrievalRerankModelsForProvider,
+          retrievalGraphExtractionProviderIds: _graphExtractionProviders(),
+          retrievalGraphExtractionModelsForProvider:
+              _graphExtractionModelsForProvider,
           initialRetrievalEmbeddingProviderId:
               _selectedRetrievalEmbeddingProviderId,
           initialRetrievalEmbeddingModelId: _selectedRetrievalEmbeddingModelId,
           initialRetrievalRerankProviderId: _selectedRetrievalRerankProviderId,
           initialRetrievalRerankModelId: _selectedRetrievalRerankModelId,
+          initialRetrievalGraphExtractionProviderId:
+              _selectedGraphExtractionProviderId,
+          initialRetrievalGraphExtractionModelId:
+              _selectedGraphExtractionModelId,
           onPersistRetrievalConfig: _persistRetrievalStoryConfig,
           embeddingEmptyHint:
               '当前没有识别到 embedding 模型。可在模型管理页给模型添加 embedding 能力，或使用名称包含 embedding / bge / e5 / gte 的模型。',
           rerankEmptyHint:
               '当前没有识别到 rerank 模型。可在模型管理页给模型添加 rerank / cross_encoder_rerank 能力。',
+          graphExtractionEmptyHint:
+              '当前没有识别到可用于 graph extraction 的文本模型。需要启用一个非 embedding / rerank 的 chat 或 responses 模型。',
         ),
       ),
     );
@@ -495,6 +591,106 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       if (mounted && token == _retrievalMaintenanceRequestToken) {
         setState(() {
           _isLoadingRetrievalMaintenance = false;
+        });
+      }
+    }
+
+    await _refreshMemoryGraphMaintenance(storyId, silent: true);
+  }
+
+  Future<void> _refreshMemoryGraphMaintenance(
+    String storyId, {
+    bool silent = false,
+  }) async {
+    final token = ++_memoryGraphMaintenanceRequestToken;
+    if (mounted) {
+      setState(() {
+        _isLoadingMemoryGraphMaintenance = true;
+        if (_memoryGraphMaintenance?.storyId != storyId) {
+          _memoryGraphMaintenance = null;
+        }
+        _memoryGraphMaintenanceError = null;
+      });
+    }
+
+    try {
+      final snapshot = await _retrievalService.getGraphMaintenance(storyId);
+      if (!mounted || token != _memoryGraphMaintenanceRequestToken) return;
+      setState(() {
+        _memoryGraphMaintenance = snapshot;
+        _memoryGraphMaintenanceError = null;
+      });
+    } catch (e) {
+      if (!mounted || token != _memoryGraphMaintenanceRequestToken) return;
+      setState(() {
+        _memoryGraphMaintenanceError = e.toString();
+      });
+      if (!silent) {
+        OwuiSnackBars.error(
+          context,
+          message: '加载 memory graph maintenance 失败: $e',
+        );
+      }
+    } finally {
+      if (mounted && token == _memoryGraphMaintenanceRequestToken) {
+        setState(() {
+          _isLoadingMemoryGraphMaintenance = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refreshMemoryGraphNeighborhood({
+    String? nodeId,
+    bool silent = false,
+  }) async {
+    final workspace = _currentWorkspace;
+    if (workspace == null) return;
+    final token = ++_memoryGraphNeighborhoodRequestToken;
+    if (mounted) {
+      setState(() {
+        _isLoadingMemoryGraphNeighborhood = true;
+        _memoryGraphNeighborhoodError = null;
+      });
+    }
+
+    try {
+      final response = await _retrievalService.getGraphNeighborhood(
+        workspace.storyId,
+        nodeId: nodeId,
+        maxDepth: _memoryGraphMaxDepth,
+        maxNodes: _memoryGraphMaxNodes,
+        maxEdges: _memoryGraphMaxEdges,
+      );
+      if (!mounted || token != _memoryGraphNeighborhoodRequestToken) return;
+      setState(() {
+        _memoryGraphNeighborhood = response;
+        _memoryGraphNeighborhoodError = null;
+        if (nodeId != null && nodeId.isNotEmpty) {
+          _selectedMemoryGraphNodeId = nodeId;
+          _selectedMemoryGraphEdgeId = null;
+        } else if (response.nodes.every(
+          (node) => node.id != _selectedMemoryGraphNodeId,
+        )) {
+          _selectedMemoryGraphNodeId = null;
+          _selectedMemoryGraphEdgeId = null;
+        }
+      });
+    } catch (e) {
+      if (!mounted || token != _memoryGraphNeighborhoodRequestToken) return;
+      setState(() {
+        _memoryGraphNeighborhoodError = e.toString();
+      });
+      if (!silent) {
+        OwuiSnackBars.error(
+          context,
+          message: '加载 memory graph neighborhood 失败: $e',
+        );
+      }
+    } finally {
+      if (mounted && token == _memoryGraphNeighborhoodRequestToken) {
+        setState(() {
+          _isLoadingMemoryGraphNeighborhood = false;
         });
       }
     }
@@ -1154,6 +1350,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     final colors = context.owuiColors;
     final embeddingProviderIds = _retrievalEmbeddingProviders();
     final rerankProviderIds = _retrievalRerankProviders();
+    final graphExtractionProviderIds = _graphExtractionProviders();
 
     return Column(
       children: [
@@ -1255,6 +1452,13 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                         color: colors.textSecondary,
                       ),
                     ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      'Graph Extraction: ${_formatRetrievalSelectionSummary(providerId: _selectedGraphExtractionProviderId, modelId: _selectedGraphExtractionModelId) ?? '未设置'}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
                     SizedBox(height: spacing.md),
                     OutlinedButton.icon(
                       onPressed: workspace == null
@@ -1285,6 +1489,15 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                       SizedBox(height: spacing.sm),
                       Text(
                         '当前没有识别到 rerank 模型。可在模型管理页给模型添加 rerank / cross_encoder_rerank 能力。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                    if (graphExtractionProviderIds.isEmpty) ...[
+                      SizedBox(height: spacing.sm),
+                      Text(
+                        '当前没有识别到可用于 graph extraction 的文本模型。需要启用一个非 embedding / rerank 的 chat 或 responses 模型。',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
                         ),
@@ -1901,6 +2114,13 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
           modelId: config['retrieval_rerank_model_id']?.toString(),
         ),
       ),
+      ..._buildTextBlock(
+        label: 'Graph Extraction',
+        value: _formatRetrievalSelectionSummary(
+          providerId: config['graph_extraction_provider_id']?.toString(),
+          modelId: config['graph_extraction_model_id']?.toString(),
+        ),
+      ),
       ..._buildTextBlock(label: 'Notes', value: config['notes']?.toString()),
     ];
   }
@@ -2093,7 +2313,518 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
             else
               ...snapshot.recentJobs.map(_buildRetrievalJobCard),
           ],
+          SizedBox(height: spacing.lg),
+          _buildMemoryGraphInspectionSection(workspace),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMemoryGraphInspectionSection(RpSetupWorkspace workspace) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final maintenance = _memoryGraphMaintenance?.storyId == workspace.storyId
+        ? _memoryGraphMaintenance
+        : null;
+    final neighborhood = _memoryGraphNeighborhood?.storyId == workspace.storyId
+        ? _memoryGraphNeighborhood
+        : null;
+
+    return Container(
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rXl),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Memory Graph Inspection',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      '只读验证视图：查看 graph health、配置、job 状态，并按 bounded neighborhood 展示节点、边和 evidence。',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: '刷新 graph maintenance',
+                onPressed: _isLoadingMemoryGraphMaintenance
+                    ? null
+                    : () => _refreshMemoryGraphMaintenance(workspace.storyId),
+                icon: _isLoadingMemoryGraphMaintenance
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          if (_isLoadingMemoryGraphMaintenance ||
+              _isLoadingMemoryGraphNeighborhood) ...[
+            SizedBox(height: spacing.md),
+            const LinearProgressIndicator(minHeight: 2),
+          ],
+          SizedBox(height: spacing.md),
+          if (_memoryGraphMaintenanceError != null && maintenance == null)
+            Text(
+              'Graph maintenance 加载失败: $_memoryGraphMaintenanceError',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            )
+          else if (maintenance == null)
+            Text(
+              '暂无 graph maintenance snapshot。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            )
+          else ...[
+            Wrap(
+              spacing: spacing.sm,
+              runSpacing: spacing.sm,
+              children: [
+                Chip(
+                  label: Text(
+                    maintenance.graphExtractionEnabled ? 'Enabled' : 'Disabled',
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+                Chip(
+                  label: Text(
+                    maintenance.graphExtractionConfigured
+                        ? 'Configured'
+                        : 'Config Missing',
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+                _buildMetricChip('Nodes', maintenance.nodeCount),
+                _buildMetricChip('Edges', maintenance.edgeCount),
+                _buildMetricChip('Evidence', maintenance.evidenceCount),
+                _buildMetricChip('Jobs', maintenance.jobCount),
+                _buildMetricChip('Failed', maintenance.failedJobCount),
+                _buildMetricChip(
+                  'Retryable',
+                  maintenance.retryableJobIds.length,
+                ),
+              ],
+            ),
+            SizedBox(height: spacing.sm),
+            Text(
+              'Backend: ${maintenance.graphBackend} · Model: ${_formatRetrievalSelectionSummary(providerId: maintenance.graphExtractionProviderId, modelId: maintenance.graphExtractionModelId) ?? '未设置'}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+            if (maintenance.sourceLayers.isNotEmpty) ...[
+              SizedBox(height: spacing.sm),
+              _buildStringChipWrap(
+                maintenance.sourceLayers,
+                emptyLabel: '暂无 source layer',
+              ),
+            ],
+            if (maintenance.maintenanceWarnings.isNotEmpty) ...[
+              SizedBox(height: spacing.sm),
+              Text(
+                'Warnings: ${maintenance.maintenanceWarnings.join(' | ')}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+            if (maintenance.errorCodeCounts.isNotEmpty ||
+                maintenance.warningCodeCounts.isNotEmpty) ...[
+              SizedBox(height: spacing.sm),
+              Text(
+                'Issue counts: ${_formatCountMap(maintenance.errorCodeCounts)} ${_formatCountMap(maintenance.warningCodeCounts)}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+            ],
+            if (maintenance.recentJobs.isNotEmpty) ...[
+              SizedBox(height: spacing.md),
+              Text('Graph Jobs', style: Theme.of(context).textTheme.titleSmall),
+              SizedBox(height: spacing.xs),
+              ...maintenance.recentJobs.take(3).map(_buildMemoryGraphJobRow),
+            ],
+          ],
+          SizedBox(height: spacing.md),
+          Wrap(
+            spacing: spacing.sm,
+            runSpacing: spacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _isLoadingMemoryGraphNeighborhood
+                    ? null
+                    : () => _refreshMemoryGraphNeighborhood(),
+                icon: const Icon(Icons.account_tree_outlined),
+                label: const Text('刷新 bounded neighborhood'),
+              ),
+              if (_selectedMemoryGraphNodeId != null)
+                OutlinedButton.icon(
+                  onPressed: _isLoadingMemoryGraphNeighborhood
+                      ? null
+                      : () => _refreshMemoryGraphNeighborhood(
+                          nodeId: _selectedMemoryGraphNodeId,
+                        ),
+                  icon: const Icon(Icons.hub_outlined),
+                  label: const Text('按选中节点刷新'),
+                ),
+              Chip(
+                label: const Text('max_depth 1 · max_nodes 30 · max_edges 50'),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          if (_memoryGraphNeighborhoodError != null) ...[
+            SizedBox(height: spacing.sm),
+            Text(
+              'Neighborhood 加载失败: $_memoryGraphNeighborhoodError',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          SizedBox(height: spacing.md),
+          _buildMemoryGraphNeighborhoodView(neighborhood),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemoryGraphJobRow(RpMemoryGraphExtractionJob job) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final scheme = Theme.of(context).colorScheme;
+    final stateColor = job.isFailed
+        ? scheme.error
+        : (job.isCompleted ? scheme.secondary : scheme.tertiary);
+    return Padding(
+      padding: EdgeInsets.only(bottom: spacing.xs),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${job.sourceLayer} · ${job.sourceAssetId ?? job.chunkId ?? job.graphJobId}',
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+          ),
+          SizedBox(width: spacing.sm),
+          Chip(
+            label: Text(job.status),
+            backgroundColor: stateColor.withValues(alpha: 0.12),
+            side: BorderSide(color: stateColor.withValues(alpha: 0.28)),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemoryGraphNeighborhoodView(
+    RpMemoryGraphNeighborhoodResponse? neighborhood,
+  ) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    if (neighborhood == null) {
+      return Text(
+        '点击刷新后加载 bounded neighborhood；不会浏览全图，也不会触发 generation 或 mutation。',
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+      );
+    }
+
+    final selectedNode = _findMemoryGraphNode(
+      neighborhood,
+      _selectedMemoryGraphNodeId,
+    );
+    final selectedEdge = _findMemoryGraphEdge(
+      neighborhood,
+      _selectedMemoryGraphEdgeId,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: spacing.sm,
+          runSpacing: spacing.sm,
+          children: [
+            _buildMetricChip('Nodes', neighborhood.nodes.length),
+            _buildMetricChip('Edges', neighborhood.edges.length),
+            _buildMetricChip('Evidence', neighborhood.evidence.length),
+            if (neighborhood.truncated)
+              const Chip(
+                label: Text('Truncated'),
+                visualDensity: VisualDensity.compact,
+              ),
+          ],
+        ),
+        if (neighborhood.warnings.isNotEmpty) ...[
+          SizedBox(height: spacing.sm),
+          Text(
+            'Warnings: ${neighborhood.warnings.join(' | ')}',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        ],
+        SizedBox(height: spacing.md),
+        Text('Nodes', style: Theme.of(context).textTheme.titleSmall),
+        SizedBox(height: spacing.xs),
+        if (neighborhood.nodes.isEmpty)
+          Text(
+            '暂无 graph nodes。',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          )
+        else
+          Wrap(
+            spacing: spacing.sm,
+            runSpacing: spacing.sm,
+            children: neighborhood.nodes
+                .map(
+                  (node) => ChoiceChip(
+                    label: Text('${node.label} · ${node.type}'),
+                    selected: node.id == _selectedMemoryGraphNodeId,
+                    onSelected: (_) {
+                      setState(() {
+                        _selectedMemoryGraphNodeId = node.id;
+                        _selectedMemoryGraphEdgeId = null;
+                      });
+                    },
+                  ),
+                )
+                .toList(),
+          ),
+        SizedBox(height: spacing.md),
+        Text('Edges', style: Theme.of(context).textTheme.titleSmall),
+        SizedBox(height: spacing.xs),
+        if (neighborhood.edges.isEmpty)
+          Text(
+            '暂无 graph edges。',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          )
+        else
+          ...neighborhood.edges.map(_buildMemoryGraphEdgeTile),
+        SizedBox(height: spacing.md),
+        _buildMemoryGraphDetailsPanel(
+          neighborhood: neighborhood,
+          selectedNode: selectedNode,
+          selectedEdge: selectedEdge,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMemoryGraphEdgeTile(RpMemoryGraphEdge edge) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final scheme = Theme.of(context).colorScheme;
+    final selected = edge.id == _selectedMemoryGraphEdgeId;
+    return Padding(
+      padding: EdgeInsets.only(bottom: spacing.xs),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        onTap: () {
+          setState(() {
+            _selectedMemoryGraphEdgeId = edge.id;
+            _selectedMemoryGraphNodeId = null;
+          });
+        },
+        child: Container(
+          padding: EdgeInsets.all(spacing.sm),
+          decoration: BoxDecoration(
+            color: selected
+                ? scheme.primaryContainer.withValues(alpha: 0.24)
+                : colors.surfaceCard,
+            borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+            border: Border.all(color: colors.borderSubtle),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${edge.sourceEntityName ?? edge.source} --${edge.label}--> ${edge.targetEntityName ?? edge.target}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              SizedBox(height: spacing.xs),
+              Text(
+                'Evidence ${edge.evidenceCount} · ${edge.sourceStatus} · ${_formatConfidence(edge.confidence)}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMemoryGraphDetailsPanel({
+    required RpMemoryGraphNeighborhoodResponse neighborhood,
+    required RpMemoryGraphNode? selectedNode,
+    required RpMemoryGraphEdge? selectedEdge,
+  }) {
+    final colors = context.owuiColors;
+    if (selectedEdge != null) {
+      final evidence = neighborhood.evidenceForEdge(selectedEdge.id);
+      return _buildMemoryGraphDetailBox(
+        title: 'Edge Details',
+        lines: [
+          '${selectedEdge.sourceEntityName ?? selectedEdge.source} -> ${selectedEdge.targetEntityName ?? selectedEdge.target}',
+          'Relation: ${selectedEdge.label} · ${selectedEdge.relationFamily}',
+          'Raw: ${selectedEdge.rawRelationText ?? 'n/a'}',
+          'Canon: ${selectedEdge.canonStatus} · Source: ${selectedEdge.sourceLayer}/${selectedEdge.sourceStatus}',
+          'Metadata: ${_formatMapPreview(selectedEdge.metadata)}',
+        ],
+        evidence: evidence,
+      );
+    }
+
+    if (selectedNode != null) {
+      final evidence = neighborhood.evidenceForNode(selectedNode.id);
+      final connectedEdges = neighborhood.edges
+          .where(
+            (edge) =>
+                edge.source == selectedNode.id ||
+                edge.target == selectedNode.id,
+          )
+          .map((edge) => edge.label)
+          .toList();
+      return _buildMemoryGraphDetailBox(
+        title: 'Node Details',
+        lines: [
+          '${selectedNode.label} · ${selectedNode.type}',
+          'Aliases: ${selectedNode.aliases.isEmpty ? 'n/a' : selectedNode.aliases.join(', ')}',
+          'Source: ${selectedNode.sourceLayer}/${selectedNode.sourceStatus} · ${_formatConfidence(selectedNode.confidence)}',
+          if (selectedNode.description != null)
+            'Description: ${selectedNode.description}',
+          'Connected: ${connectedEdges.isEmpty ? 'n/a' : connectedEdges.join(', ')}',
+          'Metadata: ${_formatMapPreview(selectedNode.metadata)}',
+        ],
+        evidence: evidence,
+      );
+    }
+
+    return Text(
+      '选择 node 或 edge 后在这里查看 evidence 与 metadata。',
+      style: Theme.of(
+        context,
+      ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+    );
+  }
+
+  Widget _buildMemoryGraphDetailBox({
+    required String title,
+    required List<String> lines,
+    required List<RpMemoryGraphEvidence> evidence,
+  }) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surfaceCard,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleSmall),
+          SizedBox(height: spacing.sm),
+          ...lines
+              .where((line) => line.trim().isNotEmpty)
+              .map(
+                (line) => Padding(
+                  padding: EdgeInsets.only(bottom: spacing.xs),
+                  child: Text(
+                    line,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+          SizedBox(height: spacing.sm),
+          Text('Evidence', style: Theme.of(context).textTheme.titleSmall),
+          SizedBox(height: spacing.xs),
+          if (evidence.isEmpty)
+            Text(
+              '暂无 evidence。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            )
+          else
+            ...evidence.map(_buildMemoryGraphEvidenceRow),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemoryGraphEvidenceRow(RpMemoryGraphEvidence evidence) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    return Padding(
+      padding: EdgeInsets.only(bottom: spacing.sm),
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.all(spacing.sm),
+        decoration: BoxDecoration(
+          color: colors.surface2,
+          borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+          border: Border.all(color: colors.borderSubtle),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              evidence.excerpt?.trim().isNotEmpty == true
+                  ? evidence.excerpt!
+                  : '无 excerpt',
+            ),
+            SizedBox(height: spacing.xs),
+            Text(
+              [
+                    evidence.sourceRef,
+                    evidence.sourceType,
+                    evidence.chunkId,
+                    evidence.sectionId,
+                  ]
+                  .whereType<String>()
+                  .where((item) => item.isNotEmpty)
+                  .join(' · '),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2253,6 +2984,28 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     );
   }
 
+  RpMemoryGraphNode? _findMemoryGraphNode(
+    RpMemoryGraphNeighborhoodResponse neighborhood,
+    String? nodeId,
+  ) {
+    if (nodeId == null) return null;
+    for (final node in neighborhood.nodes) {
+      if (node.id == nodeId) return node;
+    }
+    return null;
+  }
+
+  RpMemoryGraphEdge? _findMemoryGraphEdge(
+    RpMemoryGraphNeighborhoodResponse neighborhood,
+    String? edgeId,
+  ) {
+    if (edgeId == null) return null;
+    for (final edge in neighborhood.edges) {
+      if (edge.id == edgeId) return edge;
+    }
+    return null;
+  }
+
   Widget _buildMetricChip(String label, int value) {
     return Chip(
       label: Text('$label $value'),
@@ -2306,6 +3059,26 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
   String _truncateMiddle(String value, {int head = 10, int tail = 8}) {
     if (value.length <= head + tail + 3) return value;
     return '${value.substring(0, head)}...${value.substring(value.length - tail)}';
+  }
+
+  String _formatCountMap(Map<String, int> values) {
+    if (values.isEmpty) return '';
+    return values.entries
+        .map((entry) => '${entry.key}:${entry.value}')
+        .join(' ');
+  }
+
+  String _formatConfidence(double? value) {
+    if (value == null) return 'confidence n/a';
+    return 'confidence ${value.toStringAsFixed(2)}';
+  }
+
+  String _formatMapPreview(Map<String, dynamic> value) {
+    if (value.isEmpty) return '{}';
+    return value.entries
+        .take(4)
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join(', ');
   }
 
   String? _formatAgentSelectionSummary({

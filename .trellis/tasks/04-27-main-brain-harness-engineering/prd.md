@@ -499,6 +499,68 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
 - [`research/setup-agent-main-spec-alignment-checklist.md`](research/setup-agent-main-spec-alignment-checklist.md) — frozen alignment note for main spec vs executable specs vs current implementation, including hard conflicts and next-slice boundary.
 - [`research/setup-agent-stage-local-compact-context-engineering-design.md`](research/setup-agent-stage-local-compact-context-engineering-design.md) — source synthesis for compact as stage-local context engineering, including CC/Pi borrowing, RP lightweight boundaries, compact prompt pass, and draft-ref recovery.
 - [`research/setup-agent-action-decision-reference-notes.md`](research/setup-agent-action-decision-reference-notes.md) — source synthesis for the lightweight action decision policy and compact readback observe-act guard.
+- [`research/word-style-review-editing-framework-comparison.md`](research/word-style-review-editing-framework-comparison.md) — deep comparison for Word-style revision/comment editing across SuperDoc, CKEditor, Tiptap/ProseMirror/Yjs, AppFlowy Editor, SuperEditor, Quill Delta, and DeepDiff fallback.
+  - 2026-05-03 user decision note: WebView-backed editor is acceptable for a future quick prototype if scoped to the specialized review editor; Flutter remains the app shell, and SuperDoc is the preferred reference for tracked changes/comments.
+- [`research/setup-stage-module-draft-retrieval-contract.md`](research/setup-stage-module-draft-retrieval-contract.md) — task-level spec for canonical setup stage modules, split draft truth surfaces, structured entry/section grammar, post-commit retrieval materialization, and async diagnostics.
+- [`research/setup-stage-module-draft-slice-plan.md`](research/setup-stage-module-draft-slice-plan.md) — executable slice plan for stage module / data-driven draft block implementation, with Slice 1 scoped to backend canonical stage + draft block contract.
+
+### Setup Stage Module / Draft Contract Slice (2026-05-04)
+
+- Added executable backend spec:
+  - `.trellis/spec/backend/rp-setup-stage-module-draft-foundation-contract.md`
+- Implemented slice:
+  - Slice 1: backend canonical stage + draft block contract
+- Source alignment:
+  - user-confirmed requirement: setup lifecycle follows user-facing stages and `foundation` must not mix worldbuilding with character design
+  - existing frontend evidence: wizard stages are already world/character/plot/writer/worker/overview/activate
+  - existing backend evidence: setup already has JSON draft blocks and accepted commit snapshots, so the first clean slice generalizes that pattern rather than adding a new durable state layer
+- Slice 1 behavior:
+  - add `SetupStageId`, stage module catalog, longform mode stage plan, `SetupStageDraftBlock`, `SetupDraftEntry`, and `SetupDraftSection`
+  - add `current_stage`, `stage_plan`, `stage_states`, and data-driven `draft_blocks` to `SetupWorkspace`
+  - keep legacy fixed draft fields as compatibility mirrors
+  - add `patch_stage_draft` and `propose_stage_commit`, with stage-in-plan and stored payload/stage mismatch validation at propose and accept boundaries
+  - accepting `world_background` freezes that stage and advances canonical `current_stage` to `character_design` while keeping old `current_step=foundation` as a compatibility mirror
+  - setup retrieval ingestion can now read canonical stage snapshots such as `snapshot_payload_json["world_background"]`, render entry sections into seed text, and preserve `semantic_path` as retrieval `domain_path`
+  - add focused tests proving `world_background` and `character_design` are separate stage/draft units, invalid/mismatched stage payloads are rejected, and stage payload ingestion does not depend on old `foundation` snapshots
+- Verification:
+  - `python -m pytest backend/rp/tests/test_setup_stage_module_draft_contract.py backend/rp/tests/test_minimal_retrieval_ingestion_service.py backend/rp/tests/test_setup_tool_provider.py backend/tests/test_rp_setup_api.py -q` -> `30 passed, 14 warnings`
+  - scoped `ruff` passed
+  - scoped `mypy --follow-imports=skip` passed
+  - scoped `git diff --check` passed with only Git CRLF warnings
+- Deferred:
+  - setup tool/context/handoff migration
+  - Setup Truth Index
+  - retrieval seed materialization from entry/section tree
+  - frontend data-driven rendering
+
+### Setup Stage-Aware Context / Handoff / Draft-Ref Read Slice (2026-05-04)
+
+- Implemented slice:
+  - Slice 2A: stage-aware context, handoff, draft-ref reads, and tool-scope mapping
+- Source alignment:
+  - user-confirmed 1A boundary: migrate read/context behavior first, keep model-facing write tools on the existing legacy compatibility path
+  - existing Slice 1 code: `SetupWorkspace.current_stage`, `stage_plan`, `stage_states`, and `draft_blocks` are now the canonical lifecycle/draft sources
+  - existing SetupAgent context specs: prior-stage truth must come from accepted commits, and compact detail recovery should use `setup.read.draft_refs`
+- Slice 2A behavior:
+  - `SetupContextPacket` now carries `current_stage` while preserving `current_step`
+  - stage-aware context prefers `draft_blocks[current_stage]` for the current draft snapshot
+  - prior-stage handoffs for canonical stages are assembled from accepted canonical stage commits in `workspace.stage_plan` order
+  - handoff packets keep legacy `from_step` / `to_step` / `step_id` compatibility fields and add canonical `from_stage` / `to_stage` / `stage_id`
+  - canonical stage snapshots generate retrieval-friendly chunk refs such as `stage:world_background:race_elf` and `stage:world_background:race_elf:summary`
+  - `setup.read.draft_refs` now supports `draft:<stage_id>`, `stage:<stage_id>:<entry_id>`, and `stage:<stage_id>:<entry_id>:<section_id>` while preserving old refs
+  - runtime-v2 context metadata now exposes `current_stage`, `stage_state`, `stage_readiness`, and `prior_stage_handoff_stages`
+  - stage-aware tool scope maps canonical stages to the existing legacy patch-family tools; no new write tool was introduced
+- Verification:
+  - `python -m pytest backend/rp/tests/test_setup_stage_module_draft_contract.py backend/rp/tests/test_setup_agent_runtime_state_service.py backend/rp/tests/test_setup_tool_provider.py backend/rp/tests/test_setup_agent_tool_scope.py backend/rp/tests/test_setup_agent_execution_service_v2.py -q` -> `52 passed, 1 warning`
+  - scoped `ruff check` passed
+  - scoped `ruff format --check` passed
+  - scoped `mypy --follow-imports=skip --check-untyped-defs` passed
+  - `git diff --check` exited 0 with only Git LF/CRLF warnings
+- Deferred:
+  - Slice 2B stage-native write tool migration (`setup.truth.write` / legacy patch tools)
+  - Setup Truth Index
+  - retrieval seed materialization from entry/section tree
+  - frontend data-driven rendering
 
 ### Output Artifacts
 

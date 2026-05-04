@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from rp.models.setup_handoff import SetupContextPacket
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
 
 
@@ -16,9 +17,10 @@ class SetupAgentPromptService:
         *,
         mode: StoryMode,
         current_step: SetupStepId,
+        current_stage: SetupStageId | None,
         context_packet: SetupContextPacket,
     ) -> str:
-        stage_overlay = self._stage_overlay(current_step)
+        stage_overlay = self._stage_overlay(current_stage or current_step)
         workspace_snapshot = json.dumps(
             context_packet.model_dump(mode="json", exclude_none=True),
             ensure_ascii=False,
@@ -66,6 +68,7 @@ class SetupAgentPromptService:
             "do not reconstruct or replay raw prior-stage discussion.\n\n"
             f"Current mode: {mode.value}\n"
             f"Current step: {current_step.value}\n"
+            f"Current stage: {current_stage.value if current_stage is not None else current_step.value}\n"
             "Current stage objective:\n"
             f"{stage_overlay}\n\n"
             "Longform setup guidance:\n"
@@ -80,7 +83,39 @@ class SetupAgentPromptService:
         )
 
     @staticmethod
-    def _stage_overlay(step_id: SetupStepId) -> str:
+    def _stage_overlay(step_id: SetupStepId | SetupStageId) -> str:
+        if step_id == SetupStageId.WORLD_BACKGROUND:
+            return (
+                "- Focus on stable world background, rules, locations, history, factions, races, and other world facts.\n"
+                "- Keep entries structured and retrieval-addressable.\n"
+                "- Do not mix character-only details into this stage unless they define the world."
+            )
+        if step_id == SetupStageId.CHARACTER_DESIGN:
+            return (
+                "- Focus on stable character, relationship, group, and role facts.\n"
+                "- Use prior world handoffs as accepted context; do not replay old discussion.\n"
+                "- Keep character entries separate from world-background entries."
+            )
+        if step_id == SetupStageId.PLOT_BLUEPRINT:
+            return (
+                "- Focus on plot threads, foreshadowing, premise, conflict, arcs, and chapter plan.\n"
+                "- Use accepted world and character handoffs as constraints."
+            )
+        if step_id == SetupStageId.WRITER_CONFIG:
+            return (
+                "- Focus on POV, style, writing constraints, and task writing rules.\n"
+                "- Do not turn the draft into one giant prompt blob."
+            )
+        if step_id == SetupStageId.WORKER_CONFIG:
+            return (
+                "- Focus on worker policy, tool policy, and handoff rules.\n"
+                "- Keep runtime configuration concise and explicit."
+            )
+        if step_id in {SetupStageId.OVERVIEW, SetupStageId.ACTIVATE}:
+            return (
+                "- Focus on review and activation readiness.\n"
+                "- Do not add new foundation facts unless the user explicitly asks."
+            )
         if step_id == SetupStepId.STORY_CONFIG:
             return (
                 "- Focus on story configuration and runtime profile convergence.\n"

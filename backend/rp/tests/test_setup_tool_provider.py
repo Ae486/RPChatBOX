@@ -1,18 +1,24 @@
 """Unit tests for setup tool provider error contracts."""
+
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from rp.models.setup_drafts import (
     FoundationEntry,
     LongformBlueprintDraft,
+    SetupDraftEntry,
+    SetupDraftSection,
+    SetupStageDraftBlock,
     StoryConfigDraft,
     WritingContractDraft,
 )
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import (
     CommitProposalStatus,
     QuestionSeverity,
@@ -40,7 +46,9 @@ class _FakeWorkspaceService:
     def __init__(self, workspace=None) -> None:
         self._workspace = workspace
         self.propose_commit_called = False
-        self.propose_commit_kwargs = None
+        self.propose_commit_kwargs: dict[str, Any] | None = None
+        self.propose_stage_commit_called = False
+        self.propose_stage_commit_kwargs: dict[str, Any] | None = None
 
     def get_workspace(self, workspace_id: str):
         return self._workspace
@@ -54,6 +62,15 @@ class _FakeWorkspaceService:
             unresolved_warnings=list(kwargs.get("unresolved_warnings") or []),
         )
 
+    def propose_stage_commit(self, **kwargs):
+        self.propose_stage_commit_called = True
+        self.propose_stage_commit_kwargs = kwargs
+        return SimpleNamespace(
+            proposal_id="stage-proposal-created",
+            review_message=f"Review requested for {kwargs['stage_id'].value}",
+            unresolved_warnings=list(kwargs.get("unresolved_warnings") or []),
+        )
+
     def rollback(self) -> None:
         return None
 
@@ -61,7 +78,7 @@ class _FakeWorkspaceService:
 @pytest.mark.asyncio
 async def test_setup_tool_provider_schema_validation_returns_machine_readable_details():
     provider = SetupToolProvider(
-        workspace_service=_FakeWorkspaceService(),
+        workspace_service=cast(Any, _FakeWorkspaceService()),
         context_builder=_DummyContextBuilder(),
         runtime_state_service=_DummyRuntimeStateService(),
     )
@@ -83,7 +100,7 @@ async def test_setup_tool_provider_schema_validation_returns_machine_readable_de
 @pytest.mark.asyncio
 async def test_setup_tool_provider_truth_write_still_requires_provider_contract_fields():
     provider = SetupToolProvider(
-        workspace_service=_FakeWorkspaceService(),
+        workspace_service=cast(Any, _FakeWorkspaceService()),
         context_builder=_DummyContextBuilder(),
         runtime_state_service=_DummyRuntimeStateService(),
     )
@@ -159,7 +176,7 @@ async def test_setup_tool_provider_key_tools_return_repairable_schema_errors(
     required_fields,
 ):
     provider = SetupToolProvider(
-        workspace_service=_FakeWorkspaceService(),
+        workspace_service=cast(Any, _FakeWorkspaceService()),
         context_builder=_DummyContextBuilder(),
         runtime_state_service=_DummyRuntimeStateService(),
     )
@@ -251,7 +268,330 @@ async def test_setup_tool_provider_reads_stage_local_draft_refs(retrieval_sessio
 
 
 @pytest.mark.asyncio
-async def test_setup_tool_provider_draft_ref_full_detail_honors_max_chars(retrieval_session):
+async def test_setup_tool_provider_reads_canonical_stage_draft_refs(retrieval_session):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-draft-refs-stage-1",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            entries=[
+                SetupDraftEntry(
+                    entry_id="race_elf",
+                    entry_type="race",
+                    semantic_path="world_background.race.elf",
+                    title="Elf",
+                    summary="Moonlit forest cities.",
+                    sections=[
+                        SetupDraftSection(
+                            section_id="summary",
+                            title="Summary",
+                            kind="text",
+                            content={"text": "Moonlit forest cities."},
+                            retrieval_role="summary",
+                        )
+                    ],
+                )
+            ],
+            notes="World background notes.",
+        ),
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.read.draft_refs",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "step_id": "foundation",
+            "refs": [
+                "draft:world_background",
+                "stage:world_background:race_elf",
+                "stage:world_background:race_elf:summary",
+            ],
+            "detail": "summary",
+        },
+    )
+
+    payload = json.loads(result["content"])
+    found = {item["ref"]: item for item in payload["items"] if item["found"]}
+    assert result["success"] is True
+    assert payload["success"] is True
+    assert found["draft:world_background"]["block_type"] == "world_background"
+    assert "World Background" in found["draft:world_background"]["title"]
+    assert found["stage:world_background:race_elf"]["block_type"] == "world_background"
+    assert found["stage:world_background:race_elf"]["title"] == "Elf"
+    assert found["stage:world_background:race_elf:summary"]["title"] == "Summary"
+    assert (
+        "Moonlit forest cities."
+        in found["stage:world_background:race_elf:summary"]["summary"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_setup_tool_provider_truth_write_writes_stage_draft_entry(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-truth-write-1",
+        mode=StoryMode.LONGFORM,
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.truth.write",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "step_id": "foundation",
+            "truth_write": {
+                "write_id": "write-race-elf",
+                "current_step": "world_background",
+                "block_type": "stage_draft",
+                "stage_id": "world_background",
+                "operation": "create",
+                "payload": {
+                    "entry_id": "race_elf",
+                    "entry_type": "race",
+                    "semantic_path": "world_background.race.elf",
+                    "title": "Elf",
+                    "summary": "Moonlit forest cities.",
+                    "sections": [
+                        {
+                            "section_id": "summary",
+                            "title": "Summary",
+                            "kind": "text",
+                            "content": {"text": "Moonlit forest cities."},
+                            "retrieval_role": "summary",
+                        }
+                    ],
+                },
+                "ready_for_review": True,
+            },
+        },
+    )
+
+    payload = json.loads(result["content"])
+    refreshed = workspace_service.get_workspace(workspace.workspace_id)
+
+    assert result["success"] is True
+    assert payload["updated_refs"] == ["stage:world_background:race_elf"]
+    assert refreshed is not None
+    assert refreshed.foundation_draft is None
+    assert refreshed.draft_blocks["world_background"].entries[0].entry_id == "race_elf"
+    assert (
+        payload["cognitive_state_snapshot"]["active_truth_write"]["block_type"]
+        == "stage_draft"
+    )
+    assert (
+        payload["cognitive_state_snapshot"]["active_truth_write"]["stage_id"]
+        == "world_background"
+    )
+
+
+@pytest.mark.asyncio
+async def test_setup_tool_provider_truth_write_writes_full_stage_draft_block(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-truth-write-block-1",
+        mode=StoryMode.LONGFORM,
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.truth.write",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "step_id": "foundation",
+            "truth_write": {
+                "write_id": "write-world-block",
+                "current_step": "world_background",
+                "block_type": "stage_draft",
+                "stage_id": "world_background",
+                "operation": "create",
+                "target_ref": "draft:world_background",
+                "payload": {
+                    "stage_id": "world_background",
+                    "entries": [
+                        {
+                            "entry_id": "location_moon_forest",
+                            "entry_type": "location",
+                            "semantic_path": "world_background.location.moon_forest",
+                            "title": "Moon Forest",
+                            "summary": "A luminous old forest.",
+                            "sections": [
+                                {
+                                    "section_id": "summary",
+                                    "title": "Summary",
+                                    "kind": "text",
+                                    "content": {"text": "A luminous old forest."},
+                                }
+                            ],
+                        }
+                    ],
+                    "notes": "World background draft.",
+                },
+                "ready_for_review": True,
+            },
+        },
+    )
+
+    payload = json.loads(result["content"])
+    refreshed = workspace_service.get_workspace(workspace.workspace_id)
+
+    assert result["success"] is True
+    assert payload["updated_refs"] == ["draft:world_background"]
+    assert refreshed is not None
+    assert refreshed.foundation_draft is None
+    assert refreshed.draft_blocks["world_background"].notes == "World background draft."
+    assert (
+        refreshed.draft_blocks["world_background"].entries[0].entry_id
+        == "location_moon_forest"
+    )
+
+
+@pytest.mark.asyncio
+async def test_setup_tool_provider_truth_write_rejects_stage_payload_mismatch(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-truth-write-2",
+        mode=StoryMode.LONGFORM,
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.truth.write",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "step_id": "foundation",
+            "truth_write": {
+                "write_id": "write-bad-block",
+                "current_step": "world_background",
+                "block_type": "stage_draft",
+                "stage_id": "world_background",
+                "operation": "create",
+                "target_ref": "draft:world_background",
+                "payload": {
+                    "stage_id": "character_design",
+                    "entries": [],
+                },
+                "ready_for_review": False,
+            },
+        },
+    )
+
+    payload = json.loads(result["content"])
+    refreshed = workspace_service.get_workspace(workspace.workspace_id)
+
+    assert result["success"] is False
+    assert result["error_code"] == "SETUP_TOOL_FAILED"
+    assert payload["code"] == "setup_truth_write_stage_id_mismatch"
+    assert refreshed is not None
+    assert "world_background" not in refreshed.draft_blocks
+
+
+@pytest.mark.parametrize(
+    "target_ref",
+    ["stage:world_background:race_elf", "draft:world_background"],
+)
+@pytest.mark.asyncio
+async def test_setup_tool_provider_commit_proposal_routes_stage_refs_to_stage_commit(
+    retrieval_session,
+    target_ref,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-commit-tool-1",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            entries=[
+                SetupDraftEntry(
+                    entry_id="race_elf",
+                    entry_type="race",
+                    semantic_path="world_background.race.elf",
+                    title="Elf",
+                    sections=[
+                        SetupDraftSection(
+                            section_id="summary",
+                            title="Summary",
+                            kind="text",
+                            content={"text": "Moonlit forest cities."},
+                        )
+                    ],
+                )
+            ],
+        ),
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.proposal.commit",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "step_id": "foundation",
+            "target_draft_refs": [target_ref],
+            "reason": "World stage is ready.",
+        },
+    )
+
+    payload = json.loads(result["content"])
+    refreshed = workspace_service.get_workspace(workspace.workspace_id)
+    proposal = refreshed.commit_proposals[-1] if refreshed is not None else None
+
+    assert result["success"] is True
+    assert payload["updated_refs"][0].startswith("proposal:")
+    assert proposal is not None
+    assert proposal.step_id == SetupStageId.WORLD_BACKGROUND
+    assert proposal.target_block_types == ["world_background"]
+    assert proposal.target_draft_refs == [target_ref]
+
+
+@pytest.mark.asyncio
+async def test_setup_tool_provider_draft_ref_full_detail_honors_max_chars(
+    retrieval_session,
+):
     workspace_service = SetupWorkspaceService(retrieval_session)
     context_builder = SetupContextBuilder(workspace_service)
     runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
@@ -337,7 +677,7 @@ async def test_setup_tool_provider_allows_commit_with_blocking_question_warning(
     )
     service = _FakeWorkspaceService(workspace=workspace)
     provider = SetupToolProvider(
-        workspace_service=service,
+        workspace_service=cast(Any, service),
         context_builder=_DummyContextBuilder(),
         runtime_state_service=_DummyRuntimeStateService(),
     )
@@ -356,6 +696,7 @@ async def test_setup_tool_provider_allows_commit_with_blocking_question_warning(
     assert result["error_code"] is None
     assert payload["warnings"] == ["blocking_questions_present"]
     assert service.propose_commit_called is True
+    assert service.propose_commit_kwargs is not None
     assert service.propose_commit_kwargs["unresolved_warnings"] == [
         "blocking_questions_present"
     ]
@@ -378,7 +719,7 @@ async def test_setup_tool_provider_allows_reproposal_with_rejection_warning():
     )
     service = _FakeWorkspaceService(workspace=workspace)
     provider = SetupToolProvider(
-        workspace_service=service,
+        workspace_service=cast(Any, service),
         context_builder=_DummyContextBuilder(),
         runtime_state_service=_DummyRuntimeStateService(),
     )
@@ -397,13 +738,16 @@ async def test_setup_tool_provider_allows_reproposal_with_rejection_warning():
     assert result["error_code"] is None
     assert payload["warnings"] == ["previous_proposal_rejected"]
     assert service.propose_commit_called is True
+    assert service.propose_commit_kwargs is not None
     assert service.propose_commit_kwargs["unresolved_warnings"] == [
         "previous_proposal_rejected"
     ]
 
 
 @pytest.mark.asyncio
-async def test_setup_tool_provider_persists_commit_readiness_warnings(retrieval_session):
+async def test_setup_tool_provider_persists_commit_readiness_warnings(
+    retrieval_session,
+):
     workspace_service = SetupWorkspaceService(retrieval_session)
     context_builder = SetupContextBuilder(workspace_service)
     runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)

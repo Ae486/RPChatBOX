@@ -21,6 +21,7 @@
 | [RP Setup Agent Runtime-V2 Only Convergence](./rp-setup-agent-runtime-v2-only-convergence.md) | Remove the transitional setup legacy runtime path and keep every setup entrypoint on the runtime-v2 engine | Active |
 | [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md) | Keep the outer SetupGraph shell focused on checkpoint/routing and remove duplicate setup context assembly from the shell layer | Active |
 | [RP Setup Agent Execution Service Outer-Harness Thin Boundary](./rp-setup-agent-execution-service-outer-harness-thin-boundary.md) | Keep `SetupAgentExecutionService` on one shared preflight/launch boundary and prevent text/stream public-path drift | Active |
+| [RP Setup Stage Module Draft Foundation Contract](./rp-setup-stage-module-draft-foundation-contract.md) | Canonical setup stage modules, reusable mode plans, data-driven draft blocks, and committed foundation truth source boundaries | Active |
 | [RP Core State Block Envelope](./rp-core-state-block-envelope.md) | Read-only Block envelope over RP Core State formal store and compatibility mirrors | Active |
 | [RP Authoritative Block Governed Mutation](./rp-authoritative-block-governed-mutation.md) | Block-addressed authoritative mutation entry that normalizes into the existing proposal/apply workflow | Active |
 | [RP Authoritative Block Proposal Review Apply Visibility](./rp-authoritative-block-proposal-review-apply-visibility.md) | Block-scoped proposal detail and manual apply continuation over the existing proposal/apply persistence | Active |
@@ -33,6 +34,8 @@
 | [RP Memory Block Capability Metadata](./rp-memory-block-capability-metadata.md) | Machine-checkable Block view capability metadata and read-only mutation guard enforcement across Core State, Runtime Workspace, and retrieval-backed views | Active |
 | [RP Memory Materialization Intake Contract](./rp-memory-materialization-intake-contract.md) | Canonical Recall materialization metadata and seed-section intake contract that memory freezes before upstream runtime producers converge | Active |
 | [RP Archival Knowledge Intake Contract](./rp-archival-knowledge-intake-contract.md) | Canonical Archival source-material metadata and seed-section intake contract for setup/source imports before upstream producers converge | Active |
+| [RP Memory Contract Registry Identity Event Skeleton](./rp-memory-contract-registry-identity-event-skeleton.md) | First memory strengthening contract slice for domain/block registry, runtime identity spine, and lightweight memory change events | Active |
+| [RP Runtime Workspace Turn Material Store](./rp-runtime-workspace-turn-material-store.md) | Typed current-turn Runtime Workspace material store contract for retrieval cards, usage records, rule cards, candidates, evidence, packet refs, and traces | Active |
 | [RP Memory OS Block Rollout](./rp-memory-os-block-rollout.md) | Overall rollout contract from Core State Block integration to full Memory OS containerization | Active |
 | [RP Memory Tool Chain Block Compatibility](./rp-memory-tool-chain-block-compatibility.md) | Compatibility gate that keeps the public memory tool chain stable after Core State Block integration | Active |
 | [RP Memory Container Gap Inventory](./rp-memory-container-gap-inventory.md) | Phase C decision gate that proves whether a new durable container layer is actually required | Active |
@@ -69,6 +72,7 @@
 - [ ] If the change touches SetupAgent runtime entrypoint wiring, factory convergence, or removal of the transitional legacy runtime path, read [RP Setup Agent Runtime-V2 Only Convergence](./rp-setup-agent-runtime-v2-only-convergence.md).
 - [ ] If the change touches the phase-1 SetupGraph shell, stream checkpoint seeding, or graph-level duplication of setup context assembly, read [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md).
 - [ ] If the change touches `SetupAgentExecutionService` public turn entrypoints, shared preflight, or text/stream launch drift, read [RP Setup Agent Execution Service Outer-Harness Thin Boundary](./rp-setup-agent-execution-service-outer-harness-thin-boundary.md).
+- [ ] If the change touches setup lifecycle granularity, stage modules, mode stage plans, setup draft block storage, or committed setup foundation truth surfaces, read [RP Setup Stage Module Draft Foundation Contract](./rp-setup-stage-module-draft-foundation-contract.md).
 - [ ] If the change touches RP memory/Core State, read [RP Core State Block Envelope](./rp-core-state-block-envelope.md).
 - [ ] If the change adds or modifies block-addressed authoritative mutation, read [RP Authoritative Block Governed Mutation](./rp-authoritative-block-governed-mutation.md).
 - [ ] If the change adds or modifies block-scoped proposal review/apply visibility, read [RP Authoritative Block Proposal Review Apply Visibility](./rp-authoritative-block-proposal-review-apply-visibility.md).
@@ -81,6 +85,8 @@
 - [ ] If the change adds or modifies Block read-only, mutation, history, or proposal capability metadata, read [RP Memory Block Capability Metadata](./rp-memory-block-capability-metadata.md).
 - [ ] If the change adds or modifies Recall materialization metadata, seed-section metadata, or memory intake semantics for runtime-produced material, read [RP Memory Materialization Intake Contract](./rp-memory-materialization-intake-contract.md).
 - [ ] If the change adds or modifies Archival Knowledge source-material metadata, seed-section metadata, or setup/source import semantics, read [RP Archival Knowledge Intake Contract](./rp-archival-knowledge-intake-contract.md).
+- [ ] If the change adds or modifies memory domain/block registry, story-runtime memory identity, or memory change event contracts, read [RP Memory Contract Registry Identity Event Skeleton](./rp-memory-contract-registry-identity-event-skeleton.md).
+- [ ] If the change adds or modifies Runtime Workspace typed turn materials, material lifecycle, retrieval-card material, usage records, rule cards, worker candidates, evidence bundles, packet refs, or token usage metadata, read [RP Runtime Workspace Turn Material Store](./rp-runtime-workspace-turn-material-store.md).
 - [ ] If the change adjusts overall Memory OS Block sequencing, read [RP Memory OS Block Rollout](./rp-memory-os-block-rollout.md).
 - [ ] If the change touches memory tool/provider compatibility after Block integration, read [RP Memory Tool Chain Block Compatibility](./rp-memory-tool-chain-block-compatibility.md).
 - [ ] If the change decides whether a new durable Memory OS container layer is needed, read [RP Memory Container Gap Inventory](./rp-memory-container-gap-inventory.md).
@@ -121,6 +127,8 @@
 - [ ] Block capability metadata is generated by read adapters, overrides conflicting stored metadata, and read-only Blocks are rejected before mutation normalization.
 - [ ] Recall materialization metadata is generated by the memory intake helper, keeps canonical fields on parent assets and seed sections, and prevents upstream metadata from redefining memory-layer ownership.
 - [ ] Archival Knowledge intake metadata is generated by the memory intake helper, keeps canonical fields on parent assets and seed sections, and prevents setup/source metadata from redefining memory-layer ownership.
+- [ ] Memory contract registry remains declarative/versioned, includes the confirmed bootstrap domains, and carries full story/branch/turn/profile identity on memory events without becoming an alternate truth store.
+- [ ] Runtime Workspace typed turn materials carry full memory runtime identity, validate domains through the registry, enforce turn-scoped short ids, and remain temporary material rather than Core State / Recall / Archival truth.
 - [ ] Public memory tool/provider contracts remain stable after Block integration unless a spec explicitly widens them.
 - [ ] Retrieval-backed Block-compatible views stay additive/read-only and do not replace public search results or active-story Core State `block_context`.
 - [ ] Retrieval observability Block fields reuse the canonical retrieval Block adapter and stay additive to existing hit-centric payloads.

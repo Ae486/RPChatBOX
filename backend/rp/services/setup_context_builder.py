@@ -11,6 +11,7 @@ from rp.models.setup_handoff import (
     SetupStageHandoffPacket,
     SetupStageHandoffSourceBasis,
 )
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId
 from rp.services.setup_workspace_service import SetupWorkspaceService
 
@@ -29,14 +30,23 @@ class SetupContextBuilder:
         if workspace is None:
             raise ValueError(f"SetupWorkspace not found: {input_model.workspace_id}")
 
-        current_step = SetupStepId(input_model.current_step)
+        current_stage = self._resolve_current_stage(input_model)
+        current_step = self._resolve_current_step(
+            input_model=input_model,
+            current_stage=current_stage,
+        )
         context_profile = self._context_profile(input_model.token_budget)
         prior_stage_handoffs = self._collect_prior_stage_handoffs(
             workspace=workspace,
             current_step=current_step,
+            current_stage=current_stage,
             context_profile=context_profile,
         )
-        current_draft_snapshot = self._current_draft_snapshot(workspace, current_step)
+        current_draft_snapshot = self._current_draft_snapshot(
+            workspace=workspace,
+            current_step=current_step,
+            current_stage=current_stage,
+        )
         step_asset_preview = [
             {
                 "asset_id": asset.asset_id,
@@ -77,6 +87,7 @@ class SetupContextBuilder:
         return SetupContextPacket(
             workspace_id=workspace.workspace_id,
             current_step=current_step.value,
+            current_stage=current_stage,
             context_profile=context_profile,
             committed_summaries=committed_summaries,
             current_draft_snapshot=current_draft_snapshot,
@@ -86,6 +97,30 @@ class SetupContextBuilder:
             spotlights=spotlights[:10],
             prior_stage_handoffs=prior_stage_handoffs,
         )
+
+    @staticmethod
+    def _resolve_current_stage(
+        input_model: SetupContextBuilderInput,
+    ) -> SetupStageId | None:
+        if input_model.current_stage:
+            return SetupStageId(input_model.current_stage)
+        try:
+            return SetupStageId(input_model.current_step)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _resolve_current_step(
+        *,
+        input_model: SetupContextBuilderInput,
+        current_stage: SetupStageId | None,
+    ) -> SetupStepId:
+        try:
+            return SetupStepId(input_model.current_step)
+        except ValueError:
+            if current_stage is None:
+                raise
+            return SetupWorkspaceService._LEGACY_STEP_FOR_STAGE[current_stage]
 
     @staticmethod
     def _context_profile(
@@ -104,8 +139,17 @@ class SetupContextBuilder:
         *,
         workspace,
         current_step: SetupStepId,
+        current_stage: SetupStageId | None,
         context_profile: str,
     ) -> list[SetupStageHandoffPacket]:
+        if current_stage is not None:
+            return cls._collect_prior_canonical_stage_handoffs(
+                workspace=workspace,
+                current_step=current_step,
+                current_stage=current_stage,
+                context_profile=context_profile,
+            )
+
         try:
             current_index = cls._STEP_ORDER.index(current_step)
         except ValueError:
@@ -113,10 +157,10 @@ class SetupContextBuilder:
         if current_index <= 0:
             return []
 
-        latest_commit_by_step = cls._latest_commit_by_step(workspace)
+        latest_commit_by_lifecycle = cls._latest_commit_by_lifecycle(workspace)
         handoffs: list[SetupStageHandoffPacket] = []
         for step_id in cls._STEP_ORDER[:current_index]:
-            commit = latest_commit_by_step.get(step_id)
+            commit = latest_commit_by_lifecycle.get(step_id.value)
             if commit is None:
                 continue
             handoffs.append(
@@ -124,21 +168,70 @@ class SetupContextBuilder:
                     workspace=workspace,
                     commit=commit,
                     to_step=current_step,
+                    to_stage=None,
                     context_profile=context_profile,
                 )
             )
         return handoffs
 
     @classmethod
-    def _latest_commit_by_step(cls, workspace) -> dict[SetupStepId, Any]:
-        latest: dict[SetupStepId, Any] = {}
+    def _collect_prior_canonical_stage_handoffs(
+        cls,
+        *,
+        workspace,
+        current_step: SetupStepId,
+        current_stage: SetupStageId,
+        context_profile: str,
+    ) -> list[SetupStageHandoffPacket]:
+        stage_plan = list(workspace.stage_plan)
+        if not stage_plan:
+            return []
+        try:
+            current_index = stage_plan.index(current_stage)
+        except ValueError:
+            return []
+        if current_index <= 0:
+            return []
+
+        latest_commit_by_lifecycle = cls._latest_commit_by_lifecycle(workspace)
+        handoffs: list[SetupStageHandoffPacket] = []
+        seen_commit_ids: set[str] = set()
+        for stage_id in stage_plan[:current_index]:
+            commit = latest_commit_by_lifecycle.get(
+                stage_id.value
+            ) or latest_commit_by_lifecycle.get(
+                cls._legacy_step_for_stage(stage_id).value
+            )
+            if commit is None:
+                continue
+            if commit.commit_id in seen_commit_ids:
+                continue
+            seen_commit_ids.add(commit.commit_id)
+            handoffs.append(
+                cls._build_stage_handoff(
+                    workspace=workspace,
+                    commit=commit,
+                    to_step=current_step,
+                    to_stage=current_stage,
+                    context_profile=context_profile,
+                )
+            )
+        return handoffs
+
+    @classmethod
+    def _latest_commit_by_lifecycle(cls, workspace) -> dict[str, Any]:
+        latest: dict[str, Any] = {}
         ordered_commits = sorted(
             workspace.accepted_commits,
-            key=lambda item: (item.created_at, cls._STEP_ORDER.index(item.step_id)),
+            key=lambda item: (item.created_at, cls._lifecycle_value(item.step_id)),
         )
         for commit in ordered_commits:
-            latest[commit.step_id] = commit
+            latest[cls._lifecycle_value(commit.step_id)] = commit
         return latest
+
+    @staticmethod
+    def _legacy_step_for_stage(stage_id: SetupStageId) -> SetupStepId:
+        return SetupWorkspaceService._LEGACY_STEP_FOR_STAGE[stage_id]
 
     @classmethod
     def _build_stage_handoff(
@@ -147,14 +240,24 @@ class SetupContextBuilder:
         workspace,
         commit,
         to_step: SetupStepId,
+        to_stage: SetupStageId | None,
         context_profile: str,
     ) -> SetupStageHandoffPacket:
         compact = context_profile == "compact"
+        from_stage = cls._coerce_stage_id(cls._lifecycle_value(commit.step_id))
+        from_step = (
+            cls._legacy_step_for_stage(from_stage)
+            if from_stage is not None
+            else SetupStepId(cls._lifecycle_value(commit.step_id))
+        )
         return SetupStageHandoffPacket(
             workspace_id=workspace.workspace_id,
-            from_step=commit.step_id,
+            from_step=from_step,
             to_step=to_step,
-            step_id=commit.step_id,
+            step_id=from_step,
+            from_stage=from_stage,
+            to_stage=to_stage,
+            stage_id=from_stage,
             commit_id=commit.commit_id,
             summary=cls._commit_summary(commit=commit, compact=compact),
             summary_tier_0=(
@@ -197,6 +300,20 @@ class SetupContextBuilder:
         )
 
     @staticmethod
+    def _lifecycle_value(value: Any) -> str:
+        enum_value = getattr(value, "value", None)
+        return str(enum_value if enum_value is not None else value)
+
+    @staticmethod
+    def _coerce_stage_id(value: str | None) -> SetupStageId | None:
+        if not value:
+            return None
+        try:
+            return SetupStageId(value)
+        except ValueError:
+            return None
+
+    @staticmethod
     def _commit_summary(*, commit, compact: bool) -> str:
         summary = (
             commit.summary_tier_0
@@ -217,6 +334,15 @@ class SetupContextBuilder:
     ) -> list[SetupStageChunkDescription]:
         chunks: list[SetupStageChunkDescription] = []
         for snapshot in commit.snapshots:
+            stage_id = cls._coerce_stage_id(snapshot.block_type)
+            if stage_id is not None:
+                chunks.extend(
+                    cls._stage_chunk_descriptions(
+                        stage_id=stage_id,
+                        payload=snapshot.payload,
+                    )
+                )
+                continue
             if snapshot.block_type == "foundation":
                 chunks.extend(cls._foundation_chunk_descriptions(snapshot.payload))
                 continue
@@ -238,6 +364,71 @@ class SetupContextBuilder:
                 )
             )
         return chunks[: (4 if compact else 8)]
+
+    @classmethod
+    def _stage_chunk_descriptions(
+        cls,
+        *,
+        stage_id: SetupStageId,
+        payload: dict[str, Any],
+    ) -> list[SetupStageChunkDescription]:
+        descriptions: list[SetupStageChunkDescription] = []
+        for entry in payload.get("entries", [])[:6]:
+            entry_id = str(
+                entry.get("entry_id")
+                or entry.get("semantic_path")
+                or entry.get("title")
+                or "entry"
+            )
+            title = str(
+                entry.get("title")
+                or entry.get("display_label")
+                or entry.get("semantic_path")
+                or entry_id
+            )
+            description = cls._join_parts(
+                [
+                    cls._coerce_preview_text(entry.get("summary")),
+                    cls._coerce_preview_text(entry.get("semantic_path")),
+                    cls._stage_section_preview(entry.get("sections", []), "summary"),
+                ]
+            )
+            if not description:
+                description = "Accepted stage entry."
+            descriptions.append(
+                SetupStageChunkDescription(
+                    chunk_ref=f"stage:{stage_id.value}:{entry_id}",
+                    block_type=stage_id.value,
+                    title=title,
+                    description=description,
+                    metadata={
+                        "stage_id": stage_id.value,
+                        "entry_id": entry.get("entry_id"),
+                        "entry_type": entry.get("entry_type"),
+                        "semantic_path": entry.get("semantic_path"),
+                    },
+                )
+            )
+            for section in entry.get("sections", [])[:4]:
+                section_id = str(section.get("section_id") or "section")
+                section_description = cls._stage_section_description(section)
+                if not section_description:
+                    continue
+                descriptions.append(
+                    SetupStageChunkDescription(
+                        chunk_ref=f"stage:{stage_id.value}:{entry_id}:{section_id}",
+                        block_type=stage_id.value,
+                        title=str(section.get("title") or f"{title} / {section_id}"),
+                        description=section_description,
+                        metadata={
+                            "stage_id": stage_id.value,
+                            "entry_id": entry.get("entry_id"),
+                            "section_id": section_id,
+                            "retrieval_role": section.get("retrieval_role"),
+                        },
+                    )
+                )
+        return descriptions
 
     @classmethod
     def _build_open_issues(cls, *, commit) -> list[str]:
@@ -453,7 +644,53 @@ class SetupContextBuilder:
         return " | ".join(part for part in parts if part)
 
     @staticmethod
-    def _current_draft_snapshot(workspace, current_step: SetupStepId) -> dict:
+    def _stage_section_preview(
+        sections: list[dict[str, Any]],
+        retrieval_role: str,
+    ) -> str | None:
+        for section in sections:
+            if section.get("retrieval_role") == retrieval_role:
+                preview = SetupContextBuilder._stage_section_description(section)
+                if preview:
+                    return preview
+        return None
+
+    @staticmethod
+    def _stage_section_description(section: dict[str, Any]) -> str | None:
+        content = section.get("content")
+        if isinstance(content, dict):
+            text = content.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+            items = content.get("items")
+            if isinstance(items, list):
+                item_values = [str(item).strip() for item in items if str(item).strip()]
+                if item_values:
+                    return ", ".join(item_values[:3])
+            value_map = content.get("values")
+            if isinstance(value_map, dict):
+                parts = [
+                    str(item).strip()
+                    for item in value_map.values()
+                    if str(item).strip()
+                ]
+                if parts:
+                    return ", ".join(parts[:3])
+        preview = SetupContextBuilder._coerce_preview_text(section.get("summary"))
+        if preview:
+            return preview
+        return SetupContextBuilder._coerce_preview_text(section.get("title"))
+
+    @staticmethod
+    def _current_draft_snapshot(
+        workspace,
+        current_step: SetupStepId,
+        current_stage: SetupStageId | None,
+    ) -> dict:
+        if current_stage is not None:
+            stage_block = workspace.draft_blocks.get(current_stage.value)
+            if stage_block is not None:
+                return stage_block.model_dump(mode="json", exclude_none=True)
         if (
             current_step == SetupStepId.STORY_CONFIG
             and workspace.story_config_draft is not None

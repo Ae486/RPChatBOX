@@ -15,10 +15,13 @@
 - `SetupContextBuilderInput`
   - `workspace_id: str`
   - `current_step: str`
+  - `current_stage: str | None`
   - `user_prompt: str`
   - `user_edit_delta_ids: list[str]`
   - `token_budget: int | None`
 - `SetupContextPacket`
+  - `current_step: str`
+  - `current_stage: str | None`
   - `context_profile: Literal["standard", "compact"]`
   - `committed_summaries: list[str]`
   - `current_draft_snapshot: dict[str, Any]`
@@ -29,6 +32,9 @@
   - `from_step: SetupStepId`
   - `to_step: SetupStepId`
   - `step_id: SetupStepId`
+  - `from_stage: SetupStageId | None`
+  - `to_stage: SetupStageId | None`
+  - `stage_id: SetupStageId | None`
   - `commit_id: str`
   - `summary: str`
   - `summary_tier_0: str | None`
@@ -63,12 +69,12 @@
 - `prior_stage_handoffs` must be built only from `workspace.accepted_commits`.
 - For each earlier setup step, only the latest accepted commit is eligible for handoff.
 - The current step must never appear inside `prior_stage_handoffs`, even if the current step already has accepted commits.
-- Step ordering must follow `SetupWorkspaceService._STEP_ORDER`. If a step is not earlier than the current step, it is not a prior-stage handoff candidate.
+- Legacy step ordering must follow `SetupWorkspaceService._STEP_ORDER`. If a legacy step is not earlier than the current step, it is not a prior-stage handoff candidate.
+- Canonical stage ordering must follow `SetupWorkspace.stage_plan`. If `current_stage` is present, handoff selection uses accepted canonical stage commits before that stage; it must not wait for the old coarse `foundation` step to include both world and character setup.
 - Each handoff packet must stay explicitly stage-scoped:
   - `workspace_id = workspace.workspace_id`
-  - `from_step = commit.step_id`
-  - `to_step = current_step`
-  - `step_id` remains the accepted source step for compatibility with current runtime/tests
+  - legacy compatibility fields (`from_step`, `to_step`, `step_id`) remain populated with the mapped legacy step when the accepted source is a canonical stage
+  - stage-aware fields (`from_stage`, `to_stage`, `stage_id`) carry the canonical stage ids when available
 - `SetupContextPacket.context_profile` is derived from `SetupContextBuilderInput.token_budget`:
   - `compact` when `token_budget < 1200`
   - otherwise `standard`
@@ -101,6 +107,7 @@
 - `standard` handoffs may expose compact retrieval-friendly chunk descriptions:
   - foundation snapshots derive descriptions from `domain`, `path`, `title`, and `content.summary`
   - longform blueprint snapshots derive one overview description plus chapter descriptions
+  - canonical stage snapshots derive descriptions from `SetupStageDraftBlock.entries` and their entry/section summaries, using refs such as `stage:world_background:race_elf` and `stage:world_background:race_elf:summary`
   - generic snapshot types may expose concise previews, but only as stable accepted truth summaries
 - `open_issues` must be a bounded carry-forward summary derived only from accepted snapshot payload fields such as:
   - `open_issues`

@@ -18,6 +18,8 @@ typedef RpRetrievalConfigPersist =
       required String? embeddingModelId,
       required String? rerankProviderId,
       required String? rerankModelId,
+      required String? graphExtractionProviderId,
+      required String? graphExtractionModelId,
     });
 
 class RpModelConfigPage extends StatefulWidget {
@@ -39,16 +41,22 @@ class RpModelConfigPage extends StatefulWidget {
   final List<String> retrievalRerankProviderIds;
   final List<ModelConfig> Function(String providerId)
   retrievalRerankModelsForProvider;
+  final List<String> retrievalGraphExtractionProviderIds;
+  final List<ModelConfig> Function(String providerId)
+  retrievalGraphExtractionModelsForProvider;
   final String? initialRetrievalEmbeddingProviderId;
   final String? initialRetrievalEmbeddingModelId;
   final String? initialRetrievalRerankProviderId;
   final String? initialRetrievalRerankModelId;
+  final String? initialRetrievalGraphExtractionProviderId;
+  final String? initialRetrievalGraphExtractionModelId;
   final RpRetrievalConfigPersist onPersistRetrievalConfig;
   final String? retrievalSecondaryActionLabel;
   final Future<void> Function()? onRetrievalSecondaryAction;
   final bool retrievalSecondaryActionClearsSelections;
   final String? embeddingEmptyHint;
   final String? rerankEmptyHint;
+  final String? graphExtractionEmptyHint;
 
   const RpModelConfigPage({
     super.key,
@@ -67,10 +75,14 @@ class RpModelConfigPage extends StatefulWidget {
     required this.retrievalEmbeddingModelsForProvider,
     required this.retrievalRerankProviderIds,
     required this.retrievalRerankModelsForProvider,
+    required this.retrievalGraphExtractionProviderIds,
+    required this.retrievalGraphExtractionModelsForProvider,
     required this.initialRetrievalEmbeddingProviderId,
     required this.initialRetrievalEmbeddingModelId,
     required this.initialRetrievalRerankProviderId,
     required this.initialRetrievalRerankModelId,
+    required this.initialRetrievalGraphExtractionProviderId,
+    required this.initialRetrievalGraphExtractionModelId,
     required this.onPersistRetrievalConfig,
     this.agentEmptyHint,
     this.retrievalSecondaryActionLabel,
@@ -78,6 +90,7 @@ class RpModelConfigPage extends StatefulWidget {
     this.retrievalSecondaryActionClearsSelections = false,
     this.embeddingEmptyHint,
     this.rerankEmptyHint,
+    this.graphExtractionEmptyHint,
   });
 
   @override
@@ -91,6 +104,8 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
   String? _selectedRetrievalEmbeddingModelId;
   String? _selectedRetrievalRerankProviderId;
   String? _selectedRetrievalRerankModelId;
+  String? _selectedRetrievalGraphExtractionProviderId;
+  String? _selectedRetrievalGraphExtractionModelId;
   bool _isPersistingRetrievalConfig = false;
 
   @override
@@ -105,6 +120,10 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
     _selectedRetrievalRerankProviderId =
         widget.initialRetrievalRerankProviderId;
     _selectedRetrievalRerankModelId = widget.initialRetrievalRerankModelId;
+    _selectedRetrievalGraphExtractionProviderId =
+        widget.initialRetrievalGraphExtractionProviderId;
+    _selectedRetrievalGraphExtractionModelId =
+        widget.initialRetrievalGraphExtractionModelId;
     _normalizeAgentSelection();
   }
 
@@ -154,6 +173,8 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
     required String? embeddingModelId,
     required String? rerankProviderId,
     required String? rerankModelId,
+    required String? graphExtractionProviderId,
+    required String? graphExtractionModelId,
   }) async {
     if (_isPersistingRetrievalConfig) return;
     final previous = (
@@ -161,6 +182,8 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
       embeddingModelId: _selectedRetrievalEmbeddingModelId,
       rerankProviderId: _selectedRetrievalRerankProviderId,
       rerankModelId: _selectedRetrievalRerankModelId,
+      graphExtractionProviderId: _selectedRetrievalGraphExtractionProviderId,
+      graphExtractionModelId: _selectedRetrievalGraphExtractionModelId,
     );
 
     setState(() {
@@ -169,6 +192,8 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
       _selectedRetrievalEmbeddingModelId = embeddingModelId;
       _selectedRetrievalRerankProviderId = rerankProviderId;
       _selectedRetrievalRerankModelId = rerankModelId;
+      _selectedRetrievalGraphExtractionProviderId = graphExtractionProviderId;
+      _selectedRetrievalGraphExtractionModelId = graphExtractionModelId;
     });
 
     try {
@@ -177,6 +202,8 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
         embeddingModelId: embeddingModelId,
         rerankProviderId: rerankProviderId,
         rerankModelId: rerankModelId,
+        graphExtractionProviderId: graphExtractionProviderId,
+        graphExtractionModelId: graphExtractionModelId,
       );
     } catch (e) {
       if (!mounted) return;
@@ -185,6 +212,10 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
         _selectedRetrievalEmbeddingModelId = previous.embeddingModelId;
         _selectedRetrievalRerankProviderId = previous.rerankProviderId;
         _selectedRetrievalRerankModelId = previous.rerankModelId;
+        _selectedRetrievalGraphExtractionProviderId =
+            previous.graphExtractionProviderId;
+        _selectedRetrievalGraphExtractionModelId =
+            previous.graphExtractionModelId;
       });
       OwuiSnackBars.error(context, message: '更新 retrieval 模型配置失败: $e');
     } finally {
@@ -204,6 +235,8 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
       embeddingModelId: _selectedRetrievalEmbeddingModelId,
       rerankProviderId: _selectedRetrievalRerankProviderId,
       rerankModelId: _selectedRetrievalRerankModelId,
+      graphExtractionProviderId: _selectedRetrievalGraphExtractionProviderId,
+      graphExtractionModelId: _selectedRetrievalGraphExtractionModelId,
     );
 
     setState(() {
@@ -213,6 +246,8 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
         _selectedRetrievalEmbeddingModelId = null;
         _selectedRetrievalRerankProviderId = null;
         _selectedRetrievalRerankModelId = null;
+        _selectedRetrievalGraphExtractionProviderId = null;
+        _selectedRetrievalGraphExtractionModelId = null;
       }
     });
 
@@ -225,6 +260,10 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
         _selectedRetrievalEmbeddingModelId = previous.embeddingModelId;
         _selectedRetrievalRerankProviderId = previous.rerankProviderId;
         _selectedRetrievalRerankModelId = previous.rerankModelId;
+        _selectedRetrievalGraphExtractionProviderId =
+            previous.graphExtractionProviderId;
+        _selectedRetrievalGraphExtractionModelId =
+            previous.graphExtractionModelId;
       });
       OwuiSnackBars.error(context, message: '更新 retrieval 默认配置失败: $e');
     } finally {
@@ -421,6 +460,10 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
                                           _selectedRetrievalRerankProviderId,
                                       rerankModelId:
                                           _selectedRetrievalRerankModelId,
+                                      graphExtractionProviderId:
+                                          _selectedRetrievalGraphExtractionProviderId,
+                                      graphExtractionModelId:
+                                          _selectedRetrievalGraphExtractionModelId,
                                     );
                                   },
                           ),
@@ -458,6 +501,10 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
                                           _selectedRetrievalRerankProviderId,
                                       rerankModelId:
                                           _selectedRetrievalRerankModelId,
+                                      graphExtractionProviderId:
+                                          _selectedRetrievalGraphExtractionProviderId,
+                                      graphExtractionModelId:
+                                          _selectedRetrievalGraphExtractionModelId,
                                     );
                                   },
                           ),
@@ -501,6 +548,10 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
                                           _selectedRetrievalEmbeddingModelId,
                                       rerankProviderId: value,
                                       rerankModelId: nextModelId,
+                                      graphExtractionProviderId:
+                                          _selectedRetrievalGraphExtractionProviderId,
+                                      graphExtractionModelId:
+                                          _selectedRetrievalGraphExtractionModelId,
                                     );
                                   },
                           ),
@@ -538,6 +589,102 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
                                       rerankProviderId:
                                           _selectedRetrievalRerankProviderId,
                                       rerankModelId: value,
+                                      graphExtractionProviderId:
+                                          _selectedRetrievalGraphExtractionProviderId,
+                                      graphExtractionModelId:
+                                          _selectedRetrievalGraphExtractionModelId,
+                                    );
+                                  },
+                          ),
+                        ),
+                        SizedBox(
+                          width: fieldWidth,
+                          child: DropdownButtonFormField<String>(
+                            initialValue:
+                                _selectedRetrievalGraphExtractionProviderId,
+                            decoration: const InputDecoration(
+                              labelText: 'Graph Extraction Provider',
+                            ),
+                            items: widget.retrievalGraphExtractionProviderIds
+                                .map(
+                                  (providerId) => DropdownMenuItem<String>(
+                                    value: providerId,
+                                    child: Text(
+                                      globalModelServiceManager
+                                              .getProvider(providerId)
+                                              ?.name ??
+                                          providerId,
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _isPersistingRetrievalConfig
+                                ? null
+                                : (value) async {
+                                    final models = value == null
+                                        ? const <ModelConfig>[]
+                                        : widget
+                                              .retrievalGraphExtractionModelsForProvider(
+                                                value,
+                                              );
+                                    final nextModelId = models.isEmpty
+                                        ? null
+                                        : models.first.id;
+                                    await _persistRetrievalConfig(
+                                      embeddingProviderId:
+                                          _selectedRetrievalEmbeddingProviderId,
+                                      embeddingModelId:
+                                          _selectedRetrievalEmbeddingModelId,
+                                      rerankProviderId:
+                                          _selectedRetrievalRerankProviderId,
+                                      rerankModelId:
+                                          _selectedRetrievalRerankModelId,
+                                      graphExtractionProviderId: value,
+                                      graphExtractionModelId: nextModelId,
+                                    );
+                                  },
+                          ),
+                        ),
+                        SizedBox(
+                          width: fieldWidth,
+                          child: DropdownButtonFormField<String>(
+                            initialValue:
+                                _selectedRetrievalGraphExtractionModelId,
+                            decoration: const InputDecoration(
+                              labelText: 'Graph Extraction Model',
+                            ),
+                            items:
+                                (_selectedRetrievalGraphExtractionProviderId ==
+                                            null
+                                        ? const <ModelConfig>[]
+                                        : widget.retrievalGraphExtractionModelsForProvider(
+                                            _selectedRetrievalGraphExtractionProviderId!,
+                                          ))
+                                    .map(
+                                      (model) => DropdownMenuItem<String>(
+                                        value: model.id,
+                                        child: Text(model.displayName),
+                                      ),
+                                    )
+                                    .toList(),
+                            onChanged:
+                                _selectedRetrievalGraphExtractionProviderId ==
+                                        null ||
+                                    _isPersistingRetrievalConfig
+                                ? null
+                                : (value) async {
+                                    await _persistRetrievalConfig(
+                                      embeddingProviderId:
+                                          _selectedRetrievalEmbeddingProviderId,
+                                      embeddingModelId:
+                                          _selectedRetrievalEmbeddingModelId,
+                                      rerankProviderId:
+                                          _selectedRetrievalRerankProviderId,
+                                      rerankModelId:
+                                          _selectedRetrievalRerankModelId,
+                                      graphExtractionProviderId:
+                                          _selectedRetrievalGraphExtractionProviderId,
+                                      graphExtractionModelId: value,
                                     );
                                   },
                           ),
@@ -563,6 +710,17 @@ class _RpModelConfigPageState extends State<RpModelConfigPage> {
                   SizedBox(height: spacing.sm),
                   Text(
                     widget.rerankEmptyHint!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ],
+                if (widget.graphExtractionEmptyHint != null &&
+                    widget.graphExtractionEmptyHint!.trim().isNotEmpty &&
+                    widget.retrievalGraphExtractionProviderIds.isEmpty) ...[
+                  SizedBox(height: spacing.sm),
+                  Text(
+                    widget.graphExtractionEmptyHint!,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.textSecondary,
                     ),

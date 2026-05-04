@@ -1,4 +1,5 @@
 """SetupAgent execution layer over the runtime-v2 setup harness."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -128,7 +129,9 @@ class SetupAgentExecutionService:
         adapter, _ = self._require_runtime_v2_components()
         return adapter.to_turn_response(result)
 
-    async def run_turn_stream(self, request: SetupAgentTurnRequest) -> AsyncIterator[str]:
+    async def run_turn_stream(
+        self, request: SetupAgentTurnRequest
+    ) -> AsyncIterator[str]:
         launch = self._prepare_turn_launch(request)
         logger.info(
             "[SETUP_AGENT] run_turn_stream_start workspace_id=%s story_id=%s model_id=%s provider_id=%s model=%s target_step=%s history_count=%s",
@@ -193,7 +196,8 @@ class SetupAgentExecutionService:
             or estimated_tokens >= cls._COMPACT_ESTIMATED_INPUT_TOKEN_THRESHOLD
             or (
                 previous_prompt_tokens is not None
-                and previous_prompt_tokens >= cls._COMPACT_OBSERVED_PROMPT_TOKEN_THRESHOLD
+                and previous_prompt_tokens
+                >= cls._COMPACT_OBSERVED_PROMPT_TOKEN_THRESHOLD
             )
             or (
                 previous_total_tokens is not None
@@ -276,9 +280,7 @@ class SetupAgentExecutionService:
         total_tokens_raw: Any = usage.get("total_tokens")
         return {
             "prompt_tokens": (
-                int(prompt_tokens_raw)
-                if prompt_tokens_raw is not None
-                else None
+                int(prompt_tokens_raw) if prompt_tokens_raw is not None else None
             ),
             "completion_tokens": (
                 int(completion_tokens_raw)
@@ -286,9 +288,7 @@ class SetupAgentExecutionService:
                 else None
             ),
             "total_tokens": (
-                int(total_tokens_raw)
-                if total_tokens_raw is not None
-                else None
+                int(total_tokens_raw) if total_tokens_raw is not None else None
             ),
         }
 
@@ -312,7 +312,9 @@ class SetupAgentExecutionService:
         usage = self._usage_from_runtime_result(result)
         if usage is None:
             return
-        self._last_runtime_usage_by_workspace_step[(workspace_id, step_id.value)] = usage
+        self._last_runtime_usage_by_workspace_step[(workspace_id, step_id.value)] = (
+            usage
+        )
 
     @staticmethod
     def _build_context_report(
@@ -360,7 +362,9 @@ class SetupAgentExecutionService:
             fallback_reason=governance_metadata.get("fallback_reason"),
         )
 
-    def _resolve_model_name(self, *, model_id: str, fallback_provider_id: str | None) -> str:
+    def _resolve_model_name(
+        self, *, model_id: str, fallback_provider_id: str | None
+    ) -> str:
         entry = get_model_registry_service().get_entry(model_id)
         if entry is None:
             raise ValueError(f"Model not found: {model_id}")
@@ -389,7 +393,10 @@ class SetupAgentExecutionService:
                     f"Model {model_id} is not compatible with SetupAgent (missing function calling support)"
                 )
             if profile.supported_openai_params:
-                supported_params = {str(item).strip().lower() for item in profile.supported_openai_params}
+                supported_params = {
+                    str(item).strip().lower()
+                    for item in profile.supported_openai_params
+                }
                 if not {"tools", "tool_choice"}.issubset(supported_params):
                     raise ValueError(
                         f"Model {model_id} is not compatible with SetupAgent (missing tools/tool_choice support)"
@@ -543,7 +550,11 @@ class SetupAgentExecutionService:
 
     @staticmethod
     def _runtime_v2_observation_output(result: RpAgentTurnResult) -> dict[str, Any]:
-        payload = result.structured_payload if isinstance(result.structured_payload, dict) else {}
+        payload = (
+            result.structured_payload
+            if isinstance(result.structured_payload, dict)
+            else {}
+        )
         return {
             "finish_reason": result.finish_reason,
             "continue_reason": payload.get("continue_reason")
@@ -568,6 +579,12 @@ class SetupAgentExecutionService:
         provider,
     ):
         current_step = request.target_step or workspace.current_step
+        current_stage = (
+            workspace.current_stage
+            if request.target_step is None
+            or request.target_step == workspace.current_step
+            else None
+        )
         estimated_input_tokens = self._estimate_input_tokens(request)
         previous_usage = self._previous_usage_for_turn(
             workspace_id=workspace.workspace_id,
@@ -583,6 +600,9 @@ class SetupAgentExecutionService:
                 mode=workspace.mode.value,
                 workspace_id=workspace.workspace_id,
                 current_step=current_step.value,
+                current_stage=(
+                    current_stage.value if current_stage is not None else None
+                ),
                 user_prompt=request.user_prompt,
                 user_edit_delta_ids=list(request.user_edit_delta_ids),
                 token_budget=token_budget,
@@ -614,10 +634,14 @@ class SetupAgentExecutionService:
         ]
         last_proposal_status = None
         proposals = [
-            proposal for proposal in workspace.commit_proposals if proposal.step_id == current_step
+            proposal
+            for proposal in workspace.commit_proposals
+            if proposal.step_id == current_step
         ]
         if proposals:
-            last_proposal_status = max(proposals, key=lambda item: item.created_at).status.value
+            last_proposal_status = max(
+                proposals, key=lambda item: item.created_at
+            ).status.value
 
         retained_tool_outcomes = (
             list(cognitive_state_summary.tool_outcomes)
@@ -642,17 +666,19 @@ class SetupAgentExecutionService:
                 model_id=request.model_id,
                 provider=provider,
             )
-        governed_history, compact_summary, governance_metadata = (
-            await context_governor.govern_history_async(
-                history=list(request.history),
-                retained_tool_outcomes=retained_tool_outcomes,
-                working_digest=working_digest,
-                existing_summary=existing_compact_summary,
-                context_profile=context_packet.context_profile,
-                current_step=current_step.value,
-                estimated_input_tokens=estimated_input_tokens,
-                previous_usage=previous_usage,
-            )
+        (
+            governed_history,
+            compact_summary,
+            governance_metadata,
+        ) = await context_governor.govern_history_async(
+            history=list(request.history),
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            existing_summary=existing_compact_summary,
+            context_profile=context_packet.context_profile,
+            current_step=current_step.value,
+            estimated_input_tokens=estimated_input_tokens,
+            previous_usage=previous_usage,
         )
         context_report = self._build_context_report(
             request=request,
@@ -742,7 +768,11 @@ class SetupAgentExecutionService:
     ) -> None:
         if self._runtime_state_service is None:
             return
-        payload = result.structured_payload if isinstance(result.structured_payload, dict) else {}
+        payload = (
+            result.structured_payload
+            if isinstance(result.structured_payload, dict)
+            else {}
+        )
         working_digest = (
             SetupWorkingDigest.model_validate(payload["working_digest"])
             if isinstance(payload.get("working_digest"), dict)

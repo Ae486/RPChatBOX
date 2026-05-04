@@ -41,8 +41,42 @@ class StoryLlmGateway:
         message = choices[0].get("message") if choices else {}
         content = (message or {}).get("content")
         if isinstance(content, list):
-            return "".join(part.get("text", "") for part in content if isinstance(part, dict))
+            return "".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
         return str(content or "")
+
+    async def complete_text_with_usage(
+        self,
+        *,
+        model_id: str,
+        provider_id: str | None,
+        messages: list[ChatMessage],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        include_reasoning: bool | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        request = self.build_request(
+            model_id=model_id,
+            provider_id=provider_id,
+            messages=messages,
+            stream=False,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            include_reasoning=include_reasoning,
+        )
+        response = await self._llm_service.chat_completion(request)
+        choices = response.get("choices") or []
+        message = choices[0].get("message") if choices else {}
+        content = (message or {}).get("content")
+        if isinstance(content, list):
+            text = "".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+        else:
+            text = str(content or "")
+        usage = response.get("usage")
+        return text, dict(usage or {}) if isinstance(usage, dict) else {}
 
     def stream_text(
         self,

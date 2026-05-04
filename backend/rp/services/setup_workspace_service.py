@@ -1,4 +1,5 @@
 """Persistence and aggregate operations for SetupWorkspace."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,9 +23,11 @@ from rp.models.setup_drafts import (
     FoundationDraft,
     FoundationEntry,
     LongformBlueprintDraft,
+    SetupStageDraftBlock,
     StoryConfigDraft,
     WritingContractDraft,
 )
+from rp.models.setup_stage import SetupStageId, SetupModeStagePlan, get_mode_stage_plan
 from rp.models.setup_workspace import (
     AcceptedCommit,
     AcceptedCommitSnapshot,
@@ -39,6 +42,7 @@ from rp.models.setup_workspace import (
     ReadinessStatus,
     RetrievalIngestionJob,
     RetrievalIngestionState,
+    SetupStageState,
     SetupStepId,
     SetupStepLifecycleState,
     SetupStepReadiness,
@@ -76,6 +80,17 @@ class SetupWorkspaceService:
         "foundation": SetupStepId.FOUNDATION,
         "longform_blueprint": SetupStepId.LONGFORM_BLUEPRINT,
     }
+    _LEGACY_STEP_FOR_STAGE = {
+        SetupStageId.WORLD_BACKGROUND: SetupStepId.FOUNDATION,
+        SetupStageId.CHARACTER_DESIGN: SetupStepId.FOUNDATION,
+        SetupStageId.PLOT_BLUEPRINT: SetupStepId.LONGFORM_BLUEPRINT,
+        SetupStageId.WRITER_CONFIG: SetupStepId.WRITING_CONTRACT,
+        SetupStageId.WORKER_CONFIG: SetupStepId.STORY_CONFIG,
+        SetupStageId.OVERVIEW: SetupStepId.STORY_CONFIG,
+        SetupStageId.ACTIVATE: SetupStepId.STORY_CONFIG,
+        SetupStageId.RP_INTERACTION_CONTRACT: SetupStepId.FOUNDATION,
+        SetupStageId.TRPG_RULES: SetupStepId.FOUNDATION,
+    }
 
     def __init__(self, session: Session):
         self._session = session
@@ -83,22 +98,30 @@ class SetupWorkspaceService:
     def rollback(self) -> None:
         self._session.rollback()
 
+    def get_stage_plan(self, mode: StoryMode) -> SetupModeStagePlan:
+        return get_mode_stage_plan(mode.value)
+
     def create_workspace(self, *, story_id: str, mode: StoryMode) -> SetupWorkspace:
         existing = self._session.exec(
-            select(SetupWorkspaceRecord).where(SetupWorkspaceRecord.story_id == story_id)
+            select(SetupWorkspaceRecord).where(
+                SetupWorkspaceRecord.story_id == story_id
+            )
         ).first()
         if existing is not None:
             raise ValueError(f"SetupWorkspace already exists for story_id={story_id}")
 
         now = _utcnow()
         workspace_id = uuid4().hex
+        stage_plan = self.get_stage_plan(mode)
+        first_stage = stage_plan.stage_ids[0]
         workspace = SetupWorkspaceRecord(
             workspace_id=workspace_id,
             story_id=story_id,
             mode=mode.value,
             workspace_state=SetupWorkspaceState.DRAFTING.value,
             current_step=SetupStepId.FOUNDATION.value,
-            readiness_json=self._default_readiness_json(),
+            current_stage=first_stage.value,
+            readiness_json=self._default_readiness_json(mode),
             activated_story_session_id=None,
             version=1,
             created_at=now,
@@ -115,12 +138,27 @@ class SetupWorkspaceService:
                     updated_at=now,
                 )
             )
+        for stage in stage_plan.stage_ids:
+            self._session.add(
+                SetupStepStateRecord(
+                    id=self._stage_record_id(workspace_id, stage),
+                    workspace_id=workspace_id,
+                    step_id=stage.value,
+                    state=SetupStepLifecycleState.DISCUSSING.value,
+                    updated_at=now,
+                )
+            )
         self._session.commit()
-        return self.get_workspace(workspace_id)
+        return self._require_workspace(workspace_id)
 
     def list_workspaces(self) -> list[SetupWorkspace]:
-        statement = select(SetupWorkspaceRecord).order_by(SetupWorkspaceRecord.updated_at.desc())
-        return [self._assemble_workspace(record) for record in self._session.exec(statement).all()]
+        statement = select(SetupWorkspaceRecord).order_by(
+            SetupWorkspaceRecord.updated_at.desc()  # type: ignore[attr-defined]
+        )
+        return [
+            self._assemble_workspace(record)
+            for record in self._session.exec(statement).all()
+        ]
 
     def get_workspace(self, workspace_id: str) -> SetupWorkspace | None:
         workspace_record = self._session.get(SetupWorkspaceRecord, workspace_id)
@@ -160,11 +198,14 @@ class SetupWorkspaceService:
         workspace_id: str,
         entry: FoundationEntry,
     ) -> SetupWorkspace:
-        current = self._load_draft_block(
-            workspace_id=workspace_id,
-            block_type="foundation",
-            model=FoundationDraft,
-        ) or FoundationDraft()
+        current = (
+            self._load_draft_block(
+                workspace_id=workspace_id,
+                block_type="foundation",
+                model=FoundationDraft,
+            )
+            or FoundationDraft()
+        )
         entries = {item.entry_id: item for item in current.entries}
         entries[entry.entry_id] = entry
         payload = FoundationDraft(entries=list(entries.values())).model_dump(
@@ -189,6 +230,27 @@ class SetupWorkspaceService:
             step_id=SetupStepId.LONGFORM_BLUEPRINT,
             block_type="longform_blueprint",
             payload=patch.model_dump(mode="json", exclude_none=True),
+        )
+
+    def patch_stage_draft(
+        self,
+        *,
+        workspace_id: str,
+        stage_id: SetupStageId,
+        draft: SetupStageDraftBlock | dict,
+    ) -> SetupWorkspace:
+        workspace = self._require_workspace_record(workspace_id)
+        self._require_stage_in_plan(workspace, stage_id)
+        draft_block = SetupStageDraftBlock.model_validate(draft)
+        if draft_block.stage_id != stage_id:
+            raise ValueError(
+                f"Stage draft block mismatch: requested={stage_id.value}, "
+                f"payload={draft_block.stage_id.value}"
+            )
+        return self._upsert_stage_block(
+            workspace_id=workspace_id,
+            stage_id=stage_id,
+            payload=draft_block.model_dump(mode="json", exclude_none=True),
         )
 
     def raise_question(
@@ -337,6 +399,53 @@ class SetupWorkspaceService:
         self._session.commit()
         return self._record_to_commit_proposal(proposal)
 
+    def propose_stage_commit(
+        self,
+        *,
+        workspace_id: str,
+        stage_id: SetupStageId,
+        target_draft_refs: list[str],
+        reason: str | None = None,
+        unresolved_warnings: list[str] | None = None,
+    ) -> CommitProposal:
+        workspace = self._require_workspace_record(workspace_id)
+        self._require_stage_in_plan(workspace, stage_id)
+        stage_record = self._require_stage_state_record(workspace_id, stage_id)
+        block_type = stage_id.value
+        block_record = self._get_draft_block_record(workspace_id, block_type)
+        if block_record is not None:
+            self._validate_stage_block_payload(
+                stage_id=stage_id,
+                payload=block_record.payload_json or {},
+            )
+        now = _utcnow()
+        proposal = SetupCommitProposalRecord(
+            proposal_id=uuid4().hex,
+            workspace_id=workspace_id,
+            step_id=stage_id.value,
+            status=CommitProposalStatus.PENDING_REVIEW.value,
+            target_block_types_json=[block_type],
+            target_draft_refs_json=list(target_draft_refs),
+            review_message=f"Review requested for {stage_id.value}",
+            reason=reason,
+            unresolved_warnings_json=list(unresolved_warnings or []),
+            suggested_ingestion_targets_json=self._suggest_stage_ingestion_targets(
+                workspace_id=workspace_id,
+                stage_id=stage_id,
+            ),
+            created_at=now,
+        )
+        self._session.add(proposal)
+        stage_record.state = SetupStepLifecycleState.REVIEW_PENDING.value
+        stage_record.review_round += 1
+        stage_record.last_proposal_id = proposal.proposal_id
+        stage_record.updated_at = now
+        self._session.add(stage_record)
+        self._touch_workspace(workspace, now)
+        self._refresh_readiness_record(workspace)
+        self._session.commit()
+        return self._record_to_commit_proposal(proposal)
+
     def accept_commit(
         self,
         *,
@@ -346,34 +455,49 @@ class SetupWorkspaceService:
         workspace = self._require_workspace_record(workspace_id)
         proposal = self._require_commit_proposal_record(workspace_id, proposal_id)
         now = _utcnow()
-        step_id = SetupStepId(proposal.step_id)
+        stage_id = self._coerce_stage_id(proposal.step_id)
+        step_id = self._legacy_step_for_lifecycle_id(proposal.step_id)
+        lifecycle_id = stage_id or step_id
         snapshot_payload = self._build_snapshot_payload(
             workspace_id=workspace_id,
             block_types=proposal.target_block_types_json,
         )
+        if stage_id is not None:
+            self._validate_stage_snapshot_payload(
+                stage_id=stage_id,
+                snapshot_payload=snapshot_payload,
+            )
         commit_id = uuid4().hex
         accepted_record = SetupAcceptedCommitRecord(
             commit_id=commit_id,
             workspace_id=workspace_id,
             proposal_id=proposal_id,
-            step_id=step_id.value,
-            committed_refs_json=proposal.target_draft_refs_json or [f"{step_id.value}:{commit_id}"],
+            step_id=lifecycle_id.value,
+            committed_refs_json=proposal.target_draft_refs_json
+            or [f"{lifecycle_id.value}:{commit_id}"],
             snapshot_payload_json=snapshot_payload,
-            summary_tier_0=self._build_summary_tier_0(step_id, snapshot_payload),
-            summary_tier_1=self._build_summary_tier_1(step_id, snapshot_payload),
-            summary_tier_2=self._build_summary_tier_2(step_id, snapshot_payload),
-            spotlights_json=self._build_spotlights(step_id, snapshot_payload),
+            summary_tier_0=self._build_summary_tier_0(lifecycle_id, snapshot_payload),
+            summary_tier_1=self._build_summary_tier_1(lifecycle_id, snapshot_payload),
+            summary_tier_2=self._build_summary_tier_2(lifecycle_id, snapshot_payload),
+            spotlights_json=self._build_spotlights(lifecycle_id, snapshot_payload),
             created_at=now,
         )
         self._session.add(accepted_record)
         proposal.status = CommitProposalStatus.ACCEPTED.value
         proposal.reviewed_at = now
         self._session.add(proposal)
-        step_record = self._require_step_state_record(workspace_id, step_id)
-        step_record.state = SetupStepLifecycleState.FROZEN.value
-        step_record.last_commit_id = commit_id
-        step_record.updated_at = now
-        self._session.add(step_record)
+        if stage_id is not None:
+            stage_record = self._require_stage_state_record(workspace_id, stage_id)
+            stage_record.state = SetupStepLifecycleState.FROZEN.value
+            stage_record.last_commit_id = commit_id
+            stage_record.updated_at = now
+            self._session.add(stage_record)
+        else:
+            step_record = self._require_step_state_record(workspace_id, step_id)
+            step_record.state = SetupStepLifecycleState.FROZEN.value
+            step_record.last_commit_id = commit_id
+            step_record.updated_at = now
+            self._session.add(step_record)
         for block_type in proposal.target_block_types_json:
             block_record = self._get_draft_block_record(workspace_id, block_type)
             if block_record is not None:
@@ -389,7 +513,10 @@ class SetupWorkspaceService:
         )
         for job_record in job_records:
             self._session.add(job_record)
-        self._advance_current_step(workspace, step_id)
+        if stage_id is not None:
+            self._advance_current_stage(workspace, stage_id)
+        else:
+            self._advance_current_step(workspace, step_id)
         self._touch_workspace(workspace, now)
         self._refresh_readiness_record(workspace)
         self._session.commit()
@@ -410,11 +537,18 @@ class SetupWorkspaceService:
         proposal.status = CommitProposalStatus.REJECTED.value
         proposal.reviewed_at = now
         self._session.add(proposal)
-        step_id = SetupStepId(proposal.step_id)
-        step_record = self._require_step_state_record(workspace_id, step_id)
-        step_record.state = SetupStepLifecycleState.DISCUSSING.value
-        step_record.updated_at = now
-        self._session.add(step_record)
+        stage_id = self._coerce_stage_id(proposal.step_id)
+        if stage_id is not None:
+            stage_record = self._require_stage_state_record(workspace_id, stage_id)
+            stage_record.state = SetupStepLifecycleState.DISCUSSING.value
+            stage_record.updated_at = now
+            self._session.add(stage_record)
+        else:
+            step_id = SetupStepId(proposal.step_id)
+            step_record = self._require_step_state_record(workspace_id, step_id)
+            step_record.state = SetupStepLifecycleState.DISCUSSING.value
+            step_record.updated_at = now
+            self._session.add(step_record)
         self._touch_workspace(workspace, now)
         self._refresh_readiness_record(workspace)
         self._session.commit()
@@ -425,7 +559,7 @@ class SetupWorkspaceService:
         self._refresh_readiness_record(workspace)
         self._session.add(workspace)
         self._session.commit()
-        return self.get_workspace(workspace_id)
+        return self._require_workspace(workspace_id)
 
     def mark_workspace_state(
         self,
@@ -438,7 +572,7 @@ class SetupWorkspaceService:
         record.updated_at = _utcnow()
         self._session.add(record)
         self._session.commit()
-        return self.get_workspace(workspace_id)
+        return self._require_workspace(workspace_id)
 
     def mark_activated_story_session(
         self,
@@ -454,7 +588,7 @@ class SetupWorkspaceService:
         record.updated_at = now
         self._session.add(record)
         self._session.commit()
-        return self.get_workspace(workspace_id)
+        return self._require_workspace(workspace_id)
 
     def get_pending_ingestion_jobs(
         self,
@@ -466,7 +600,10 @@ class SetupWorkspaceService:
             select(SetupRetrievalIngestionJobRecord)
             .where(SetupRetrievalIngestionJobRecord.workspace_id == workspace_id)
             .where(SetupRetrievalIngestionJobRecord.commit_id == commit_id)
-            .where(SetupRetrievalIngestionJobRecord.state != RetrievalIngestionState.COMPLETED.value)
+            .where(
+                SetupRetrievalIngestionJobRecord.state
+                != RetrievalIngestionState.COMPLETED.value
+            )
         )
         return list(self._session.exec(statement).all())
 
@@ -496,8 +633,10 @@ class SetupWorkspaceService:
         self._session.refresh(record)
         return record
 
-    def _assemble_workspace(self, workspace_record: SetupWorkspaceRecord) -> SetupWorkspace:
-        step_records = list(
+    def _assemble_workspace(
+        self, workspace_record: SetupWorkspaceRecord
+    ) -> SetupWorkspace:
+        lifecycle_records = list(
             self._session.exec(
                 select(SetupStepStateRecord).where(
                     SetupStepStateRecord.workspace_id == workspace_record.workspace_id
@@ -514,78 +653,118 @@ class SetupWorkspaceService:
         asset_records = list(
             self._session.exec(
                 select(SetupImportedAssetRecord).where(
-                    SetupImportedAssetRecord.workspace_id == workspace_record.workspace_id
+                    SetupImportedAssetRecord.workspace_id
+                    == workspace_record.workspace_id
                 )
             ).all()
         )
         binding_records = list(
             self._session.exec(
                 select(SetupStepAssetBindingRecord).where(
-                    SetupStepAssetBindingRecord.workspace_id == workspace_record.workspace_id
+                    SetupStepAssetBindingRecord.workspace_id
+                    == workspace_record.workspace_id
                 )
             ).all()
         )
         ingestion_records = list(
             self._session.exec(
                 select(SetupRetrievalIngestionJobRecord).where(
-                    SetupRetrievalIngestionJobRecord.workspace_id == workspace_record.workspace_id
+                    SetupRetrievalIngestionJobRecord.workspace_id
+                    == workspace_record.workspace_id
                 )
             ).all()
         )
         proposal_records = list(
             self._session.exec(
                 select(SetupCommitProposalRecord).where(
-                    SetupCommitProposalRecord.workspace_id == workspace_record.workspace_id
+                    SetupCommitProposalRecord.workspace_id
+                    == workspace_record.workspace_id
                 )
             ).all()
         )
         commit_records = list(
             self._session.exec(
                 select(SetupAcceptedCommitRecord).where(
-                    SetupAcceptedCommitRecord.workspace_id == workspace_record.workspace_id
+                    SetupAcceptedCommitRecord.workspace_id
+                    == workspace_record.workspace_id
                 )
             ).all()
         )
         delta_records = list(
             self._session.exec(
                 select(SetupPendingUserEditDeltaRecord).where(
-                    SetupPendingUserEditDeltaRecord.workspace_id == workspace_record.workspace_id
+                    SetupPendingUserEditDeltaRecord.workspace_id
+                    == workspace_record.workspace_id
                 )
             ).all()
         )
         question_records = list(
             self._session.exec(
                 select(SetupOpenQuestionRecord).where(
-                    SetupOpenQuestionRecord.workspace_id == workspace_record.workspace_id
+                    SetupOpenQuestionRecord.workspace_id
+                    == workspace_record.workspace_id
                 )
             ).all()
         )
         blocks = {record.block_type: record for record in block_records}
+        stage_plan = self.get_stage_plan(StoryMode(workspace_record.mode)).stage_ids
+        legacy_step_records = [
+            record
+            for record in lifecycle_records
+            if self._coerce_legacy_step_id(record.step_id)
+        ]
+        stage_records = [
+            record
+            for record in lifecycle_records
+            if self._coerce_stage_id(record.step_id)
+        ]
+        stage_order = {stage.value: index for index, stage in enumerate(stage_plan)}
+        current_stage = self._coerce_stage_id(workspace_record.current_stage or "")
+        if current_stage is None and stage_plan:
+            current_stage = stage_plan[0]
         return SetupWorkspace(
             workspace_id=workspace_record.workspace_id,
             story_id=workspace_record.story_id,
             mode=StoryMode(workspace_record.mode),
             workspace_state=SetupWorkspaceState(workspace_record.workspace_state),
             current_step=SetupStepId(workspace_record.current_step),
+            current_stage=current_stage,
+            stage_plan=stage_plan,
             step_states=[
                 self._record_to_step_state(record)
                 for record in sorted(
-                    step_records,
+                    legacy_step_records,
                     key=lambda item: self._STEP_ORDER.index(SetupStepId(item.step_id)),
                 )
             ],
-            story_config_draft=self._parse_block(blocks.get("story_config"), StoryConfigDraft),
+            stage_states=[
+                self._record_to_stage_state(record)
+                for record in sorted(
+                    stage_records,
+                    key=lambda item: stage_order.get(item.step_id, len(stage_order)),
+                )
+            ],
+            draft_blocks=self._parse_stage_draft_blocks(blocks, stage_plan),
+            story_config_draft=self._parse_block(
+                blocks.get("story_config"), StoryConfigDraft
+            ),
             writing_contract_draft=self._parse_block(
                 blocks.get("writing_contract"),
                 WritingContractDraft,
             ),
-            foundation_draft=self._parse_block(blocks.get("foundation"), FoundationDraft),
+            foundation_draft=self._parse_block(
+                blocks.get("foundation"), FoundationDraft
+            ),
             longform_blueprint_draft=self._parse_block(
                 blocks.get("longform_blueprint"),
                 LongformBlueprintDraft,
             ),
-            imported_assets=[self._record_to_imported_asset(record) for record in asset_records],
-            step_asset_bindings=[self._record_to_step_asset_binding(record) for record in binding_records],
+            imported_assets=[
+                self._record_to_imported_asset(record) for record in asset_records
+            ],
+            step_asset_bindings=[
+                self._record_to_step_asset_binding(record) for record in binding_records
+            ],
             retrieval_ingestion_jobs=[
                 self._record_to_ingestion_job(record) for record in ingestion_records
             ],
@@ -598,8 +777,12 @@ class SetupWorkspaceService:
             pending_user_edit_deltas=[
                 self._record_to_pending_delta(record) for record in delta_records
             ],
-            open_questions=[self._record_to_open_question(record) for record in question_records],
-            readiness_status=ReadinessStatus.model_validate(workspace_record.readiness_json),
+            open_questions=[
+                self._record_to_open_question(record) for record in question_records
+            ],
+            readiness_status=ReadinessStatus.model_validate(
+                workspace_record.readiness_json
+            ),
             version=workspace_record.version,
             created_at=workspace_record.created_at,
             updated_at=workspace_record.updated_at,
@@ -642,7 +825,45 @@ class SetupWorkspaceService:
         self._touch_workspace(workspace, now)
         self._refresh_readiness_record(workspace)
         self._session.commit()
-        return self.get_workspace(workspace_id)
+        return self._require_workspace(workspace_id)
+
+    def _upsert_stage_block(
+        self,
+        *,
+        workspace_id: str,
+        stage_id: SetupStageId,
+        payload: dict,
+    ) -> SetupWorkspace:
+        workspace = self._require_workspace_record(workspace_id)
+        self._require_stage_in_plan(workspace, stage_id)
+        now = _utcnow()
+        block_type = stage_id.value
+        block_record = self._get_draft_block_record(workspace_id, block_type)
+        if block_record is None:
+            block_record = SetupDraftBlockRecord(
+                draft_block_id=uuid4().hex,
+                workspace_id=workspace_id,
+                step_id=stage_id.value,
+                block_type=block_type,
+                payload_json=payload,
+                created_at=now,
+                updated_at=now,
+            )
+        else:
+            block_record.payload_json = payload
+            block_record.current_revision += 1
+            block_record.updated_at = now
+            block_record.step_id = stage_id.value
+        self._session.add(block_record)
+        stage_record = self._require_stage_state_record(workspace_id, stage_id)
+        stage_record.state = SetupStepLifecycleState.DISCUSSING.value
+        stage_record.discussion_round += 1
+        stage_record.updated_at = now
+        self._session.add(stage_record)
+        self._touch_workspace(workspace, now)
+        self._refresh_readiness_record(workspace)
+        self._session.commit()
+        return self._require_workspace(workspace_id)
 
     def _touch_workspace(self, workspace: SetupWorkspaceRecord, now: datetime) -> None:
         workspace.updated_at = now
@@ -661,6 +882,21 @@ class SetupWorkspaceService:
                 return
         workspace.current_step = current_step.value
 
+    def _advance_current_stage(
+        self,
+        workspace: SetupWorkspaceRecord,
+        current_stage: SetupStageId,
+    ) -> None:
+        stage_plan = self.get_stage_plan(StoryMode(workspace.mode)).stage_ids
+        for stage in stage_plan:
+            stage_record = self._require_stage_state_record(
+                workspace.workspace_id, stage
+            )
+            if stage_record.state != SetupStepLifecycleState.FROZEN.value:
+                workspace.current_stage = stage.value
+                return
+        workspace.current_stage = current_stage.value
+
     def _refresh_readiness_record(self, workspace: SetupWorkspaceRecord) -> None:
         blocks = {
             record.block_type: record
@@ -670,7 +906,7 @@ class SetupWorkspaceService:
                 )
             ).all()
         }
-        step_records = list(
+        lifecycle_records = list(
             self._session.exec(
                 select(SetupStepStateRecord).where(
                     SetupStepStateRecord.workspace_id == workspace.workspace_id
@@ -679,23 +915,33 @@ class SetupWorkspaceService:
         )
         readiness: dict[str, str] = {}
         warnings: list[str] = []
-        for record in step_records:
-            step_id = SetupStepId(record.step_id)
+        for record in lifecycle_records:
+            legacy_step_id = self._coerce_legacy_step_id(record.step_id)
+            stage_id = self._coerce_stage_id(record.step_id)
+            lifecycle_id = legacy_step_id or stage_id
+            if lifecycle_id is None:
+                continue
             if record.state == SetupStepLifecycleState.FROZEN.value:
-                readiness[step_id.value] = SetupStepReadiness.FROZEN.value
+                readiness[lifecycle_id.value] = SetupStepReadiness.FROZEN.value
                 continue
             if record.state == SetupStepLifecycleState.REVIEW_PENDING.value:
-                readiness[step_id.value] = SetupStepReadiness.READY_FOR_REVIEW.value
+                readiness[lifecycle_id.value] = (
+                    SetupStepReadiness.READY_FOR_REVIEW.value
+                )
                 continue
-            block_type = self._BLOCK_TYPE_BY_STEP[step_id]
+            block_type = (
+                self._BLOCK_TYPE_BY_STEP[legacy_step_id]
+                if legacy_step_id is not None
+                else lifecycle_id.value
+            )
             has_content = self._draft_block_has_content(blocks.get(block_type))
-            readiness[step_id.value] = (
+            readiness[lifecycle_id.value] = (
                 SetupStepReadiness.READY_FOR_COMMIT.value
                 if has_content
                 else SetupStepReadiness.NOT_READY.value
             )
-            if not has_content:
-                warnings.append(f"Step {step_id.value} has no draft content yet")
+            if not has_content and legacy_step_id is not None:
+                warnings.append(f"Step {legacy_step_id.value} has no draft content yet")
         workspace.readiness_json = {
             "step_readiness": readiness,
             "blocking_issues": [],
@@ -717,10 +963,18 @@ class SetupWorkspaceService:
             return any(bool(value) for value in payload.values())
         return bool(payload)
 
-    def _default_readiness_json(self) -> dict:
+    def _default_readiness_json(self, mode: StoryMode) -> dict:
+        stage_plan = self.get_stage_plan(mode).stage_ids
         return {
             "step_readiness": {
-                step.value: SetupStepReadiness.NOT_READY.value for step in self._STEP_ORDER
+                **{
+                    step.value: SetupStepReadiness.NOT_READY.value
+                    for step in self._STEP_ORDER
+                },
+                **{
+                    stage.value: SetupStepReadiness.NOT_READY.value
+                    for stage in stage_plan
+                },
             },
             "blocking_issues": [],
             "warnings": [],
@@ -749,17 +1003,51 @@ class SetupWorkspaceService:
             raise ValueError(f"SetupWorkspace not found: {workspace_id}")
         return record
 
+    def _require_workspace(self, workspace_id: str) -> SetupWorkspace:
+        workspace = self.get_workspace(workspace_id)
+        if workspace is None:
+            raise ValueError(f"SetupWorkspace not found: {workspace_id}")
+        return workspace
+
     def _require_step_state_record(
         self,
         workspace_id: str,
         step_id: SetupStepId,
     ) -> SetupStepStateRecord:
-        record = self._session.get(SetupStepStateRecord, self._step_record_id(workspace_id, step_id))
+        record = self._session.get(
+            SetupStepStateRecord, self._step_record_id(workspace_id, step_id)
+        )
         if record is None:
             raise ValueError(
                 f"SetupStepState not found: workspace_id={workspace_id}, step_id={step_id.value}"
             )
         return record
+
+    def _require_stage_state_record(
+        self,
+        workspace_id: str,
+        stage_id: SetupStageId,
+    ) -> SetupStepStateRecord:
+        record = self._session.get(
+            SetupStepStateRecord,
+            self._stage_record_id(workspace_id, stage_id),
+        )
+        if record is None:
+            raise ValueError(
+                f"SetupStageState not found: workspace_id={workspace_id}, stage_id={stage_id.value}"
+            )
+        return record
+
+    def _require_stage_in_plan(
+        self,
+        workspace: SetupWorkspaceRecord,
+        stage_id: SetupStageId,
+    ) -> None:
+        stage_plan = self.get_stage_plan(StoryMode(workspace.mode)).stage_ids
+        if stage_id not in stage_plan:
+            raise ValueError(
+                f"Setup stage {stage_id.value} is not in mode plan for {workspace.mode}"
+            )
 
     def _require_commit_proposal_record(
         self,
@@ -784,7 +1072,41 @@ class SetupWorkspaceService:
                 payload[block_type] = dict(record.payload_json or {})
         return payload
 
-    def _build_summary_tier_0(self, step_id: SetupStepId, snapshot_payload: dict) -> str:
+    def _validate_stage_snapshot_payload(
+        self,
+        *,
+        stage_id: SetupStageId,
+        snapshot_payload: dict,
+    ) -> None:
+        block_payload = snapshot_payload.get(stage_id.value)
+        if block_payload is None:
+            return
+        self._validate_stage_block_payload(stage_id=stage_id, payload=block_payload)
+
+    @staticmethod
+    def _validate_stage_block_payload(
+        *,
+        stage_id: SetupStageId,
+        payload: dict,
+    ) -> SetupStageDraftBlock:
+        draft_block = SetupStageDraftBlock.model_validate(payload)
+        if draft_block.stage_id != stage_id:
+            raise ValueError(
+                "Stored stage draft block mismatch: "
+                f"block_type={stage_id.value}, payload={draft_block.stage_id.value}"
+            )
+        return draft_block
+
+    def _build_summary_tier_0(
+        self,
+        step_id: SetupStepId | SetupStageId,
+        snapshot_payload: dict,
+    ) -> str:
+        if isinstance(step_id, SetupStageId):
+            entry_count = len(
+                snapshot_payload.get(step_id.value, {}).get("entries", [])
+            )
+            return f"Committed {entry_count} {step_id.value} entries"
         if step_id == SetupStepId.FOUNDATION:
             entry_count = len(snapshot_payload.get("foundation", {}).get("entries", []))
             return f"Committed {entry_count} foundation entries"
@@ -794,7 +1116,22 @@ class SetupWorkspaceService:
             return "Committed writing contract"
         return f"Committed {step_id.value}"
 
-    def _build_summary_tier_1(self, step_id: SetupStepId, snapshot_payload: dict) -> str:
+    def _build_summary_tier_1(
+        self,
+        step_id: SetupStepId | SetupStageId,
+        snapshot_payload: dict,
+    ) -> str:
+        if isinstance(step_id, SetupStageId):
+            block = snapshot_payload.get(step_id.value, {})
+            entries = block.get("entries", [])
+            paths = [
+                entry.get("semantic_path") or entry.get("title")
+                for entry in entries
+                if entry.get("semantic_path") or entry.get("title")
+            ]
+            return (
+                ", ".join(paths[:5]) or block.get("notes") or f"{step_id.value} updated"
+            )
         if step_id == SetupStepId.FOUNDATION:
             entries = snapshot_payload.get("foundation", {}).get("entries", [])
             paths = [entry.get("path") for entry in entries if entry.get("path")]
@@ -804,14 +1141,35 @@ class SetupWorkspaceService:
             return blueprint.get("premise") or "Blueprint updated"
         if step_id == SetupStepId.WRITING_CONTRACT:
             contract = snapshot_payload.get("writing_contract", {})
-            return ", ".join(contract.get("style_rules", [])[:3]) or "Writing rules updated"
+            return (
+                ", ".join(contract.get("style_rules", [])[:3])
+                or "Writing rules updated"
+            )
         config = snapshot_payload.get("story_config", {})
         return config.get("notes") or "Story config updated"
 
-    def _build_summary_tier_2(self, step_id: SetupStepId, snapshot_payload: dict) -> str:
+    def _build_summary_tier_2(
+        self,
+        step_id: SetupStepId | SetupStageId,
+        snapshot_payload: dict,
+    ) -> str:
         return self._build_summary_tier_1(step_id, snapshot_payload)
 
-    def _build_spotlights(self, step_id: SetupStepId, snapshot_payload: dict) -> list[str]:
+    def _build_spotlights(
+        self,
+        step_id: SetupStepId | SetupStageId,
+        snapshot_payload: dict,
+    ) -> list[str]:
+        if isinstance(step_id, SetupStageId):
+            return [
+                entry.get("title")
+                or entry.get("semantic_path")
+                or entry.get("entry_id")
+                for entry in snapshot_payload.get(step_id.value, {}).get("entries", [])
+                if entry.get("title")
+                or entry.get("semantic_path")
+                or entry.get("entry_id")
+            ][:5]
         if step_id == SetupStepId.FOUNDATION:
             return [
                 entry.get("title") or entry.get("path")
@@ -837,7 +1195,9 @@ class SetupWorkspaceService:
     ) -> list[str]:
         targets: list[str] = []
         if step_id == SetupStepId.FOUNDATION:
-            foundation = self._load_draft_block(workspace_id, "foundation", FoundationDraft)
+            foundation = self._load_draft_block(
+                workspace_id, "foundation", FoundationDraft
+            )
             if foundation is not None:
                 targets.extend(entry.entry_id for entry in foundation.entries)
         elif step_id == SetupStepId.LONGFORM_BLUEPRINT:
@@ -846,10 +1206,26 @@ class SetupWorkspaceService:
             select(SetupImportedAssetRecord)
             .where(SetupImportedAssetRecord.workspace_id == workspace_id)
             .where(SetupImportedAssetRecord.step_id == step_id.value)
-            .where(SetupImportedAssetRecord.parse_status == ImportedAssetParseStatus.PARSED.value)
+            .where(
+                SetupImportedAssetRecord.parse_status
+                == ImportedAssetParseStatus.PARSED.value
+            )
         ).all()
         targets.extend(record.asset_id for record in asset_records)
         return targets
+
+    def _suggest_stage_ingestion_targets(
+        self,
+        *,
+        workspace_id: str,
+        stage_id: SetupStageId,
+    ) -> list[str]:
+        block = self._load_draft_block(
+            workspace_id, stage_id.value, SetupStageDraftBlock
+        )
+        if block is None:
+            return []
+        return [entry.entry_id for entry in block.entries]
 
     def _create_ingestion_job_records(
         self,
@@ -861,6 +1237,26 @@ class SetupWorkspaceService:
         created_at: datetime,
     ) -> list[SetupRetrievalIngestionJobRecord]:
         records: list[SetupRetrievalIngestionJobRecord] = []
+        for block_type, block_payload in snapshot_payload.items():
+            stage_id = self._coerce_stage_id(block_type)
+            if stage_id is None:
+                continue
+            for entry in block_payload.get("entries", []):
+                records.append(
+                    SetupRetrievalIngestionJobRecord(
+                        job_id=uuid4().hex,
+                        workspace_id=workspace_id,
+                        commit_id=commit_id,
+                        step_id=stage_id.value,
+                        target_type="foundation_entry",
+                        target_ref=entry.get("entry_id")
+                        or entry.get("semantic_path")
+                        or uuid4().hex,
+                        state=RetrievalIngestionState.QUEUED.value,
+                        created_at=created_at,
+                        updated_at=created_at,
+                    )
+                )
         if step_id == SetupStepId.FOUNDATION:
             for entry in snapshot_payload.get("foundation", {}).get("entries", []):
                 records.append(
@@ -870,7 +1266,9 @@ class SetupWorkspaceService:
                         commit_id=commit_id,
                         step_id=step_id.value,
                         target_type="foundation_entry",
-                        target_ref=entry.get("entry_id") or entry.get("path") or uuid4().hex,
+                        target_ref=entry.get("entry_id")
+                        or entry.get("path")
+                        or uuid4().hex,
                         state=RetrievalIngestionState.QUEUED.value,
                         created_at=created_at,
                         updated_at=created_at,
@@ -894,7 +1292,10 @@ class SetupWorkspaceService:
             select(SetupImportedAssetRecord)
             .where(SetupImportedAssetRecord.workspace_id == workspace_id)
             .where(SetupImportedAssetRecord.step_id == step_id.value)
-            .where(SetupImportedAssetRecord.parse_status == ImportedAssetParseStatus.PARSED.value)
+            .where(
+                SetupImportedAssetRecord.parse_status
+                == ImportedAssetParseStatus.PARSED.value
+            )
         ).all()
         for record in asset_records:
             records.append(
@@ -916,6 +1317,35 @@ class SetupWorkspaceService:
     def _step_record_id(cls, workspace_id: str, step_id: SetupStepId) -> str:
         return f"{workspace_id}:{step_id.value}"
 
+    @classmethod
+    def _stage_record_id(cls, workspace_id: str, stage_id: SetupStageId) -> str:
+        return f"{workspace_id}:stage:{stage_id.value}"
+
+    @classmethod
+    def _coerce_legacy_step_id(cls, value: str | None) -> SetupStepId | None:
+        if not value:
+            return None
+        try:
+            return SetupStepId(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def _coerce_stage_id(cls, value: str | None) -> SetupStageId | None:
+        if not value:
+            return None
+        try:
+            return SetupStageId(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def _legacy_step_for_lifecycle_id(cls, value: str) -> SetupStepId:
+        stage_id = cls._coerce_stage_id(value)
+        if stage_id is not None:
+            return cls._LEGACY_STEP_FOR_STAGE[stage_id]
+        return SetupStepId(value)
+
     @staticmethod
     def _parse_block(record: SetupDraftBlockRecord | None, model):
         if record is None:
@@ -923,10 +1353,38 @@ class SetupWorkspaceService:
         return model.model_validate(record.payload_json or {})
 
     @staticmethod
+    def _parse_stage_draft_blocks(
+        blocks: dict[str, SetupDraftBlockRecord],
+        stage_plan: list[SetupStageId],
+    ) -> dict[str, SetupStageDraftBlock]:
+        parsed: dict[str, SetupStageDraftBlock] = {}
+        for stage_id in stage_plan:
+            record = blocks.get(stage_id.value)
+            if record is not None:
+                parsed[stage_id.value] = SetupStageDraftBlock.model_validate(
+                    record.payload_json or {}
+                )
+        return parsed
+
+    @staticmethod
     def _record_to_step_state(record: SetupStepStateRecord) -> SetupStepState:
         return SetupStepState.model_validate(
             {
                 "step_id": record.step_id,
+                "state": record.state,
+                "discussion_round": record.discussion_round,
+                "review_round": record.review_round,
+                "last_proposal_id": record.last_proposal_id,
+                "last_commit_id": record.last_commit_id,
+                "updated_at": record.updated_at,
+            }
+        )
+
+    @staticmethod
+    def _record_to_stage_state(record: SetupStepStateRecord) -> SetupStageState:
+        return SetupStageState.model_validate(
+            {
+                "stage_id": record.step_id,
                 "state": record.state,
                 "discussion_round": record.discussion_round,
                 "review_round": record.review_round,
@@ -957,7 +1415,9 @@ class SetupWorkspaceService:
         )
 
     @staticmethod
-    def _record_to_step_asset_binding(record: SetupStepAssetBindingRecord) -> StepAssetBinding:
+    def _record_to_step_asset_binding(
+        record: SetupStepAssetBindingRecord,
+    ) -> StepAssetBinding:
         return StepAssetBinding.model_validate(
             {
                 "binding_id": record.binding_id,
@@ -970,7 +1430,9 @@ class SetupWorkspaceService:
         )
 
     @staticmethod
-    def _record_to_ingestion_job(record: SetupRetrievalIngestionJobRecord) -> RetrievalIngestionJob:
+    def _record_to_ingestion_job(
+        record: SetupRetrievalIngestionJobRecord,
+    ) -> RetrievalIngestionJob:
         return RetrievalIngestionJob.model_validate(
             {
                 "job_id": record.job_id,
@@ -1032,14 +1494,19 @@ class SetupWorkspaceService:
         )
 
     @staticmethod
-    def _record_to_pending_delta(record: SetupPendingUserEditDeltaRecord) -> PendingUserEditDelta:
+    def _record_to_pending_delta(
+        record: SetupPendingUserEditDeltaRecord,
+    ) -> PendingUserEditDelta:
         return PendingUserEditDelta.model_validate(
             {
                 "delta_id": record.delta_id,
                 "step_id": record.step_id,
                 "target_block": record.target_block,
                 "target_ref": record.target_ref,
-                "changes": [UserEditChangeItem.model_validate(item).model_dump(mode="json") for item in record.changes_json],
+                "changes": [
+                    UserEditChangeItem.model_validate(item).model_dump(mode="json")
+                    for item in record.changes_json
+                ],
                 "created_at": record.created_at,
                 "consumed_at": record.consumed_at,
             }

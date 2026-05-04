@@ -35,6 +35,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   String? _selectedRetrievalEmbeddingModelId;
   String? _selectedRetrievalRerankProviderId;
   String? _selectedRetrievalRerankModelId;
+  String? _selectedGraphExtractionProviderId;
+  String? _selectedGraphExtractionModelId;
   bool _isLoading = true;
   bool _isSending = false;
   String _streamingText = '';
@@ -197,6 +199,12 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       providerCandidates: _retrievalRerankProviders(),
       modelCandidatesForProvider: _retrievalRerankModelsForProvider,
     );
+    final graphSelection = _normalizeRetrievalSelection(
+      providerId: config['graph_extraction_provider_id']?.toString(),
+      modelId: config['graph_extraction_model_id']?.toString(),
+      providerCandidates: _graphExtractionProviders(),
+      modelCandidatesForProvider: _graphExtractionModelsForProvider,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -204,6 +212,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       _selectedRetrievalEmbeddingModelId = embeddingSelection.modelId;
       _selectedRetrievalRerankProviderId = rerankSelection.providerId;
       _selectedRetrievalRerankModelId = rerankSelection.modelId;
+      _selectedGraphExtractionProviderId = graphSelection.providerId;
+      _selectedGraphExtractionModelId = graphSelection.modelId;
     });
   }
 
@@ -283,6 +293,25 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         .toList();
   }
 
+  List<String> _graphExtractionProviders() {
+    return globalModelServiceManager
+        .getEnabledProviders()
+        .where(
+          (provider) =>
+              _graphExtractionModelsForProvider(provider.id).isNotEmpty,
+        )
+        .map((provider) => provider.id)
+        .toList();
+  }
+
+  List<ModelConfig> _graphExtractionModelsForProvider(String providerId) {
+    return globalModelServiceManager
+        .getModelsByProvider(providerId)
+        .where((item) => item.isEnabled)
+        .where(_isGraphExtractionCandidateModel)
+        .toList();
+  }
+
   bool _isEmbeddingCandidateModel(ModelConfig model) {
     final lowerName = model.modelName.toLowerCase();
     return model.isEmbeddingModel ||
@@ -295,11 +324,23 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     return model.isRerankModel || model.isCrossEncoderRerankModel;
   }
 
+  bool _isGraphExtractionCandidateModel(ModelConfig model) {
+    if (model.isEmbeddingModel ||
+        model.isRerankModel ||
+        model.isCrossEncoderRerankModel) {
+      return false;
+    }
+    final mode = model.resolvedMode;
+    return mode == null || mode == 'chat' || mode == 'responses';
+  }
+
   Future<void> _persistRetrievalRuntimeConfig({
     required String? embeddingProviderId,
     required String? embeddingModelId,
     required String? rerankProviderId,
     required String? rerankModelId,
+    required String? graphExtractionProviderId,
+    required String? graphExtractionModelId,
   }) async {
     final sessionId = _currentSessionId;
     final current = _snapshot?.session.runtimeStoryConfig;
@@ -313,7 +354,11 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
             embeddingModelId &&
         current['retrieval_rerank_provider_id']?.toString() ==
             rerankProviderId &&
-        current['retrieval_rerank_model_id']?.toString() == rerankModelId) {
+        current['retrieval_rerank_model_id']?.toString() == rerankModelId &&
+        current['graph_extraction_provider_id']?.toString() ==
+            graphExtractionProviderId &&
+        current['graph_extraction_model_id']?.toString() ==
+            graphExtractionModelId) {
       return;
     }
 
@@ -324,6 +369,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         'retrieval_embedding_model_id': embeddingModelId,
         'retrieval_rerank_provider_id': rerankProviderId,
         'retrieval_rerank_model_id': rerankModelId,
+        'graph_extraction_provider_id': graphExtractionProviderId,
+        'graph_extraction_model_id': graphExtractionModelId,
       },
     );
     List<RpStorySession>? sessions;
@@ -348,6 +395,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       embeddingModelId: null,
       rerankProviderId: null,
       rerankModelId: null,
+      graphExtractionProviderId: null,
+      graphExtractionModelId: null,
     );
   }
 
@@ -362,7 +411,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           agentSectionDescription: '这里选择当前 story 命令和讨论发送使用的模型，只影响前端当前会话的发送行为。',
           retrievalSectionTitle: 'Retrieval Runtime',
           retrievalSectionDescription:
-              '这里修改 active story session 的 retrieval override；清空后会回退到 setup 阶段写入的默认配置。',
+              '这里修改 active story session 的 retrieval override；Embedding / Rerank / Graph Extraction 清空后都会回退到 setup 阶段写入的默认配置。',
           agentProviders: globalModelServiceManager.getEnabledProviders(),
           agentModelsForProvider: (providerId) => globalModelServiceManager
               .getModelsByProvider(providerId)
@@ -376,11 +425,18 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
               _retrievalEmbeddingModelsForProvider,
           retrievalRerankProviderIds: _retrievalRerankProviders(),
           retrievalRerankModelsForProvider: _retrievalRerankModelsForProvider,
+          retrievalGraphExtractionProviderIds: _graphExtractionProviders(),
+          retrievalGraphExtractionModelsForProvider:
+              _graphExtractionModelsForProvider,
           initialRetrievalEmbeddingProviderId:
               _selectedRetrievalEmbeddingProviderId,
           initialRetrievalEmbeddingModelId: _selectedRetrievalEmbeddingModelId,
           initialRetrievalRerankProviderId: _selectedRetrievalRerankProviderId,
           initialRetrievalRerankModelId: _selectedRetrievalRerankModelId,
+          initialRetrievalGraphExtractionProviderId:
+              _selectedGraphExtractionProviderId,
+          initialRetrievalGraphExtractionModelId:
+              _selectedGraphExtractionModelId,
           onPersistRetrievalConfig: _persistRetrievalRuntimeConfig,
           retrievalSecondaryActionLabel: 'Use Setup Defaults',
           onRetrievalSecondaryAction: _resetRetrievalRuntimeOverrides,
@@ -389,6 +445,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
               '当前没有识别到 embedding 模型。可在模型管理页给模型添加 embedding 能力，或使用名称包含 embedding / bge / e5 / gte 的模型。',
           rerankEmptyHint:
               '当前没有识别到 rerank 模型。可在模型管理页给模型添加 rerank / cross_encoder_rerank 能力。',
+          graphExtractionEmptyHint:
+              '当前没有识别到可用于 graph extraction 的文本模型。需要启用一个非 embedding / rerank 的 chat 或 responses 模型。',
         ),
       ),
     );
@@ -846,6 +904,12 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           modelId: _selectedRetrievalRerankModelId,
         ) ??
         '跟随 setup 默认';
+    final graphSummary =
+        _formatModelSelectionSummary(
+          providerId: _selectedGraphExtractionProviderId,
+          modelId: _selectedGraphExtractionModelId,
+        ) ??
+        '跟随 setup 默认';
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -863,6 +927,13 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
             SizedBox(height: spacing.xs),
             Text(
               'Retrieval: Embedding $embeddingSummary · Rerank $rerankSummary',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+            SizedBox(height: spacing.xs),
+            Text(
+              'Graph Extraction: $graphSummary',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),

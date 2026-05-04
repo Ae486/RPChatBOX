@@ -17,12 +17,14 @@
   - `mode: str`
   - `workspace_id: str`
   - `current_step: str`
+  - `current_stage: str | None`
   - `user_prompt: str`
   - `user_edit_delta_ids: list[str]`
   - `token_budget: int | None`
 - `SetupContextPacket`
   - `workspace_id: str`
   - `current_step: str`
+  - `current_stage: str | None`
   - `context_profile: Literal["standard", "compact"]`
   - `committed_summaries: list[str]`
   - `current_draft_snapshot: dict[str, Any]`
@@ -78,8 +80,11 @@
     - `context_packet`
     - `mode`
     - `current_step`
+    - `current_stage`
     - `step_state`
+    - `stage_state`
     - `step_readiness`
+    - `stage_readiness`
     - `open_question_count`
     - `blocking_open_question_count`
     - `open_question_texts`
@@ -87,6 +92,7 @@
     - `has_prior_stage_handoffs`
     - `prior_stage_handoff_count`
     - `prior_stage_handoff_steps`
+    - `prior_stage_handoff_stages`
     - `last_proposal_status`
     - `has_rejected_commit_proposal`
     - `cognitive_state`
@@ -109,7 +115,7 @@
 - Layer 1: `SetupContextBuilder.build(...)`
   - reads `SetupWorkspace`
   - selects prior-stage handoffs
-  - selects current-step draft snapshot
+  - selects current-stage draft snapshot from `draft_blocks[current_stage]` when `current_stage` is present, otherwise falls back to the legacy current-step draft snapshot
   - selects current-step asset preview
   - selects relevant user edit deltas
   - produces `SetupContextPacket`
@@ -159,6 +165,7 @@
   - `continue_reason`
   - latest same-turn tool results
 - Prior-stage truth still enters only through `prior_stage_handoffs`; this slice must not rebuild it from historical chat.
+- During stage migration, `current_step` remains available for compatibility, but `current_stage` is the canonical lifecycle signal whenever it is present.
 
 #### 3.4 System Prompt And Runtime Overlay Have Different Responsibilities
 

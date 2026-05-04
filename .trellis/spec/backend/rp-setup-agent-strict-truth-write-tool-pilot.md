@@ -32,6 +32,9 @@
   - `writing_contract -> writing_contract`
   - `foundation -> foundation_entry`
   - `longform_blueprint -> longform_blueprint`
+- `SETUP_TRUTH_WRITE_STAGE_BLOCK_TYPE = "stage_draft"`
+- Runtime-owned `truth_write.stage_id: SetupStageId | None`
+  - injected only when the current turn has a canonical `current_stage`
 - Runtime model-facing tool schema for `setup.truth.write`:
   - top-level required field: `truth_write`
   - `truth_write.write_id: string`
@@ -43,8 +46,9 @@
 - Runtime execution normalization:
   - inject `workspace_id` from `RpAgentTurnInput.workspace_id`
   - inject `step_id` from `context_bundle.current_step`
-  - inject `truth_write.current_step` from `context_bundle.current_step`
-  - inject `truth_write.block_type` from `SETUP_TRUTH_WRITE_BLOCK_TYPE_BY_STEP[current_step]`
+  - inject `truth_write.current_step` from `context_bundle.current_stage` when present, otherwise from `context_bundle.current_step`
+  - inject `truth_write.block_type = "stage_draft"` and `truth_write.stage_id = context_bundle.current_stage` when the turn has a canonical current stage
+  - otherwise inject `truth_write.block_type` from `SETUP_TRUTH_WRITE_BLOCK_TYPE_BY_STEP[current_step]`
   - parse `truth_write.payload_json` into provider-side `truth_write.payload`
   - inject `user_edit_delta_ids` from current context packet user-edit deltas when available, otherwise `[]`
 
@@ -62,6 +66,18 @@
 - The runtime should expose a slimmer model-facing schema whenever it can deterministically rehydrate those fields before calling the provider.
 - If the runtime cannot determine `workspace_id`, `current_step`, or `block_type`, it must fall back to the normal non-slim tool schema instead of sending a slim schema with incomplete runtime defaults.
 - `function.strict = true` is an enhancement on this slim schema, not the condition that makes the slim schema legal.
+
+#### 4.1.1 Canonical Stages Use The Same Hardened Truth-Write Path
+
+- When `current_stage` is available, `setup.truth.write` is still the only model-facing draft write path.
+- The runtime must inject `truth_write.block_type = "stage_draft"` and `truth_write.stage_id = current_stage`.
+- Provider-side execution must validate the payload as canonical setup draft grammar and write through `SetupWorkspaceService.patch_stage_draft(...)`.
+- Valid stage payloads are:
+  - one `SetupDraftEntry` payload, merged into the current `SetupStageDraftBlock`
+  - one full `SetupStageDraftBlock` payload whose `stage_id` matches the injected stage
+- Successful stage-entry writes must return canonical refs such as `stage:world_background:race_elf`.
+- Successful full-stage writes must return `draft:world_background`.
+- This is intentionally not a new `setup.patch.stage_draft` tool. The design source is the existing structured-output pilot and bounded pydantic repair loop; the project-specific adaptation is to change the truth-write landing target when the turn has canonical stage context.
 
 #### 4.2 Runtime-Owned Fields Must Not Be Model Burden
 
@@ -107,7 +123,10 @@
 ### 5. Validation & Error Matrix
 
 - `current_step = foundation` and model calls slim `setup.truth.write` with `payload_json` -> runtime injects `step_id = foundation` and `truth_write.block_type = foundation_entry`
+- `current_step = foundation`, `current_stage = world_background`, and model calls slim `setup.truth.write` with one stage entry `payload_json` -> runtime injects `step_id = foundation`, `truth_write.current_step = world_background`, `truth_write.block_type = stage_draft`, and `truth_write.stage_id = world_background`
 - `current_step = story_config` -> runtime injects `truth_write.block_type = story_config`
+- provider-side stage write with an entry payload -> writes `draft_blocks[current_stage].entries[entry_id]`, returns `stage:<stage_id>:<entry_id>`, and does not mutate `foundation_draft`
+- provider-side stage write with a full block whose `stage_id` mismatches the injected stage -> fails with a machine-readable setup tool error and does not mutate the workspace
 - final tool definition for `setup.truth.write` uses the slim root object whenever runtime defaults are available
 - strict-enabled model family -> slim tool definition also uses `strict = true`
 - non-strict-enabled model family such as `glm-5` -> runtime exposes the slim schema without `strict = true`
@@ -123,9 +142,11 @@
   - assert strict-enabled models add `function.strict = true`
   - assert non-strict-enabled models keep the slim schema without `function.strict`
   - assert the runtime rehydrates slim truth-write arguments before tool execution
+  - assert canonical stage turns rehydrate slim truth-write arguments to `stage_draft` plus injected `stage_id`
   - assert non-pilot tools stay non-strict
 - `backend/rp/tests/test_setup_tool_provider_cognitive_tools.py` or provider-level tests
   - assert provider-side `SetupTruthWriteInput` validation remains unchanged for direct calls
+  - assert provider-side `stage_draft` truth writes land in `draft_blocks[stage_id]` and return canonical stage refs
 - `backend/rp/tests/test_setup_agent_real_model_compact_recovery.py`
   - extend the opt-in real-model chain to assert the request contains slim `setup.truth.write`
   - for strict-enabled models, assert `function.strict = true`
@@ -149,5 +170,6 @@
 - Keep provider truth unchanged behind that adapter.
 - Use a strict-compatible shell around the dynamic payload.
 - Rehydrate runtime-owned fields deterministically before provider execution.
+- For canonical setup stages, reuse the same truth-write shell and change only the injected provider-side landing target to `stage_draft`.
 - Add `function.strict = true` only as a verified enhancement.
 - Verify with schema snapshots first, then opt-in real-model behavior, then decide whether to expand to other tools.

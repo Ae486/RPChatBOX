@@ -1,4 +1,5 @@
 """Runtime-internal contracts for RP agent execution."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId
 
 
@@ -98,7 +100,9 @@ class DiscussionState(BaseModel):
     current_step: str
     discussion_topic: str
     confirmed_points: list[str] = Field(default_factory=list)
-    candidate_directions: list[DiscussionCandidateDirection] = Field(default_factory=list)
+    candidate_directions: list[DiscussionCandidateDirection] = Field(
+        default_factory=list
+    )
     open_questions: list[str] = Field(default_factory=list)
     unresolved_conflicts: list[str] = Field(default_factory=list)
     user_preference_signals: list[str] = Field(default_factory=list)
@@ -118,7 +122,9 @@ class ChunkCandidate(BaseModel):
         "writing_contract",
         "foundation_entry",
         "longform_blueprint",
+        "stage_draft",
     ]
+    stage_id: SetupStageId | None = None
     target_ref: str | None = None
     title: str
     content: str
@@ -143,7 +149,9 @@ class DraftTruthWrite(BaseModel):
         "writing_contract",
         "foundation_entry",
         "longform_blueprint",
+        "stage_draft",
     ]
+    stage_id: SetupStageId | None = None
     target_ref: str | None = None
     operation: Literal["create", "merge", "replace"]
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -268,6 +276,7 @@ class SetupDraftRefReadInput(BaseModel):
 
     workspace_id: str
     step_id: SetupStepId
+    stage_id: SetupStageId | None = None
     refs: list[str]
     detail: Literal["summary", "full"] = "summary"
     max_chars: int = 4000
@@ -280,12 +289,7 @@ class SetupDraftRefReadItem(BaseModel):
 
     ref: str
     found: bool
-    block_type: Literal[
-        "story_config",
-        "writing_contract",
-        "foundation_entry",
-        "longform_blueprint",
-    ] | None = None
+    block_type: str | None = None
     title: str | None = None
     summary: str | None = None
     payload: dict[str, Any] | None = None

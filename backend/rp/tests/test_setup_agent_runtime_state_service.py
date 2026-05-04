@@ -18,8 +18,12 @@ from rp.models.setup_drafts import (
     ChapterBlueprintEntry,
     FoundationEntry,
     LongformBlueprintDraft,
+    SetupDraftEntry,
+    SetupDraftSection,
+    SetupStageDraftBlock,
 )
 from rp.models.setup_handoff import SetupContextBuilderInput
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
@@ -36,6 +40,37 @@ def _build_context_packet(*, context_builder, workspace_id: str, step_id: SetupS
             user_edit_delta_ids=[],
             token_budget=None,
         )
+    )
+
+
+def _stage_block(
+    stage_id: SetupStageId,
+    *,
+    entry_id: str,
+    entry_type: str,
+    semantic_path: str,
+    title: str,
+    summary: str,
+) -> SetupStageDraftBlock:
+    return SetupStageDraftBlock(
+        stage_id=stage_id,
+        entries=[
+            SetupDraftEntry(
+                entry_id=entry_id,
+                entry_type=entry_type,
+                semantic_path=semantic_path,
+                title=title,
+                sections=[
+                    SetupDraftSection(
+                        section_id="summary",
+                        title="Summary",
+                        kind="text",
+                        content={"text": summary},
+                        retrieval_role="summary",
+                    )
+                ],
+            )
+        ],
     )
 
 
@@ -586,9 +621,7 @@ def test_context_builder_derives_blueprint_handoff_chunk_descriptions_from_accep
     assert blueprint_handoff.retrieval_refs == ["longform_blueprint"]
     assert blueprint_handoff.warnings == []
     assert blueprint_handoff.open_issues == []
-    assert blueprint_handoff.source_basis.snapshot_block_types == [
-        "longform_blueprint"
-    ]
+    assert blueprint_handoff.source_basis.snapshot_block_types == ["longform_blueprint"]
     assert [chunk.title for chunk in blueprint_handoff.chunk_descriptions] == [
         "Blueprint Overview",
         "Audit Day",
@@ -649,3 +682,82 @@ def test_context_builder_drops_chunk_descriptions_when_token_budget_is_compact(
         "Committed 1 foundation entries"
     )
     assert context_packet.committed_summaries == ["Committed 1 foundation entries"]
+
+
+def test_context_builder_uses_stage_plan_for_canonical_stage_handoff(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-context-handoff-1",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace = workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=_stage_block(
+            SetupStageId.WORLD_BACKGROUND,
+            entry_id="race_elf",
+            entry_type="race",
+            semantic_path="world_background.race.elf",
+            title="Elf",
+            summary="Elves live in moonlit forest cities.",
+        ),
+    )
+    proposal = workspace_service.propose_stage_commit(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        target_draft_refs=["stage:world_background:race_elf"],
+    )
+    workspace_service.accept_commit(
+        workspace_id=workspace.workspace_id,
+        proposal_id=proposal.proposal_id,
+    )
+    workspace = workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.CHARACTER_DESIGN,
+        draft=_stage_block(
+            SetupStageId.CHARACTER_DESIGN,
+            entry_id="hero_lin",
+            entry_type="character",
+            semantic_path="character_design.protagonist.lin",
+            title="Lin",
+            summary="Lin is a border courier who knows the elf roads.",
+        ),
+    )
+
+    context_packet = context_builder.build(
+        SetupContextBuilderInput(
+            mode=StoryMode.LONGFORM.value,
+            workspace_id=workspace.workspace_id,
+            current_step=SetupStepId.FOUNDATION.value,
+            current_stage=SetupStageId.CHARACTER_DESIGN.value,
+            user_prompt="Design the protagonist.",
+            user_edit_delta_ids=[],
+            token_budget=None,
+        )
+    )
+
+    assert context_packet.current_step == SetupStepId.FOUNDATION.value
+    assert context_packet.current_stage == SetupStageId.CHARACTER_DESIGN
+    assert context_packet.current_draft_snapshot["stage_id"] == "character_design"
+    assert context_packet.current_draft_snapshot["entries"][0]["entry_id"] == "hero_lin"
+    assert [handoff.stage_id for handoff in context_packet.prior_stage_handoffs] == [
+        SetupStageId.WORLD_BACKGROUND
+    ]
+    world_handoff = context_packet.prior_stage_handoffs[0]
+    assert world_handoff.from_step == SetupStepId.FOUNDATION
+    assert world_handoff.to_step == SetupStepId.FOUNDATION
+    assert world_handoff.from_stage == SetupStageId.WORLD_BACKGROUND
+    assert world_handoff.to_stage == SetupStageId.CHARACTER_DESIGN
+    assert world_handoff.step_id == SetupStepId.FOUNDATION
+    assert world_handoff.source_basis.snapshot_block_types == ["world_background"]
+    assert [chunk.chunk_ref for chunk in world_handoff.chunk_descriptions][:2] == [
+        "stage:world_background:race_elf",
+        "stage:world_background:race_elf:summary",
+    ]
+    assert world_handoff.chunk_descriptions[0].block_type == "world_background"
+    assert world_handoff.chunk_descriptions[0].title == "Elf"
+    assert "world_background.race.elf" in world_handoff.summary

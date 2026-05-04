@@ -36,6 +36,50 @@ def test_resolve_story_config_reads_setup_story_config(retrieval_session):
     assert config.rerank_provider_id == "provider-rerank"
 
 
+def test_resolve_story_config_reads_independent_graph_extraction_slot(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    workspace = workspace_service.create_workspace(
+        story_id="story-runtime-config-graph",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_story_config(
+        workspace_id=workspace.workspace_id,
+        patch=StoryConfigDraft(
+            retrieval_embedding_model_id="embedding-model-setup",
+            retrieval_embedding_provider_id="provider-embedding",
+            retrieval_rerank_model_id="rerank-model-setup",
+            retrieval_rerank_provider_id="provider-rerank",
+            graph_extraction_provider_id="provider-graph-setup",
+            graph_extraction_model_id="graph-model-setup",
+            graph_extraction_structured_output_mode="json_schema",
+            graph_extraction_temperature=0.0,
+            graph_extraction_max_output_tokens=1024,
+            graph_extraction_timeout_ms=45000,
+            graph_extraction_retry_policy={"max_attempts": 2},
+            graph_extraction_fallback_model_ref="graph-fallback",
+            graph_extraction_enabled=True,
+        ),
+    )
+
+    config = RetrievalRuntimeConfigService(retrieval_session).resolve_story_config(
+        story_id="story-runtime-config-graph"
+    )
+
+    assert config.embedding_model_id == "embedding-model-setup"
+    assert config.rerank_model_id == "rerank-model-setup"
+    assert config.graph_extraction_provider_id == "provider-graph-setup"
+    assert config.graph_extraction_model_id == "graph-model-setup"
+    assert config.graph_extraction_structured_output_mode == "json_schema"
+    assert config.graph_extraction_temperature == 0.0
+    assert config.graph_extraction_max_output_tokens == 1024
+    assert config.graph_extraction_timeout_ms == 45000
+    assert config.graph_extraction_retry_policy.max_attempts == 2
+    assert config.graph_extraction_fallback_model_ref == "graph-fallback"
+    assert config.graph_extraction_enabled is True
+
+
 def test_resolve_story_config_prefers_active_story_session_and_falls_back_per_field(
     retrieval_session,
 ):
@@ -75,6 +119,49 @@ def test_resolve_story_config_prefers_active_story_session_and_falls_back_per_fi
     assert config.embedding_provider_id == "provider-embedding-session"
     assert config.rerank_model_id == "rerank-model-session"
     assert config.rerank_provider_id == "provider-rerank-setup"
+
+
+def test_resolve_story_config_overlays_graph_extraction_per_field(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    workspace = workspace_service.create_workspace(
+        story_id="story-runtime-config-graph-override",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_story_config(
+        workspace_id=workspace.workspace_id,
+        patch=StoryConfigDraft(
+            graph_extraction_provider_id="provider-graph-setup",
+            graph_extraction_model_id="graph-model-setup",
+            graph_extraction_temperature=0.1,
+            graph_extraction_retry_policy={"max_attempts": 2},
+            graph_extraction_enabled=True,
+        ),
+    )
+    StorySessionService(retrieval_session).create_session(
+        story_id="story-runtime-config-graph-override",
+        source_workspace_id=workspace.workspace_id,
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={
+            "graph_extraction_model_id": "graph-model-session",
+            "graph_extraction_temperature": 0.0,
+            "graph_extraction_enabled": False,
+        },
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+
+    config = RetrievalRuntimeConfigService(retrieval_session).resolve_story_config(
+        story_id="story-runtime-config-graph-override"
+    )
+
+    assert config.graph_extraction_provider_id == "provider-graph-setup"
+    assert config.graph_extraction_model_id == "graph-model-session"
+    assert config.graph_extraction_temperature == 0.0
+    assert config.graph_extraction_retry_policy.max_attempts == 2
+    assert config.graph_extraction_enabled is False
 
 
 def test_resolve_story_config_reflects_runtime_story_config_updates(retrieval_session):

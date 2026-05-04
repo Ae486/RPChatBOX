@@ -7,12 +7,28 @@ from collections.abc import Sequence
 from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
 from rp.retrieval.embedder import Embedder
 from rp.retrieval.fusion_strategy import RrfFusionStrategy
+from rp.retrieval.graph_expansion import (
+    GraphExpansionRetriever,
+    attach_skipped_graph_summary,
+    graph_expansion_should_run,
+    merge_graph_expansion_result,
+)
 from rp.retrieval.keyword_retriever import KeywordRetriever
-from rp.retrieval.pipeline_slots import FusionStrategy, QueryPreprocessor, ResultBuilder, Retriever, Reranker
+from rp.retrieval.pipeline_slots import (
+    FusionStrategy,
+    QueryPreprocessor,
+    ResultBuilder,
+    Retriever,
+    Reranker,
+)
 from rp.retrieval.pipeline_runner import retrieve_and_fuse
 from rp.retrieval.query_preprocessor import DefaultQueryPreprocessor
 from rp.retrieval.rag_context_builder import RagContextBuilder
-from rp.retrieval.reranker_backends import HostedRerankerBackend, LocalCrossEncoderBackend, RerankerBackendChain
+from rp.retrieval.reranker_backends import (
+    HostedRerankerBackend,
+    LocalCrossEncoderBackend,
+    RerankerBackendChain,
+)
 from rp.retrieval.result_builder import ChunkResultBuilder, DocumentResultBuilder
 from rp.retrieval.reranker import CrossEncoderReranker
 from rp.retrieval.semantic_retriever import SemanticRetriever
@@ -46,7 +62,9 @@ class RetrievalService:
         self._fusion_strategy = fusion_strategy or RrfFusionStrategy()
         self._reranker = reranker
         self._chunk_result_builder = chunk_result_builder or ChunkResultBuilder()
-        self._document_result_builder = document_result_builder or DocumentResultBuilder()
+        self._document_result_builder = (
+            document_result_builder or DocumentResultBuilder()
+        )
         self._rag_builder = rag_context_builder or RagContextBuilder()
         self._retrieval_runtime_config_service = (
             retrieval_runtime_config_service or RetrievalRuntimeConfigService(session)
@@ -58,7 +76,9 @@ class RetrievalService:
         with self._langfuse.start_as_current_observation(
             name="rp.retrieval.search_chunks",
             as_type="chain",
-            input=self._build_observation_input(query=query, normalized_query=normalized_query),
+            input=self._build_observation_input(
+                query=query, normalized_query=normalized_query
+            ),
         ) as observation:
             try:
                 result = await self._search_chunks_preprocessed(normalized_query)
@@ -85,11 +105,15 @@ class RetrievalService:
         with self._langfuse.start_as_current_observation(
             name="rp.retrieval.search_documents",
             as_type="chain",
-            input=self._build_observation_input(query=query, normalized_query=normalized_query),
+            input=self._build_observation_input(
+                query=query, normalized_query=normalized_query
+            ),
         ) as observation:
             try:
                 chunk_result = await self._search_chunks_preprocessed(normalized_query)
-                result = self._document_result_builder.build(query=normalized_query, result=chunk_result)
+                result = self._document_result_builder.build(
+                    query=normalized_query, result=chunk_result
+                )
             except Exception as exc:
                 observation.update(
                     output=self._build_error_output(
@@ -113,7 +137,9 @@ class RetrievalService:
         with self._langfuse.start_as_current_observation(
             name="rp.retrieval.rag_context",
             as_type="chain",
-            input=self._build_observation_input(query=query, normalized_query=normalized_query),
+            input=self._build_observation_input(
+                query=query, normalized_query=normalized_query
+            ),
         ) as observation:
             try:
                 chunk_result = await self._search_chunks_preprocessed(normalized_query)
@@ -136,13 +162,27 @@ class RetrievalService:
             )
             return result
 
-    async def _search_chunks_preprocessed(self, query: RetrievalQuery) -> RetrievalSearchResult:
+    async def _search_chunks_preprocessed(
+        self, query: RetrievalQuery
+    ) -> RetrievalSearchResult:
         retrievers, reranker = self._resolve_runtime_components(query)
         fused_result = await retrieve_and_fuse(
             query=query,
             retrievers=retrievers,
             fusion_strategy=self._fusion_strategy,
         )
+        if graph_expansion_should_run(query):
+            graph_result = await GraphExpansionRetriever(self._session).search(query)
+            fused_result = merge_graph_expansion_result(
+                query=query,
+                result=fused_result,
+                graph_result=graph_result,
+            )
+        else:
+            fused_result = attach_skipped_graph_summary(
+                query=query,
+                result=fused_result,
+            )
         reranked_result = await reranker.rerank(query=query, result=fused_result)
         return self._chunk_result_builder.build(query=query, result=reranked_result)
 
@@ -150,7 +190,9 @@ class RetrievalService:
         self,
         query: RetrievalQuery,
     ) -> tuple[Sequence[Retriever], Reranker]:
-        resolved_embedder = self._embedder or self._build_story_embedder(story_id=query.story_id)
+        resolved_embedder = self._embedder or self._build_story_embedder(
+            story_id=query.story_id
+        )
         retrievers = self._retrievers or (
             KeywordRetriever(self._session),
             SemanticRetriever(self._session, embedder=resolved_embedder),
@@ -159,14 +201,18 @@ class RetrievalService:
         return retrievers, reranker
 
     def _build_story_embedder(self, *, story_id: str) -> Embedder:
-        config = self._retrieval_runtime_config_service.resolve_story_config(story_id=story_id)
+        config = self._retrieval_runtime_config_service.resolve_story_config(
+            story_id=story_id
+        )
         return Embedder(
             model_id=config.embedding_model_id,
             provider_id=config.embedding_provider_id,
         )
 
     def _build_story_reranker(self, *, story_id: str) -> Reranker:
-        config = self._retrieval_runtime_config_service.resolve_story_config(story_id=story_id)
+        config = self._retrieval_runtime_config_service.resolve_story_config(
+            story_id=story_id
+        )
         if not config.rerank_model_id and not config.rerank_provider_id:
             return CrossEncoderReranker()
         return CrossEncoderReranker(

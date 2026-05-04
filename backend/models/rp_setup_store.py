@@ -18,7 +18,7 @@ def _utcnow() -> datetime:
 _JSON_VARIANT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class SetupWorkspaceRecord(SQLModel, table=True):
+class SetupWorkspaceRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Setup workspace aggregate metadata record."""
 
     __tablename__ = "rp_setup_workspaces"
@@ -28,6 +28,7 @@ class SetupWorkspaceRecord(SQLModel, table=True):
     mode: str = Field(index=True)
     workspace_state: str = Field(index=True)
     current_step: str = Field(index=True)
+    current_stage: str | None = Field(default=None, index=True)
     version: int = 1
     readiness_json: dict[str, Any] = Field(
         default_factory=dict,
@@ -39,7 +40,7 @@ class SetupWorkspaceRecord(SQLModel, table=True):
     activated_at: datetime | None = Field(default=None, index=True)
 
 
-class SetupStepStateRecord(SQLModel, table=True):
+class SetupStepStateRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Per-step lifecycle record for one setup workspace."""
 
     __tablename__ = "rp_setup_step_states"
@@ -59,7 +60,7 @@ class SetupStepStateRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class SetupDraftBlockRecord(SQLModel, table=True):
+class SetupDraftBlockRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Typed setup draft block stored as JSONB payload."""
 
     __tablename__ = "rp_setup_draft_blocks"
@@ -82,7 +83,7 @@ class SetupDraftBlockRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class SetupImportedAssetRecord(SQLModel, table=True):
+class SetupImportedAssetRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Setup-stage imported asset record before retrieval authoritative persistence."""
 
     __tablename__ = "rp_setup_imported_assets"
@@ -116,7 +117,7 @@ class SetupImportedAssetRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class SetupStepAssetBindingRecord(SQLModel, table=True):
+class SetupStepAssetBindingRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Binding between setup step, asset, and target block."""
 
     __tablename__ = "rp_setup_step_asset_bindings"
@@ -137,7 +138,7 @@ class SetupStepAssetBindingRecord(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class SetupCommitProposalRecord(SQLModel, table=True):
+class SetupCommitProposalRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Durable setup commit proposal record."""
 
     __tablename__ = "rp_setup_commit_proposals"
@@ -171,7 +172,7 @@ class SetupCommitProposalRecord(SQLModel, table=True):
     reviewed_at: datetime | None = Field(default=None, index=True)
 
 
-class SetupAcceptedCommitRecord(SQLModel, table=True):
+class SetupAcceptedCommitRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Accepted setup commit snapshot record."""
 
     __tablename__ = "rp_setup_accepted_commits"
@@ -201,7 +202,7 @@ class SetupAcceptedCommitRecord(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class SetupPendingUserEditDeltaRecord(SQLModel, table=True):
+class SetupPendingUserEditDeltaRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Durable user edit delta record for setup review/apply workflows."""
 
     __tablename__ = "rp_setup_pending_user_edit_deltas"
@@ -222,7 +223,7 @@ class SetupPendingUserEditDeltaRecord(SQLModel, table=True):
     consumed_at: datetime | None = Field(default=None, index=True)
 
 
-class SetupAgentRuntimeStateRecord(SQLModel, table=True):
+class SetupAgentRuntimeStateRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Runtime-private cognitive state snapshot for one workspace step."""
 
     __tablename__ = "rp_setup_agent_runtime_states"
@@ -243,7 +244,7 @@ class SetupAgentRuntimeStateRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
-class SetupOpenQuestionRecord(SQLModel, table=True):
+class SetupOpenQuestionRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Open question record owned by SetupWorkspace."""
 
     __tablename__ = "rp_setup_open_questions"
@@ -262,7 +263,7 @@ class SetupOpenQuestionRecord(SQLModel, table=True):
     resolved_at: datetime | None = Field(default=None, index=True)
 
 
-class SetupRetrievalIngestionJobRecord(SQLModel, table=True):
+class SetupRetrievalIngestionJobRecord(SQLModel, table=True):  # type: ignore[call-arg]
     """Setup-side view of minimal retrieval ingestion jobs."""
 
     __tablename__ = "rp_setup_retrieval_ingestion_jobs"
@@ -289,7 +290,7 @@ class SetupRetrievalIngestionJobRecord(SQLModel, table=True):
 
 
 def ensure_setup_store_compatible_schema(engine: Engine) -> None:
-    """Patch existing setup tables in-place for active-story activation links."""
+    """Patch existing setup tables in-place for additive setup metadata."""
 
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
@@ -297,13 +298,18 @@ def ensure_setup_store_compatible_schema(engine: Engine) -> None:
         return
 
     columns = {item["name"] for item in inspector.get_columns("rp_setup_workspaces")}
-    if "activated_story_session_id" in columns:
-        return
-
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                "ALTER TABLE rp_setup_workspaces "
-                "ADD COLUMN activated_story_session_id VARCHAR"
+        if "activated_story_session_id" not in columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE rp_setup_workspaces "
+                    "ADD COLUMN activated_story_session_id VARCHAR"
+                )
             )
-        )
+        if "current_stage" not in columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE rp_setup_workspaces "
+                    "ADD COLUMN current_stage VARCHAR"
+                )
+            )

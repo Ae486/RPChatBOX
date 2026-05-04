@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from rp.models.setup_drafts import (
     FoundationDraft,
     LongformBlueprintDraft,
+    SetupStageDraftBlock,
     StoryConfigDraft,
     WritingContractDraft,
 )
+from rp.models.setup_stage import SetupStageId
 
 
 class StoryMode(StrEnum):
@@ -94,6 +96,18 @@ class SetupStepState(BaseModel):
     updated_at: datetime
 
 
+class SetupStageState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stage_id: SetupStageId
+    state: SetupStepLifecycleState
+    discussion_round: int = 0
+    review_round: int = 0
+    last_proposal_id: str | None = None
+    last_commit_id: str | None = None
+    updated_at: datetime
+
+
 class ImportedAssetRaw(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -128,7 +142,7 @@ class RetrievalIngestionJob(BaseModel):
 
     job_id: str
     commit_id: str
-    step_id: SetupStepId
+    step_id: SetupStepId | SetupStageId
     target_type: Literal["foundation_entry", "writing_contract", "blueprint", "asset"]
     target_ref: str
     index_job_id: str | None = None
@@ -144,7 +158,7 @@ class CommitProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proposal_id: str
-    step_id: SetupStepId
+    step_id: SetupStepId | SetupStageId
     status: CommitProposalStatus = CommitProposalStatus.PENDING_REVIEW
     target_block_types: list[str] = Field(default_factory=list)
     target_draft_refs: list[str] = Field(default_factory=list)
@@ -169,7 +183,7 @@ class AcceptedCommit(BaseModel):
 
     commit_id: str
     proposal_id: str | None = None
-    step_id: SetupStepId
+    step_id: SetupStepId | SetupStageId
     committed_refs: list[str] = Field(default_factory=list)
     snapshots: list[AcceptedCommitSnapshot] = Field(default_factory=list)
     summary_tier_0: str | None = None
@@ -230,7 +244,11 @@ class SetupWorkspace(BaseModel):
     mode: StoryMode
     workspace_state: SetupWorkspaceState
     current_step: SetupStepId
+    current_stage: SetupStageId | None = None
+    stage_plan: list[SetupStageId] = Field(default_factory=list)
     step_states: list[SetupStepState] = Field(default_factory=list)
+    stage_states: list[SetupStageState] = Field(default_factory=list)
+    draft_blocks: dict[str, SetupStageDraftBlock] = Field(default_factory=dict)
     story_config_draft: StoryConfigDraft | None = None
     writing_contract_draft: WritingContractDraft | None = None
     foundation_draft: FoundationDraft | None = None

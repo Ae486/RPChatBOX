@@ -1,4 +1,5 @@
 """Deterministic controller for SetupAgent MVP workflows."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -28,7 +29,9 @@ from rp.models.setup_workspace import (
     SetupWorkspaceState,
     StoryMode,
 )
-from rp.services.minimal_retrieval_ingestion_service import MinimalRetrievalIngestionService
+from rp.services.minimal_retrieval_ingestion_service import (
+    MinimalRetrievalIngestionService,
+)
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_commit_warning_service import collect_setup_commit_warning_codes
 from rp.services.setup_context_builder import SetupContextBuilder
@@ -86,7 +89,9 @@ class SetupRuntimeController:
         workspace_id: str,
         patch: StoryConfigDraft,
     ) -> SetupToolResult:
-        self._workspace_service.patch_story_config(workspace_id=workspace_id, patch=patch)
+        self._workspace_service.patch_story_config(
+            workspace_id=workspace_id, patch=patch
+        )
         return SetupToolResult(
             success=True,
             message="Updated story_config draft",
@@ -99,7 +104,9 @@ class SetupRuntimeController:
         workspace_id: str,
         patch: WritingContractDraft,
     ) -> SetupToolResult:
-        self._workspace_service.patch_writing_contract(workspace_id=workspace_id, patch=patch)
+        self._workspace_service.patch_writing_contract(
+            workspace_id=workspace_id, patch=patch
+        )
         return SetupToolResult(
             success=True,
             message="Updated writing_contract draft",
@@ -112,7 +119,9 @@ class SetupRuntimeController:
         workspace_id: str,
         entry: FoundationEntry,
     ) -> SetupToolResult:
-        self._workspace_service.patch_foundation_entry(workspace_id=workspace_id, entry=entry)
+        self._workspace_service.patch_foundation_entry(
+            workspace_id=workspace_id, entry=entry
+        )
         return SetupToolResult(
             success=True,
             message="Updated foundation draft entry",
@@ -284,18 +293,26 @@ class SetupRuntimeController:
         workspace = self._workspace_service.get_workspace(workspace_id)
         if workspace is None:
             return None
+        current_stage = (
+            workspace.current_stage if current_step == workspace.current_step else None
+        )
         return self._context_builder.build(
             SetupContextBuilderInput(
                 mode=workspace.mode.value,
                 workspace_id=workspace_id,
                 current_step=current_step.value,
+                current_stage=(
+                    current_stage.value if current_stage is not None else None
+                ),
                 user_prompt=user_prompt,
                 user_edit_delta_ids=list(user_edit_delta_ids or []),
                 token_budget=token_budget,
             )
         )
 
-    def run_activation_check(self, *, workspace_id: str) -> ActivationCheckResult | None:
+    def run_activation_check(
+        self, *, workspace_id: str
+    ) -> ActivationCheckResult | None:
         workspace = self._workspace_service.get_workspace(workspace_id)
         if workspace is None:
             return None
@@ -309,15 +326,24 @@ class SetupRuntimeController:
         }
         step_state_by_id = {step.step_id: step for step in workspace.step_states}
         for step_id in required_steps:
-            if step_state_by_id.get(step_id) is None or step_state_by_id[step_id].state.value != "frozen":
+            if (
+                step_state_by_id.get(step_id) is None
+                or step_state_by_id[step_id].state.value != "frozen"
+            ):
                 blocking_issues.append(f"Step not frozen: {step_id.value}")
         if workspace.story_config_draft is None:
             blocking_issues.append("story_config_draft missing")
         if workspace.writing_contract_draft is None:
             blocking_issues.append("writing_contract_draft missing")
-        if not any(commit.step_id == SetupStepId.FOUNDATION for commit in workspace.accepted_commits):
+        if not any(
+            commit.step_id == SetupStepId.FOUNDATION
+            for commit in workspace.accepted_commits
+        ):
             blocking_issues.append("foundation commit missing")
-        if not any(commit.step_id == SetupStepId.LONGFORM_BLUEPRINT for commit in workspace.accepted_commits):
+        if not any(
+            commit.step_id == SetupStepId.LONGFORM_BLUEPRINT
+            for commit in workspace.accepted_commits
+        ):
             blocking_issues.append("blueprint commit missing")
 
         required_job_states = [
@@ -327,7 +353,9 @@ class SetupRuntimeController:
         ]
         for job in required_job_states:
             if job.state.value != "completed":
-                blocking_issues.append(f"Retrieval ingestion not completed: {job.job_id}")
+                blocking_issues.append(
+                    f"Retrieval ingestion not completed: {job.job_id}"
+                )
 
         ready = not blocking_issues
         self._workspace_service.mark_workspace_state(
@@ -381,6 +409,51 @@ class SetupRuntimeController:
                     ),
                     retrieval_rerank_provider_id=(
                         workspace.story_config_draft.retrieval_rerank_provider_id
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_provider_id=(
+                        workspace.story_config_draft.graph_extraction_provider_id
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_model_id=(
+                        workspace.story_config_draft.graph_extraction_model_id
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_structured_output_mode=(
+                        workspace.story_config_draft.graph_extraction_structured_output_mode
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_temperature=(
+                        workspace.story_config_draft.graph_extraction_temperature
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_max_output_tokens=(
+                        workspace.story_config_draft.graph_extraction_max_output_tokens
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_timeout_ms=(
+                        workspace.story_config_draft.graph_extraction_timeout_ms
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_retry_policy=(
+                        workspace.story_config_draft.graph_extraction_retry_policy
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_fallback_model_ref=(
+                        workspace.story_config_draft.graph_extraction_fallback_model_ref
+                        if workspace.story_config_draft is not None
+                        else None
+                    ),
+                    graph_extraction_enabled=(
+                        workspace.story_config_draft.graph_extraction_enabled
                         if workspace.story_config_draft is not None
                         else None
                     ),

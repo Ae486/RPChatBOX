@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from models.chat import ProviderConfig
 from rp.agent_runtime.contracts import (
     RpAgentTurnInput,
@@ -60,9 +62,11 @@ class SetupRuntimeAdapter:
         cognitive_state_summary: SetupCognitiveStateSummary | None = None,
     ) -> RpAgentTurnInput:
         current_step = request.target_step or workspace.current_step
+        current_stage = getattr(context_packet, "current_stage", None)
         system_prompt = self._prompt_service.build_system_prompt(
             mode=workspace.mode,
             current_step=current_step,
+            current_stage=current_stage,
             context_packet=context_packet,
         )
         open_questions = [
@@ -77,11 +81,24 @@ class SetupRuntimeAdapter:
             if question.severity == QuestionSeverity.BLOCKING
         ]
         latest_proposal = self._latest_step_proposal(
-            workspace=workspace, current_step=current_step
+            workspace=workspace,
+            current_step=current_step,
+            current_stage=current_stage,
         )
         step_state = next(
             (item for item in workspace.step_states if item.step_id == current_step),
             None,
+        )
+        stage_state = next(
+            (
+                item
+                for item in workspace.stage_states
+                if current_stage is not None and item.stage_id == current_stage
+            ),
+            None,
+        )
+        tool_scope_key = (
+            current_stage.value if current_stage is not None else current_step.value
         )
         return RpAgentTurnInput(
             profile_id="setup_agent",
@@ -94,7 +111,11 @@ class SetupRuntimeAdapter:
             user_visible_request=request.user_prompt,
             conversation_messages=[
                 item.model_dump(mode="json")
-                for item in (governed_history if governed_history is not None else request.history)
+                for item in (
+                    governed_history
+                    if governed_history is not None
+                    else request.history
+                )
             ],
             context_bundle={
                 "system_prompt": system_prompt,
@@ -103,13 +124,26 @@ class SetupRuntimeAdapter:
                 ),
                 "mode": workspace.mode.value,
                 "current_step": current_step.value,
+                "current_stage": current_stage.value
+                if current_stage is not None
+                else None,
                 "step_state": (
                     step_state.model_dump(mode="json", exclude_none=True)
                     if step_state is not None
                     else None
                 ),
+                "stage_state": (
+                    stage_state.model_dump(mode="json", exclude_none=True)
+                    if stage_state is not None
+                    else None
+                ),
                 "step_readiness": workspace.readiness_status.step_readiness.get(
                     current_step.value
+                ),
+                "stage_readiness": (
+                    workspace.readiness_status.step_readiness.get(current_stage.value)
+                    if current_stage is not None
+                    else None
                 ),
                 "open_question_count": len(open_questions),
                 "blocking_open_question_count": len(blocking_open_questions),
@@ -121,6 +155,18 @@ class SetupRuntimeAdapter:
                 "prior_stage_handoff_count": len(context_packet.prior_stage_handoffs),
                 "prior_stage_handoff_steps": [
                     handoff.step_id.value
+                    for handoff in context_packet.prior_stage_handoffs
+                ],
+                "prior_stage_handoff_stages": [
+                    (
+                        handoff.stage_id.value
+                        if handoff.stage_id is not None
+                        else (
+                            handoff.from_stage.value
+                            if handoff.from_stage is not None
+                            else handoff.step_id.value
+                        )
+                    )
                     for handoff in context_packet.prior_stage_handoffs
                 ],
                 "last_proposal_status": (
@@ -167,7 +213,7 @@ class SetupRuntimeAdapter:
                     else None
                 ),
             },
-            tool_scope=build_setup_agent_tool_scope(current_step.value),
+            tool_scope=build_setup_agent_tool_scope(tool_scope_key),
             metadata={
                 "model_name": model_name,
                 "provider": provider.model_dump(mode="json", exclude_none=True),
@@ -183,7 +229,15 @@ class SetupRuntimeAdapter:
         return build_setup_agent_profile()
 
     @staticmethod
-    def _latest_step_proposal(*, workspace, current_step):
+    def _latest_step_proposal(*, workspace, current_step, current_stage=None):
+        if current_stage is not None:
+            stage_proposals = [
+                proposal
+                for proposal in workspace.commit_proposals
+                if proposal.step_id == current_stage
+            ]
+            if stage_proposals:
+                return max(stage_proposals, key=lambda item: item.created_at)
         proposals = [
             proposal
             for proposal in workspace.commit_proposals

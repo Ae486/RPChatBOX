@@ -1,7 +1,9 @@
 """Runtime profiles for RP agent execution."""
+
 from __future__ import annotations
 
 from rp.agent_runtime.contracts import RuntimeProfile
+from rp.models.setup_stage import SetupStageId
 
 SETUP_READ_ONLY_MEMORY_TOOLS: tuple[str, ...] = (
     "memory.get_state",
@@ -31,6 +33,10 @@ SETUP_STEP_PATCH_TOOLS: dict[str, tuple[str, ...]] = {
     "longform_blueprint": ("setup.patch.longform_blueprint",),
 }
 
+SETUP_STAGE_PATCH_TOOLS: dict[str, tuple[str, ...]] = {
+    stage_id.value: () for stage_id in SetupStageId
+}
+
 SETUP_AGENT_VISIBLE_TOOLS: tuple[str, ...] = (
     *SETUP_READ_ONLY_MEMORY_TOOLS,
     *SETUP_SHARED_PRIVATE_TOOLS,
@@ -48,7 +54,10 @@ def build_setup_agent_tool_scope(current_step: str | None) -> list[str]:
     if not current_step:
         return list(SETUP_AGENT_VISIBLE_TOOLS)
 
-    patch_tools = SETUP_STEP_PATCH_TOOLS.get(str(current_step))
+    current_key = str(current_step)
+    patch_tools = SETUP_STEP_PATCH_TOOLS.get(current_key)
+    if patch_tools is None:
+        patch_tools = SETUP_STAGE_PATCH_TOOLS.get(current_key)
     if patch_tools is None:
         return list(SETUP_AGENT_VISIBLE_TOOLS)
 

@@ -1011,3 +1011,111 @@ Post-check learning captured on 2026-04-29:
 - `trellis-check` found one real coverage gap: `longform_blueprint` was implemented and frozen in spec, but not covered by a setup ingestion regression. Added focused coverage for parent asset, seed section, tags, and chunk metadata.
 - The executable spec itself captures the new durable contract; no separate guide/spec update is needed beyond the new registered code-spec.
 - `MinimalRetrievalIngestionService` remains the setup-facing facade, but canonical Archival ownership fields now come from memory-layer helpers rather than setup job payloads.
+
+## Next Executable Slice: Memory Contract Registry + Identity/Event Skeleton
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-memory-contract-registry-identity-event-skeleton.md`
+
+Source design alignment:
+
+- `.trellis/tasks/04-28-runtime-story-dev-task/research/memory-layer-strengthening-proposal.md`
+- `.trellis/tasks/04-28-runtime-story-dev-task/research/memory-strengthening-preflight-grill-questions.md`
+- `.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-memory-domain-preliminary-design.md`
+
+Confirmed direction:
+
+- no more pre-implementation grill is required for Q1-Q20;
+- first memory strengthening slice is `Memory Contract Registry + identity spine + lightweight event skeleton`;
+- registry starts as versioned declarative config with narrow service APIs, not full user-editable CRUD;
+- bootstrap domains are `scene`, `character`, `knowledge_boundary`, `relation`, `goal`, `timeline`, `plot_thread`, `foreshadow`, `world_rule`, `inventory`, `rule_state`, `chapter`, and `narrative_progress`;
+- every future memory read/write/proposal/retrieval material must be able to bind `StorySession + BranchHead + Turn + RuntimeProfileSnapshot`;
+- lightweight memory change events are trace/invalidation records, not full event sourcing and not a new truth store.
+
+Objective:
+
+- freeze the first executable backend contract for memory domain/block vocabulary, story-runtime memory identity, and memory change event records before Runtime Workspace, worker tools, projection refresh, retrieval-card usage, or branch-ready filters depend on them.
+
+Planned implementation direction:
+
+- add `backend/rp/models/memory_contract_registry.py` for registry DTOs, runtime identity DTO, source refs, dirty targets, and memory change event DTO;
+- add `backend/rp/services/memory_contract_registry.py` for a declarative bootstrap registry and narrow resolver/list methods;
+- add `knowledge_boundary` and `rule_state` to current typed domain compatibility only where current DTO boundaries require it;
+- add focused tests proving registry coverage, lifecycle filtering, alias resolution, mode defaults, test-only registry extensibility, identity validation, and event identity/source/dirty metadata;
+- keep existing Core State read/write, proposal/apply, RetrievalBroker, public memory tools, and Runtime Workspace Block views behavior unchanged in this slice.
+
+Boundaries:
+
+- no universal durable `rp_blocks` table;
+- no full Runtime Workspace turn-material store;
+- no public MCP/tool widening;
+- no branch UI or whole-memory copy;
+- no Recall / Archival evidence auto-promotion;
+- no proposal/apply persistence rewrite.
+
+Status on 2026-05-04:
+
+- added `rp-memory-contract-registry-identity-event-skeleton.md` and registered it in the backend spec index;
+- added `backend/rp/models/memory_contract_registry.py` with registry DTOs, runtime identity DTO, source refs, dirty targets, and change event DTO;
+- added `backend/rp/services/memory_contract_registry.py` with a versioned declarative bootstrap registry, 13 domains, lifecycle filtering, alias/migration resolution, mode activation defaults, permission defaults, and block template listing;
+- added `knowledge_boundary` and `rule_state` to `Domain` for current typed DTO compatibility;
+- added focused tests for bootstrap domains, DSL compatibility, lifecycle filtering, alias/migration resolution, mode defaults, test-only extension, identity validation, event metadata, and allowed-layer/template alignment;
+- `trellis-check` fixed the registry/template gap by adding read-only retrieval-backed Recall / Archival templates and normalized new task context paths to forward slashes.
+
+Quality gate:
+
+- `pytest backend\rp\tests\test_memory_contract_registry.py -q`
+  - result: `17 passed, 1 warning`
+- `ruff check backend\rp\models\memory_contract_registry.py backend\rp\services\memory_contract_registry.py backend\rp\tests\test_memory_contract_registry.py backend\rp\models\dsl.py`
+- `ruff format --check backend\rp\models\memory_contract_registry.py backend\rp\services\memory_contract_registry.py backend\rp\tests\test_memory_contract_registry.py backend\rp\models\dsl.py`
+- `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\memory_contract_registry.py backend\rp\services\memory_contract_registry.py backend\rp\tests\test_memory_contract_registry.py backend\rp\models\dsl.py`
+- `git diff --check`
+
+## Next Executable Slice: Runtime Workspace Turn Material Store
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-runtime-workspace-turn-material-store.md`
+
+Objective:
+
+- add a typed Runtime Workspace turn-material store contract and service skeleton for retrieval cards, expanded chunks, misses, usage records, rule cards, review overlays, worker candidates, evidence bundles, packet refs, and token usage metadata;
+- preserve full `StorySession + BranchHead + Turn + RuntimeProfileSnapshot` identity on each material;
+- keep material domain validation registry-driven;
+- emit lightweight memory change events for material creation and lifecycle updates;
+- keep this slice current-turn/scratch only, without promoting material into Core State, Recall, Archival, public tools, or existing draft/discussion Block views.
+
+Planned implementation direction:
+
+- add `backend/rp/models/runtime_workspace_material.py` for material kind, lifecycle, envelope, query/receipt models, and validation;
+- add `backend/rp/services/runtime_workspace_material_service.py` for an identity-scoped in-process store skeleton, registry validation, short-id uniqueness, list/get/require, and lifecycle updates;
+- add `backend/rp/tests/test_runtime_workspace_material_service.py` for model/service contract coverage;
+- do not modify `StoryArtifact`, `StoryDiscussionEntry`, `RpBlockReadService`, proposal/apply, RetrievalBroker, or public memory tools in this slice.
+
+Boundaries:
+
+- no persistent DB table;
+- no writer final-output retrieval usage gate;
+- no retrieval tool integration;
+- no worker orchestration;
+- no proposal/apply integration;
+- no replacement of current Runtime Workspace Block views.
+
+Status on 2026-05-04:
+
+- added `rp-runtime-workspace-turn-material-store.md` and registered it in the backend spec index;
+- added `backend/rp/models/runtime_workspace_material.py` with material kind, lifecycle, visibility, material envelope, query, and receipt DTOs;
+- added `backend/rp/services/runtime_workspace_material_service.py` with an injected in-process store, full `MemoryRuntimeIdentity` scoping, registry-backed domain validation, short-id uniqueness per identity, list/get/require, and lifecycle update methods;
+- added `backend/rp/tests/test_runtime_workspace_material_service.py` covering enum coverage, model validation, identity isolation, registry validation, test-only registry domain extension, short-id conflict/reuse, lifecycle events, and not-truth boundary metadata;
+- `trellis-check` fixed a coverage gap by proving `short_id` reuse across different branch head, turn, and runtime profile snapshot identities, while preserving conflict failure inside one exact identity;
+- existing `StoryArtifact`, `StoryDiscussionEntry`, `RpBlockReadService`, proposal/apply, RetrievalBroker, public memory tools, and DB models were not modified by this slice.
+
+Quality gate:
+
+- `pytest backend\rp\tests\test_runtime_workspace_material_service.py -q`
+  - result: `12 passed, 1 warning`
+- `ruff check backend\rp\models\runtime_workspace_material.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_runtime_workspace_material_service.py`
+- `ruff format --check backend\rp\models\runtime_workspace_material.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_runtime_workspace_material_service.py`
+- `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\runtime_workspace_material.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_runtime_workspace_material_service.py`
+- `git diff --check`

@@ -34,3 +34,10 @@
 {"file": "backend/rp/services/setup_context_governor.py", "reason": "Trellis check fixed scoped mypy previous-usage token metadata handling"}
 {"file": "backend/rp/tests/test_setup_context_governor.py", "reason": "Trellis check added focused regression coverage for first compact, incremental update, prefix mismatch rebuild, and compact prompt boundary"}
 {"file": "backend/rp/tests/test_setup_tool_provider.py", "reason": "Trellis check confirmed non-truth.write key tools must also assert failure_origin and errors on repairable schema validation payloads"}
+{"file": ".trellis/spec/backend/rp-setup-stage-module-draft-foundation-contract.md", "reason": "Review the canonical setup stage/module and data-driven draft block implementation against the executable contract"}
+{"file": ".trellis/tasks/04-27-main-brain-harness-engineering/research/setup-stage-module-draft-slice-plan.md", "reason": "Verify this check batch stays within Slice 1 and does not start tool/context/frontend migration early"}
+{"file": "backend/rp/tests/test_setup_agent_runtime_state_service.py", "reason": "Slice 2A check: proves character_design context sees accepted world_background handoff via canonical stage refs"}
+{"file": "backend/rp/tests/test_setup_tool_provider.py", "reason": "Slice 2A check: proves setup.read.draft_refs reads draft:<stage_id>, stage:<stage_id>:<entry_id>, and section refs while legacy refs remain intact"}
+{"file": "backend/rp/tests/test_setup_agent_tool_scope.py", "reason": "Slice 2A check: proves canonical stages map to the intended legacy patch-family tool scopes"}
+{"file": "backend/rp/tests/test_setup_agent_execution_service_v2.py", "reason": "Slice 2A check: proves runtime-v2 turn input carries current_stage metadata and stage-aware tool scope"}
+{"file": ".trellis/tasks/04-27-main-brain-harness-engineering/research/setup-stage-module-draft-slice-plan.md", "reason": "Slice 2A check: confirms setup write tools remain deferred to Slice 2B"}

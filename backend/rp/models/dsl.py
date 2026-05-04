@@ -1,4 +1,5 @@
 """Shared DSL-facing models for RP Phase A."""
+
 from __future__ import annotations
 
 from enum import StrEnum
@@ -14,6 +15,7 @@ class Domain(StrEnum):
 
     SCENE = "scene"
     CHARACTER = "character"
+    KNOWLEDGE_BOUNDARY = "knowledge_boundary"
     RELATION = "relation"
     GOAL = "goal"
     PLOT_THREAD = "plot_thread"
@@ -21,6 +23,7 @@ class Domain(StrEnum):
     TIMELINE = "timeline"
     WORLD_RULE = "world_rule"
     INVENTORY = "inventory"
+    RULE_STATE = "rule_state"
     CHAPTER = "chapter"
     NARRATIVE_PROGRESS = "narrative_progress"
 
@@ -105,4 +108,3 @@ class TypedEnvelope(BaseModel, Generic[T]):
     def canonical_dump(self) -> dict[str, Any]:
         """Return the stable JSON shape expected by downstream serializers."""
         return self.model_dump(mode="json", exclude_none=True)
-

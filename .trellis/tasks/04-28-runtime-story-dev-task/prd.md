@@ -583,6 +583,13 @@ StoryGraphRunner
 38. writer-side retrieval 的召回材料先进入 Runtime Workspace，表现为本轮检索卡片、短编号映射、摘要、refs、展开内容、missed query、attempt trace 和 usage record；Recall Memory 不作为本轮 raw hit 暂存区，Context Orchestration Layer 不承担存储语义。
 39. writer 可以在受控 attempt limit 内重试检索，也可以请求展开已返回卡片；但每轮发生 retrieval 后，最终输出前必须有结构化 retrieval usage record。post-write scheduler 只处理 `used_cards`、必要 `expanded_cards` 和 `knowledge_gaps`。
 40. 检索卡片 / 摘要 / 展开 chunk 都是证据，不是事实。写后必须由 block-owner worker 追溯 provenance、抽取事实候选，并通过 permission / proposal / apply / user review 链路后才进入 Core State 当前事实和当前视图。
+41. Recall Memory 的职责冻结为历史回忆层，保存过去已经发生的材料，例如已接受正文、历史摘要、transcript、scene / chapter summary。它不承担当前事实缓存，也不是当前视图；当前事实属于 Core State 当前事实，当前视图属于 Core State 当前视图，本轮临时检索和工具结果属于 Runtime Workspace。
+42. ModeProfile 是区分 longform / roleplay / trpg 等功能的重要关键，但它不应被理解成一个大 prompt。它主要决定 setup 阶段流程、Core Memory / Memory OS 默认展示和激活哪些 block、story runtime 的调度器 + worker 层怎么走。
+43. Writer 主要负责写作。writer 的文风、写作风格等在 setup 阶段讨论；writer 输入由 Context Orchestration Layer 编排，来源包括近几轮原文窗口、Core State 当前视图、特殊 worker 内容等。检索等能力在 worker 配置 stage 和 runtime 配置合同中表达，不能把 writer 设计成自由工具 agent。
+44. ModeProfile 第一版可以不完整实现 longform / roleplay / trpg 全部行为，但必须为这些 mode 的差异预留合同和扩展位，不能全量按照 longform 行为设计编码。
+45. Memory OS 各层都应对用户公开，但编辑方式不同。Core State 可直接编辑，用户显式编辑优先级最高；Recall Memory 主要保存已有事实、历史摘要、transcript 和已接受正文，基本用于回顾、失效、重算，不作为常规直接编辑层；Archival Knowledge 可修改，但必须通过 Story Evolution / ingestion / reindex 流程，因为它会进入 retrieval 层并影响 provenance、chunk、embedding 和索引。
+46. TRPG 的 `rule_state` / `mechanics_state` 可以作为独立 domain，不归入 `world_rule` 或 `inventory`。`world_rule` 更偏规则文本、世界约束和规则知识；`inventory` 更偏物品、资源和持有关系；`rule_state` 更偏当前机械状态、判定结果、状态效果、战斗 / 回合 / 冷却 / HP / 任务状态等当前事实。
+47. Worker ownership 按 `domain` 划分，不按 `block` 划分。`domain` 是剧情事实的语义责任边界；`block` 是某个 domain 在某一层 Memory OS 里的具体存储、展示或编辑容器。同一个 domain 可以在 Core State 当前事实、Core State 当前视图、Recall Memory、Archival Knowledge 和 Runtime Workspace 中有不同 block，但默认仍由同一个 domain owner worker 理解和维护；具体能读、能提 proposal、能刷新视图或能修改什么，由 layer / block 权限控制。
 
 ## Acceptance Criteria
 
@@ -627,7 +634,7 @@ StoryGraphRunner
 
 ## Technical Approach
 
-第一阶段采用“最小合同升级，不扩多 worker”的方式。实现目标不是立刻拆出多 specialist，而是先让现有 longform 链路具备 block-owner worker、context packet 和 deterministic scheduler 的合同位置：
+第一阶段先把完整 spec coding 方案讨论完并落稳，再进入最小实现。实现时可以采用“最小合同升级，不扩多 worker”的方式，让现有 longform 链路具备 block-owner worker、context packet 和 deterministic scheduler 的合同位置：
 
 ```text
 existing OrchestratorPlan
@@ -643,6 +650,8 @@ existing OrchestratorPlan
 
 - 在当前 `OrchestratorPlan` 上增量补足 worker 调度语义。
 - 或新增轻量 worker plan / context packet 模型，再由 adapter 兼容当前 `OrchestratorPlan`。
+- 如果现有 longform MVP 链路阻碍新的完整 story runtime 合同，也允许从新 runtime 骨架起一条替代实现，而不是被旧 MVP 绑定。此时 spec coding 方案必须明确旧链路保留 / 废弃策略、迁移边界、最小可验证路径和回滚方式。
+- 第一阶段不以“保持当前 longform MVP 的用户可见行为完全不变”为硬约束。允许改变当前 MVP 行为，但必须服务于新的 story runtime 产品目标和核心合同，例如唯一 writer 输出、Memory OS 分层、worker 管理 memory、post-write workflow、可回退和可追溯；不能为了临时实现方便制造新的行为分叉。
 
 关键不是命名，而是合同必须表达：
 
@@ -689,6 +698,8 @@ existing OrchestratorPlan
 已记录的研究文档：
 
 - `research/story-runtime-design-gap-analysis.md`
+- `research/story-runtime-architecture-question-queue.md`
+- `research/story-runtime-memory-domain-preliminary-design.md`
 
 关键设计文档：
 

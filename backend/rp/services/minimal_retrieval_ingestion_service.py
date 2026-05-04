@@ -23,8 +23,10 @@ from rp.models.memory_materialization import (
     build_archival_seed_section,
     build_archival_source_metadata,
 )
+from rp.models.memory_graph_projection import GRAPH_JOB_REASON_ARCHIVAL_INGESTED
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
+from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
@@ -37,11 +39,19 @@ def _utcnow() -> datetime:
 class MinimalRetrievalIngestionService:
     """Keep the setup commit contract stable while delegating to retrieval-core."""
 
-    def __init__(self, session):
+    def __init__(
+        self,
+        session,
+        *,
+        graph_projection_service: MemoryGraphProjectionService | None = None,
+    ):
         self._session = session
         self._collection_service = RetrievalCollectionService(session)
         self._document_service = RetrievalDocumentService(session)
         self._ingestion_service = RetrievalIngestionService(session)
+        self._graph_projection_service = (
+            graph_projection_service or MemoryGraphProjectionService(session)
+        )
 
     def ingest_commit(self, *, workspace_id: str, commit_id: str) -> list[str]:
         workspace = self._session.get(SetupWorkspaceRecord, workspace_id)
@@ -64,14 +74,23 @@ class MinimalRetrievalIngestionService:
             ).all()
         )
         completed_ids: list[str] = []
+        completed_asset_ids: list[str] = []
         for job in jobs:
-            self._run_single_job(
+            asset_id = self._run_single_job(
                 workspace=workspace,
                 commit=commit,
                 collection_id=collection.collection_id,
                 job=job,
             )
             completed_ids.append(job.job_id)
+            if asset_id is not None:
+                completed_asset_ids.append(asset_id)
+        self._queue_graph_extraction_after_archival_ingestion(
+            story_id=workspace.story_id,
+            workspace_id=workspace.workspace_id,
+            commit_id=commit.commit_id,
+            source_asset_ids=completed_asset_ids,
+        )
         self._session.commit()
         return completed_ids
 
@@ -82,7 +101,7 @@ class MinimalRetrievalIngestionService:
         commit: SetupAcceptedCommitRecord,
         collection_id: str,
         job: SetupRetrievalIngestionJobRecord,
-    ) -> None:
+    ) -> str | None:
         now = _utcnow()
         asset_record: SetupImportedAssetRecord | None = None
         title: str | None = None
@@ -182,6 +201,31 @@ class MinimalRetrievalIngestionService:
         job.updated_at = _utcnow()
         job.completed_at = index_job.completed_at
         self._session.add(job)
+        return asset_id if index_job.job_state == "completed" else None
+
+    def _queue_graph_extraction_after_archival_ingestion(
+        self,
+        *,
+        story_id: str,
+        workspace_id: str,
+        commit_id: str,
+        source_asset_ids: list[str],
+    ) -> None:
+        if not source_asset_ids:
+            return
+        try:
+            with self._session.begin_nested():
+                self._graph_projection_service.queue_archival_extraction_jobs(
+                    story_id=story_id,
+                    source_asset_ids=source_asset_ids,
+                    workspace_id=workspace_id,
+                    commit_id=commit_id,
+                    queued_reason=GRAPH_JOB_REASON_ARCHIVAL_INGESTED,
+                )
+        except Exception:
+            # Graph extraction is asynchronous maintenance. Queue failures must
+            # not roll back setup commit ingestion or archival retrieval readiness.
+            return
 
     def _build_sections(
         self,
@@ -194,6 +238,8 @@ class MinimalRetrievalIngestionService:
     ) -> list[dict[str, object]]:
         if job.target_type == "foundation_entry":
             foundation = commit.snapshot_payload_json.get("foundation", {})
+            if not foundation:
+                foundation = commit.snapshot_payload_json.get(job.step_id, {})
             for entry in foundation.get("entries", []):
                 if (entry.get("entry_id") or entry.get("path")) == job.target_ref:
                     return [
@@ -233,9 +279,17 @@ class MinimalRetrievalIngestionService:
         source_ref: str,
         source_type: str,
     ) -> dict[str, object]:
-        domain = self._coarse_domain_for_foundation(entry.get("domain"))
-        domain_path = f"foundation.{entry.get('domain')}.{entry.get('path')}".strip(".")
-        text = self._render_payload_text(entry.get("content", {}))
+        domain = self._coarse_domain_for_setup_entry(
+            entry.get("domain"),
+            entry_type=entry.get("entry_type"),
+            semantic_path=entry.get("semantic_path"),
+        )
+        semantic_path = entry.get("semantic_path")
+        if isinstance(semantic_path, str) and semantic_path.strip():
+            domain_path = semantic_path.strip()
+        else:
+            domain_path = f"foundation.{entry.get('domain')}.{entry.get('path')}".strip(".")
+        text = self._render_setup_entry_text(entry)
         title = entry.get("title") or entry.get("path") or entry.get("entry_id")
         metadata = self._build_archival_metadata(
             commit=commit,
@@ -248,17 +302,92 @@ class MinimalRetrievalIngestionService:
                 "title": title,
                 "source_refs": list(entry.get("source_refs", [])),
                 "entry_commit_id": entry.get("commit_id"),
+                "semantic_path": semantic_path,
             },
         )
         return build_archival_seed_section(
             section_id=str(entry.get("entry_id") or uuid4().hex),
             title=str(title or "foundation"),
-            path=str(entry.get("path") or entry.get("entry_id") or "foundation"),
+            path=str(semantic_path or entry.get("path") or entry.get("entry_id") or "foundation"),
             level=1,
             text=text,
             metadata=metadata,
             tags=list(entry.get("tags", [])),
         )
+
+    def _render_setup_entry_text(self, entry: dict) -> str:
+        sections = entry.get("sections")
+        if isinstance(sections, list) and sections:
+            rendered_sections: list[str] = []
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                rendered = self._render_setup_section_text(section)
+                if not rendered:
+                    continue
+                title = section.get("title")
+                if isinstance(title, str) and title.strip():
+                    rendered_sections.append(f"{title.strip()}\n{rendered}")
+                else:
+                    rendered_sections.append(rendered)
+            if rendered_sections:
+                return "\n\n".join(rendered_sections)
+
+        content = entry.get("content")
+        if isinstance(content, dict) and content:
+            return self._render_payload_text(content)
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+
+        for fallback_key in ("summary", "title", "semantic_path", "path", "entry_id"):
+            fallback_value = entry.get(fallback_key)
+            if isinstance(fallback_value, str) and fallback_value.strip():
+                return fallback_value.strip()
+        return ""
+
+    def _render_setup_section_text(self, section: dict) -> str:
+        content = section.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, dict):
+            return ""
+
+        kind = section.get("kind")
+        if kind == "text":
+            text = content.get("text")
+            if isinstance(text, str):
+                return text.strip()
+        elif kind == "list":
+            items = content.get("items")
+            if isinstance(items, list):
+                rendered_items: list[str] = []
+                for item in items:
+                    if isinstance(item, str) and item.strip():
+                        rendered_items.append(f"- {item.strip()}")
+                    elif isinstance(item, dict):
+                        text = item.get("text") or item.get("title") or item.get("label")
+                        if isinstance(text, str) and text.strip():
+                            rendered_items.append(f"- {text.strip()}")
+                        else:
+                            rendered_items.append(f"- {self._render_payload_text(item)}")
+                    elif item is not None:
+                        rendered_items.append(f"- {item}")
+                if rendered_items:
+                    return "\n".join(rendered_items)
+        elif kind == "key_value":
+            values = content.get("values")
+            if isinstance(values, dict):
+                rendered_pairs: list[str] = []
+                for key, value in values.items():
+                    if isinstance(value, str):
+                        rendered_value = value.strip()
+                    else:
+                        rendered_value = self._render_payload_text(value)
+                    rendered_pairs.append(f"{key}: {rendered_value}")
+                if rendered_pairs:
+                    return "\n".join(rendered_pairs)
+
+        return self._render_payload_text(content)
 
     def _blueprint_to_sections(
         self,
@@ -474,9 +603,18 @@ class MinimalRetrievalIngestionService:
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     @staticmethod
-    def _coarse_domain_for_foundation(domain: str | None) -> str:
-        if domain == "character":
+    def _coarse_domain_for_setup_entry(
+        domain: str | None,
+        *,
+        entry_type: str | None = None,
+        semantic_path: str | None = None,
+    ) -> str:
+        if domain == "character" or entry_type in {"character", "relationship", "group"}:
             return "character"
+        if domain == "chapter" or (semantic_path and "chapter" in semantic_path):
+            return "chapter"
+        if entry_type in {"plot_thread", "foreshadow"}:
+            return entry_type
         return "world_rule"
 
     @staticmethod

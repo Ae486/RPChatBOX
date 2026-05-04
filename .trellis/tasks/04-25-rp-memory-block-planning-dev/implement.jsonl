@@ -37,3 +37,7 @@
 {"file": "backend/rp/tests/test_projection_builder_services.py", "reason": "Adds focused normalization and specialist bundle parsing coverage for the new story-segment metadata sidecar."}
 {"file": "backend/tests/test_rp_story_api.py", "reason": "Adds end-to-end write -> accept -> complete coverage proving persisted story-segment metadata feeds the existing chapter-close foreshadow consumer path."}
 {"file": ".trellis/spec/backend/rp-archival-knowledge-intake-contract.md", "reason": "Executable backend contract for canonical Archival source-material metadata and setup/source import intake semantics."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/memory-contract-registry-identity-event-slice-plan.md", "reason": "Slice plan for the first memory strengthening implementation batch."}
+{"file": ".trellis/spec/backend/rp-memory-contract-registry-identity-event-skeleton.md", "reason": "Executable backend contract for the first memory strengthening slice: registry, runtime identity, and lightweight change events."}
+{"file": ".trellis/spec/backend/rp-runtime-workspace-turn-material-store.md", "reason": "Executable backend contract for Runtime Workspace typed turn-material store and lifecycle service skeleton."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-workspace-turn-material-store-slice-plan.md", "reason": "Slice plan for Runtime Workspace typed turn-material implementation batch."}

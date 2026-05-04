@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from rp.models.retrieval_runtime_config import GraphExtractionRetryPolicy
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
 
 
@@ -29,6 +31,7 @@ class SetupContextBuilderInput(BaseModel):
     mode: str
     workspace_id: str
     current_step: str
+    current_stage: str | None = None
     user_prompt: str
     user_edit_delta_ids: list[str] = Field(default_factory=list)
     token_budget: int | None = None
@@ -65,6 +68,9 @@ class SetupStageHandoffPacket(BaseModel):
     from_step: SetupStepId
     to_step: SetupStepId
     step_id: SetupStepId
+    from_stage: SetupStageId | None = None
+    to_stage: SetupStageId | None = None
+    stage_id: SetupStageId | None = None
     commit_id: str
     summary: str
     summary_tier_0: str | None = None
@@ -86,6 +92,7 @@ class SetupContextPacket(BaseModel):
 
     workspace_id: str
     current_step: str
+    current_stage: SetupStageId | None = None
     context_profile: Literal["standard", "compact"] = "standard"
     committed_summaries: list[str] = Field(default_factory=list)
     current_draft_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -110,6 +117,15 @@ class RuntimeStoryConfigSeed(BaseModel):
     retrieval_embedding_provider_id: str | None = None
     retrieval_rerank_model_id: str | None = None
     retrieval_rerank_provider_id: str | None = None
+    graph_extraction_provider_id: str | None = None
+    graph_extraction_model_id: str | None = None
+    graph_extraction_structured_output_mode: str | None = None
+    graph_extraction_temperature: float | None = None
+    graph_extraction_max_output_tokens: int | None = None
+    graph_extraction_timeout_ms: int | None = None
+    graph_extraction_retry_policy: GraphExtractionRetryPolicy | None = None
+    graph_extraction_fallback_model_ref: str | None = None
+    graph_extraction_enabled: bool | None = None
 
 
 class WriterContractSeed(BaseModel):

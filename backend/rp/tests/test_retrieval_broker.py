@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pytest
+from sqlmodel import select
 
 from config import get_settings
 from models.rp_retrieval_store import (
@@ -26,7 +27,14 @@ from rp.models.memory_crud import (
     RetrievalSearchResult,
     RetrievalTrace,
 )
+from rp.models.memory_graph_projection import (
+    GRAPH_REL_AFFILIATED_WITH,
+    MemoryGraphEdgeUpsert,
+    MemoryGraphEvidenceUpsert,
+    MemoryGraphNodeUpsert,
+)
 from rp.models.retrieval_records import SourceAsset
+from rp.retrieval.graph_expansion import graph_expansion_summary_from_trace
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import (
     LongformChapterPhase,
@@ -36,6 +44,7 @@ from rp.models.story_runtime import (
 from rp.retrieval.search_utils import build_chunk_hit
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_os_service import MemoryOsService
+from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
 from rp.services.recall_continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )
@@ -46,6 +55,7 @@ from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
 from rp.services.story_session_service import StorySessionService
+from rp.tools.memory_crud_provider import MemoryCrudToolProvider
 
 
 def _utcnow() -> datetime:
@@ -245,6 +255,92 @@ def _ingest_archival_seed_asset(
         story_id=story_id,
         asset_id=asset_id,
         collection_id=collection.collection_id,
+    )
+
+
+def _ingest_archival_seed_asset_and_return_chunk(
+    retrieval_session,
+    *,
+    story_id: str,
+    asset_id: str,
+    text: str,
+    metadata: dict[str, Any],
+    workspace_id: str | None = None,
+    commit_id: str | None = None,
+) -> KnowledgeChunkRecord:
+    _ingest_archival_seed_asset(
+        retrieval_session,
+        story_id=story_id,
+        asset_id=asset_id,
+        text=text,
+        metadata=metadata,
+        workspace_id=workspace_id,
+        commit_id=commit_id,
+    )
+    chunk = retrieval_session.exec(
+        select(KnowledgeChunkRecord).where(KnowledgeChunkRecord.asset_id == asset_id)
+    ).first()
+    assert chunk is not None
+    return chunk
+
+
+def _seed_archival_relation_graph(
+    retrieval_session,
+    *,
+    story_id: str,
+    chunk: KnowledgeChunkRecord,
+    edge_id: str = "graph-edge-aileen-order",
+) -> None:
+    MemoryGraphProjectionService(retrieval_session).upsert_seed_graph(
+        story_id=story_id,
+        nodes=[
+            MemoryGraphNodeUpsert(
+                node_id="graph-node-aileen",
+                entity_type="character",
+                canonical_name="Aileen",
+                aliases=["Ail"],
+                normalization_key="character:aileen",
+                confidence=0.91,
+            ),
+            MemoryGraphNodeUpsert(
+                node_id="graph-node-order",
+                entity_type="faction_or_org",
+                canonical_name="Order of Dawn",
+                aliases=["the Order"],
+                normalization_key="faction_or_org:order-of-dawn",
+                confidence=0.88,
+            ),
+        ],
+        edges=[
+            MemoryGraphEdgeUpsert(
+                edge_id=edge_id,
+                source_node_id="graph-node-aileen",
+                target_node_id="graph-node-order",
+                source_entity_name="Aileen",
+                target_entity_name="Order of Dawn",
+                relation_type=GRAPH_REL_AFFILIATED_WITH,
+                raw_relation_text="protected by the Order of Dawn",
+                confidence=0.84,
+            )
+        ],
+        evidence=[
+            MemoryGraphEvidenceUpsert(
+                evidence_id=f"{edge_id}-evidence",
+                edge_id=edge_id,
+                source_family="setup_source",
+                source_type="foundation_entry",
+                import_event="setup.commit_ingest",
+                source_ref=f"memory://{chunk.asset_id}",
+                source_asset_id=chunk.asset_id,
+                collection_id=chunk.collection_id,
+                parsed_document_id=chunk.parsed_document_id,
+                chunk_id=chunk.chunk_id,
+                section_id=str((chunk.metadata_json or {}).get("section_id") or ""),
+                domain=chunk.domain,
+                domain_path=chunk.domain_path,
+                evidence_excerpt="Aileen is protected by the Order of Dawn.",
+            )
+        ],
     )
 
 
@@ -884,6 +980,245 @@ async def test_search_archival_filters_fallback_to_asset_columns(retrieval_sessi
     ]
     assert result.hits[0].metadata["workspace_id"] == "workspace-column-fallback"
     assert result.hits[0].metadata["commit_id"] == "commit-column-fallback"
+
+
+@pytest.mark.asyncio
+async def test_search_archival_relation_lookup_uses_graph_evidence_expansion(
+    retrieval_session,
+):
+    story_id = "story-archival-graph-expansion"
+    miss_chunk = _ingest_archival_seed_asset_and_return_chunk(
+        retrieval_session,
+        story_id=story_id,
+        asset_id="asset-graph-evidence",
+        text="Only the covenant wording is stored in this source chunk.",
+        metadata={
+            "layer": "archival",
+            "source_family": "setup_source",
+            "source_type": "foundation_entry",
+            "source_origin": "setup_workspace",
+        },
+    )
+    _seed_archival_relation_graph(
+        retrieval_session,
+        story_id=story_id,
+        chunk=miss_chunk,
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id=story_id)
+    baseline = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="Aileen Order of Dawn relation",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+        )
+    )
+    expanded = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="How is Aileen related to the Order?",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+            filters={
+                "intent": "relation_lookup",
+                "need_evidence": True,
+            },
+        )
+    )
+
+    assert all("graph_expanded" not in hit.metadata for hit in baseline.hits)
+    assert [hit.metadata["asset_id"] for hit in expanded.hits] == [
+        "asset-graph-evidence"
+    ]
+    graph_hit = expanded.hits[0]
+    assert graph_hit.hit_id == miss_chunk.chunk_id
+    assert graph_hit.metadata["graph_expanded"] is True
+    assert graph_hit.metadata["graph_edge_id"] == "graph-edge-aileen-order"
+    assert "nodes" not in graph_hit.metadata
+    assert "edges" not in graph_hit.metadata
+    assert "evidence" not in graph_hit.metadata
+
+    graph_summary = graph_expansion_summary_from_trace(expanded.trace)
+    assert graph_summary["graph_enabled"] is True
+    assert graph_summary["graph_backend"] == "postgres_lightweight"
+    assert graph_summary["graph_policy_mode"] == "text_first"
+    assert graph_summary["graph_candidate_count"] == 1
+    assert graph_summary["graph_expanded_hit_count"] == 1
+    assert graph_summary["graph_warning_codes"] == []
+    assert graph_summary["graph_ms"] >= 0.0
+    assert "nodes" not in (expanded.trace.details if expanded.trace else {})
+    assert "edges" not in (expanded.trace.details if expanded.trace else {})
+    assert "evidence" not in (expanded.trace.details if expanded.trace else {})
+
+
+@pytest.mark.asyncio
+async def test_search_archival_relation_lookup_keeps_graph_evidence_under_top_k(
+    retrieval_session,
+):
+    story_id = "story-archival-graph-top-k"
+    for index in range(3):
+        _ingest_archival_seed_asset(
+            retrieval_session,
+            story_id=story_id,
+            asset_id=f"asset-ordinary-{index}",
+            text=(
+                "Relationtopk ordinary text hit mentions Aileen and Order "
+                f"without evidence marker {index}."
+            ),
+            metadata={
+                "layer": "archival",
+                "source_family": "setup_source",
+                "source_type": "foundation_entry",
+                "source_origin": "setup_workspace",
+            },
+        )
+    evidence_chunk = _ingest_archival_seed_asset_and_return_chunk(
+        retrieval_session,
+        story_id=story_id,
+        asset_id="asset-graph-top-k-evidence",
+        text="This hidden covenant source proves the protected affiliation.",
+        metadata={
+            "layer": "archival",
+            "source_family": "setup_source",
+            "source_type": "foundation_entry",
+            "source_origin": "setup_workspace",
+        },
+    )
+    _seed_archival_relation_graph(
+        retrieval_session,
+        story_id=story_id,
+        chunk=evidence_chunk,
+        edge_id="graph-edge-top-k",
+    )
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id=story_id)
+    result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="relationtopk Aileen Order",
+            domains=[Domain.WORLD_RULE],
+            top_k=2,
+            filters={"intent": "relation_lookup", "need_evidence": True},
+        )
+    )
+
+    assert len(result.hits) == 2
+    assert result.hits[-1].metadata["asset_id"] == "asset-graph-top-k-evidence"
+    assert result.hits[-1].metadata["graph_expanded"] is True
+    graph_summary = graph_expansion_summary_from_trace(result.trace)
+    assert graph_summary["graph_expanded_hit_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_archival_graph_expansion_degrades_with_warning_summary(
+    retrieval_session,
+    monkeypatch,
+):
+    _ingest_archival_seed_asset(
+        retrieval_session,
+        story_id="story-archival-graph-degraded",
+        asset_id="asset-graph-degraded",
+        text="Degradeanchor normal archival retrieval should still work.",
+        metadata={
+            "layer": "archival",
+            "source_family": "setup_source",
+            "source_type": "foundation_entry",
+            "source_origin": "setup_workspace",
+        },
+    )
+    retrieval_session.commit()
+
+    def fail_graph_search(self, query):
+        raise RuntimeError("graph unavailable")
+
+    monkeypatch.setattr(
+        "rp.retrieval.graph_expansion.GraphExpansionRetriever._load_graph_evidence_rows",
+        fail_graph_search,
+    )
+    broker = RetrievalBroker(default_story_id="story-archival-graph-degraded")
+
+    result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="degradeanchor archival retrieval",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+            filters={"intent": "relation_lookup"},
+        )
+    )
+
+    assert [hit.metadata["asset_id"] for hit in result.hits] == ["asset-graph-degraded"]
+    graph_summary = graph_expansion_summary_from_trace(result.trace)
+    assert graph_summary["graph_enabled"] is True
+    assert graph_summary["graph_candidate_count"] == 0
+    assert graph_summary["graph_expanded_hit_count"] == 0
+    assert graph_summary["graph_warning_codes"] == [
+        "graph_expansion_unavailable:RuntimeError"
+    ]
+    assert "graph_expansion_unavailable:RuntimeError" in result.warnings
+
+
+@pytest.mark.asyncio
+async def test_search_archival_non_relation_intent_does_not_graph_expand(
+    retrieval_session,
+):
+    story_id = "story-archival-graph-nonrelation"
+    chunk = _ingest_archival_seed_asset_and_return_chunk(
+        retrieval_session,
+        story_id=story_id,
+        asset_id="asset-graph-nonrelation",
+        text="Only hidden covenant wording is stored here.",
+        metadata={
+            "layer": "archival",
+            "source_family": "setup_source",
+            "source_type": "foundation_entry",
+            "source_origin": "setup_workspace",
+        },
+    )
+    _seed_archival_relation_graph(retrieval_session, story_id=story_id, chunk=chunk)
+    retrieval_session.commit()
+
+    broker = RetrievalBroker(default_story_id=story_id)
+    fact_result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="How is Aileen related to the Order?",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+            filters={"intent": "fact_lookup"},
+        )
+    )
+    relationship_view_result = await broker.search_archival(
+        MemorySearchArchivalInput(
+            query="How is Aileen related to the Order?",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+            filters={
+                "need_relationship_view": True,
+            },
+        )
+    )
+
+    assert all("graph_expanded" not in hit.metadata for hit in fact_result.hits)
+    fact_summary = graph_expansion_summary_from_trace(fact_result.trace)
+    assert fact_summary["graph_enabled"] is False
+    assert fact_summary["graph_expanded_hit_count"] == 0
+
+    assert all(
+        "graph_expanded" not in hit.metadata for hit in relationship_view_result.hits
+    )
+    view_summary = graph_expansion_summary_from_trace(relationship_view_result.trace)
+    assert view_summary["graph_enabled"] is True
+    assert view_summary["graph_expanded_hit_count"] == 0
+    assert view_summary["graph_warning_codes"] == [
+        "graph_relationship_view_inspection_available"
+    ]
+
+
+def test_public_memory_tool_names_do_not_include_graph_search():
+    tool_names = {tool.name for tool in MemoryCrudToolProvider().list_tools()}
+
+    assert "memory.search_recall" in tool_names
+    assert "memory.search_archival" in tool_names
+    assert "memory.search_graph" not in tool_names
 
 
 @pytest.mark.asyncio
