@@ -669,7 +669,7 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
         response_text=json.dumps(
             {
                 "output_kind": StoryArtifactKind.STORY_SEGMENT.value,
-                "needs_retrieval": False,
+                    "needs_retrieval": True,
                 "archival_queries": ["archive policy"],
                 "recall_queries": ["storm callback"],
                 "specialist_focus": ["segment continuity"],
