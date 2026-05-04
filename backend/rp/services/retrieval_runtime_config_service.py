@@ -79,7 +79,7 @@ class RetrievalRuntimeConfigService:
         values = {
             field_name: payload[payload_key]
             for field_name, payload_key in field_map.items()
-            if payload_key in payload
+            if payload_key in payload and payload[payload_key] is not None
         }
         if "graph_extraction_retry_policy" in payload:
             raw_policy = payload.get("graph_extraction_retry_policy")

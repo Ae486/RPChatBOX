@@ -41,3 +41,11 @@
 {"file": ".trellis/spec/backend/rp-memory-contract-registry-identity-event-skeleton.md", "reason": "Executable backend contract for the first memory strengthening slice: registry, runtime identity, and lightweight change events."}
 {"file": ".trellis/spec/backend/rp-runtime-workspace-turn-material-store.md", "reason": "Executable backend contract for Runtime Workspace typed turn-material store and lifecycle service skeleton."}
 {"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-workspace-turn-material-store-slice-plan.md", "reason": "Slice plan for Runtime Workspace typed turn-material implementation batch."}
+{"file": ".trellis/spec/backend/rp-memory-change-event-spine.md", "reason": "Executable backend contract for the current slice: shared lightweight memory event recording, identity-scoped queries, dirty-target readback, and Runtime Workspace publishing."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/memory-change-event-spine-slice-plan.md", "reason": "Slice plan for the current Memory Change Event Spine implementation batch."}
+{"file": ".trellis/spec/backend/rp-core-state-base-revision-conflict-enforcement.md", "reason": "Executable backend contract for current slice: apply-side base revision conflict enforcement for authoritative Core State proposals."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/core-state-base-revision-conflict-slice-plan.md", "reason": "Slice plan for Core State base revision conflict enforcement implementation batch."}
+
+{"file": ".trellis/spec/backend/rp-projection-refresh-write-contract.md", "reason": "Executable backend contract for the next slice: projection refresh write metadata, stale base revision protection, and dirty marker recording over derived Core State current views."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/memory-layer-strengthening-proposal.md", "reason": "Source proposal section for the projection refresh contract and its required source refs, base revision, refresh reason, and dirty marker semantics."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/memory-strengthening-preflight-grill-questions.md", "reason": "Confirmed projection refresh semantics and stale-base protection notes that define the implementation contract."}

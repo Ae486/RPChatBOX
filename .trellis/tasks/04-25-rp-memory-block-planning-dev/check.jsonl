@@ -41,3 +41,11 @@
 {"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/memory-contract-registry-identity-event-slice-plan.md", "reason": "Slice plan for verifying the first memory strengthening implementation batch."}
 {"file": ".trellis/spec/backend/rp-runtime-workspace-turn-material-store.md", "reason": "Quality check contract for Runtime Workspace typed turn-material store and lifecycle service skeleton."}
 {"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-workspace-turn-material-store-slice-plan.md", "reason": "Slice plan for verifying Runtime Workspace typed turn-material implementation batch."}
+{"file": ".trellis/spec/backend/rp-memory-change-event-spine.md", "reason": "Quality check contract for the current slice: event spine identity scoping, registry validation, filtering, dirty targets, and no event-sourced truth store."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/memory-change-event-spine-slice-plan.md", "reason": "Slice plan for verifying the current Memory Change Event Spine implementation batch."}
+{"file": ".trellis/spec/backend/rp-core-state-base-revision-conflict-enforcement.md", "reason": "Quality check contract for current slice: fail-closed authoritative apply on stale base revisions without widening mutation paths."}
+{"file": ".trellis/tasks/04-25-rp-memory-block-planning-dev/research/core-state-base-revision-conflict-slice-plan.md", "reason": "Slice plan for verifying Core State base revision conflict enforcement implementation batch."}
+
+{"file": ".trellis/spec/backend/rp-projection-refresh-write-contract.md", "reason": "Quality check contract for projection refresh metadata, stale-base protection, dirty markers, and optional event emission."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/memory-layer-strengthening-proposal.md", "reason": "Check against the source proposal for projection refresh freshness and invalidation semantics."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/memory-strengthening-preflight-grill-questions.md", "reason": "Check against the confirmed refresh contract and stale-base protection semantics."}

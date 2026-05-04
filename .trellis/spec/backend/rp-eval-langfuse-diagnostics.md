@@ -83,6 +83,10 @@
   - `structured_payload.round_no`
   - `finish_reason`
   - `assistant_text`
+- Online score emission must keep the diagnostics import path lightweight:
+  - `rp.observability.langfuse_scores` may import `rp.eval.diagnostics` during API requests;
+  - importing `rp.eval.diagnostics` must not eagerly load optional RAGAS / LangChain dependencies or start their background analytics threads;
+  - `rp.eval` package-root exports should stay lazy, and RAGAS imports should remain limited to explicit eval runner / adapter / metric paths.
 - `setup.commit_blocked` follows the effective block-commit route, not only the raw warning list:
   - `true` when `repair_route == "block_commit"`
   - `true` when `repair_route` is derived as `block_commit` because warnings contain `commit_proposal_blocked`
@@ -137,6 +141,8 @@
   - Assert tool-expected turns without tool selection mark `setup.tool_selection_correct=fail`.
   - Assert successful patch/write turns mark `setup.tool_result_value=pass` and emit `setup.metric.tokens_per_tool_invocation`.
   - Assert unresolved repair loops mark `setup.loop.noop_or_repeated_question=fail`.
+- `rp/tests/test_eval_case_loader.py` or another lightweight eval import test:
+  - Assert importing `rp.eval.diagnostics` does not eagerly import `ragas`.
 - `rp/tests/test_eval_langfuse_sync.py`
   - Assert suite summary sync emits diagnostic aggregate scores.
   - Assert missing/malformed `diagnostic_summary` still emits `none`/`0` defaults.

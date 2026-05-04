@@ -21,6 +21,7 @@ from rp.services.memory_contract_registry import (
     MemoryContractRegistryError,
     MemoryContractRegistryService,
 )
+from rp.services.memory_change_event_service import MemoryChangeEventService
 
 
 RUNTIME_WORKSPACE_TRACE_ROLE = "runtime_workspace_trace_invalidation_skeleton"
@@ -61,9 +62,11 @@ class RuntimeWorkspaceMaterialService:
         self,
         *,
         registry_service: MemoryContractRegistryService | None = None,
+        memory_change_event_service: MemoryChangeEventService | None = None,
         store: RuntimeWorkspaceMaterialStore | None = None,
     ) -> None:
         self._registry_service = registry_service or MemoryContractRegistryService()
+        self._memory_change_event_service = memory_change_event_service
         self._store = store or RuntimeWorkspaceMaterialStore()
 
     @property
@@ -95,6 +98,7 @@ class RuntimeWorkspaceMaterialService:
             extra_metadata={"lifecycle": material.lifecycle.value},
         )
         self._store.events.append(event)
+        self._publish_event(event)
         return RuntimeWorkspaceMaterialReceipt(material=material, event=event)
 
     def get_material(
@@ -176,7 +180,13 @@ class RuntimeWorkspaceMaterialService:
             },
         )
         self._store.events.append(event)
+        self._publish_event(event)
         return RuntimeWorkspaceMaterialReceipt(material=updated, event=event)
+
+    def _publish_event(self, event: MemoryChangeEvent) -> None:
+        if self._memory_change_event_service is None:
+            return
+        self._memory_change_event_service.record_event(event)
 
     def _require_registered_domain(self, domain: str) -> str:
         try:

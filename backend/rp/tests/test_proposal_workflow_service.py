@@ -192,6 +192,223 @@ async def test_proposal_workflow_applies_and_persists_receipt(retrieval_session)
 
 
 @pytest.mark.asyncio
+async def test_proposal_workflow_applies_matching_base_ref(retrieval_session):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    story_session_service, repository, workflow = _build_workflow(retrieval_session)
+
+    receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id="story-1",
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Base Matched Chapter"},
+                }
+            ],
+            base_refs=[
+                {
+                    "object_id": "chapter.current",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.CHAPTER,
+                    "domain_path": "chapter.current",
+                    "scope": "story",
+                    "revision": 1,
+                }
+            ],
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="tool",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.NOTIFY_APPLY,
+        ),
+    )
+
+    assert receipt.status == "applied"
+    updated_session = story_session_service.get_session(session.session_id)
+    assert updated_session is not None
+    assert (
+        updated_session.current_state_json["chapter_digest"]["title"]
+        == "Base Matched Chapter"
+    )
+    apply_receipts = repository.list_apply_receipts_for_proposal(receipt.proposal_id)
+    assert len(apply_receipts) == 1
+    assert apply_receipts[0].revision_after_json["chapter.current"] == 2
+
+
+@pytest.mark.asyncio
+async def test_proposal_workflow_rejects_stale_base_ref_before_mutation(
+    retrieval_session,
+):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    story_session_service, repository, workflow = _build_workflow(retrieval_session)
+
+    fresh_receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id="story-1",
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Fresh Chapter"},
+                }
+            ],
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="tool",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.NOTIFY_APPLY,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="phase_e_apply_base_revision_conflict"):
+        await workflow.submit_and_route(
+            ProposalSubmitInput(
+                story_id="story-1",
+                mode="longform",
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                operations=[
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": {
+                            "object_id": "chapter.current",
+                            "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                            "domain": Domain.CHAPTER,
+                            "domain_path": "chapter.current",
+                        },
+                        "field_patch": {"title": "Stale Chapter"},
+                    }
+                ],
+                base_refs=[
+                    {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                        "scope": "story",
+                        "revision": 1,
+                    }
+                ],
+            ),
+            session_id=session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            submit_source="tool",
+            policy=PostWriteMaintenancePolicy(
+                preset_id="test",
+                fallback_decision=PolicyDecision.NOTIFY_APPLY,
+            ),
+        )
+
+    updated_session = story_session_service.get_session(session.session_id)
+    assert updated_session is not None
+    assert (
+        updated_session.current_state_json["chapter_digest"]["title"] == "Fresh Chapter"
+    )
+    proposal_records = repository.list_proposals_for_story("story-1")
+    stale_record = proposal_records[-1]
+    assert stale_record.status == "failed"
+    assert stale_record.error_message is not None
+    assert stale_record.error_message.startswith("phase_e_apply_base_revision_conflict")
+    assert repository.list_apply_receipts_for_proposal(stale_record.proposal_id) == []
+    assert (
+        len(repository.list_apply_receipts_for_proposal(fresh_receipt.proposal_id)) == 1
+    )
+    assert (
+        len(
+            repository.list_apply_receipts_for_story(
+                "story-1",
+                session_id=session.session_id,
+            )
+        )
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_proposal_workflow_rejects_base_ref_without_revision(
+    retrieval_session,
+):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    story_session_service, repository, workflow = _build_workflow(retrieval_session)
+
+    with pytest.raises(ValueError, match="phase_e_apply_base_revision_missing"):
+        await workflow.submit_and_route(
+            ProposalSubmitInput(
+                story_id="story-1",
+                mode="longform",
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                operations=[
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": {
+                            "object_id": "chapter.current",
+                            "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                            "domain": Domain.CHAPTER,
+                            "domain_path": "chapter.current",
+                        },
+                        "field_patch": {"title": "Missing Revision Chapter"},
+                    }
+                ],
+                base_refs=[
+                    {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                        "scope": "story",
+                    }
+                ],
+            ),
+            session_id=session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            submit_source="tool",
+            policy=PostWriteMaintenancePolicy(
+                preset_id="test",
+                fallback_decision=PolicyDecision.NOTIFY_APPLY,
+            ),
+        )
+
+    updated_session = story_session_service.get_session(session.session_id)
+    assert updated_session is not None
+    assert (
+        updated_session.current_state_json["chapter_digest"]["title"] == "Chapter One"
+    )
+    proposal_records = repository.list_proposals_for_story("story-1")
+    assert len(proposal_records) == 1
+    assert proposal_records[0].status == "failed"
+    assert proposal_records[0].error_message is not None
+    assert proposal_records[0].error_message.startswith(
+        "phase_e_apply_base_revision_missing"
+    )
+    assert (
+        repository.list_apply_receipts_for_proposal(proposal_records[0].proposal_id)
+        == []
+    )
+
+
+@pytest.mark.asyncio
 async def test_apply_service_does_not_reapply_applied_proposal(retrieval_session):
     session, chapter = _seed_story_runtime(retrieval_session)
     story_session_service, repository, workflow = _build_workflow(retrieval_session)

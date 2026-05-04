@@ -1119,3 +1119,155 @@ Quality gate:
 - `ruff format --check backend\rp\models\runtime_workspace_material.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_runtime_workspace_material_service.py`
 - `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\runtime_workspace_material.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_runtime_workspace_material_service.py`
 - `git diff --check`
+
+## Next Executable Slice: Core State Base Revision Conflict Enforcement
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-core-state-base-revision-conflict-enforcement.md`
+
+Objective:
+
+- enforce stale base revision rejection in the authoritative apply path;
+- keep `base_refs` as the conflict guard for target refs that are actually being mutated;
+- fail closed before authoritative mutation, apply receipt creation, or proposal status transitions to `applied`;
+- preserve existing legacy behavior for proposals that still carry no `base_refs` in this slice.
+
+Planned implementation direction:
+
+- add a base-revision validation helper in `ProposalApplyService`;
+- compare matching target revisions against the current authoritative revision source used by the existing apply flow;
+- reject missing base revisions and stale revisions with stable `phase_e_apply_base_revision_*` errors;
+- add regression tests that prove stale proposals fail closed and matching proposals still apply;
+- keep idempotent re-apply behavior for already-applied proposals unchanged.
+
+Boundaries:
+
+- no new revision store;
+- no direct state write path;
+- no projection refresh semantics change;
+- no user-edit apply path yet;
+- no public tool widening;
+- no automatic merge policy for stale revisions in this slice.
+
+Status on 2026-05-04:
+
+- added `rp-core-state-base-revision-conflict-enforcement.md` and registered it in the backend spec index plus task implement/check context;
+- added apply-side base revision validation in `ProposalApplyService` before authoritative mutation, apply receipt creation, and `applied` status transition;
+- normalized authoritative target/base ref identity before matching and fail closed with stable `phase_e_apply_base_revision_missing` / `phase_e_apply_base_revision_conflict` errors;
+- preserved legacy proposals with no `base_refs`, existing idempotent re-apply behavior, and adapter-backed revision semantics;
+- adjusted the API proposal seed so review-required base refs align with the existing adapter-backed proposal revision after the seeded applied proposal;
+- `trellis-check` fixed one coverage gap by adding a store-primary regression proving the write switch seeds the current authoritative snapshot before reading current revision for base-ref validation.
+- follow-up check found two API-test timeout risks outside the core-state mutation contract:
+  - online activation score emission imported `rp.eval.diagnostics` through an eager `rp.eval` package root, which loaded optional RAGAS / LangChain dependencies during API requests;
+  - deterministic `ACCEPT_PENDING_SEGMENT` fallback could trigger real Memory OS retrieval / embedding even when the turn did not need retrieval.
+- fixed those risks with lazy `rp.eval` package exports, explicit specialist `needs_retrieval=False` gating, deterministic accept/complete fallback plans that do not request retrieval, focused regression tests, and spec updates in `rp-eval-langfuse-diagnostics.md` / `rp-narrative-retrieval-policy-contract.md`.
+
+Quality gate:
+
+- `pytest backend\rp\tests\test_proposal_workflow_service.py backend\rp\tests\test_retrieval_runtime_config_service.py backend\rp\tests\test_core_state_dual_write_services.py::test_proposal_apply_service_write_switch_seeds_before_base_revision_check -q`
+  - result: `19 passed, 1 warning`
+- `pytest backend\tests\test_rp_story_api.py -q`
+  - result: `19 passed, 81 warnings`
+- `pytest backend\rp\tests\test_proposal_workflow_service.py backend\rp\tests\test_retrieval_runtime_config_service.py backend\rp\tests\test_core_state_dual_write_services.py::test_proposal_apply_service_write_switch_seeds_before_base_revision_check backend\rp\tests\test_eval_case_loader.py backend\rp\tests\test_projection_builder_services.py::test_orchestrator_accept_fallback_does_not_request_retrieval backend\rp\tests\test_projection_builder_services.py::test_specialist_skips_memory_os_when_plan_does_not_need_retrieval -q`
+  - result: `23 passed, 1 warning`
+- `pytest backend\rp\tests\test_memory_change_event_service.py backend\rp\tests\test_runtime_workspace_material_service.py -q`
+  - result: `17 passed, 1 warning`
+- `ruff check` / `ruff format --check` / `mypy --follow-imports=skip --check-untyped-defs` passed on touched backend files, API regression files, and previous Memory Change Event Spine files.
+- `git diff --check` passed with only existing LF/CRLF warnings on `.trellis` docs.
+
+## Next Executable Slice: Memory Change Event Spine
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-memory-change-event-spine.md`
+
+Objective:
+
+- turn the existing lightweight `MemoryChangeEvent` DTO from a local receipt shape into a reusable trace / invalidation spine;
+- keep events full-identity scoped by `StorySession + BranchHead + Turn + RuntimeProfileSnapshot`;
+- validate and normalize event domains through the memory contract registry;
+- expose query filters and dirty-target readback for later worker dirty checks, packet/window recompute, projection refresh, branch visibility, and UI audit;
+- let Runtime Workspace material creation / lifecycle events publish to the shared spine when an event service is injected.
+
+Planned implementation direction:
+
+- add `backend/rp/services/memory_change_event_service.py` with an in-process store, `record_event`, `list_events`, and `list_dirty_targets`;
+- reject duplicate event ids and unknown domains;
+- support registry alias normalization;
+- lightly wire `RuntimeWorkspaceMaterialService` to optionally publish the same receipt event to the shared spine;
+- add focused tests covering identity isolation, filter behavior, dirty-target readback, and Runtime Workspace publishing.
+
+Boundaries:
+
+- no durable DB event table;
+- no full event sourcing or memory replay;
+- no Core State apply rewrite;
+- no projection refresh write contract;
+- no public memory tool widening;
+- no Runtime Workspace promotion into Core State / Recall / Archival.
+
+Status on 2026-05-04:
+
+- added `rp-memory-change-event-spine.md` and registered it in the backend spec index;
+- added `backend/rp/services/memory_change_event_service.py` with an injected in-process event store, full `MemoryRuntimeIdentity` scoping, registry-backed domain validation / alias normalization, duplicate `event_id` rejection, event filters, and dirty-target flattening;
+- wired `RuntimeWorkspaceMaterialService` to optionally publish creation / lifecycle receipt events into the shared event spine while preserving local receipts and `RuntimeWorkspaceMaterialStore.events`;
+- added `backend/rp/tests/test_memory_change_event_service.py` covering alias normalization, identity isolation across branch / turn / runtime profile snapshot, unknown-domain rejection, duplicate-id rejection, filter behavior, dirty-target readback, and Runtime Workspace publishing;
+- `trellis-check` found no spec drift or test gap, and no extra durable spec update was needed beyond the newly registered executable spec.
+
+Quality gate:
+
+- `pytest backend\rp\tests\test_memory_change_event_service.py backend\rp\tests\test_runtime_workspace_material_service.py -q`
+  - result: `17 passed, 1 warning`
+- `ruff check backend\rp\services\memory_change_event_service.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_memory_change_event_service.py`
+- `ruff format --check backend\rp\services\memory_change_event_service.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_memory_change_event_service.py`
+- `mypy --follow-imports=skip --check-untyped-defs backend\rp\services\memory_change_event_service.py backend\rp\services\runtime_workspace_material_service.py backend\rp\tests\test_memory_change_event_service.py`
+- `git diff --check`
+
+## Next Executable Slice: Projection Refresh Write Contract
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-projection-refresh-write-contract.md`
+
+Objective:
+
+- freeze projection refresh as a first-class derived current-view write with explicit source refs, refresh reason, base revision, and dirty markers;
+- keep the refresh path as `Core State.derived_projection` maintenance, not authoritative truth mutation;
+- preserve legacy builder snapshot behavior while formal projection rows gain richer refresh metadata and stale-base protection;
+- optionally publish refresh invalidation into the shared lightweight memory event spine when runtime identity is available.
+
+Planned implementation direction:
+
+- add a small request DTO for refresh provenance and dirty markers;
+- extend `ProjectionRefreshService` to accept the request and pass refresh metadata into `CoreStateDualWriteService`;
+- teach the projection store write path to record richer refresh metadata and reject stale base revisions;
+- emit projection refresh dirty-target events through the shared spine when identity is supplied;
+- add focused tests for legacy compatibility, metadata recording, stale-base rejection, stale source rejection, and optional event emission.
+
+Boundaries:
+
+- no authoritative Core State mutation;
+- no proposal/apply rewrite;
+- no new durable truth table;
+- no public tool widening;
+- no replacement of `WritingPacketBuilder`.
+
+Status on 2026-05-04:
+
+- added `rp-projection-refresh-write-contract.md` and registered it in the backend spec index plus task implement/check context;
+- added `backend/rp/models/projection_refresh.py` with `ProjectionRefreshRequest` and stable refresh error codes;
+- extended `ProjectionRefreshService` and `CoreStateDualWriteService` so refresh writes richer derived-projection metadata, validates stale base revision/source revision before writes, and preserves legacy no-request behavior;
+- optional memory change event publication records `projection_refreshed` events when runtime identity and event spine are supplied, using unique event ids so repeated refreshes in the same turn do not collide;
+- added focused regressions for metadata persistence, stale-base rejection, stale-source rejection, legacy refresh compatibility, optional event emission, and repeated same-identity event publication.
+
+Quality gate:
+
+- `pytest backend\rp\tests\test_core_state_dual_write_services.py::test_projection_refresh_service_dual_writes_formal_projection_store backend\rp\tests\test_core_state_dual_write_services.py::test_projection_refresh_service_records_freshness_metadata_and_dirty_targets backend\rp\tests\test_core_state_dual_write_services.py::test_projection_refresh_service_rejects_stale_base_revision_before_write backend\rp\tests\test_core_state_dual_write_services.py::test_projection_refresh_service_rejects_stale_source_revision_before_write backend\rp\tests\test_core_state_dual_write_services.py::test_projection_refresh_service_emits_shared_event_when_identity_is_supplied -q`
+  - result: `5 passed, 1 warning`
+- `pytest backend\rp\tests\test_core_state_dual_write_services.py backend\rp\tests\test_memory_change_event_service.py -q`
+  - result: `17 passed, 1 warning`
+- `trellis-check` finding fixed: repeated same-identity projection refresh no longer collides with `MemoryChangeEventService` duplicate event-id rejection.
+- `ruff check backend\rp\models\projection_refresh.py backend\rp\services\projection_refresh_service.py backend\rp\services\core_state_dual_write_service.py backend\rp\tests\test_core_state_dual_write_services.py`
+- `ruff format --check backend\rp\models\projection_refresh.py backend\rp\services\projection_refresh_service.py backend\rp\services\core_state_dual_write_service.py backend\rp\tests\test_core_state_dual_write_services.py`
+- `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\projection_refresh.py backend\rp\services\projection_refresh_service.py backend\rp\services\core_state_dual_write_service.py backend\rp\tests\test_core_state_dual_write_services.py`

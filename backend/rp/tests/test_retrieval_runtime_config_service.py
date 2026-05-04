@@ -207,3 +207,51 @@ def test_resolve_story_config_reflects_runtime_story_config_updates(retrieval_se
     assert config.embedding_provider_id == "provider-embedding-session-updated"
     assert config.rerank_model_id == "rerank-model-setup"
     assert config.rerank_provider_id == "provider-rerank-setup"
+
+
+def test_resolve_story_config_ignores_none_graph_defaults_in_session_payload(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    workspace = workspace_service.create_workspace(
+        story_id="story-runtime-config-none-graph-session",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_story_config(
+        workspace_id=workspace.workspace_id,
+        patch=StoryConfigDraft(
+            graph_extraction_provider_id="provider-graph-setup",
+            graph_extraction_model_id="graph-model-setup",
+            graph_extraction_temperature=0.25,
+            graph_extraction_max_output_tokens=1024,
+            graph_extraction_timeout_ms=45000,
+            graph_extraction_enabled=True,
+        ),
+    )
+    StorySessionService(retrieval_session).create_session(
+        story_id="story-runtime-config-none-graph-session",
+        source_workspace_id=workspace.workspace_id,
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={
+            "graph_extraction_structured_output_mode": None,
+            "graph_extraction_temperature": None,
+            "graph_extraction_max_output_tokens": None,
+            "graph_extraction_timeout_ms": None,
+            "graph_extraction_enabled": None,
+        },
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+
+    config = RetrievalRuntimeConfigService(retrieval_session).resolve_story_config(
+        story_id="story-runtime-config-none-graph-session"
+    )
+
+    assert config.graph_extraction_provider_id == "provider-graph-setup"
+    assert config.graph_extraction_model_id == "graph-model-setup"
+    assert config.graph_extraction_structured_output_mode == "json_schema"
+    assert config.graph_extraction_temperature == 0.25
+    assert config.graph_extraction_max_output_tokens == 1024
+    assert config.graph_extraction_timeout_ms == 45000
+    assert config.graph_extraction_enabled is True

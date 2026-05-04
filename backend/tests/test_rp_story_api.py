@@ -168,43 +168,6 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             metadata_json={"test_marker": "api_formal_projection_revision"},
         )
         proposal_repo = ProposalRepository(db_session)
-        matching_review_required = proposal_repo.create_proposal(
-            input_model=ProposalSubmitInput(
-                story_id=story_session.story_id,
-                mode="longform",
-                domain=Domain.CHAPTER,
-                domain_path="chapter.current",
-                operations=[
-                    {
-                        "kind": "patch_fields",
-                        "target_ref": {
-                            "object_id": "chapter.current",
-                            "layer": Layer.CORE_STATE_AUTHORITATIVE,
-                            "domain": Domain.CHAPTER,
-                            "domain_path": "chapter.current",
-                        },
-                        "field_patch": {"title": "Pending API Chapter"},
-                    }
-                ],
-                base_refs=[
-                    {
-                        "object_id": "chapter.current",
-                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
-                        "domain": Domain.CHAPTER,
-                        "domain_path": "chapter.current",
-                        "scope": "story",
-                        "revision": 5,
-                    }
-                ],
-                reason="api review required detail",
-                trace_id="trace-api-review-required",
-            ),
-            status="review_required",
-            policy_decision="review_required",
-            submit_source="api_test",
-            session_id=story_session.session_id,
-            chapter_workspace_id=chapter.chapter_workspace_id,
-        )
         matching_applied = proposal_repo.create_proposal(
             input_model=ProposalSubmitInput(
                 story_id=story_session.story_id,
@@ -230,7 +193,7 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
                         "domain": Domain.CHAPTER,
                         "domain_path": "chapter.current",
                         "scope": "story",
-                        "revision": 5,
+                        "revision": 1,
                     }
                 ],
                 reason="api applied detail",
@@ -248,6 +211,43 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             story_state_apply_service=StoryStateApplyService(),
         )
         proposal_apply_service.apply_proposal(matching_applied.proposal_id)
+        matching_review_required = proposal_repo.create_proposal(
+            input_model=ProposalSubmitInput(
+                story_id=story_session.story_id,
+                mode="longform",
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                operations=[
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": {
+                            "object_id": "chapter.current",
+                            "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                            "domain": Domain.CHAPTER,
+                            "domain_path": "chapter.current",
+                        },
+                        "field_patch": {"title": "Pending API Chapter"},
+                    }
+                ],
+                base_refs=[
+                    {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                        "scope": "story",
+                        "revision": 2,
+                    }
+                ],
+                reason="api review required detail",
+                trace_id="trace-api-review-required",
+            ),
+            status="review_required",
+            policy_decision="review_required",
+            submit_source="api_test",
+            session_id=story_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+        )
         same_domain_other_block = proposal_repo.create_proposal(
             input_model=ProposalSubmitInput(
                 story_id=story_session.story_id,
@@ -1178,7 +1178,9 @@ def test_accept_pending_segment_patch_can_override_draft_structured_metadata(
     assert completed.status_code == 200
 
     completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    assert completed_snapshot["session"]["current_state_json"]["foreshadow_registry"] == [
+    assert completed_snapshot["session"]["current_state_json"][
+        "foreshadow_registry"
+    ] == [
         {
             "foreshadow_id": "envoy_debt",
             "status": "closed",
@@ -1236,7 +1238,9 @@ def test_accept_pending_segment_empty_patch_clears_draft_structured_metadata(
     assert completed.status_code == 200
 
     completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    assert completed_snapshot["session"]["current_state_json"]["foreshadow_registry"] == []
+    assert (
+        completed_snapshot["session"]["current_state_json"]["foreshadow_registry"] == []
+    )
 
 
 def test_story_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
@@ -1688,9 +1692,10 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert overview_payload["layers"][Layer.RECALL.value]["storage_model"] == (
         "retrieval_core"
     )
-    assert "accepted_story_segment" in overview_payload["layers"][Layer.RECALL.value][
-        "known_source_families"
-    ]
+    assert (
+        "accepted_story_segment"
+        in overview_payload["layers"][Layer.RECALL.value]["known_source_families"]
+    )
     assert overview_payload["proposals"]["by_status"]["review_required"] == 1
     assert overview_payload["proposals"]["by_status"]["applied"] == 1
     assert overview_payload["consumers"]["total"] == 3
@@ -1700,11 +1705,13 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
         "story.specialist",
         "story.writer_packet",
     }
-    assert "authoritative_mutation_requires_proposal_apply" in overview_payload[
-        "boundaries"
-    ]
-    assert "runtime_workspace_blocks_are_read_only_current_turn_scratch" in (
-        overview_payload["boundaries"]
+    assert (
+        "authoritative_mutation_requires_proposal_apply"
+        in overview_payload["boundaries"]
+    )
+    assert (
+        "runtime_workspace_blocks_are_read_only_current_turn_scratch"
+        in (overview_payload["boundaries"])
     )
     assert all(
         item["layer"] == Layer.CORE_STATE_AUTHORITATIVE.value
@@ -2070,7 +2077,7 @@ def test_story_memory_block_proposal_detail_and_apply_routes(client, monkeypatch
     assert detail_item["operations"][0]["field_patch"] == {
         "title": "Pending API Chapter"
     }
-    assert detail_item["base_refs"][0]["revision"] == 5
+    assert detail_item["base_refs"][0]["revision"] == 2
     assert detail_item["apply_receipts"] == []
 
     assert applied_detail.status_code == 200

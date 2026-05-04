@@ -10,6 +10,10 @@ from models.rp_core_state_store import (
     CoreStateAuthoritativeRevisionRecord,
 )
 from rp.models.dsl import Layer, ObjectRef
+from rp.models.projection_refresh import (
+    ProjectionRefreshRequest,
+    ProjectionRefreshServiceError,
+)
 from rp.models.story_runtime import ChapterWorkspace, StorySession
 
 from .core_state_store_repository import CoreStateStoreRepository
@@ -294,7 +298,17 @@ class CoreStateDualWriteService:
         snapshot: dict[str, Any],
         refresh_source_kind: str,
         refresh_source_ref: str | None = None,
+        refresh_request: ProjectionRefreshRequest | None = None,
     ) -> None:
+        request = refresh_request or ProjectionRefreshRequest(
+            refresh_source_kind=refresh_source_kind,
+            refresh_source_ref=refresh_source_ref,
+        )
+        self.validate_projection_refresh_request(
+            session_id=session.session_id,
+            chapter=chapter,
+            refresh_request=request,
+        )
         for binding in projection_bindings():
             items = [
                 str(item)
@@ -305,10 +319,16 @@ class CoreStateDualWriteService:
                 chapter_workspace_id=chapter.chapter_workspace_id,
                 summary_id=binding.summary_id,
             )
+            metadata = self._projection_refresh_metadata(
+                refresh_source_kind=request.refresh_source_kind,
+                refresh_source_ref=request.refresh_source_ref,
+                refresh_request=request,
+            )
             if (
                 existing is not None
                 and list(existing.items_json or []) == items
-                and existing.last_refresh_kind == refresh_source_kind
+                and existing.last_refresh_kind == request.refresh_source_kind
+                and dict(existing.metadata_json or {}) == metadata
             ):
                 continue
             next_revision = 1 if existing is None else existing.current_revision + 1
@@ -324,11 +344,8 @@ class CoreStateDualWriteService:
                 scope="chapter",
                 current_revision=next_revision,
                 items_json=items,
-                metadata_json=self._projection_refresh_metadata(
-                    refresh_source_kind=refresh_source_kind,
-                    refresh_source_ref=refresh_source_ref,
-                ),
-                last_refresh_kind=refresh_source_kind,
+                metadata_json=metadata,
+                last_refresh_kind=request.refresh_source_kind,
             )
             self._repository.upsert_projection_slot_revision(
                 projection_slot_id=current_record.projection_slot_id,
@@ -343,32 +360,106 @@ class CoreStateDualWriteService:
                 scope="chapter",
                 revision=next_revision,
                 items_json=items,
-                refresh_source_kind=refresh_source_kind,
-                refresh_source_ref=refresh_source_ref,
-                metadata_json=self._projection_refresh_metadata(
-                    refresh_source_kind=refresh_source_kind,
-                    refresh_source_ref=refresh_source_ref,
-                ),
+                refresh_source_kind=request.refresh_source_kind,
+                refresh_source_ref=request.refresh_source_ref,
+                metadata_json=metadata,
             )
+
+    def validate_projection_refresh_request(
+        self,
+        *,
+        session_id: str,
+        chapter: ChapterWorkspace,
+        refresh_request: ProjectionRefreshRequest,
+    ) -> None:
+        self._validate_projection_source_refs(
+            session_id=session_id,
+            refresh_request=refresh_request,
+        )
+        self._validate_projection_base_revision(
+            chapter=chapter,
+            refresh_request=refresh_request,
+        )
 
     @staticmethod
     def _projection_refresh_metadata(
         *,
         refresh_source_kind: str,
         refresh_source_ref: str | None,
+        refresh_request: ProjectionRefreshRequest | None = None,
     ) -> dict[str, Any]:
+        request = refresh_request or ProjectionRefreshRequest(
+            refresh_source_kind=refresh_source_kind,
+            refresh_source_ref=refresh_source_ref,
+        )
         metadata: dict[str, Any] = {
-            "dual_write_source": refresh_source_kind,
+            "dual_write_source": request.refresh_source_kind,
             "layer_family": "core_state.derived_projection",
             "semantic_layer": "Core State.derived_projection",
             "projection_role": "current_projection",
             "materialization_event": "projection_refresh",
-            "maintenance_event": refresh_source_kind,
+            "maintenance_event": request.refresh_source_kind,
             "authoritative_mutation": False,
+            "refresh_actor": request.refresh_actor,
+            "refresh_reason": request.refresh_reason,
+            "base_revision": request.base_revision,
+            "projection_dirty_state": request.projection_dirty_state,
+            "source_authoritative_refs": [
+                ref.model_dump(mode="json") for ref in request.source_authoritative_refs
+            ],
+            "source_refs": [ref.model_dump(mode="json") for ref in request.source_refs],
+            "dirty_targets": [
+                target.model_dump(mode="json") for target in request.dirty_targets
+            ],
         }
-        if refresh_source_ref:
-            metadata["maintenance_source_ref"] = refresh_source_ref
+        if request.identity is not None:
+            metadata["identity"] = request.identity.model_dump(mode="json")
+        if request.refresh_source_ref:
+            metadata["maintenance_source_ref"] = request.refresh_source_ref
         return metadata
+
+    def _validate_projection_source_refs(
+        self,
+        *,
+        session_id: str,
+        refresh_request: ProjectionRefreshRequest,
+    ) -> None:
+        for source_ref in refresh_request.source_authoritative_refs:
+            if source_ref.revision is None:
+                raise ProjectionRefreshServiceError(
+                    "projection_refresh_source_revision_missing",
+                    source_ref.object_id,
+                )
+            current_revision = self.current_authoritative_revision(
+                session_id=session_id,
+                target_ref=source_ref,
+            )
+            if current_revision != source_ref.revision:
+                raise ProjectionRefreshServiceError(
+                    "projection_refresh_source_revision_conflict",
+                    f"{source_ref.object_id}:base={source_ref.revision}:current={current_revision}",
+                )
+
+    def _validate_projection_base_revision(
+        self,
+        *,
+        chapter: ChapterWorkspace,
+        refresh_request: ProjectionRefreshRequest,
+    ) -> None:
+        if refresh_request.base_revision is None:
+            return
+        for binding in projection_bindings():
+            existing = self._repository.get_projection_slot(
+                chapter_workspace_id=chapter.chapter_workspace_id,
+                summary_id=binding.summary_id,
+            )
+            if existing is None:
+                continue
+            if int(existing.current_revision or 0) != refresh_request.base_revision:
+                raise ProjectionRefreshServiceError(
+                    "projection_refresh_base_revision_conflict",
+                    f"{binding.summary_id}:base={refresh_request.base_revision}:current={existing.current_revision}",
+                )
 
     def _ensure_authoritative_revision_one(
         self,

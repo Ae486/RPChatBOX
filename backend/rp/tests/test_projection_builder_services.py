@@ -169,6 +169,14 @@ class _StubMemoryOsService:
         return SimpleNamespace(hits=list(self._recall_hits))
 
 
+class _FailingMemoryOsService:
+    async def search_archival(self, *_args, **_kwargs):
+        raise AssertionError("retrieval should not run for this plan")
+
+    async def search_recall(self, *_args, **_kwargs):
+        raise AssertionError("retrieval should not run for this plan")
+
+
 def _build_turn_domain_service(
     service: StorySessionService,
     *,
@@ -384,6 +392,70 @@ def test_orchestrator_fallback_uses_projection_slots_not_writer_hints(
 
     assert "Persisted Hint" not in " ".join(plan.archival_queries)
     assert any("Outline A" in query for query in plan.archival_queries)
+
+
+def test_orchestrator_accept_fallback_does_not_request_retrieval(
+    retrieval_session,
+):
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    authoritative_state_view_service, projection_state_service = (
+        _build_boundary_services(service)
+    )
+    orchestrator_service = LongformOrchestratorService(
+        authoritative_state_view_service=authoritative_state_view_service,
+        projection_state_service=projection_state_service,
+    )
+
+    plan = orchestrator_service._fallback_plan(
+        session=session,
+        chapter=chapter,
+        command_kind=LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+        user_prompt=None,
+        projection_snapshot=projection_state_service.build_planner_projection(
+            session_id=session.session_id
+        ),
+    )
+
+    assert plan.needs_retrieval is False
+    assert plan.archival_queries == []
+    assert plan.recall_queries == []
+
+
+@pytest.mark.asyncio
+async def test_specialist_skips_memory_os_when_plan_does_not_need_retrieval(
+    retrieval_session,
+):
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    authoritative_state_view_service, projection_state_service = (
+        _build_boundary_services(service)
+    )
+    specialist_service = LongformSpecialistService(
+        authoritative_state_view_service=authoritative_state_view_service,
+        projection_state_service=projection_state_service,
+        memory_os_factory=lambda _story_id: _FailingMemoryOsService(),
+    )
+
+    bundle = await specialist_service.analyze(
+        session=session,
+        chapter=chapter,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            needs_retrieval=False,
+            archival_queries=["should not run"],
+            recall_queries=["should not run"],
+            writer_instruction="Accept the pending segment.",
+        ),
+        command_kind=LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt=None,
+        accepted_segments=[],
+        pending_artifact=None,
+    )
+
+    assert bundle.state_patch_proposals["narrative_progress"]["last_command"] == (
+        LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT.value
+    )
 
 
 def test_story_segment_structured_metadata_normalizes_latest_foreshadow_update():
