@@ -25,6 +25,7 @@ from rp.models.memory_materialization import (
 )
 from rp.models.memory_graph_projection import GRAPH_JOB_REASON_ARCHIVAL_INGESTED
 from rp.models.retrieval_records import SourceAsset
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import StoryMode
 from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
 from rp.services.retrieval_collection_service import RetrievalCollectionService
@@ -147,10 +148,20 @@ class MinimalRetrievalIngestionService:
         raw_excerpt = str(first_text)[:280] if first_text is not None else None
         first_metadata = seed_sections[0].get("metadata") if seed_sections else {}
         first_metadata = first_metadata if isinstance(first_metadata, dict) else {}
+        if title is None:
+            fallback_title = first_metadata.get("entry_title") or first_metadata.get(
+                "title"
+            )
+            if isinstance(fallback_title, str) and fallback_title.strip():
+                title = fallback_title.strip()
         domain = str(
             first_metadata.get("domain") or self._domain_from_targets(mapped_targets)
         )
-        domain_path = str(first_metadata.get("domain_path") or source_ref)
+        domain_path = str(
+            first_metadata.get("entry_domain_path")
+            or first_metadata.get("domain_path")
+            or source_ref
+        )
         metadata = build_archival_source_metadata(
             source_type=source_type,
             import_event=SETUP_COMMIT_IMPORT_EVENT,
@@ -240,13 +251,35 @@ class MinimalRetrievalIngestionService:
             foundation = commit.snapshot_payload_json.get("foundation", {})
             if not foundation:
                 foundation = commit.snapshot_payload_json.get(job.step_id, {})
+            stage_id = self._coerce_stage_id(
+                str(foundation.get("stage_id") or job.step_id or "")
+            )
             for entry in foundation.get("entries", []):
-                if (entry.get("entry_id") or entry.get("path")) == job.target_ref:
+                entry_ref = (
+                    entry.get("entry_id")
+                    or entry.get("path")
+                    or entry.get("semantic_path")
+                )
+                if (
+                    entry_ref == job.target_ref
+                    or entry.get("semantic_path") == job.target_ref
+                ):
+                    rendered_sections = self._setup_entry_to_seed_sections(
+                        commit=commit,
+                        job=job,
+                        entry=entry,
+                        stage_id=stage_id,
+                        source_ref=source_ref,
+                        source_type=source_type,
+                    )
+                    if rendered_sections:
+                        return rendered_sections
                     return [
                         self._foundation_entry_to_section(
                             commit=commit,
                             job=job,
                             entry=entry,
+                            stage_id=stage_id,
                             source_ref=source_ref,
                             source_type=source_type,
                         )
@@ -270,12 +303,48 @@ class MinimalRetrievalIngestionService:
             )
         return []
 
+    def _setup_entry_to_seed_sections(
+        self,
+        *,
+        commit: SetupAcceptedCommitRecord,
+        job: SetupRetrievalIngestionJobRecord,
+        entry: dict,
+        stage_id: SetupStageId | None,
+        source_ref: str,
+        source_type: str,
+    ) -> list[dict[str, object]]:
+        sections = entry.get("sections")
+        if not isinstance(sections, list) or not sections:
+            return []
+
+        seed_sections: list[dict[str, object]] = []
+        for raw_section in sections:
+            if not isinstance(raw_section, dict):
+                continue
+            rendered = self._render_setup_section_text(raw_section)
+            if not rendered:
+                continue
+            seed_sections.append(
+                self._section_to_seed_section(
+                    commit=commit,
+                    job=job,
+                    entry=entry,
+                    section=raw_section,
+                    stage_id=stage_id,
+                    source_ref=source_ref,
+                    source_type=source_type,
+                    text=rendered,
+                )
+            )
+        return seed_sections
+
     def _foundation_entry_to_section(
         self,
         *,
         commit: SetupAcceptedCommitRecord,
         job: SetupRetrievalIngestionJobRecord,
         entry: dict,
+        stage_id: SetupStageId | None = None,
         source_ref: str,
         source_type: str,
     ) -> dict[str, object]:
@@ -288,7 +357,9 @@ class MinimalRetrievalIngestionService:
         if isinstance(semantic_path, str) and semantic_path.strip():
             domain_path = semantic_path.strip()
         else:
-            domain_path = f"foundation.{entry.get('domain')}.{entry.get('path')}".strip(".")
+            domain_path = f"foundation.{entry.get('domain')}.{entry.get('path')}".strip(
+                "."
+            )
         text = self._render_setup_entry_text(entry)
         title = entry.get("title") or entry.get("path") or entry.get("entry_id")
         metadata = self._build_archival_metadata(
@@ -300,19 +371,127 @@ class MinimalRetrievalIngestionService:
             domain_path=domain_path,
             extra={
                 "title": title,
+                "entry_id": entry.get("entry_id") or entry.get("path"),
+                "entry_title": title,
+                "entry_type": entry.get("entry_type") or entry.get("domain"),
+                "entry_domain_path": domain_path,
                 "source_refs": list(entry.get("source_refs", [])),
                 "entry_commit_id": entry.get("commit_id"),
                 "semantic_path": semantic_path,
+                "entry_semantic_path": semantic_path,
+                "committed_ref": (
+                    f"foundation:{stage_id.value}:{entry.get('entry_id')}"
+                    if stage_id is not None and entry.get("entry_id")
+                    else f"foundation:{entry.get('entry_id') or entry.get('path')}"
+                ),
+                "stage_ref": (
+                    f"stage:{stage_id.value}:{entry.get('entry_id')}"
+                    if stage_id is not None and entry.get("entry_id")
+                    else None
+                ),
+                "stage_id": stage_id.value if stage_id is not None else None,
             },
         )
         return build_archival_seed_section(
             section_id=str(entry.get("entry_id") or uuid4().hex),
             title=str(title or "foundation"),
-            path=str(semantic_path or entry.get("path") or entry.get("entry_id") or "foundation"),
+            path=str(
+                semantic_path
+                or entry.get("path")
+                or entry.get("entry_id")
+                or "foundation"
+            ),
             level=1,
             text=text,
             metadata=metadata,
             tags=list(entry.get("tags", [])),
+        )
+
+    def _section_to_seed_section(
+        self,
+        *,
+        commit: SetupAcceptedCommitRecord,
+        job: SetupRetrievalIngestionJobRecord,
+        entry: dict,
+        section: dict,
+        stage_id: SetupStageId | None,
+        source_ref: str,
+        source_type: str,
+        text: str,
+    ) -> dict[str, object]:
+        entry_id = str(
+            entry.get("entry_id")
+            or entry.get("path")
+            or entry.get("semantic_path")
+            or uuid4().hex
+        )
+        entry_title = str(entry.get("title") or entry.get("display_label") or entry_id)
+        entry_semantic_path = self._entry_semantic_path(entry)
+        section_id = str(section.get("section_id") or uuid4().hex)
+        section_title = str(section.get("title") or section_id)
+        section_path = (
+            f"{entry_semantic_path}.{section_id}"
+            if entry_semantic_path
+            else f"{entry_id}.{section_id}"
+        )
+        domain = self._coarse_domain_for_setup_entry(
+            entry.get("domain"),
+            entry_type=entry.get("entry_type"),
+            semantic_path=entry_semantic_path,
+        )
+        committed_ref = (
+            f"foundation:{stage_id.value}:{entry_id}:{section_id}"
+            if stage_id is not None
+            else f"foundation:{entry_id}:{section_id}"
+        )
+        stage_ref = (
+            f"stage:{stage_id.value}:{entry_id}:{section_id}"
+            if stage_id is not None
+            else None
+        )
+        metadata = self._build_archival_metadata(
+            commit=commit,
+            job=job,
+            source_ref=source_ref,
+            source_type=source_type,
+            domain=domain,
+            domain_path=section_path,
+            extra={
+                "title": section_title,
+                "entry_id": entry_id,
+                "entry_title": entry_title,
+                "entry_type": entry.get("entry_type"),
+                "entry_semantic_path": entry_semantic_path,
+                "entry_domain_path": entry_semantic_path,
+                "section_id": section_id,
+                "setup_section_id": section.get("section_id"),
+                "section_title": section_title,
+                "section_kind": section.get("kind"),
+                "retrieval_role": section.get("retrieval_role"),
+                "section_semantic_path": section_path,
+                "committed_ref": committed_ref,
+                "stage_ref": stage_ref,
+                "source_refs": list(entry.get("source_refs", [])),
+                "entry_commit_id": entry.get("commit_id"),
+                "stage_id": stage_id.value if stage_id is not None else None,
+            },
+        )
+        tags = list(
+            dict.fromkeys(
+                [
+                    *list(entry.get("tags", [])),
+                    *list(section.get("tags", [])),
+                ]
+            )
+        )
+        return build_archival_seed_section(
+            section_id=committed_ref,
+            title=section_title,
+            path=section_path,
+            level=int(section.get("level") or 2),
+            text=text,
+            metadata=metadata,
+            tags=tags,
         )
 
     def _render_setup_entry_text(self, entry: dict) -> str:
@@ -365,11 +544,15 @@ class MinimalRetrievalIngestionService:
                     if isinstance(item, str) and item.strip():
                         rendered_items.append(f"- {item.strip()}")
                     elif isinstance(item, dict):
-                        text = item.get("text") or item.get("title") or item.get("label")
+                        text = (
+                            item.get("text") or item.get("title") or item.get("label")
+                        )
                         if isinstance(text, str) and text.strip():
                             rendered_items.append(f"- {text.strip()}")
                         else:
-                            rendered_items.append(f"- {self._render_payload_text(item)}")
+                            rendered_items.append(
+                                f"- {self._render_payload_text(item)}"
+                            )
                     elif item is not None:
                         rendered_items.append(f"- {item}")
                 if rendered_items:
@@ -603,13 +786,44 @@ class MinimalRetrievalIngestionService:
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     @staticmethod
+    def _entry_semantic_path(entry: dict) -> str:
+        semantic_path = entry.get("semantic_path")
+        if isinstance(semantic_path, str) and semantic_path.strip():
+            return semantic_path.strip()
+        legacy_path = ".".join(
+            part
+            for part in (
+                "foundation",
+                str(entry.get("domain") or "").strip(),
+                str(entry.get("path") or "").strip(),
+            )
+            if part
+        )
+        if legacy_path:
+            return legacy_path
+        return str(entry.get("entry_id") or "").strip()
+
+    @staticmethod
+    def _coerce_stage_id(value: str | None) -> SetupStageId | None:
+        if not value:
+            return None
+        try:
+            return SetupStageId(value)
+        except ValueError:
+            return None
+
+    @staticmethod
     def _coarse_domain_for_setup_entry(
         domain: str | None,
         *,
         entry_type: str | None = None,
         semantic_path: str | None = None,
     ) -> str:
-        if domain == "character" or entry_type in {"character", "relationship", "group"}:
+        if domain == "character" or entry_type in {
+            "character",
+            "relationship",
+            "group",
+        }:
             return "character"
         if domain == "chapter" or (semantic_path and "chapter" in semantic_path):
             return "chapter"

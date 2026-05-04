@@ -24,6 +24,8 @@ SETUP_SHARED_PRIVATE_TOOLS: tuple[str, ...] = (
     "setup.read.workspace",
     "setup.read.step_context",
     "setup.read.draft_refs",
+    "setup.truth_index.search",
+    "setup.truth_index.read_refs",
 )
 
 SETUP_STEP_PATCH_TOOLS: dict[str, tuple[str, ...]] = {

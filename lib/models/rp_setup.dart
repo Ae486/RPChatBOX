@@ -2,15 +2,9 @@ class SetupDialogueMessage {
   final String role;
   final String content;
 
-  const SetupDialogueMessage({
-    required this.role,
-    required this.content,
-  });
+  const SetupDialogueMessage({required this.role, required this.content});
 
-  Map<String, dynamic> toJson() => {
-    'role': role,
-    'content': content,
-  };
+  Map<String, dynamic> toJson() => {'role': role, 'content': content};
 }
 
 class RpSetupStepState {
@@ -41,6 +35,145 @@ class RpSetupStepState {
       lastProposalId: json['last_proposal_id'] as String?,
       lastCommitId: json['last_commit_id'] as String?,
       updatedAt: DateTime.parse(json['updated_at'] as String),
+    );
+  }
+}
+
+class RpSetupStageState {
+  final String stageId;
+  final String state;
+  final int discussionRound;
+  final int reviewRound;
+  final String? lastProposalId;
+  final String? lastCommitId;
+  final DateTime updatedAt;
+
+  const RpSetupStageState({
+    required this.stageId,
+    required this.state,
+    required this.discussionRound,
+    required this.reviewRound,
+    required this.lastProposalId,
+    required this.lastCommitId,
+    required this.updatedAt,
+  });
+
+  factory RpSetupStageState.fromJson(Map<String, dynamic> json) {
+    return RpSetupStageState(
+      stageId: json['stage_id'] as String,
+      state: json['state'] as String,
+      discussionRound: json['discussion_round'] as int? ?? 0,
+      reviewRound: json['review_round'] as int? ?? 0,
+      lastProposalId: json['last_proposal_id'] as String?,
+      lastCommitId: json['last_commit_id'] as String?,
+      updatedAt: DateTime.parse(json['updated_at'] as String),
+    );
+  }
+}
+
+class RpSetupDraftSection {
+  final String sectionId;
+  final String title;
+  final String kind;
+  final Map<String, dynamic> content;
+  final String retrievalRole;
+  final List<String> tags;
+
+  const RpSetupDraftSection({
+    required this.sectionId,
+    required this.title,
+    required this.kind,
+    required this.content,
+    required this.retrievalRole,
+    required this.tags,
+  });
+
+  factory RpSetupDraftSection.fromJson(Map<String, dynamic> json) {
+    return RpSetupDraftSection(
+      sectionId: json['section_id'] as String,
+      title: json['title'] as String,
+      kind: json['kind'] as String,
+      content: json['content'] is Map
+          ? Map<String, dynamic>.from(json['content'] as Map)
+          : const <String, dynamic>{},
+      retrievalRole: json['retrieval_role'] as String? ?? 'detail',
+      tags: (json['tags'] as List? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+    );
+  }
+}
+
+class RpSetupDraftEntry {
+  final String entryId;
+  final String entryType;
+  final String semanticPath;
+  final String title;
+  final String? displayLabel;
+  final String? summary;
+  final List<String> aliases;
+  final List<String> tags;
+  final List<RpSetupDraftSection> sections;
+
+  const RpSetupDraftEntry({
+    required this.entryId,
+    required this.entryType,
+    required this.semanticPath,
+    required this.title,
+    required this.displayLabel,
+    required this.summary,
+    required this.aliases,
+    required this.tags,
+    required this.sections,
+  });
+
+  factory RpSetupDraftEntry.fromJson(Map<String, dynamic> json) {
+    return RpSetupDraftEntry(
+      entryId: json['entry_id'] as String,
+      entryType: json['entry_type'] as String,
+      semanticPath: json['semantic_path'] as String,
+      title: json['title'] as String,
+      displayLabel: json['display_label'] as String?,
+      summary: json['summary'] as String?,
+      aliases: (json['aliases'] as List? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      tags: (json['tags'] as List? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      sections: (json['sections'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                RpSetupDraftSection.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(),
+    );
+  }
+}
+
+class RpSetupStageDraftBlock {
+  final String stageId;
+  final List<RpSetupDraftEntry> entries;
+  final String? notes;
+
+  const RpSetupStageDraftBlock({
+    required this.stageId,
+    required this.entries,
+    required this.notes,
+  });
+
+  factory RpSetupStageDraftBlock.fromJson(Map<String, dynamic> json) {
+    return RpSetupStageDraftBlock(
+      stageId: json['stage_id'] as String,
+      entries: (json['entries'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                RpSetupDraftEntry.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(),
+      notes: json['notes'] as String?,
     );
   }
 }
@@ -181,8 +314,9 @@ class RpReadinessStatus {
 
   factory RpReadinessStatus.fromJson(Map<String, dynamic> json) {
     return RpReadinessStatus(
-      stepReadiness: (json['step_readiness'] as Map? ?? const {})
-          .map((key, value) => MapEntry(key.toString(), value.toString())),
+      stepReadiness: (json['step_readiness'] as Map? ?? const {}).map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      ),
       blockingIssues: (json['blocking_issues'] as List? ?? const [])
           .map((item) => item.toString())
           .toList(),
@@ -256,7 +390,9 @@ class RpActivationCheckResult {
           .map((item) => item.toString())
           .toList(),
       handoff: json['handoff'] is Map<String, dynamic>
-          ? RpActivationHandoff.fromJson(json['handoff'] as Map<String, dynamic>)
+          ? RpActivationHandoff.fromJson(
+              json['handoff'] as Map<String, dynamic>,
+            )
           : null,
     );
   }
@@ -268,7 +404,11 @@ class RpSetupWorkspace {
   final String mode;
   final String workspaceState;
   final String currentStep;
+  final String? currentStage;
+  final List<String> stagePlan;
   final List<RpSetupStepState> stepStates;
+  final List<RpSetupStageState> stageStates;
+  final Map<String, RpSetupStageDraftBlock> stageDraftBlocks;
   final Map<String, dynamic>? storyConfigDraft;
   final Map<String, dynamic>? writingContractDraft;
   final Map<String, dynamic>? foundationDraft;
@@ -288,7 +428,11 @@ class RpSetupWorkspace {
     required this.mode,
     required this.workspaceState,
     required this.currentStep,
+    required this.currentStage,
+    required this.stagePlan,
     required this.stepStates,
+    required this.stageStates,
+    required this.stageDraftBlocks,
     required this.storyConfigDraft,
     required this.writingContractDraft,
     required this.foundationDraft,
@@ -306,6 +450,9 @@ class RpSetupWorkspace {
   List<RpSetupCommitProposal> get pendingCommitProposals =>
       commitProposals.where((proposal) => proposal.isPendingReview).toList();
 
+  RpSetupStageDraftBlock? stageBlock(String stageId) =>
+      stageDraftBlocks[stageId];
+
   factory RpSetupWorkspace.fromJson(Map<String, dynamic> json) {
     return RpSetupWorkspace(
       workspaceId: json['workspace_id'] as String,
@@ -313,10 +460,32 @@ class RpSetupWorkspace {
       mode: json['mode'] as String,
       workspaceState: json['workspace_state'] as String,
       currentStep: json['current_step'] as String,
+      currentStage: json['current_stage'] as String?,
+      stagePlan: (json['stage_plan'] as List? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
       stepStates: (json['step_states'] as List? ?? const [])
           .whereType<Map>()
-          .map((item) => RpSetupStepState.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) =>
+                RpSetupStepState.fromJson(Map<String, dynamic>.from(item)),
+          )
           .toList(),
+      stageStates: (json['stage_states'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                RpSetupStageState.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(),
+      stageDraftBlocks: (json['draft_blocks'] as Map? ?? const {}).map(
+        (key, value) => MapEntry(
+          key.toString(),
+          RpSetupStageDraftBlock.fromJson(
+            Map<String, dynamic>.from(value as Map),
+          ),
+        ),
+      ),
       storyConfigDraft: json['story_config_draft'] is Map
           ? Map<String, dynamic>.from(json['story_config_draft'] as Map)
           : null,
@@ -335,16 +504,26 @@ class RpSetupWorkspace {
           .toList(),
       commitProposals: (json['commit_proposals'] as List? ?? const [])
           .whereType<Map>()
-          .map((item) => RpSetupCommitProposal.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) =>
+                RpSetupCommitProposal.fromJson(Map<String, dynamic>.from(item)),
+          )
           .toList(),
       acceptedCommits: (json['accepted_commits'] as List? ?? const [])
           .whereType<Map>()
-          .map((item) => RpSetupAcceptedCommit.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) =>
+                RpSetupAcceptedCommit.fromJson(Map<String, dynamic>.from(item)),
+          )
           .toList(),
       retrievalIngestionJobs:
           (json['retrieval_ingestion_jobs'] as List? ?? const [])
               .whereType<Map>()
-              .map((item) => RpSetupIngestionJob.fromJson(Map<String, dynamic>.from(item)))
+              .map(
+                (item) => RpSetupIngestionJob.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
               .toList(),
       readinessStatus: RpReadinessStatus.fromJson(
         Map<String, dynamic>.from(json['readiness_status'] as Map? ?? const {}),

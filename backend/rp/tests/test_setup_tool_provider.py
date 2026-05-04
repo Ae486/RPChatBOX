@@ -589,6 +589,184 @@ async def test_setup_tool_provider_commit_proposal_routes_stage_refs_to_stage_co
 
 
 @pytest.mark.asyncio
+async def test_setup_tool_provider_truth_index_search_reads_committed_snapshot_only(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-truth-index-tool-search-1",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            entries=[
+                SetupDraftEntry(
+                    entry_id="race_elf",
+                    entry_type="race",
+                    semantic_path="world_background.race.elf",
+                    title="Elf",
+                    summary="Committed moonlit forest cities.",
+                    aliases=["Eldar"],
+                    tags=["forest"],
+                    sections=[
+                        SetupDraftSection(
+                            section_id="summary",
+                            title="Summary",
+                            kind="text",
+                            content={"text": "Committed moonlit forest cities."},
+                            retrieval_role="summary",
+                        )
+                    ],
+                )
+            ],
+        ),
+    )
+    proposal = workspace_service.propose_stage_commit(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        target_draft_refs=["stage:world_background:race_elf"],
+    )
+    workspace_service.accept_commit(
+        workspace_id=workspace.workspace_id,
+        proposal_id=proposal.proposal_id,
+    )
+    workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            entries=[
+                SetupDraftEntry(
+                    entry_id="race_dragon",
+                    entry_type="race",
+                    semantic_path="world_background.race.dragon",
+                    title="Dragon",
+                    summary="Uncommitted sky rulers.",
+                    sections=[
+                        SetupDraftSection(
+                            section_id="summary",
+                            title="Summary",
+                            kind="text",
+                            content={"text": "Uncommitted sky rulers."},
+                        )
+                    ],
+                )
+            ],
+        ),
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.truth_index.search",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "query": "Eldar",
+            "filters": {"tags": ["forest"]},
+            "limit": 5,
+        },
+    )
+
+    payload = json.loads(result["content"])
+    refs = [item["ref"] for item in payload["items"]]
+    assert result["success"] is True
+    assert refs[0] == "foundation:world_background:race_elf"
+    assert "foundation:world_background:race_elf:summary" in refs
+    assert "race_dragon" not in json.dumps(payload, sort_keys=True)
+    assert payload["items"][0]["source"] == "committed_snapshot"
+
+
+@pytest.mark.asyncio
+async def test_setup_tool_provider_truth_index_read_refs_returns_exact_payload(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-truth-index-tool-read-1",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            entries=[
+                SetupDraftEntry(
+                    entry_id="race_elf",
+                    entry_type="race",
+                    semantic_path="world_background.race.elf",
+                    title="Elf",
+                    sections=[
+                        SetupDraftSection(
+                            section_id="summary",
+                            title="Summary",
+                            kind="text",
+                            content={"text": "Committed moonlit forest cities."},
+                            retrieval_role="summary",
+                        )
+                    ],
+                )
+            ],
+        ),
+    )
+    proposal = workspace_service.propose_stage_commit(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        target_draft_refs=["stage:world_background:race_elf"],
+    )
+    accepted, _ = workspace_service.accept_commit(
+        workspace_id=workspace.workspace_id,
+        proposal_id=proposal.proposal_id,
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.truth_index.read_refs",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "refs": [
+                "foundation:world_background:race_elf:summary",
+                "stage:world_background:race_elf",
+                "foundation:world_background:missing",
+            ],
+            "detail": "full",
+            "max_chars": 1200,
+        },
+    )
+
+    payload = json.loads(result["content"])
+    found = {item["ref"]: item for item in payload["items"] if item["found"]}
+    assert result["success"] is True
+    assert payload["success"] is False
+    assert payload["missing_refs"] == ["foundation:world_background:missing"]
+    assert (
+        found["foundation:world_background:race_elf:summary"]["commit_id"]
+        == accepted.commit_id
+    )
+    assert found["foundation:world_background:race_elf:summary"]["payload"][
+        "content"
+    ] == {"text": "Committed moonlit forest cities."}
+    assert (
+        found["stage:world_background:race_elf"]["semantic_path"]
+        == "world_background.race.elf"
+    )
+
+
+@pytest.mark.asyncio
 async def test_setup_tool_provider_draft_ref_full_detail_honors_max_chars(
     retrieval_session,
 ):

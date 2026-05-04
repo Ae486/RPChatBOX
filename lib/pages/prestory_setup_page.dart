@@ -5,6 +5,7 @@ import '../chat_ui/owui/components/owui_app_bar.dart';
 import '../chat_ui/owui/components/owui_card.dart';
 import '../chat_ui/owui/components/owui_scaffold.dart';
 import '../chat_ui/owui/components/owui_snack_bar.dart';
+import '../chat_ui/owui/owui_icons.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';
 import '../pages/longform_story_page.dart';
 import '../pages/rp_model_config_page.dart';
@@ -172,7 +173,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
 
     final nextStage = _preferredStageForWorkspace(workspace);
     if (!mounted) return;
-    if (!force && _selectedStage != _SetupWizardStage.activate) {
+    if (!force && !_isSelectedStageOutOfPlan(workspace)) {
       return;
     }
     setState(() {
@@ -865,7 +866,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         workspaceId: workspace.workspaceId,
         modelId: modelId,
         providerId: modelWithProvider.provider.id,
-        targetStep: _targetStepForStage(_selectedStage, workspace),
+        targetStep: _targetStepForSelectedStage(workspace),
         history: history,
         userPrompt: userPrompt,
       )) {
@@ -1168,7 +1169,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                       Text(
                         workspace == null
                             ? '先创建一个 prestory workspace'
-                            : '当前向导步骤: ${_selectedStage.label} · workspace state: ${workspace.workspaceState}',
+                            : '当前阶段: ${_currentStageLabel(workspace)} · 选中视图: ${_selectedStage.label} · workspace state: ${workspace.workspaceState}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
                         ),
@@ -1201,7 +1202,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                   : entries.isEmpty
                   ? Center(
                       child: Text(
-                        '当前还没有对话。发送第一条指令开始收敛 ${_selectedStage.label}。',
+                        '当前还没有对话。发送第一条指令开始收敛 ${_currentStageLabel(workspace)}。',
                         style: Theme.of(context).textTheme.bodyMedium,
                         textAlign: TextAlign.center,
                       ),
@@ -1259,8 +1260,8 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                           minLines: 2,
                           maxLines: 6,
                           decoration: InputDecoration(
-                            labelText: '给 SetupAgent 的当前 step 指令',
-                            hintText: _stagePromptHint(_selectedStage),
+                            labelText: '给 SetupAgent 的当前阶段指令',
+                            hintText: _stagePromptHintForWorkspace(workspace!),
                             suffixIcon: _isSending
                                 ? const Padding(
                                     padding: EdgeInsets.all(12),
@@ -1411,7 +1412,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                             (item) => DropdownMenuItem<String>(
                               value: item.workspaceId,
                               child: Text(
-                                '${item.storyId} · ${item.currentStep}',
+                                '${item.storyId} · ${item.currentStage ?? item.currentStep} · ${item.workspaceState}',
                               ),
                             ),
                           )
@@ -1506,7 +1507,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
                     if (workspace != null) ...[
                       SizedBox(height: spacing.md),
                       Text(
-                        '当前聚焦：${_selectedStage.label}',
+                        '当前聚焦：${_currentStageLabel(workspace)}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
                         ),
@@ -1517,9 +1518,11 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
               ),
               SizedBox(height: spacing.lg),
               if (workspace != null) ...[
-                _buildSidebarStageMap(workspace),
+                _buildWorkspaceOverviewCard(workspace),
                 SizedBox(height: spacing.lg),
-                _buildCurrentStagePanel(workspace),
+                _buildStageRailCard(workspace),
+                SizedBox(height: spacing.lg),
+                _buildStageInspectorCard(workspace),
               ] else
                 OwuiCard(
                   padding: EdgeInsets.all(spacing.lg),
@@ -1665,159 +1668,274 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
     );
   }
 
-  Widget _buildSidebarStageMap(RpSetupWorkspace workspace) {
+  Widget _buildWorkspaceOverviewCard(RpSetupWorkspace workspace) {
     final spacing = context.owuiSpacing;
-    final items = _SetupWizardStage.values;
-
-    return _buildSidebarSectionCard(
-      title: '流程地图',
-      subtitle: '一次只看一个步骤。当前步骤高亮，后续步骤可以手动切换查看。',
-      children: [
-        Wrap(
-          spacing: spacing.sm,
-          runSpacing: spacing.sm,
-          children: items
-              .map(
-                (item) => ChoiceChip(
-                  label: Text(
-                    '${item.label} · ${_stageReadyLabel(item, workspace)}',
-                  ),
-                  selected: _selectedStage == item,
-                  onSelected: (_) {
-                    setState(() {
-                      _selectedStage = item;
-                    });
-                  },
+    final colors = context.owuiColors;
+    final stageId = _workspaceCurrentStageId(workspace);
+    return OwuiCard(
+      padding: EdgeInsets.all(spacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Workspace Overview',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      '后端返回的 stage plan、stage state 和 draft blocks 直接驱动页面，不再写死在前端。',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
-              )
-              .toList(),
-        ),
+              ),
+              Chip(label: Text(_currentStageLabel(workspace))),
+            ],
+          ),
+          SizedBox(height: spacing.md),
+          Wrap(
+            spacing: spacing.sm,
+            runSpacing: spacing.sm,
+            children: [
+              _buildMetricChip('Steps', workspace.stepStates.length),
+              _buildMetricChip('Stages', _stagePlanFor(workspace).length),
+              _buildMetricChip(
+                'Draft Blocks',
+                workspace.stageDraftBlocks.length,
+              ),
+              _buildMetricChip('Accepted', workspace.acceptedCommits.length),
+              _buildMetricChip(
+                'Proposals',
+                workspace.pendingCommitProposals.length,
+              ),
+              if (stageId != null)
+                Chip(
+                  label: Text('Stage ${_stageDisplayLabel(stageId)}'),
+                  visualDensity: VisualDensity.compact,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStageRailCard(RpSetupWorkspace workspace) {
+    final spacing = context.owuiSpacing;
+    final stages = _stagePlanFor(workspace);
+    return _buildSidebarSectionCard(
+      title: 'Stage Plan',
+      subtitle:
+          '从 workspace 的 stage_plan 读取顺序，卡片状态来自 stage_states 和 draft_blocks。',
+      children: [
+        if (stages.isEmpty)
+          const Text('当前 workspace 没有 stage plan。')
+        else
+          SizedBox(
+            height: 124,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: stages.length,
+              separatorBuilder: (_, __) => SizedBox(width: spacing.sm),
+              itemBuilder: (context, index) {
+                final stageId = stages[index];
+                return _buildStageRailItem(
+                  workspace: workspace,
+                  stageId: stageId,
+                  index: index,
+                );
+              },
+            ),
+          ),
       ],
     );
   }
 
-  _SetupWizardStage _preferredStageForWorkspace(RpSetupWorkspace workspace) {
-    if (workspace.workspaceState == 'activated') {
-      return _SetupWizardStage.activate;
-    }
-    switch (workspace.currentStep) {
-      case 'foundation':
-        return _characterFoundationEntries(workspace).isEmpty
-            ? _SetupWizardStage.worldBackground
-            : _SetupWizardStage.characterDesign;
-      case 'longform_blueprint':
-        return _SetupWizardStage.plotBlueprint;
-      case 'writing_contract':
-        return _SetupWizardStage.writerConfig;
-      case 'story_config':
-        return _SetupWizardStage.workerConfig;
-      default:
-        return _SetupWizardStage.worldBackground;
-    }
-  }
-
-  String _stageReadyLabel(_SetupWizardStage stage, RpSetupWorkspace workspace) {
-    switch (stage) {
-      case _SetupWizardStage.worldBackground:
-        return _worldFoundationEntries(workspace).isNotEmpty ? '已填写' : '待补充';
-      case _SetupWizardStage.characterDesign:
-        return _characterFoundationEntries(workspace).isNotEmpty
-            ? '已填写'
-            : '待补充';
-      case _SetupWizardStage.plotBlueprint:
-        return workspace.longformBlueprintDraft != null ? '已填写' : '待补充';
-      case _SetupWizardStage.writerConfig:
-        return workspace.writingContractDraft != null ? '已填写' : '待补充';
-      case _SetupWizardStage.workerConfig:
-        return workspace.storyConfigDraft != null ? '已填写' : '待补充';
-      case _SetupWizardStage.overview:
-        return workspace.acceptedCommits.isNotEmpty ? '可查看' : '待收敛';
-      case _SetupWizardStage.activate:
-        return (_lastActivationCheck?.ready ?? false) ||
-                workspace.workspaceState == 'ready_to_activate' ||
-                workspace.workspaceState == 'activated'
-            ? '可激活'
-            : '未就绪';
-    }
-  }
-
-  String _stagePromptHint(_SetupWizardStage stage) {
-    switch (stage) {
-      case _SetupWizardStage.worldBackground:
-        return '例如：先帮我补齐世界规则、地理背景和稳定设定。';
-      case _SetupWizardStage.characterDesign:
-        return '例如：继续收敛主角设定、关系和 voice seed。';
-      case _SetupWizardStage.plotBlueprint:
-        return '例如：请把核心冲突、章节推进和伏笔回收方向收敛清楚。';
-      case _SetupWizardStage.writerConfig:
-        return '例如：帮我明确 POV、文风、写作约束和任务写作规则。';
-      case _SetupWizardStage.workerConfig:
-        return '例如：帮我确定 model profile、worker profile 和 post-write preset。';
-      case _SetupWizardStage.overview:
-        return '例如：请帮我检查哪些部分已经可以提交 review，哪些还缺。';
-      case _SetupWizardStage.activate:
-        return '例如：请先检查当前是否已经满足激活条件。';
-    }
-  }
-
-  String? _targetStepForStage(
-    _SetupWizardStage stage,
-    RpSetupWorkspace workspace,
-  ) {
-    switch (stage) {
-      case _SetupWizardStage.worldBackground:
-      case _SetupWizardStage.characterDesign:
-        return 'foundation';
-      case _SetupWizardStage.plotBlueprint:
-        return 'longform_blueprint';
-      case _SetupWizardStage.writerConfig:
-        return 'writing_contract';
-      case _SetupWizardStage.workerConfig:
-        return 'story_config';
-      case _SetupWizardStage.overview:
-      case _SetupWizardStage.activate:
-        return workspace.currentStep;
-    }
-  }
-
-  Widget _buildCurrentStagePanel(RpSetupWorkspace workspace) {
+  Widget _buildStageRailItem({
+    required RpSetupWorkspace workspace,
+    required String stageId,
+    required int index,
+  }) {
     final spacing = context.owuiSpacing;
-    final panel = switch (_selectedStage) {
-      _SetupWizardStage.worldBackground => _buildSidebarSectionCard(
-        title: '世界观背景',
-        subtitle: '只看世界规则、背景设定和稳定的环境事实。',
-        children: _buildFoundationEntryWidgets(
+    final colors = context.owuiColors;
+    final selected = _stageIdFor(_selectedStage) == stageId;
+    final meta = _stageMetaFor(stageId);
+    final state = _stageStateLabel(workspace, stageId);
+    final bgColor = selected
+        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.09)
+        : colors.surfaceCard;
+    final borderColor = selected
+        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.28)
+        : colors.borderSubtle;
+
+    return SizedBox(
+      width: 184,
+      child: Material(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            final nextStage = _stageForId(stageId);
+            if (nextStage == null) return;
+            setState(() {
+              _selectedStage = nextStage;
+            });
+          },
+          child: Container(
+            padding: EdgeInsets.all(spacing.sm),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+              border: Border.all(color: borderColor),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary.withValues(
+                          alpha: selected ? 0.14 : 0.08,
+                        ),
+                        borderRadius: BorderRadius.circular(
+                          context.owuiRadius.rLg,
+                        ),
+                      ),
+                      child: Icon(
+                        meta.icon,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                    SizedBox(width: spacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            meta.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          SizedBox(height: spacing.xs),
+                          Text(
+                            '#${index + 1} · ${_stageDisplayLabel(stageId)}',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: spacing.sm),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Chip(
+                    label: Text(state),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStageInspectorCard(RpSetupWorkspace workspace) {
+    final stageId = _stageIdFor(_selectedStage);
+    final meta = _stageMetaFor(stageId);
+    final block = _stageBlockFor(workspace, stageId);
+    final spacing = context.owuiSpacing;
+    final stageBody = _buildStageBody(workspace, stageId, block);
+
+    return _buildSidebarSectionCard(
+      title: meta.title,
+      subtitle: meta.description,
+      children: [
+        Wrap(
+          spacing: spacing.sm,
+          runSpacing: spacing.sm,
+          children: [
+            Chip(
+              label: Text(_stageStateLabel(workspace, stageId)),
+              visualDensity: VisualDensity.compact,
+            ),
+            _buildMetricChip('Entries', block?.entries.length ?? 0),
+            _buildMetricChip(
+              'Sections',
+              block?.entries.fold<int>(
+                    0,
+                    (count, entry) => count + entry.sections.length,
+                  ) ??
+                  0,
+            ),
+            Chip(label: Text(stageId), visualDensity: VisualDensity.compact),
+          ],
+        ),
+        SizedBox(height: spacing.md),
+        ...stageBody,
+      ],
+    );
+  }
+
+  List<Widget> _buildStageBody(
+    RpSetupWorkspace workspace,
+    String stageId,
+    RpSetupStageDraftBlock? block,
+  ) {
+    final spacing = context.owuiSpacing;
+    final stage = _stageForId(stageId);
+    switch (stage) {
+      case _SetupWizardStage.worldBackground:
+        if (block != null && block.entries.isNotEmpty) {
+          return _buildStageDraftBlockWidgets(block);
+        }
+        return _buildFoundationEntryWidgets(
           _worldFoundationEntries(workspace),
           emptyText: '还没有世界观背景条目。',
-        ),
-      ),
-      _SetupWizardStage.characterDesign => _buildSidebarSectionCard(
-        title: '角色设定',
-        subtitle: '只看人物设定、人物背景和角色 voice seed 相关条目。',
-        children: _buildFoundationEntryWidgets(
+        );
+      case _SetupWizardStage.characterDesign:
+        if (block != null && block.entries.isNotEmpty) {
+          return _buildStageDraftBlockWidgets(block);
+        }
+        return _buildFoundationEntryWidgets(
           _characterFoundationEntries(workspace),
           emptyText: '还没有角色设定条目。',
-        ),
-      ),
-      _SetupWizardStage.plotBlueprint => _buildSidebarSectionCard(
-        title: '伏笔 / 剧情设计',
-        subtitle: '只看 premise、冲突、章节推进和伏笔回收方向。',
-        children: _buildBlueprintWidgets(workspace),
-      ),
-      _SetupWizardStage.writerConfig => _buildSidebarSectionCard(
-        title: '作家配置',
-        subtitle: '只看 POV、风格、写作约束和任务写作规则。',
-        children: _buildWritingContractWidgets(workspace),
-      ),
-      _SetupWizardStage.workerConfig => _buildSidebarSectionCard(
-        title: 'Worker 配置',
-        subtitle: '只看模型画像、worker画像和 post-write preset。',
-        children: _buildStoryConfigWidgets(workspace),
-      ),
-      _SetupWizardStage.overview => _buildSidebarSectionCard(
-        title: '全览 / Review',
-        subtitle: '在这里统一检查 setup 是否已经收敛到可激活状态。',
-        children: [
+        );
+      case _SetupWizardStage.plotBlueprint:
+        if (block != null && block.entries.isNotEmpty) {
+          return _buildStageDraftBlockWidgets(block);
+        }
+        return _buildBlueprintWidgets(workspace);
+      case _SetupWizardStage.writerConfig:
+        if (block != null && block.entries.isNotEmpty) {
+          return _buildStageDraftBlockWidgets(block);
+        }
+        return _buildWritingContractWidgets(workspace);
+      case _SetupWizardStage.workerConfig:
+        if (block != null && block.entries.isNotEmpty) {
+          return _buildStageDraftBlockWidgets(block);
+        }
+        return _buildStoryConfigWidgets(workspace);
+      case _SetupWizardStage.overview:
+        return [
           ..._buildOverviewWidgets(workspace),
           SizedBox(height: spacing.md),
           Text(
@@ -1838,12 +1956,9 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
           ),
           SizedBox(height: spacing.sm),
           ..._buildRetrievalOverviewWidgets(workspace),
-        ],
-      ),
-      _SetupWizardStage.activate => _buildSidebarSectionCard(
-        title: 'Activate',
-        subtitle: '最后一步才显示激活入口。',
-        children: [
+        ];
+      case _SetupWizardStage.activate:
+        return [
           Row(
             children: [
               OutlinedButton.icon(
@@ -1880,61 +1995,260 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
               ),
             ],
           ],
+        ];
+      default:
+        if (block != null && block.entries.isNotEmpty) {
+          return _buildStageDraftBlockWidgets(block);
+        }
+        return const [Text('当前 stage 还没有可展示的内容。')];
+    }
+  }
+
+  List<Widget> _buildStageDraftBlockWidgets(RpSetupStageDraftBlock block) {
+    final spacing = context.owuiSpacing;
+    final widgets = <Widget>[];
+    if (block.notes != null && block.notes!.trim().isNotEmpty) {
+      widgets.add(
+        Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(spacing.md),
+          decoration: BoxDecoration(
+            color: context.owuiColors.surface2,
+            borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+            border: Border.all(color: context.owuiColors.borderSubtle),
+          ),
+          child: Text(block.notes!),
+        ),
+      );
+      widgets.add(SizedBox(height: spacing.md));
+    }
+
+    if (block.entries.isEmpty) {
+      widgets.add(const Text('当前 stage block 还没有条目。'));
+      return widgets;
+    }
+
+    for (final entry in block.entries) {
+      widgets.add(_buildDraftEntryCard(entry));
+      widgets.add(SizedBox(height: spacing.md));
+    }
+    widgets.removeLast();
+    return widgets;
+  }
+
+  Widget _buildDraftEntryCard(RpSetupDraftEntry entry) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.only(bottom: spacing.sm),
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surfaceCard,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.title,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      entry.displayLabel ?? entry.semanticPath,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Chip(
+                label: Text(entry.entryType),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          if (entry.summary != null && entry.summary!.trim().isNotEmpty) ...[
+            SizedBox(height: spacing.sm),
+            Text(entry.summary!),
+          ],
+          if (entry.aliases.isNotEmpty || entry.tags.isNotEmpty) ...[
+            SizedBox(height: spacing.sm),
+            Wrap(
+              spacing: spacing.xs,
+              runSpacing: spacing.xs,
+              children: [
+                ...entry.aliases.map(
+                  (alias) => Chip(
+                    label: Text(alias),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                ...entry.tags.map(
+                  (tag) => Chip(
+                    label: Text(tag),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (entry.sections.isNotEmpty) ...[
+            SizedBox(height: spacing.md),
+            ...entry.sections.map((section) => _buildDraftSectionCard(section)),
+          ],
         ],
       ),
-    };
-
-    return Column(
-      children: [
-        panel,
-        SizedBox(height: spacing.lg),
-        _buildStageNavigation(),
-      ],
     );
   }
 
-  Widget _buildStageNavigation() {
+  Widget _buildDraftSectionCard(RpSetupDraftSection section) {
     final spacing = context.owuiSpacing;
-    final stages = _SetupWizardStage.values;
-    final currentIndex = stages.indexOf(_selectedStage);
-    final prevStage = currentIndex > 0 ? stages[currentIndex - 1] : null;
-    final nextStage = currentIndex < stages.length - 1
-        ? stages[currentIndex + 1]
-        : null;
-    return OwuiCard(
-      padding: EdgeInsets.all(spacing.md),
-      child: Row(
+    final colors = context.owuiColors;
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.only(bottom: spacing.sm),
+      padding: EdgeInsets.all(spacing.sm),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: prevStage == null
-                  ? null
-                  : () {
-                      setState(() {
-                        _selectedStage = prevStage;
-                      });
-                    },
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('上一步'),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  section.title,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              Chip(
+                label: Text(section.retrievalRole),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
           ),
-          SizedBox(width: spacing.md),
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: nextStage == null
-                  ? null
-                  : () {
-                      setState(() {
-                        _selectedStage = nextStage;
-                      });
-                    },
-              icon: const Icon(Icons.arrow_forward),
-              label: Text(nextStage == null ? '完成' : '下一步'),
+          if (section.tags.isNotEmpty) ...[
+            SizedBox(height: spacing.xs),
+            Wrap(
+              spacing: spacing.xs,
+              runSpacing: spacing.xs,
+              children: section.tags
+                  .map(
+                    (tag) => Chip(
+                      label: Text(tag),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  )
+                  .toList(),
             ),
-          ),
+          ],
+          SizedBox(height: spacing.sm),
+          _buildSectionContent(section),
         ],
       ),
     );
+  }
+
+  Widget _buildSectionContent(RpSetupDraftSection section) {
+    final content = section.content;
+    final spacing = context.owuiSpacing;
+    switch (section.kind) {
+      case 'text':
+        final text = content['text']?.toString().trim() ?? '';
+        return Text(text.isEmpty ? '暂无内容' : text);
+      case 'list':
+        final items = (content['items'] as List? ?? const [])
+            .map((item) => item.toString())
+            .toList();
+        if (items.isEmpty) {
+          return const Text('暂无条目');
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: items
+              .map(
+                (item) => Padding(
+                  padding: EdgeInsets.only(bottom: spacing.xs),
+                  child: Text('• $item'),
+                ),
+              )
+              .toList(),
+        );
+      case 'key_value':
+        final values = content['values'];
+        if (values is! Map || values.isEmpty) {
+          return const Text('暂无键值内容');
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: values.entries
+              .map(
+                (entry) => Padding(
+                  padding: EdgeInsets.only(bottom: spacing.xs),
+                  child: Text('${entry.key}: ${entry.value}'),
+                ),
+              )
+              .toList(),
+        );
+      default:
+        return Text(content.toString());
+    }
+  }
+
+  _SetupWizardStage _preferredStageForWorkspace(RpSetupWorkspace workspace) {
+    if (workspace.workspaceState == 'activated') {
+      return _SetupWizardStage.activate;
+    }
+    final currentStageId = workspace.currentStage;
+    if (currentStageId != null) {
+      final stage = _stageForId(currentStageId);
+      if (stage != null) {
+        return stage;
+      }
+    }
+    switch (workspace.currentStep) {
+      case 'foundation':
+        return _characterFoundationEntries(workspace).isEmpty
+            ? _SetupWizardStage.worldBackground
+            : _SetupWizardStage.characterDesign;
+      case 'longform_blueprint':
+        return _SetupWizardStage.plotBlueprint;
+      case 'writing_contract':
+        return _SetupWizardStage.writerConfig;
+      case 'story_config':
+        return _SetupWizardStage.workerConfig;
+      default:
+        return _SetupWizardStage.worldBackground;
+    }
+  }
+
+  bool _isSelectedStageOutOfPlan(RpSetupWorkspace workspace) {
+    final currentStageId = _stageIdFor(_selectedStage);
+    final plan = _stagePlanFor(workspace);
+    if (plan.isEmpty) return true;
+    return !plan.contains(currentStageId);
+  }
+
+  String? _targetStepForSelectedStage(RpSetupWorkspace workspace) {
+    final stageId = _stageIdFor(_selectedStage);
+    if (workspace.currentStage == stageId) {
+      return null;
+    }
+    return _stageMetaFor(stageId).legacyStepId ?? workspace.currentStep;
   }
 
   List<Map<String, dynamic>> _foundationEntries(RpSetupWorkspace workspace) {
@@ -2131,6 +2445,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       Text('Story: ${workspace.storyId}'),
       Text('Mode: ${workspace.mode}'),
       Text('Workspace State: ${workspace.workspaceState}'),
+      Text('Current Stage: ${workspace.currentStage ?? 'n/a'}'),
       Text('Current Step: ${workspace.currentStep}'),
       Text('Version: ${workspace.version}'),
       if (workspace.activatedStorySessionId != null)
@@ -2143,6 +2458,28 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
             .map((step) => Chip(label: Text('${step.stepId} · ${step.state}')))
             .toList(),
       ),
+      if (workspace.stageStates.isNotEmpty) ...[
+        SizedBox(height: spacing.md),
+        Wrap(
+          spacing: spacing.sm,
+          runSpacing: spacing.sm,
+          children: workspace.stageStates
+              .map(
+                (stage) => Chip(
+                  label: Text('${stage.stageId} · ${stage.state}'),
+                  visualDensity: VisualDensity.compact,
+                ),
+              )
+              .toList(),
+        ),
+      ],
+      if (workspace.stagePlan.isNotEmpty) ...[
+        SizedBox(height: spacing.md),
+        Text(
+          'Stage Plan: ${workspace.stagePlan.map(_stageDisplayLabel).join(' → ')}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
       SizedBox(height: spacing.md),
       Text('Accepted Commits', style: Theme.of(context).textTheme.titleSmall),
       SizedBox(height: spacing.sm),
@@ -3175,6 +3512,407 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       ),
     );
   }
+
+  List<String> _stagePlanFor(RpSetupWorkspace workspace) {
+    if (workspace.stagePlan.isNotEmpty) {
+      return workspace.stagePlan;
+    }
+    return _legacyStagePlan();
+  }
+
+  String? _workspaceCurrentStageId(RpSetupWorkspace workspace) {
+    return workspace.currentStage ?? _stageIdFor(_selectedStage);
+  }
+
+  String _currentStageLabel(RpSetupWorkspace workspace) {
+    final stageId = _workspaceCurrentStageId(workspace);
+    if (stageId == null) {
+      return _selectedStage.label;
+    }
+    return _stageDisplayLabel(stageId);
+  }
+
+  String _stagePromptHintForWorkspace(RpSetupWorkspace workspace) {
+    final stageId = _stageIdFor(_selectedStage);
+    return _stageMetaFor(stageId).promptHint;
+  }
+
+  String _stageDisplayLabel(String stageId) {
+    return _stageMetaFor(stageId).title;
+  }
+
+  String _stageStateLabel(RpSetupWorkspace workspace, String stageId) {
+    final state = _stageStateFor(workspace, stageId);
+    if (state != null) {
+      switch (state.state) {
+        case 'discussing':
+          return '讨论中';
+        case 'review_pending':
+          return '待 Review';
+        case 'ready_for_commit':
+          return '待 Commit';
+        case 'frozen':
+          return '已冻结';
+        default:
+          return state.state;
+      }
+    }
+
+    final block = _stageBlockFor(workspace, stageId);
+    if (block != null && block.entries.isNotEmpty) {
+      return '已填写';
+    }
+    if (stageId == 'overview') {
+      return '待收敛';
+    }
+    if (stageId == 'activate') {
+      return (_lastActivationCheck?.ready ?? false) ||
+              workspace.workspaceState == 'ready_to_activate' ||
+              workspace.workspaceState == 'activated'
+          ? '可激活'
+          : '未就绪';
+    }
+    return '待补充';
+  }
+
+  RpSetupStageState? _stageStateFor(
+    RpSetupWorkspace workspace,
+    String stageId,
+  ) {
+    for (final state in workspace.stageStates) {
+      if (state.stageId == stageId) {
+        return state;
+      }
+    }
+    return null;
+  }
+
+  RpSetupStageDraftBlock? _stageBlockFor(
+    RpSetupWorkspace workspace,
+    String stageId,
+  ) {
+    final block = workspace.stageBlock(stageId);
+    if (block != null) {
+      return block;
+    }
+    return _legacyStageBlockFor(workspace, stageId);
+  }
+
+  RpSetupStageDraftBlock? _legacyStageBlockFor(
+    RpSetupWorkspace workspace,
+    String stageId,
+  ) {
+    switch (stageId) {
+      case 'world_background':
+        final entries = _worldFoundationEntries(
+          workspace,
+        ).map(_legacyFoundationEntryToDraftEntry).toList();
+        if (entries.isEmpty) return null;
+        return RpSetupStageDraftBlock(
+          stageId: stageId,
+          entries: entries,
+          notes: null,
+        );
+      case 'character_design':
+        final entries = _characterFoundationEntries(
+          workspace,
+        ).map(_legacyFoundationEntryToDraftEntry).toList();
+        if (entries.isEmpty) return null;
+        return RpSetupStageDraftBlock(
+          stageId: stageId,
+          entries: entries,
+          notes: null,
+        );
+      case 'plot_blueprint':
+        final blueprint = workspace.longformBlueprintDraft;
+        if (blueprint == null) return null;
+        return RpSetupStageDraftBlock(
+          stageId: stageId,
+          entries: [
+            RpSetupDraftEntry(
+              entryId: 'longform_blueprint',
+              entryType: 'plot_blueprint',
+              semanticPath: 'plot_blueprint',
+              title: '伏笔 / 剧情设计',
+              displayLabel: 'longform_blueprint',
+              summary: blueprint['premise']?.toString(),
+              aliases: const [],
+              tags: const ['legacy'],
+              sections: [
+                RpSetupDraftSection(
+                  sectionId: 'premise',
+                  title: 'Premise',
+                  kind: 'text',
+                  content: {'text': blueprint['premise']?.toString() ?? ''},
+                  retrievalRole: 'summary',
+                  tags: const ['legacy'],
+                ),
+                RpSetupDraftSection(
+                  sectionId: 'conflict',
+                  title: 'Central Conflict',
+                  kind: 'text',
+                  content: {
+                    'text': blueprint['central_conflict']?.toString() ?? '',
+                  },
+                  retrievalRole: 'detail',
+                  tags: const ['legacy'],
+                ),
+                RpSetupDraftSection(
+                  sectionId: 'chapter_strategy',
+                  title: 'Chapter Strategy',
+                  kind: 'text',
+                  content: {
+                    'text': blueprint['chapter_strategy']?.toString() ?? '',
+                  },
+                  retrievalRole: 'detail',
+                  tags: const ['legacy'],
+                ),
+              ],
+            ),
+          ],
+          notes: blueprint['notes']?.toString(),
+        );
+      case 'writer_config':
+        final contract = workspace.writingContractDraft;
+        if (contract == null) return null;
+        return RpSetupStageDraftBlock(
+          stageId: stageId,
+          entries: [
+            RpSetupDraftEntry(
+              entryId: 'writing_contract',
+              entryType: 'writer_config',
+              semanticPath: 'writer_config',
+              title: '作家配置',
+              displayLabel: 'writing_contract',
+              summary: _legacyListSummary(contract['style_rules']),
+              aliases: const [],
+              tags: const ['legacy'],
+              sections: [
+                RpSetupDraftSection(
+                  sectionId: 'pov_rules',
+                  title: 'POV Rules',
+                  kind: 'list',
+                  content: {'items': contract['pov_rules'] ?? const []},
+                  retrievalRole: 'rule',
+                  tags: const ['legacy'],
+                ),
+                RpSetupDraftSection(
+                  sectionId: 'style_rules',
+                  title: 'Style Rules',
+                  kind: 'list',
+                  content: {'items': contract['style_rules'] ?? const []},
+                  retrievalRole: 'rule',
+                  tags: const ['legacy'],
+                ),
+                RpSetupDraftSection(
+                  sectionId: 'writing_constraints',
+                  title: 'Writing Constraints',
+                  kind: 'list',
+                  content: {
+                    'items': contract['writing_constraints'] ?? const [],
+                  },
+                  retrievalRole: 'rule',
+                  tags: const ['legacy'],
+                ),
+              ],
+            ),
+          ],
+          notes: contract['notes']?.toString(),
+        );
+      case 'worker_config':
+        final config = workspace.storyConfigDraft;
+        if (config == null) return null;
+        return RpSetupStageDraftBlock(
+          stageId: stageId,
+          entries: [
+            RpSetupDraftEntry(
+              entryId: 'story_config',
+              entryType: 'worker_config',
+              semanticPath: 'worker_config',
+              title: 'Worker 配置',
+              displayLabel: 'story_config',
+              summary: config['model_profile_ref']?.toString(),
+              aliases: const [],
+              tags: const ['legacy'],
+              sections: [
+                RpSetupDraftSection(
+                  sectionId: 'model_profile',
+                  title: 'Model Profile',
+                  kind: 'text',
+                  content: {
+                    'text': config['model_profile_ref']?.toString() ?? '',
+                  },
+                  retrievalRole: 'detail',
+                  tags: const ['legacy'],
+                ),
+                RpSetupDraftSection(
+                  sectionId: 'worker_profile',
+                  title: 'Worker Profile',
+                  kind: 'text',
+                  content: {
+                    'text': config['worker_profile_ref']?.toString() ?? '',
+                  },
+                  retrievalRole: 'detail',
+                  tags: const ['legacy'],
+                ),
+                RpSetupDraftSection(
+                  sectionId: 'post_write_policy',
+                  title: 'Post Write Preset',
+                  kind: 'text',
+                  content: {
+                    'text':
+                        config['post_write_policy_preset']?.toString() ?? '',
+                  },
+                  retrievalRole: 'detail',
+                  tags: const ['legacy'],
+                ),
+              ],
+            ),
+          ],
+          notes: config['notes']?.toString(),
+        );
+      default:
+        return null;
+    }
+  }
+
+  RpSetupDraftEntry _legacyFoundationEntryToDraftEntry(
+    Map<String, dynamic> entry,
+  ) {
+    final summary = _entrySummary(entry);
+    final content = entry['content'];
+    final details = content is Map ? content['details']?.toString() : null;
+    final notes = content is Map ? content['notes']?.toString() : null;
+    final sections = <RpSetupDraftSection>[
+      RpSetupDraftSection(
+        sectionId: 'summary',
+        title: '概要',
+        kind: 'text',
+        content: {'text': summary},
+        retrievalRole: 'summary',
+        tags: const ['legacy'],
+      ),
+    ];
+    if (details != null && details.trim().isNotEmpty) {
+      sections.add(
+        RpSetupDraftSection(
+          sectionId: 'details',
+          title: '细节',
+          kind: 'text',
+          content: {'text': details},
+          retrievalRole: 'detail',
+          tags: const ['legacy'],
+        ),
+      );
+    }
+    if (notes != null && notes.trim().isNotEmpty) {
+      sections.add(
+        RpSetupDraftSection(
+          sectionId: 'notes',
+          title: '备注',
+          kind: 'text',
+          content: {'text': notes},
+          retrievalRole: 'note',
+          tags: const ['legacy'],
+        ),
+      );
+    }
+    return RpSetupDraftEntry(
+      entryId:
+          entry['entry_id']?.toString() ?? entry['path']?.toString() ?? summary,
+      entryType: entry['domain']?.toString() ?? 'foundation',
+      semanticPath:
+          entry['path']?.toString() ?? entry['entry_id']?.toString() ?? summary,
+      title: entry['title']?.toString().isNotEmpty == true
+          ? entry['title'].toString()
+          : summary,
+      displayLabel: entry['path']?.toString(),
+      summary: summary,
+      aliases: [
+        if (entry['title']?.toString().isNotEmpty == true)
+          entry['title'].toString(),
+      ],
+      tags: (entry['tags'] as List? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      sections: sections,
+    );
+  }
+
+  String _legacyListSummary(dynamic value) {
+    final items = (value as List? ?? const [])
+        .map((item) => item.toString())
+        .where((item) => item.trim().isNotEmpty)
+        .toList();
+    if (items.isEmpty) {
+      return '暂无内容';
+    }
+    return items.join(' / ');
+  }
+
+  List<String> _legacyStagePlan() {
+    return _SetupWizardStage.values.map((stage) => _stageIdFor(stage)).toList();
+  }
+
+  _SetupStageMeta _stageMetaFor(String stageId) {
+    return _setupStageMetaById[stageId] ??
+        _SetupStageMeta(
+          stageId: stageId,
+          title: _humanizeStageId(stageId),
+          description: '当前阶段内容由后端 stage contract 提供。',
+          promptHint: '例如：请继续收敛当前阶段。',
+          legacyStepId: null,
+          icon: OwuiIcons.dashboard,
+        );
+  }
+
+  _SetupWizardStage? _stageForId(String stageId) {
+    switch (stageId) {
+      case 'world_background':
+        return _SetupWizardStage.worldBackground;
+      case 'character_design':
+        return _SetupWizardStage.characterDesign;
+      case 'plot_blueprint':
+        return _SetupWizardStage.plotBlueprint;
+      case 'writer_config':
+        return _SetupWizardStage.writerConfig;
+      case 'worker_config':
+        return _SetupWizardStage.workerConfig;
+      case 'overview':
+        return _SetupWizardStage.overview;
+      case 'activate':
+        return _SetupWizardStage.activate;
+      default:
+        return null;
+    }
+  }
+
+  String _stageIdFor(_SetupWizardStage stage) {
+    switch (stage) {
+      case _SetupWizardStage.worldBackground:
+        return 'world_background';
+      case _SetupWizardStage.characterDesign:
+        return 'character_design';
+      case _SetupWizardStage.plotBlueprint:
+        return 'plot_blueprint';
+      case _SetupWizardStage.writerConfig:
+        return 'writer_config';
+      case _SetupWizardStage.workerConfig:
+        return 'worker_config';
+      case _SetupWizardStage.overview:
+        return 'overview';
+      case _SetupWizardStage.activate:
+        return 'activate';
+    }
+  }
+
+  String _humanizeStageId(String stageId) {
+    return stageId
+        .split('_')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
+  }
 }
 
 enum _SetupWizardStage {
@@ -3190,6 +3928,99 @@ enum _SetupWizardStage {
 
   const _SetupWizardStage(this.label);
 }
+
+class _SetupStageMeta {
+  final String stageId;
+  final String title;
+  final String description;
+  final String promptHint;
+  final String? legacyStepId;
+  final IconData icon;
+
+  const _SetupStageMeta({
+    required this.stageId,
+    required this.title,
+    required this.description,
+    required this.promptHint,
+    required this.legacyStepId,
+    required this.icon,
+  });
+}
+
+const Map<String, _SetupStageMeta> _setupStageMetaById = {
+  'world_background': _SetupStageMeta(
+    stageId: 'world_background',
+    title: '世界观背景',
+    description: '只看世界规则、背景设定和稳定的环境事实。',
+    promptHint: '例如：先帮我补齐世界规则、地理背景和稳定设定。',
+    legacyStepId: 'foundation',
+    icon: OwuiIcons.globe,
+  ),
+  'character_design': _SetupStageMeta(
+    stageId: 'character_design',
+    title: '角色设定',
+    description: '只看人物设定、人物背景和角色 voice seed 相关条目。',
+    promptHint: '例如：继续收敛主角设定、关系和 voice seed。',
+    legacyStepId: 'foundation',
+    icon: OwuiIcons.person,
+  ),
+  'plot_blueprint': _SetupStageMeta(
+    stageId: 'plot_blueprint',
+    title: '伏笔 / 剧情设计',
+    description: '只看 premise、冲突、章节推进和伏笔回收方向。',
+    promptHint: '例如：请把核心冲突、章节推进和伏笔回收方向收敛清楚。',
+    legacyStepId: 'longform_blueprint',
+    icon: OwuiIcons.workflow,
+  ),
+  'writer_config': _SetupStageMeta(
+    stageId: 'writer_config',
+    title: '作家配置',
+    description: '只看 POV、风格、写作约束和任务写作规则。',
+    promptHint: '例如：帮我明确 POV、文风、写作约束和任务写作规则。',
+    legacyStepId: 'writing_contract',
+    icon: OwuiIcons.document,
+  ),
+  'worker_config': _SetupStageMeta(
+    stageId: 'worker_config',
+    title: 'Worker 配置',
+    description: '只看模型画像、worker 画像和 post-write preset。',
+    promptHint: '例如：帮我确定 model profile、worker profile 和 post-write preset。',
+    legacyStepId: 'story_config',
+    icon: OwuiIcons.tools,
+  ),
+  'overview': _SetupStageMeta(
+    stageId: 'overview',
+    title: '全览 / Review',
+    description: '统一检查 setup 是否已经收敛到可激活状态。',
+    promptHint: '例如：请帮我检查哪些部分已经可以提交 review，哪些还缺。',
+    legacyStepId: null,
+    icon: OwuiIcons.dashboard,
+  ),
+  'activate': _SetupStageMeta(
+    stageId: 'activate',
+    title: 'Activate',
+    description: '最后一步才显示激活入口。',
+    promptHint: '例如：请先检查当前是否已经满足激活条件。',
+    legacyStepId: null,
+    icon: OwuiIcons.checkCircle,
+  ),
+  'rp_interaction_contract': _SetupStageMeta(
+    stageId: 'rp_interaction_contract',
+    title: '互动契约',
+    description: '角色扮演模式的互动边界、玩家 agency 和对话规则。',
+    promptHint: '例如：请继续收敛角色扮演的互动契约和约束。',
+    legacyStepId: null,
+    icon: OwuiIcons.conversation,
+  ),
+  'trpg_rules': _SetupStageMeta(
+    stageId: 'trpg_rules',
+    title: 'TRPG 规则',
+    description: 'TRPG 模式的规则、判定、表格与机制说明。',
+    promptHint: '例如：请继续收敛 TRPG 的规则、判定和表格结构。',
+    legacyStepId: null,
+    icon: OwuiIcons.shield,
+  ),
+};
 
 enum _SetupChatEntryKind { user, assistant, system }
 

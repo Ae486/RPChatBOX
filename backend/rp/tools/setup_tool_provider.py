@@ -27,10 +27,15 @@ from rp.models.setup_drafts import (
 from rp.models.setup_handoff import SetupToolResult
 from rp.models.setup_handoff import SetupContextBuilderInput
 from rp.models.setup_stage import SetupStageId
+from rp.models.setup_truth_index import (
+    SetupTruthIndexReadInput,
+    SetupTruthIndexSearchInput,
+)
 from rp.models.setup_workspace import QuestionSeverity, SetupStepId
 from rp.services.memory_crud_serialization_service import MemoryCrudSerializationService
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_commit_warning_service import collect_setup_commit_warning_codes
+from rp.services.setup_truth_index_service import SetupTruthIndexService
 from rp.services.setup_workspace_service import SetupWorkspaceService
 
 
@@ -169,6 +174,7 @@ class SetupToolProvider:
         context_builder: _SetupContextBuilderLike,
         runtime_state_service: SetupAgentRuntimeStateService,
         serialization_service: MemoryCrudSerializationService | None = None,
+        truth_index_service: SetupTruthIndexService | None = None,
     ) -> None:
         self._workspace_service = workspace_service
         self._context_builder = context_builder
@@ -176,6 +182,7 @@ class SetupToolProvider:
         self._serialization_service = (
             serialization_service or MemoryCrudSerializationService()
         )
+        self._truth_index_service = truth_index_service or SetupTruthIndexService()
         self._schemas: dict[str, type[BaseModel]] = {
             "setup.discussion.update_state": SetupDiscussionUpdateStateInput,
             "setup.chunk.upsert": SetupChunkUpsertInput,
@@ -190,6 +197,8 @@ class SetupToolProvider:
             "setup.read.workspace": SetupReadWorkspaceInput,
             "setup.read.step_context": SetupReadStepContextInput,
             "setup.read.draft_refs": SetupDraftRefReadInput,
+            "setup.truth_index.search": SetupTruthIndexSearchInput,
+            "setup.truth_index.read_refs": SetupTruthIndexReadInput,
         }
 
     def list_tools(self) -> list[McpToolInfo]:
@@ -266,6 +275,16 @@ class SetupToolProvider:
                     "setup.read.draft_refs",
                     "Read exact setup draft details by compact-summary refs. Use after compaction when recovery_hints point to draft:story_config, draft:writing_contract, draft:longform_blueprint, draft:<stage_id>, stage:<stage_id>:<entry_id>, stage:<stage_id>:<entry_id>:<section_id>, or foundation:<entry_id>. Read-only; never use for prior-stage raw discussion or Memory OS state.",
                     SetupDraftRefReadInput,
+                ),
+                (
+                    "setup.truth_index.search",
+                    "Search accepted setup truth by lexical query, stage filters, entry types, tags, semantic path prefix, or commit id. Use when you need a small candidate ref list from committed snapshots. Target object: SetupTruthIndexSearchInput. Important fields: query, filters, limit.",
+                    SetupTruthIndexSearchInput,
+                ),
+                (
+                    "setup.truth_index.read_refs",
+                    "Read exact accepted setup truth by foundation:<stage_id>, foundation:<stage_id>:<entry_id>, foundation:<stage_id>:<entry_id>:<section_id>, or stage:<stage_id>:<entry_id> aliases. Use for exact committed truth lookup, not editable draft recovery. Target object: SetupTruthIndexReadInput. Important field: refs.",
+                    SetupTruthIndexReadInput,
                 ),
             )
         ]
@@ -518,6 +537,23 @@ class SetupToolProvider:
             )
         if tool_name == "setup.read.draft_refs":
             return self._read_draft_refs(input_model=input_model)
+        if tool_name == "setup.truth_index.search":
+            workspace = self._require_workspace(input_model.workspace_id)
+            return self._truth_index_service.search(
+                workspace=workspace,
+                query=input_model.query,
+                filters=input_model.filters,
+                limit=input_model.limit,
+            )
+        if tool_name == "setup.truth_index.read_refs":
+            workspace = self._require_workspace(input_model.workspace_id)
+            return self._truth_index_service.read_refs(
+                workspace=workspace,
+                refs=list(input_model.refs),
+                detail=input_model.detail,
+                max_chars=input_model.max_chars,
+                commit_id=input_model.commit_id,
+            )
         raise ValueError(f"Unknown setup tool: {tool_name}")
 
     def _read_draft_refs(
