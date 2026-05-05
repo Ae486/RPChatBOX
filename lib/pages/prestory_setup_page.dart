@@ -1739,21 +1739,17 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         if (stages.isEmpty)
           const Text('当前 workspace 没有 stage plan。')
         else
-          SizedBox(
-            height: 124,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: stages.length,
-              separatorBuilder: (_, __) => SizedBox(width: spacing.sm),
-              itemBuilder: (context, index) {
-                final stageId = stages[index];
-                return _buildStageRailItem(
+          Column(
+            children: [
+              for (var index = 0; index < stages.length; index++) ...[
+                _buildStageRailItem(
                   workspace: workspace,
-                  stageId: stageId,
+                  stageId: stages[index],
                   index: index,
-                );
-              },
-            ),
+                ),
+                if (index != stages.length - 1) SizedBox(height: spacing.sm),
+              ],
+            ],
           ),
       ],
     );
@@ -1777,7 +1773,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         : colors.borderSubtle;
 
     return SizedBox(
-      width: 184,
+      width: double.infinity,
       child: Material(
         color: bgColor,
         borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
