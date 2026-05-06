@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from rp.models.block_view import BlockSource, RpBlockView
+from rp.models.core_mutation import DirectCoreEditRequest
+from rp.models.archival_evolution import ArchivalEvolutionRequest
 from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import (
     MemoryBlockProposalSubmitRequest,
     MemoryListVersionsInput,
@@ -13,17 +16,20 @@ from rp.models.memory_crud import (
     ProvenanceResult,
     VersionListResult,
 )
+from rp.models.memory_inspection import RecallReviewCommand
 from rp.models.story_runtime import (
     ChapterWorkspaceSnapshot,
     StoryActivationResult,
     StorySession,
 )
 from .memory_inspection_read_service import MemoryInspectionReadService
+from .memory_inspection_service import MemoryInspectionService
 from .projection_read_service import ProjectionReadService
 from .provenance_read_service import ProvenanceReadService
 from .recall_scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
+from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from .rp_block_read_service import RpBlockReadService
 from .story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
@@ -52,6 +58,7 @@ class StoryRuntimeController:
         provenance_read_service: ProvenanceReadService,
         projection_read_service: ProjectionReadService,
         memory_inspection_read_service: MemoryInspectionReadService,
+        memory_inspection_service: MemoryInspectionService | None = None,
         rp_block_read_service: RpBlockReadService,
         story_block_mutation_service: StoryBlockMutationService | None = None,
         story_block_consumer_state_service: StoryBlockConsumerStateService
@@ -59,6 +66,7 @@ class StoryRuntimeController:
         recall_scene_transcript_ingestion_service: (
             RecallSceneTranscriptIngestionService | None
         ) = None,
+        runtime_profile_snapshot_service: RuntimeProfileSnapshotService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._story_activation_service = story_activation_service
@@ -66,12 +74,14 @@ class StoryRuntimeController:
         self._provenance_read_service = provenance_read_service
         self._projection_read_service = projection_read_service
         self._memory_inspection_read_service = memory_inspection_read_service
+        self._memory_inspection_service = memory_inspection_service
         self._rp_block_read_service = rp_block_read_service
         self._story_block_mutation_service = story_block_mutation_service
         self._story_block_consumer_state_service = story_block_consumer_state_service
         self._recall_scene_transcript_ingestion_service = (
             recall_scene_transcript_ingestion_service
         )
+        self._runtime_profile_snapshot_service = runtime_profile_snapshot_service
 
     def activate_workspace(self, *, workspace_id: str) -> StoryActivationResult:
         return self._story_activation_service.activate_workspace(
@@ -102,13 +112,24 @@ class StoryRuntimeController:
         session_id: str,
         patch: dict[str, Any],
     ) -> ChapterWorkspaceSnapshot:
+        if self._runtime_profile_snapshot_service is None:
+            raise RuntimeError("runtime_profile_snapshot_service_not_configured")
         updated_session = self._story_session_service.update_session(
             session_id=session_id,
             runtime_story_config_patch=patch,
         )
+        compiled = self._runtime_profile_snapshot_service.compile_snapshot(
+            story_id=updated_session.story_id,
+            session_id=updated_session.session_id,
+            mode=updated_session.mode,
+            created_from="story_runtime.runtime_config_patch",
+        )
+        self._runtime_profile_snapshot_service.publish_snapshot(
+            compiled.runtime_profile_snapshot_id
+        )
         self._story_session_service.commit()
         return self._story_session_service.build_chapter_snapshot(
-            session_id=session_id,
+            session_id=updated_session.session_id,
             chapter_index=updated_session.current_chapter_index,
         )
 
@@ -132,6 +153,29 @@ class StoryRuntimeController:
         self._require_session(session_id)
         return self._memory_inspection_read_service.list_projection_slots(
             session_id=session_id
+        )
+
+    def inspect_visible_memory(
+        self,
+        *,
+        session_id: str,
+        identity: MemoryRuntimeIdentity,
+        layers: list[str] | None = None,
+        domains: list[str] | None = None,
+        include_hidden_audit: bool = False,
+    ) -> dict[str, Any]:
+        session = self._require_session(session_id)
+        if identity.session_id != session.session_id:
+            raise ValueError("memory_inspection_identity_session_mismatch")
+        if identity.story_id != session.story_id:
+            raise ValueError("memory_inspection_identity_story_mismatch")
+        if self._memory_inspection_service is None:
+            raise RuntimeError("memory_inspection_service_not_configured")
+        return self._memory_inspection_service.inspect_visible_memory(
+            identity=identity,
+            layers=layers,
+            domains=domains,
+            include_hidden_audit=include_hidden_audit,
         )
 
     def list_memory_blocks(
@@ -165,9 +209,7 @@ class StoryRuntimeController:
         proposal_status_counts = self._count_values(
             str(item.get("status") or "unknown") for item in proposals
         )
-        dirty_consumers = [
-            item for item in consumers if bool(item.get("dirty"))
-        ]
+        dirty_consumers = [item for item in consumers if bool(item.get("dirty"))]
         return {
             "session_id": session.session_id,
             "story_id": session.story_id,
@@ -359,6 +401,76 @@ class StoryRuntimeController:
             return None
         return receipt.model_dump(mode="json")
 
+    async def direct_edit_memory_block(
+        self,
+        *,
+        session_id: str,
+        block_id: str,
+        payload: DirectCoreEditRequest,
+    ) -> dict | None:
+        if self._story_block_mutation_service is None:
+            raise RuntimeError("story_block_mutation_service_not_configured")
+        receipt = await self._story_block_mutation_service.direct_edit_block(
+            session_id=session_id,
+            block_id=block_id,
+            payload=payload,
+        )
+        if receipt is None:
+            return None
+        return receipt.model_dump(mode="json")
+
+    async def direct_edit_core_memory(
+        self,
+        *,
+        session_id: str,
+        payload: DirectCoreEditRequest,
+    ) -> dict:
+        session = self._require_session(session_id)
+        if payload.identity.session_id != session.session_id:
+            raise ValueError("memory_core_direct_edit_identity_session_mismatch")
+        if payload.identity.story_id != session.story_id:
+            raise ValueError("memory_core_direct_edit_identity_story_mismatch")
+        if self._memory_inspection_service is None:
+            raise RuntimeError("memory_inspection_service_not_configured")
+        receipt = await self._memory_inspection_service.direct_core_edit(
+            request=payload,
+        )
+        return receipt.model_dump(mode="json")
+
+    def review_recall_memory(
+        self,
+        *,
+        session_id: str,
+        command: RecallReviewCommand,
+    ) -> dict:
+        session = self._require_session(session_id)
+        if command.identity.session_id != session.session_id:
+            raise ValueError("memory_recall_review_identity_session_mismatch")
+        if command.identity.story_id != session.story_id:
+            raise ValueError("memory_recall_review_identity_story_mismatch")
+        if self._memory_inspection_service is None:
+            raise RuntimeError("memory_inspection_service_not_configured")
+        receipt = self._memory_inspection_service.review_recall(command=command)
+        self._story_session_service.commit()
+        return receipt.model_dump(mode="json")
+
+    def evolve_archival_memory(
+        self,
+        *,
+        session_id: str,
+        request: ArchivalEvolutionRequest,
+    ) -> dict:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("memory_archival_evolution_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("memory_archival_evolution_identity_story_mismatch")
+        if self._memory_inspection_service is None:
+            raise RuntimeError("memory_inspection_service_not_configured")
+        receipt = self._memory_inspection_service.evolve_archival(request=request)
+        self._story_session_service.commit()
+        return receipt.model_dump(mode="json")
+
     def apply_memory_block_proposal(
         self,
         *,
@@ -521,7 +633,9 @@ class StoryRuntimeController:
         return {
             Layer.CORE_STATE_AUTHORITATIVE.value: {
                 "semantic_layer": "Core State.authoritative_state",
-                "block_count": block_counts.get(Layer.CORE_STATE_AUTHORITATIVE.value, 0),
+                "block_count": block_counts.get(
+                    Layer.CORE_STATE_AUTHORITATIVE.value, 0
+                ),
                 "truth_status": "authoritative_truth",
                 "storage_model": "formal_store_with_compatibility_mirror",
                 "read_surface": "memory.get_state / memory.blocks",

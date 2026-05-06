@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rp.models.story_runtime import LongformChapterPhase, StoryActivationResult
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_runtime_controller import SetupRuntimeController
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
@@ -19,11 +20,13 @@ class StoryActivationService:
         workspace_service: SetupWorkspaceService,
         story_session_service: StorySessionService,
         core_state_dual_write_service: CoreStateDualWriteService | None = None,
+        runtime_profile_snapshot_service: RuntimeProfileSnapshotService | None = None,
     ) -> None:
         self._setup_controller = setup_controller
         self._workspace_service = workspace_service
         self._story_session_service = story_session_service
         self._core_state_dual_write_service = core_state_dual_write_service
+        self._runtime_profile_snapshot_service = runtime_profile_snapshot_service
 
     def activate_workspace(self, *, workspace_id: str) -> StoryActivationResult:
         workspace = self._workspace_service.get_workspace(workspace_id)
@@ -35,6 +38,11 @@ class StoryActivationService:
                 workspace.activated_story_session_id
             )
             if existing is not None:
+                self._ensure_active_runtime_snapshot(
+                    session_id=existing.session_id,
+                    created_from="story_runtime.activate_workspace",
+                )
+                self._story_session_service.commit()
                 return StoryActivationResult(
                     session_id=existing.session_id,
                     story_id=existing.story_id,
@@ -50,7 +58,11 @@ class StoryActivationService:
         if not check.ready or check.handoff is None:
             raise ValueError(
                 "Workspace is not ready for activation"
-                + (f": {'; '.join(check.blocking_issues)}" if check.blocking_issues else "")
+                + (
+                    f": {'; '.join(check.blocking_issues)}"
+                    if check.blocking_issues
+                    else ""
+                )
             )
 
         initial_phase = LongformChapterPhase.OUTLINE_DRAFTING
@@ -58,7 +70,9 @@ class StoryActivationService:
             story_id=check.handoff.story_id,
             source_workspace_id=check.handoff.workspace_id,
             mode=check.handoff.mode.value,
-            runtime_story_config=check.handoff.runtime_story_config.model_dump(mode="json"),
+            runtime_story_config=check.handoff.runtime_story_config.model_dump(
+                mode="json"
+            ),
             writer_contract=check.handoff.writer_contract.model_dump(mode="json"),
             current_state_json=self._initial_current_state(workspace),
             initial_phase=initial_phase,
@@ -72,9 +86,14 @@ class StoryActivationService:
         )
         if self._core_state_dual_write_service is not None:
             self._core_state_dual_write_service.seed_activation_state(
-                session=self._story_session_service.get_session(session.session_id) or session,
+                session=self._story_session_service.get_session(session.session_id)
+                or session,
                 chapter=chapter,
             )
+        self._ensure_active_runtime_snapshot(
+            session_id=session.session_id,
+            created_from="story_runtime.activate_workspace",
+        )
         self._workspace_service.mark_activated_story_session(
             workspace_id=workspace_id,
             session_id=session.session_id,
@@ -88,12 +107,27 @@ class StoryActivationService:
             initial_outline_required=True,
         )
 
+    def _ensure_active_runtime_snapshot(
+        self,
+        *,
+        session_id: str,
+        created_from: str,
+    ) -> None:
+        if self._runtime_profile_snapshot_service is None:
+            return
+        self._runtime_profile_snapshot_service.ensure_active_snapshot(
+            session_id=session_id,
+            created_from=created_from,
+        )
+
     @staticmethod
     def _initial_current_state(workspace) -> dict:
         return {
             "chapter_digest": {
                 "current_chapter": 1,
-                "title": StoryActivationService._chapter_title(workspace, chapter_index=1),
+                "title": StoryActivationService._chapter_title(
+                    workspace, chapter_index=1
+                ),
             },
             "narrative_progress": {
                 "current_phase": LongformChapterPhase.OUTLINE_DRAFTING.value,
@@ -108,7 +142,9 @@ class StoryActivationService:
     @staticmethod
     def _initial_builder_snapshot(workspace) -> dict:
         foundation_digest = [
-            commit.summary_tier_1 or commit.summary_tier_0 or f"commit:{commit.commit_id}"
+            commit.summary_tier_1
+            or commit.summary_tier_0
+            or f"commit:{commit.commit_id}"
             for commit in workspace.accepted_commits
             if commit.step_id.value == "foundation"
         ]
@@ -143,7 +179,11 @@ class StoryActivationService:
     @staticmethod
     def _chapter_goal(workspace, *, chapter_index: int) -> str | None:
         if workspace.longform_blueprint_draft is None:
-            return workspace.story_config_draft.notes if workspace.story_config_draft else None
+            return (
+                workspace.story_config_draft.notes
+                if workspace.story_config_draft
+                else None
+            )
         chapter_blueprints = workspace.longform_blueprint_draft.chapter_blueprints
         if len(chapter_blueprints) >= chapter_index:
             entry = chapter_blueprints[chapter_index - 1]

@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId
 
 
@@ -26,6 +27,7 @@ class SetupAgentTurnRequest(BaseModel):
     model_id: str
     provider_id: str | None = None
     target_step: SetupStepId | None = None
+    target_stage: SetupStageId | None = None
     history: list[SetupAgentDialogueMessage] = Field(default_factory=list)
     user_edit_delta_ids: list[str] = Field(default_factory=list)
     user_prompt: str

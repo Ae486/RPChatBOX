@@ -53,3 +53,5 @@
 {"file": "lib/models/rp_setup.dart", "reason": "Slice 5 check: verify Flutter model parses current_stage, stage_plan, stage_states, and draft_blocks while preserving legacy fields"}
 {"file": "lib/pages/prestory_setup_page.dart", "reason": "Slice 5 check: verify setup page renders from backend stage plan/draft blocks with MVP-only UI changes"}
 {"file": "test/unit/models/rp_setup_test.dart", "reason": "Slice 5 check: verify frontend stage contract parsing and legacy fallback behavior"}
+{"file": ".trellis/spec/backend/rp-setup-target-stage-turn-entry-contract.md", "reason": "Follow-up check: verify canonical target_stage survives request, graph shell, runtime launch, context assembly, and compatibility validation"}
+{"file": ".trellis/tasks/04-27-main-brain-harness-engineering/research/setup-stage-followup-convergence-slice-plan.md", "reason": "Follow-up check: verify implementation stayed on the scoped ingress slice and did not grow into stage-specific patch-tool work"}

@@ -9,6 +9,7 @@ class SetupGraphState(TypedDict, total=False):
     mode: str
     current_step: str
     target_step: str | None
+    target_stage: str | None
     model_id: str
     provider_id: str | None
     user_prompt: str

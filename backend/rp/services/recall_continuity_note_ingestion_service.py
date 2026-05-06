@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_materialization import (
     CONTINUITY_NOTE_KIND,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
@@ -13,6 +14,7 @@ from rp.models.memory_materialization import (
 )
 from rp.models.retrieval_records import IndexJob, SourceAsset
 from rp.models.setup_workspace import StoryMode
+from .recall_lifecycle_service import RecallLifecycleService
 from .retrieval_collection_service import RetrievalCollectionService
 from .retrieval_document_service import RetrievalDocumentService
 from .retrieval_ingestion_service import RetrievalIngestionService
@@ -29,6 +31,7 @@ class RecallContinuityNoteIngestionService:
         self._document_service = RetrievalDocumentService(session)
         self._collection_service = RetrievalCollectionService(session)
         self._ingestion_service = RetrievalIngestionService(session)
+        self._lifecycle_service = RecallLifecycleService(session)
 
     def ingest_continuity_notes(
         self,
@@ -38,6 +41,8 @@ class RecallContinuityNoteIngestionService:
         chapter_index: int,
         source_workspace_id: str,
         summary_updates: list[str],
+        runtime_identity: MemoryRuntimeIdentity | None = None,
+        source_refs: list[MemorySourceRef] | None = None,
     ) -> list[str]:
         notes = self._dedupe_notes(summary_updates)
         if not notes:
@@ -55,6 +60,11 @@ class RecallContinuityNoteIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 note_text=note_text,
+                branch_head_id=(
+                    runtime_identity.branch_head_id
+                    if runtime_identity is not None
+                    else None
+                ),
             )
             now = _utcnow()
             existing_asset = self._document_service.get_source_asset(asset_id)
@@ -76,8 +86,15 @@ class RecallContinuityNoteIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 domain_path=section_path,
+                identity=runtime_identity,
+                source_refs=source_refs,
                 extra={"note_index": note_index},
             )
+            if existing_asset is not None:
+                metadata = self._lifecycle_service.build_recomputed_metadata(
+                    existing_metadata=existing_asset.metadata,
+                    replacement_metadata=metadata,
+                )
             asset = SourceAsset(
                 asset_id=asset_id,
                 story_id=story_id,
@@ -150,6 +167,7 @@ class RecallContinuityNoteIngestionService:
         session_id: str,
         chapter_index: int,
         note_text: str,
+        branch_head_id: str | None = None,
     ) -> str:
         return (
             "recall_continuity_note_"
@@ -157,6 +175,7 @@ class RecallContinuityNoteIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 note_text=note_text,
+                branch_head_id=branch_head_id,
             )[:24]
         )
 
@@ -165,8 +184,17 @@ class RecallContinuityNoteIngestionService:
         return " ".join(note_text.split())
 
     @staticmethod
-    def _note_digest(*, session_id: str, chapter_index: int, note_text: str) -> str:
-        identity = f"{session_id}\n{chapter_index}\n{note_text}"
+    def _note_digest(
+        *,
+        session_id: str,
+        chapter_index: int,
+        note_text: str,
+        branch_head_id: str | None = None,
+    ) -> str:
+        identity = (
+            f"{session_id}\n{chapter_index}\n{note_text}\n"
+            f"{(branch_head_id or '').strip()}"
+        )
         return sha256(identity.encode("utf-8")).hexdigest()
 
     @staticmethod

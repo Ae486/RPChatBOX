@@ -157,6 +157,64 @@ class StoryBlockConsumerStateRecord(SQLModel, table=True):  # type: ignore[call-
     updated_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
+class BranchHeadRecord(SQLModel, table=True):  # type: ignore[call-arg]
+    __tablename__ = "rp_story_branch_heads"
+
+    branch_head_id: str = Field(primary_key=True, index=True)
+    story_id: str = Field(index=True)
+    session_id: str = Field(foreign_key="rp_story_sessions.session_id", index=True)
+    branch_name: str = Field(index=True)
+    parent_branch_head_id: str | None = Field(default=None, index=True)
+    forked_from_turn_id: str | None = Field(default=None, index=True)
+    head_turn_id: str | None = Field(default=None, index=True)
+    status: str = Field(index=True)
+    visibility_scope: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    updated_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
+class RuntimeProfileSnapshotRecord(SQLModel, table=True):  # type: ignore[call-arg]
+    __tablename__ = "rp_runtime_profile_snapshots"
+
+    runtime_profile_snapshot_id: str = Field(primary_key=True, index=True)
+    story_id: str = Field(index=True)
+    session_id: str = Field(foreign_key="rp_story_sessions.session_id", index=True)
+    mode: str = Field(index=True)
+    source_config_revision: str | None = Field(default=None, index=True)
+    compiled_profile_json: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(_JSON_VARIANT, nullable=False),
+    )
+    created_from: str = Field(index=True)
+    status: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    activated_at: datetime | None = Field(default=None, index=True)
+    superseded_at: datetime | None = Field(default=None, index=True)
+
+
+class StoryTurnRecord(SQLModel, table=True):  # type: ignore[call-arg]
+    __tablename__ = "rp_story_turns"
+
+    turn_id: str = Field(primary_key=True, index=True)
+    story_id: str = Field(index=True)
+    session_id: str = Field(foreign_key="rp_story_sessions.session_id", index=True)
+    branch_head_id: str = Field(
+        foreign_key="rp_story_branch_heads.branch_head_id",
+        index=True,
+    )
+    runtime_profile_snapshot_id: str = Field(
+        foreign_key="rp_runtime_profile_snapshots.runtime_profile_snapshot_id",
+        index=True,
+    )
+    turn_kind: str = Field(index=True)
+    command_kind: str = Field(index=True)
+    actor: str = Field(index=True)
+    status: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    started_at: datetime | None = Field(default=None, index=True)
+    completed_at: datetime | None = Field(default=None, index=True)
+
+
 def _ensure_column(engine: Engine, table_name: str, column_name: str, ddl: str) -> None:
     inspector = inspect(engine)
     columns = {item["name"] for item in inspector.get_columns(table_name)}
@@ -328,5 +386,47 @@ def ensure_story_store_compatible_schema(engine: Engine) -> None:
                     "CREATE INDEX IF NOT EXISTS "
                     "ix_rp_story_block_consumer_states_session_consumer "
                     "ON rp_story_block_consumer_states (session_id, consumer_key)"
+                )
+            )
+        if "rp_story_branch_heads" in tables:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_rp_story_branch_heads_session_status "
+                    "ON rp_story_branch_heads (session_id, status)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_rp_story_branch_heads_story_branch "
+                    "ON rp_story_branch_heads (story_id, branch_name)"
+                )
+            )
+        if "rp_runtime_profile_snapshots" in tables:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_rp_runtime_profile_snapshots_session_status "
+                    "ON rp_runtime_profile_snapshots (session_id, status)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_rp_runtime_profile_snapshots_story_created "
+                    "ON rp_runtime_profile_snapshots (story_id, created_at)"
+                )
+            )
+        if "rp_story_turns" in tables:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_rp_story_turns_branch_created "
+                    "ON rp_story_turns (branch_head_id, created_at)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_rp_story_turns_session_snapshot_status "
+                    "ON rp_story_turns (session_id, runtime_profile_snapshot_id, status)"
                 )
             )

@@ -24,6 +24,7 @@ from rp.models.setup_agent import (
     SetupAgentTurnResponse,
 )
 from rp.models.setup_handoff import SetupContextBuilderInput
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_context_builder import SetupContextBuilder
@@ -45,6 +46,7 @@ class _SetupTurnLaunch:
     request: SetupAgentTurnRequest
     workspace: Any
     current_step: SetupStepId
+    current_stage: SetupStageId | None
     model_name: str
     provider: Any
 
@@ -109,12 +111,13 @@ class SetupAgentExecutionService:
     async def run_turn(self, request: SetupAgentTurnRequest) -> SetupAgentTurnResponse:
         launch = self._prepare_turn_launch(request)
         logger.info(
-            "[SETUP_AGENT] run_turn_start workspace_id=%s story_id=%s model_id=%s provider_id=%s model=%s target_step=%s history_count=%s",
+            "[SETUP_AGENT] run_turn_start workspace_id=%s story_id=%s model_id=%s provider_id=%s model=%s target_stage=%s target_step=%s history_count=%s",
             launch.request.workspace_id,
             launch.workspace.story_id,
             launch.request.model_id,
             launch.request.provider_id or "",
             launch.model_name,
+            launch.current_stage.value if launch.current_stage is not None else "",
             launch.current_step.value,
             len(launch.request.history),
         )
@@ -134,12 +137,13 @@ class SetupAgentExecutionService:
     ) -> AsyncIterator[str]:
         launch = self._prepare_turn_launch(request)
         logger.info(
-            "[SETUP_AGENT] run_turn_stream_start workspace_id=%s story_id=%s model_id=%s provider_id=%s model=%s target_step=%s history_count=%s",
+            "[SETUP_AGENT] run_turn_stream_start workspace_id=%s story_id=%s model_id=%s provider_id=%s model=%s target_stage=%s target_step=%s history_count=%s",
             launch.request.workspace_id,
             launch.workspace.story_id,
             launch.request.model_id,
             launch.request.provider_id or "",
             launch.model_name,
+            launch.current_stage.value if launch.current_stage is not None else "",
             launch.current_step.value,
             len(launch.request.history),
         )
@@ -148,7 +152,10 @@ class SetupAgentExecutionService:
 
     def _prepare_turn_launch(self, request: SetupAgentTurnRequest) -> _SetupTurnLaunch:
         workspace = self._require_workspace(request.workspace_id)
-        current_step = request.target_step or workspace.current_step
+        current_step, current_stage = self._resolve_turn_selection(
+            request=request,
+            workspace=workspace,
+        )
         self._ensure_agent_model_compatible(request.model_id)
         provider = self._resolve_provider(
             model_id=request.model_id,
@@ -162,9 +169,46 @@ class SetupAgentExecutionService:
             request=request,
             workspace=workspace,
             current_step=current_step,
+            current_stage=current_stage,
             model_name=model_name,
             provider=provider,
         )
+
+    @classmethod
+    def _resolve_turn_selection(
+        cls,
+        *,
+        request: SetupAgentTurnRequest,
+        workspace,
+    ) -> tuple[SetupStepId, SetupStageId | None]:
+        target_stage = request.target_stage
+        if target_stage is not None:
+            if target_stage not in workspace.stage_plan:
+                raise ValueError(
+                    "setup_target_stage_not_in_stage_plan:"
+                    f"{target_stage.value}:{workspace.mode.value}"
+                )
+            expected_step = SetupWorkspaceService._LEGACY_STEP_FOR_STAGE[target_stage]
+            if (
+                request.target_step is not None
+                and request.target_step != expected_step
+            ):
+                raise ValueError(
+                    "setup_target_stage_step_mismatch:"
+                    f"{target_stage.value}:{request.target_step.value}:{expected_step.value}"
+                )
+        current_stage = target_stage
+        if current_stage is None and (
+            request.target_step is None or request.target_step == workspace.current_step
+        ):
+            current_stage = workspace.current_stage
+        if request.target_step is not None:
+            current_step = request.target_step
+        elif current_stage is not None:
+            current_step = SetupWorkspaceService._LEGACY_STEP_FOR_STAGE[current_stage]
+        else:
+            current_step = workspace.current_step
+        return current_step, current_stage
 
     @classmethod
     def _context_token_budget(
@@ -447,6 +491,16 @@ class SetupAgentExecutionService:
             input={
                 "workspace_id": launch.request.workspace_id,
                 "target_step": launch.current_step.value,
+                "target_stage": (
+                    launch.request.target_stage.value
+                    if launch.request.target_stage is not None
+                    else None
+                ),
+                "current_stage": (
+                    launch.current_stage.value
+                    if launch.current_stage is not None
+                    else None
+                ),
                 "model_id": launch.request.model_id,
                 "provider_id": launch.request.provider_id,
                 "history_count": len(launch.request.history),
@@ -491,6 +545,16 @@ class SetupAgentExecutionService:
             input={
                 "workspace_id": launch.request.workspace_id,
                 "target_step": launch.current_step.value,
+                "target_stage": (
+                    launch.request.target_stage.value
+                    if launch.request.target_stage is not None
+                    else None
+                ),
+                "current_stage": (
+                    launch.current_stage.value
+                    if launch.current_stage is not None
+                    else None
+                ),
                 "model_id": launch.request.model_id,
                 "provider_id": launch.request.provider_id,
                 "history_count": len(launch.request.history),
@@ -578,12 +642,9 @@ class SetupAgentExecutionService:
         model_name: str,
         provider,
     ):
-        current_step = request.target_step or workspace.current_step
-        current_stage = (
-            workspace.current_stage
-            if request.target_step is None
-            or request.target_step == workspace.current_step
-            else None
+        current_step, current_stage = self._resolve_turn_selection(
+            request=request,
+            workspace=workspace,
         )
         estimated_input_tokens = self._estimate_input_tokens(request)
         previous_usage = self._previous_usage_for_turn(

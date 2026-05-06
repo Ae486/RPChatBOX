@@ -48,8 +48,18 @@ def build_setup_trace(
                 "target_step": (
                     request.target_step.value if request.target_step is not None else None
                 ),
+                "target_stage": (
+                    request.target_stage.value
+                    if request.target_stage is not None
+                    else None
+                ),
                 "setup_step": (
                     request.target_step.value if request.target_step is not None else None
+                ),
+                "setup_stage": (
+                    request.target_stage.value
+                    if request.target_stage is not None
+                    else None
                 ),
                 "model_id": request.model_id,
                 "provider_id": request.provider_id,

@@ -1,8 +1,10 @@
 """Node adapters for the phase-1 StoryGraph shell."""
+
 from __future__ import annotations
 
 from typing import AsyncIterator
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.story_runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -28,6 +30,32 @@ class StoryGraphNodes:
 
     def __init__(self, *, domain_service: StoryTurnDomainService) -> None:
         self._domain_service = domain_service
+
+    def pin_runtime_identity(self, state: StoryGraphState) -> StoryGraphState:
+        if state.get("error"):
+            return {}
+        try:
+            identity = self._domain_service.resolve_runtime_entry_identity(
+                session_id=state["session_id"],
+                command_kind=LongformTurnCommandKind(state["command_kind"]),
+            )
+        except ValueError as exc:
+            return {
+                "error": {
+                    "message": str(exc),
+                    "type": "story_turn_identity_failed",
+                },
+                "status": "failed",
+            }
+        if identity is None:
+            return {"status": "runtime_identity_skipped"}
+        return {
+            "runtime_identity": identity.model_dump(mode="json"),
+            "branch_head_id": identity.branch_head_id,
+            "turn_id": identity.turn_id,
+            "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+            "status": "runtime_identity_pinned",
+        }
 
     def load_session_and_chapter(self, state: StoryGraphState) -> StoryGraphState:
         if state.get("error"):
@@ -148,6 +176,7 @@ class StoryGraphNodes:
             plan=OrchestratorPlan.model_validate(state.get("plan") or {}),
             pending_artifact_id=state.get("pending_artifact_id"),
             accepted_segment_ids=list(state.get("accepted_segment_ids") or []),
+            runtime_identity=self._runtime_identity_from_state(state),
         )
         return {
             "specialist_bundle": bundle.model_dump(mode="json"),
@@ -167,8 +196,12 @@ class StoryGraphNodes:
             specialist_bundle=SpecialistResultBundle.model_validate(
                 state.get("specialist_bundle") or {}
             ),
+            runtime_identity=self._runtime_identity_from_state(state),
         )
-        return {"writing_packet": packet.model_dump(mode="json"), "status": "packet_ready"}
+        return {
+            "writing_packet": packet.model_dump(mode="json"),
+            "status": "packet_ready",
+        }
 
     async def writer_run(self, state: StoryGraphState) -> StoryGraphState:
         if state.get("error"):
@@ -210,7 +243,9 @@ class StoryGraphNodes:
         )
         return {
             "artifact_id": response.artifact_id,
-            "artifact_kind": response.artifact_kind.value if response.artifact_kind else None,
+            "artifact_kind": response.artifact_kind.value
+            if response.artifact_kind
+            else None,
             "chapter_workspace_id": response.chapter_workspace_id,
             "chapter_phase": response.current_phase.value,
             "current_chapter_index": response.current_chapter_index,
@@ -244,7 +279,9 @@ class StoryGraphNodes:
         return {
             "assistant_text": response.assistant_text or "",
             "artifact_id": response.artifact_id,
-            "artifact_kind": response.artifact_kind.value if response.artifact_kind else None,
+            "artifact_kind": response.artifact_kind.value
+            if response.artifact_kind
+            else None,
             "chapter_workspace_id": response.chapter_workspace_id,
             "chapter_phase": response.current_phase.value,
             "current_chapter_index": response.current_chapter_index,
@@ -257,7 +294,8 @@ class StoryGraphNodes:
             return {}
         try:
             response = await self._domain_service.accept_pending_segment(
-                request=self._request_from_state(state)
+                request=self._request_from_state(state),
+                runtime_identity=self._runtime_identity_from_state(state),
             )
         except ValueError as exc:
             return {
@@ -270,7 +308,9 @@ class StoryGraphNodes:
         return {
             "assistant_text": response.assistant_text or "",
             "artifact_id": response.artifact_id,
-            "artifact_kind": response.artifact_kind.value if response.artifact_kind else None,
+            "artifact_kind": response.artifact_kind.value
+            if response.artifact_kind
+            else None,
             "chapter_workspace_id": response.chapter_workspace_id,
             "chapter_phase": response.current_phase.value,
             "current_chapter_index": response.current_chapter_index,
@@ -283,7 +323,8 @@ class StoryGraphNodes:
             return {}
         try:
             response = await self._domain_service.complete_chapter(
-                request=self._request_from_state(state)
+                request=self._request_from_state(state),
+                runtime_identity=self._runtime_identity_from_state(state),
             )
         except ValueError as exc:
             return {
@@ -303,7 +344,12 @@ class StoryGraphNodes:
         }
 
     def finalize_turn(self, state: StoryGraphState) -> StoryGraphState:
-        return {}
+        failed = bool(state.get("error")) or state.get("status") == "failed"
+        self._domain_service.finalize_runtime_turn(
+            turn_id=state.get("turn_id"),
+            failed=failed,
+        )
+        return {"status": "failed" if failed else "completed"}
 
     @staticmethod
     def _request_from_state(state: StoryGraphState) -> LongformTurnRequest:
@@ -320,3 +366,15 @@ class StoryGraphNodes:
     @staticmethod
     def extract_text_delta(line: str) -> str:
         return StoryTurnDomainService.extract_text_delta(line)
+
+    @staticmethod
+    def _runtime_identity_from_state(
+        state: StoryGraphState,
+    ) -> MemoryRuntimeIdentity | None:
+        payload = state.get("runtime_identity")
+        if not isinstance(payload, dict):
+            return None
+        try:
+            return MemoryRuntimeIdentity.model_validate(payload)
+        except ValueError:
+            return None

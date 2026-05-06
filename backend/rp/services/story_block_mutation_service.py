@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from rp.models.core_mutation import (
+    CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
+    CoreMutationEnvelope,
+    DirectCoreEditRequest,
+)
 from rp.models.block_view import RpBlockView
 from rp.models.dsl import Layer, ObjectRef
 from rp.models.memory_crud import (
@@ -10,6 +15,7 @@ from rp.models.memory_crud import (
     ProposalSubmitInput,
     StatePatchOperation,
 )
+from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 
 from .memory_inspection_read_service import MemoryInspectionReadService
 from .proposal_apply_service import ProposalApplyService
@@ -97,6 +103,66 @@ class StoryBlockMutationService:
             self._story_session_service.commit()
             raise
 
+    async def direct_edit_block(
+        self,
+        *,
+        session_id: str,
+        block_id: str,
+        payload: DirectCoreEditRequest,
+    ) -> ProposalReceipt | None:
+        session = self._require_session(session_id)
+        self._ensure_direct_edit_identity(
+            session_id=session_id,
+            story_id=session.story_id,
+            payload=payload,
+        )
+        chapter = self._story_session_service.get_current_chapter(session_id)
+        block = self._rp_block_read_service.get_block(
+            session_id=session_id,
+            block_id=block_id,
+        )
+        if block is None:
+            return None
+        self._ensure_block_mutable(block)
+        self._ensure_direct_edit_matches_block(block=block, payload=payload)
+
+        canonical_target_ref = self._block_ref(block)
+        operations = self._normalize_operations(
+            payload.operations,
+            target_ref=canonical_target_ref,
+        )
+        envelope = CoreMutationEnvelope(
+            identity=payload.identity,
+            origin_kind=CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
+            actor=payload.actor,
+            domain=block.domain,
+            domain_path=block.domain_path,
+            operations=operations,
+            base_refs=payload.base_refs,
+            source_refs=payload.source_refs,
+            reason=payload.reason,
+        )
+        try:
+            receipt = await self._proposal_workflow_service.submit_core_mutation(
+                envelope,
+                story_id=session.story_id,
+                mode=session.mode,
+                session_id=session_id,
+                chapter_workspace_id=(
+                    chapter.chapter_workspace_id if chapter is not None else None
+                ),
+                submit_source="api.memory.block.direct_edit",
+                policy=PostWriteMaintenancePolicy(
+                    preset_id="core_direct_edit",
+                    fallback_decision=PolicyDecision.NOTIFY_APPLY,
+                ),
+            )
+            self._story_session_service.commit()
+            return receipt
+        except Exception:
+            self._story_session_service.commit()
+            raise
+
     def apply_block_proposal(
         self,
         *,
@@ -112,11 +178,13 @@ class StoryBlockMutationService:
         if block is None:
             return None
         self._ensure_block_mutable(block)
-        proposal = self._memory_inspection_read_service.get_proposal_for_authoritative_ref(
-            story_id=session.story_id,
-            session_id=session_id,
-            target_ref=self._block_ref(block),
-            proposal_id=proposal_id,
+        proposal = (
+            self._memory_inspection_read_service.get_proposal_for_authoritative_ref(
+                story_id=session.story_id,
+                session_id=session_id,
+                target_ref=self._block_ref(block),
+                proposal_id=proposal_id,
+            )
         )
         if proposal is None:
             raise MemoryBlockProposalNotFoundError(
@@ -163,6 +231,34 @@ class StoryBlockMutationService:
                 )
             normalized.append(operation.model_copy(update={"target_ref": target_ref}))
         return normalized
+
+    @staticmethod
+    def _ensure_direct_edit_identity(
+        *,
+        session_id: str,
+        story_id: str,
+        payload: DirectCoreEditRequest,
+    ) -> None:
+        if payload.identity.session_id != session_id:
+            raise ValueError("direct_core_edit_identity_session_mismatch")
+        if payload.identity.story_id != story_id:
+            raise ValueError("direct_core_edit_identity_story_mismatch")
+
+    @staticmethod
+    def _ensure_direct_edit_matches_block(
+        *,
+        block: RpBlockView,
+        payload: DirectCoreEditRequest,
+    ) -> None:
+        if payload.domain != block.domain:
+            raise MemoryBlockTargetMismatchError(
+                "Direct edit domain must match the resolved authoritative block"
+            )
+        requested_domain_path = payload.domain_path or block.domain_path
+        if requested_domain_path != block.domain_path:
+            raise MemoryBlockTargetMismatchError(
+                "Direct edit domain_path must match the resolved authoritative block"
+            )
 
     @staticmethod
     def _target_identity(ref: ObjectRef) -> tuple[str, str, str, str, str]:

@@ -1,4 +1,5 @@
 """State schema for the phase-1 StoryGraph shell."""
+
 from __future__ import annotations
 
 from typing import Any, TypedDict
@@ -6,6 +7,10 @@ from typing import Any, TypedDict
 
 class StoryGraphState(TypedDict, total=False):
     session_id: str
+    runtime_identity: dict[str, Any]
+    branch_head_id: str
+    turn_id: str
+    runtime_profile_snapshot_id: str
     chapter_workspace_id: str
     chapter_phase: str
     current_chapter_index: int

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from time import perf_counter
 from typing import Any
@@ -11,7 +12,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
 from config import get_settings
+from models.rp_retrieval_store import KnowledgeChunkRecord, SourceAssetRecord
+from models.rp_story_store import RuntimeProfileSnapshotRecord
 from rp.models.block_view import RpBlockView
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_crud import (
     MemoryGetStateInput,
@@ -21,6 +25,7 @@ from rp.models.memory_crud import (
     MemorySearchArchivalInput,
     MemorySearchRecallInput,
     ProvenanceResult,
+    RetrievalHit,
     RetrievalQuery,
     RetrievalSearchResult,
     StateReadResult,
@@ -29,6 +34,9 @@ from rp.models.memory_crud import (
     SummaryReadResult,
     VersionListResult,
 )
+from rp.models.runtime_read_contract import RuntimeBranchReadScope
+from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
+from rp.models.runtime_identity import RuntimeProfileSnapshotCompiledProfile
 from rp.observability.langfuse_scores import emit_retrieval_trace_scores
 from rp.services.builder_projection_context_service import (
     BuilderProjectionContextService,
@@ -47,6 +55,11 @@ from rp.services.projection_read_service import ProjectionReadService
 from rp.services.retrieval_observability_service import RetrievalObservabilityService
 from rp.services.retrieval_runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.retrieval_service import RetrievalService
+from rp.services.runtime_read_manifest_service import (
+    BranchVisibilityResolver,
+    RuntimeReadManifestServiceError,
+    filter_hits_by_branch_visibility,
+)
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
@@ -56,6 +69,20 @@ from services.database import get_engine
 from services.langfuse_service import get_langfuse_service
 
 
+_RUNTIME_BRANCH_VISIBILITY_FILTER_KEYS = (
+    "branch_id",
+    "branch_ids",
+    "branch_head_id",
+    "branch_head_ids",
+    "owning_branch_head_id",
+    "owning_branch_head_ids",
+    "selected_branch_head_ids",
+)
+_RUNTIME_BRANCH_VISIBILITY_IGNORED_FILTERS_KEY = (
+    "_runtime_branch_visibility_ignored_filters"
+)
+
+
 class RetrievalBroker:
     """Route memory.search_* to the retrieval-core while keeping other surfaces stable."""
 
@@ -63,12 +90,17 @@ class RetrievalBroker:
         self,
         *,
         default_story_id: str | None = None,
+        runtime_identity: MemoryRuntimeIdentity | dict[str, Any] | None = None,
+        session: Session | None = None,
         retrieval_service_factory=None,
         core_state_read_service_factory=None,
         projection_read_service_factory=None,
         langfuse_service=None,
     ) -> None:
         self._default_story_id = default_story_id
+        self._runtime_identity = self._normalize_runtime_identity(runtime_identity)
+        self._session = session
+        self._custom_retrieval_service_factory = retrieval_service_factory is not None
         self._retrieval_service_factory = retrieval_service_factory or (
             lambda session: RetrievalService(session)
         )
@@ -82,7 +114,7 @@ class RetrievalBroker:
 
     async def get_state(self, input_model: MemoryGetStateInput) -> StateReadResult:
         try:
-            with Session(get_engine()) as session:
+            with self._session_scope() as session:
                 service = self._core_state_read_service_factory(session)
                 result = await service.get_state(input_model)
                 return self._merge_state_result_from_blocks(
@@ -124,7 +156,7 @@ class RetrievalBroker:
         self, input_model: MemoryGetSummaryInput
     ) -> SummaryReadResult:
         try:
-            with Session(get_engine()) as session:
+            with self._session_scope() as session:
                 service = self._projection_read_service_factory(session)
                 result = await service.get_summary(input_model)
                 return self._merge_summary_result_from_blocks(
@@ -152,6 +184,39 @@ class RetrievalBroker:
         )
         return await self._search(query, search_kind="chunks")
 
+    def expand_hit(self, hit: RetrievalHit) -> dict[str, Any]:
+        chunk_id = self._hit_chunk_id(hit)
+        with self._session_scope() as session:
+            chunk = session.get(KnowledgeChunkRecord, chunk_id)
+            if chunk is None:
+                raise ValueError(f"retrieval_hit_chunk_not_found:{chunk_id}")
+            asset = session.get(SourceAssetRecord, chunk.asset_id)
+            return {
+                "chunk_id": chunk.chunk_id,
+                "asset_id": chunk.asset_id,
+                "parsed_document_id": chunk.parsed_document_id,
+                "collection_id": chunk.collection_id,
+                "domain": chunk.domain,
+                "domain_path": chunk.domain_path,
+                "chunk_index": chunk.chunk_index,
+                "title": chunk.title or (asset.title if asset is not None else None),
+                "text": chunk.text,
+                "token_count": chunk.token_count,
+                "layer": hit.layer,
+                "metadata": deepcopy(chunk.metadata_json or {}),
+                "provenance_refs": list(chunk.provenance_refs_json or []),
+                "source_ref": (
+                    asset.source_ref
+                    if asset is not None
+                    else hit.metadata.get("source_ref")
+                ),
+                "asset_kind": (
+                    asset.asset_kind
+                    if asset is not None
+                    else hit.metadata.get("asset_kind")
+                ),
+            }
+
     async def search_archival(
         self,
         input_model: MemorySearchArchivalInput,
@@ -173,7 +238,7 @@ class RetrievalBroker:
         self,
         input_model: MemoryListVersionsInput,
     ) -> VersionListResult:
-        with Session(get_engine()) as session:
+        with self._session_scope() as session:
             service = (
                 self._projection_read_service_factory(session)
                 if (input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION)
@@ -185,7 +250,7 @@ class RetrievalBroker:
         self,
         input_model: MemoryReadProvenanceInput,
     ) -> ProvenanceResult:
-        with Session(get_engine()) as session:
+        with self._session_scope() as session:
             service = (
                 self._projection_read_service_factory(session)
                 if (input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION)
@@ -204,10 +269,27 @@ class RetrievalBroker:
         filters: dict[str, object],
     ) -> RetrievalQuery:
         normalized_filters = dict(filters)
+        runtime_identity = self._effective_runtime_identity(normalized_filters)
+        if runtime_identity is not None:
+            normalized_filters = self._filters_without_runtime_branch_overrides(
+                normalized_filters
+            )
+        if runtime_identity is not None:
+            normalized_filters["runtime_identity"] = runtime_identity.model_dump(
+                mode="json"
+            )
+        story_id = (
+            runtime_identity.story_id
+            if runtime_identity is not None
+            else str(
+                normalized_filters.get("story_id") or self._default_story_id or "*"
+            )
+        )
         return RetrievalQuery(
             query_id=f"rq_{uuid.uuid4().hex[:10]}",
             query_kind=query_kind,
-            story_id=str(normalized_filters.get("story_id") or self._default_story_id or "*"),
+            story_id=story_id,
+            identity=runtime_identity,
             scope=scope,
             domains=list(domains),
             text_query=text_query,
@@ -215,6 +297,24 @@ class RetrievalBroker:
             top_k=top_k,
             rerank=self._explicit_rerank_enabled(normalized_filters),
         )
+
+    @staticmethod
+    def _filters_without_runtime_branch_overrides(
+        filters: dict[str, object],
+    ) -> dict[str, object]:
+        cleaned = dict(filters)
+        ignored_filter_keys: list[str] = []
+        for key in _RUNTIME_BRANCH_VISIBILITY_FILTER_KEYS:
+            if key not in cleaned:
+                continue
+            ignored_filter_keys.append(key)
+            cleaned.pop(key, None)
+        if ignored_filter_keys:
+            cleaned[_RUNTIME_BRANCH_VISIBILITY_IGNORED_FILTERS_KEY] = {
+                "ignored_filter_keys": ignored_filter_keys,
+                "reason": "runtime_identity_branch_visibility_is_authoritative",
+            }
+        return cleaned
 
     @staticmethod
     def _search_policy(filters: dict[str, object]) -> dict[str, object]:
@@ -245,25 +345,33 @@ class RetrievalBroker:
             return False
         return profile.strip().lower() in {"longform", "roleplay", "trpg"}
 
-    @classmethod
     def _query_with_runtime_search_policy(
-        cls,
+        self,
         *,
         query: RetrievalQuery,
         session: Session,
     ) -> RetrievalQuery:
-        policy_value = cls._rerank_policy_value(dict(query.filters or {}))
+        filters = dict(query.filters or {})
+        policy_value = self._rerank_policy_value(filters)
         if policy_value == "on":
             return query.model_copy(update={"rerank": True})
         if policy_value == "off":
             return query.model_copy(update={"rerank": False})
-        if query.story_id in {"", "*"}:
+        runtime_identity = query.identity or self._effective_runtime_identity(filters)
+        if runtime_identity is not None:
+            config = self._runtime_retrieval_config_for_identity(
+                session=session,
+                runtime_identity=runtime_identity,
+            )
             return query.model_copy(
                 update={
-                    "rerank": cls._profile_default_rerank_enabled(
-                        dict(query.filters or {})
-                    )
+                    "rerank": bool(config.rerank_model_id or config.rerank_provider_id)
+                    or self._profile_default_rerank_enabled(filters)
                 }
+            )
+        if query.story_id in {"", "*"}:
+            return query.model_copy(
+                update={"rerank": self._profile_default_rerank_enabled(filters)}
             )
         config = RetrievalRuntimeConfigService(session).resolve_story_config(
             story_id=query.story_id
@@ -271,8 +379,27 @@ class RetrievalBroker:
         return query.model_copy(
             update={
                 "rerank": bool(config.rerank_model_id or config.rerank_provider_id)
-                or cls._profile_default_rerank_enabled(dict(query.filters or {}))
+                or self._profile_default_rerank_enabled(filters)
             }
+        )
+
+    def _build_retrieval_service(
+        self,
+        *,
+        session: Session,
+        query: RetrievalQuery,
+    ):
+        runtime_identity = query.identity or self._effective_runtime_identity(
+            dict(query.filters or {})
+        )
+        if runtime_identity is None or self._custom_retrieval_service_factory:
+            return self._retrieval_service_factory(session)
+        return RetrievalService(
+            session,
+            retrieval_runtime_config_service=_SnapshotPinnedRetrievalRuntimeConfigService(
+                session=session,
+                runtime_identity=runtime_identity,
+            ),
         )
 
     def _build_core_state_read_service(self, session: Session) -> CoreStateReadService:
@@ -308,6 +435,7 @@ class RetrievalBroker:
             core_state_store_repository=core_state_store_repository,
             store_read_enabled=store_read_enabled,
             core_state_backfill_service=backfill_service,
+            runtime_identity=self._runtime_identity,
         )
 
     def _build_projection_read_service(self, session: Session) -> ProjectionReadService:
@@ -328,6 +456,7 @@ class RetrievalBroker:
                 proposal_repository=proposal_repository,
                 core_state_store_repository=core_state_store_repository,
             ),
+            runtime_identity=self._runtime_identity,
         )
 
     def _build_rp_block_read_service(self, session: Session) -> RpBlockReadService:
@@ -485,6 +614,8 @@ class RetrievalBroker:
         return result.model_copy(update={"items": ordered_items})
 
     def _current_session_id(self, session: Session) -> str | None:
+        if self._runtime_identity is not None:
+            return self._runtime_identity.session_id
         if not self._default_story_id:
             return None
         current_session = StorySessionService(session).get_latest_session_for_story(
@@ -654,16 +785,24 @@ class RetrievalBroker:
         ) as observation:
             started = perf_counter()
             try:
-                with Session(get_engine()) as session:
+                with self._session_scope() as session:
                     query = self._query_with_runtime_search_policy(
                         query=query,
                         session=session,
                     )
-                    service = self._retrieval_service_factory(session)
+                    service = self._build_retrieval_service(
+                        session=session,
+                        query=query,
+                    )
                     if search_kind == "documents":
                         result = await service.search_documents(query)
                     else:
                         result = await service.search_chunks(query)
+                    result = self._filter_runtime_search_result(
+                        session=session,
+                        query=query,
+                        result=result,
+                    )
                     trace = result.trace
                     if trace is not None and "broker_ms" not in trace.timings:
                         trace.timings["broker_ms"] = round(
@@ -744,3 +883,172 @@ class RetrievalBroker:
                     error_code=type(exc).__name__,
                 )
                 raise
+
+    def _filter_runtime_search_result(
+        self,
+        *,
+        session: Session,
+        query: RetrievalQuery,
+        result: RetrievalSearchResult,
+    ) -> RetrievalSearchResult:
+        runtime_identity = query.identity or self._effective_runtime_identity(
+            dict(query.filters or {})
+        )
+        if runtime_identity is None:
+            return result
+        resolver = BranchVisibilityResolver(session)
+        warnings = list(result.warnings)
+        ignored_filter_keys = self._runtime_ignored_branch_filter_keys(query.filters)
+        if ignored_filter_keys:
+            warnings.append(
+                "runtime_branch_filters_ignored:" + ",".join(ignored_filter_keys)
+            )
+        try:
+            scope = resolver.build_runtime_scope(identity=runtime_identity)
+        except RuntimeReadManifestServiceError:
+            warnings.append("runtime_branch_scope_identity_only_fallback")
+            scope = RuntimeBranchReadScope(
+                story_id=runtime_identity.story_id,
+                session_id=runtime_identity.session_id,
+                active_branch_head_id=runtime_identity.branch_head_id,
+                active_turn_id=runtime_identity.turn_id,
+                visible_branch_head_ids=[runtime_identity.branch_head_id],
+                turn_cutoff_by_branch={
+                    runtime_identity.branch_head_id: runtime_identity.turn_id
+                },
+            )
+        filtered_hits, omitted_refs = filter_hits_by_branch_visibility(
+            resolver=resolver,
+            scope=scope,
+            hits=list(result.hits),
+        )
+        if not omitted_refs:
+            if warnings == result.warnings:
+                return result
+            return result.model_copy(update={"warnings": warnings})
+        warnings.append(
+            "runtime_branch_visibility_filtered:"
+            + ",".join(str(item.get("ref_id") or "") for item in omitted_refs)
+        )
+        trace = result.trace
+        if trace is not None:
+            details = dict(trace.details or {})
+            details["branch_visibility"] = {
+                "active_branch_head_id": scope.active_branch_head_id,
+                "visible_branch_head_ids": list(scope.visible_branch_head_ids),
+                "turn_cutoff_by_branch": dict(scope.turn_cutoff_by_branch),
+                "omitted_refs": omitted_refs,
+            }
+            trace = trace.model_copy(
+                update={
+                    "returned_count": len(filtered_hits),
+                    "warnings": [
+                        *list(trace.warnings),
+                        "runtime_branch_visibility_filtered",
+                    ],
+                    "details": details,
+                }
+            )
+        return result.model_copy(
+            update={
+                "hits": filtered_hits,
+                "warnings": warnings,
+                "trace": trace,
+            }
+        )
+
+    @staticmethod
+    def _runtime_ignored_branch_filter_keys(
+        filters: dict[str, object] | None,
+    ) -> list[str]:
+        marker = dict(filters or {}).get(_RUNTIME_BRANCH_VISIBILITY_IGNORED_FILTERS_KEY)
+        if not isinstance(marker, dict):
+            return []
+        raw_keys = marker.get("ignored_filter_keys")
+        if not isinstance(raw_keys, list):
+            return []
+        return [str(key) for key in raw_keys if str(key)]
+
+    @staticmethod
+    def _normalize_runtime_identity(
+        runtime_identity: object | None,
+    ) -> MemoryRuntimeIdentity | None:
+        if runtime_identity is None:
+            return None
+        if isinstance(runtime_identity, MemoryRuntimeIdentity):
+            return runtime_identity
+        if not isinstance(runtime_identity, dict):
+            return None
+        try:
+            return MemoryRuntimeIdentity.model_validate(runtime_identity)
+        except ValueError:
+            return None
+
+    def _effective_runtime_identity(
+        self,
+        filters: dict[str, object],
+    ) -> MemoryRuntimeIdentity | None:
+        if self._runtime_identity is not None:
+            return self._runtime_identity
+        return self._normalize_runtime_identity(filters.get("runtime_identity"))
+
+    @contextmanager
+    def _session_scope(self):
+        if self._session is not None:
+            yield self._session
+            return
+        with Session(get_engine()) as session:
+            yield session
+
+    @staticmethod
+    def _hit_chunk_id(hit: RetrievalHit) -> str:
+        for candidate in (
+            hit.hit_id,
+            hit.metadata.get("chunk_id"),
+            hit.knowledge_ref.object_id if hit.knowledge_ref is not None else None,
+        ):
+            normalized = str(candidate or "").strip()
+            if normalized:
+                return normalized
+        raise ValueError("retrieval_hit_chunk_id_missing")
+
+    @staticmethod
+    def _runtime_retrieval_config_for_identity(
+        *,
+        session: Session,
+        runtime_identity: MemoryRuntimeIdentity,
+    ) -> RetrievalRuntimeConfig:
+        snapshot = session.get(
+            RuntimeProfileSnapshotRecord,
+            runtime_identity.runtime_profile_snapshot_id,
+        )
+        if snapshot is None:
+            raise ValueError(
+                "runtime_profile_snapshot_not_found:"
+                f"{runtime_identity.runtime_profile_snapshot_id}"
+            )
+        compiled = RuntimeProfileSnapshotCompiledProfile.model_validate(
+            snapshot.compiled_profile_json or {}
+        )
+        return compiled.retrieval_policy
+
+
+class _SnapshotPinnedRetrievalRuntimeConfigService:
+    """Resolve retrieval config from a pinned runtime profile snapshot."""
+
+    def __init__(
+        self,
+        *,
+        session: Session,
+        runtime_identity: MemoryRuntimeIdentity,
+    ) -> None:
+        self._session = session
+        self._runtime_identity = runtime_identity
+
+    def resolve_story_config(self, *, story_id: str) -> RetrievalRuntimeConfig:
+        if story_id not in {"", "*", self._runtime_identity.story_id}:
+            raise ValueError(f"runtime_identity_story_mismatch:{story_id}")
+        return RetrievalBroker._runtime_retrieval_config_for_identity(
+            session=self._session,
+            runtime_identity=self._runtime_identity,
+        )

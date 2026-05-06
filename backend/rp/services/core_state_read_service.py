@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from .core_state_backfill_service import CoreStateBackfillService
 from .core_state_store_repository import CoreStateStoreRepository
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import (
     MemoryGetStateInput,
     MemoryListVersionsInput,
@@ -36,6 +37,7 @@ class CoreStateReadService:
         core_state_store_repository: CoreStateStoreRepository | None = None,
         store_read_enabled: bool = False,
         core_state_backfill_service: CoreStateBackfillService | None = None,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> None:
         self._adapter = adapter
         self._version_history_read_service = version_history_read_service
@@ -43,6 +45,7 @@ class CoreStateReadService:
         self._core_state_store_repository = core_state_store_repository
         self._store_read_enabled = store_read_enabled
         self._core_state_backfill_service = core_state_backfill_service
+        self._runtime_identity = runtime_identity
 
     async def get_state(self, input_model: MemoryGetStateInput) -> StateReadResult:
         refs = input_model.refs or [
@@ -51,8 +54,9 @@ class CoreStateReadService:
                 scope=input_model.scope,
             )
         ]
-        session = self._adapter.get_story_session()
-        _, payload = self._adapter.get_state_payload()
+        session_id = self._runtime_session_id()
+        session = self._adapter.get_story_session(session_id=session_id)
+        _, payload = self._adapter.get_state_payload(session_id=session_id)
         items: list[StateReadResultItem] = []
         version_refs: list[str] = []
         top_level_warnings: list[str] = []
@@ -73,7 +77,9 @@ class CoreStateReadService:
             if session is None:
                 warnings.append("phase_e_story_context_missing")
             if binding is None:
-                warnings.append(f"phase_e_authoritative_ref_not_materialized:{effective_ref.object_id}")
+                warnings.append(
+                    f"phase_e_authoritative_ref_not_materialized:{effective_ref.object_id}"
+                )
             else:
                 has_store_value = False
                 if (
@@ -96,25 +102,37 @@ class CoreStateReadService:
                             session_id=session.session_id
                         )
                         authoritative_store_hydrated = True
-                        row = self._core_state_store_repository.get_authoritative_object(
-                            session_id=session.session_id,
-                            layer=ref.layer.value,
-                            scope=ref.scope or "story",
-                            object_id=ref.object_id,
+                        row = (
+                            self._core_state_store_repository.get_authoritative_object(
+                                session_id=session.session_id,
+                                layer=ref.layer.value,
+                                scope=ref.scope or "story",
+                                object_id=ref.object_id,
+                            )
                         )
                     if row is not None:
                         data = deepcopy(row.data_json)
                         has_store_value = True
                     else:
-                        warnings.append(f"phase_g_store_row_missing_fallback:{effective_ref.object_id}")
+                        warnings.append(
+                            f"phase_g_store_row_missing_fallback:{effective_ref.object_id}"
+                        )
                 if not has_store_value:
                     value = payload.get(binding.backend_field)
                     if value is None:
-                        warnings.append(f"phase_e_authoritative_value_missing:{binding.backend_field}")
+                        warnings.append(
+                            f"phase_e_authoritative_value_missing:{binding.backend_field}"
+                        )
                     else:
                         data = deepcopy(value)
-            items.append(StateReadResultItem(object_ref=effective_ref, data=data, warnings=warnings))
-            version_refs.append(f"{effective_ref.object_id}@{effective_ref.revision or 1}")
+            items.append(
+                StateReadResultItem(
+                    object_ref=effective_ref, data=data, warnings=warnings
+                )
+            )
+            version_refs.append(
+                f"{effective_ref.object_id}@{effective_ref.revision or 1}"
+            )
 
         return StateReadResult(
             items=items,
@@ -122,16 +140,26 @@ class CoreStateReadService:
             warnings=top_level_warnings,
         )
 
-    async def list_versions(self, input_model: MemoryListVersionsInput) -> VersionListResult:
+    async def list_versions(
+        self, input_model: MemoryListVersionsInput
+    ) -> VersionListResult:
         if self._version_history_read_service is not None:
-            return self._version_history_read_service.list_versions(input_model.target_ref)
+            return self._version_history_read_service.list_versions(
+                input_model.target_ref,
+                session_id=self._runtime_session_id(),
+            )
         ref = normalize_authoritative_ref(input_model.target_ref)
         current_ref = f"{ref.object_id}@{ref.revision or 1}"
         return VersionListResult(versions=[current_ref], current_ref=current_ref)
 
-    async def read_provenance(self, input_model: MemoryReadProvenanceInput) -> ProvenanceResult:
+    async def read_provenance(
+        self, input_model: MemoryReadProvenanceInput
+    ) -> ProvenanceResult:
         if self._provenance_read_service is not None:
-            return self._provenance_read_service.read_provenance(input_model.target_ref)
+            return self._provenance_read_service.read_provenance(
+                input_model.target_ref,
+                session_id=self._runtime_session_id(),
+            )
         ref = normalize_authoritative_ref(input_model.target_ref)
         return ProvenanceResult(
             target_ref=ref,
@@ -152,8 +180,15 @@ class CoreStateReadService:
             ref,
             session_id=session_id,
         )
-        current_ref = version_result.current_ref or f"{ref.object_id}@{ref.revision or 1}"
+        current_ref = (
+            version_result.current_ref or f"{ref.object_id}@{ref.revision or 1}"
+        )
         try:
             return int(current_ref.rsplit("@", 1)[1])
         except (IndexError, ValueError):
             return ref.revision or 1
+
+    def _runtime_session_id(self) -> str | None:
+        if self._runtime_identity is None:
+            return None
+        return self._runtime_identity.session_id

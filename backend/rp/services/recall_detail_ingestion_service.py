@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_materialization import (
     ACCEPTED_STORY_SEGMENT_KIND,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
@@ -17,6 +18,7 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from .recall_lifecycle_service import RecallLifecycleService
 from .retrieval_collection_service import RetrievalCollectionService
 from .retrieval_document_service import RetrievalDocumentService
 from .retrieval_ingestion_service import RetrievalIngestionService
@@ -33,6 +35,7 @@ class RecallDetailIngestionService:
         self._document_service = RetrievalDocumentService(session)
         self._collection_service = RetrievalCollectionService(session)
         self._ingestion_service = RetrievalIngestionService(session)
+        self._lifecycle_service = RecallLifecycleService(session)
 
     def ingest_accepted_story_segments(
         self,
@@ -42,6 +45,8 @@ class RecallDetailIngestionService:
         chapter_index: int,
         source_workspace_id: str,
         accepted_segments: list[StoryArtifact],
+        runtime_identity: MemoryRuntimeIdentity | None = None,
+        source_refs: list[MemorySourceRef] | None = None,
     ) -> list[str]:
         collection = self._collection_service.ensure_story_collection(
             story_id=story_id,
@@ -70,12 +75,23 @@ class RecallDetailIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 domain_path=section_path,
+                identity=runtime_identity,
+                source_refs=self._build_source_refs(
+                    artifact=artifact,
+                    source_refs=source_refs,
+                ),
+                scene_ref=artifact.scene_ref,
                 extra={
                     "artifact_id": artifact.artifact_id,
                     "artifact_revision": artifact.revision,
                     "artifact_kind": artifact.artifact_kind.value,
                 },
             )
+            if existing_asset is not None:
+                metadata = self._lifecycle_service.build_recomputed_metadata(
+                    existing_metadata=existing_asset.metadata,
+                    replacement_metadata=metadata,
+                )
             source_asset = SourceAsset(
                 asset_id=asset_id,
                 story_id=story_id,
@@ -141,6 +157,37 @@ class RecallDetailIngestionService:
             return
         error_detail = job.error_message or job.job_state
         raise RuntimeError(f"recall_detail_ingestion_failed:{asset_id}:{error_detail}")
+
+    @staticmethod
+    def _build_source_refs(
+        *,
+        artifact: StoryArtifact,
+        source_refs: list[MemorySourceRef] | None,
+    ) -> list[MemorySourceRef]:
+        refs = list(source_refs or [])
+        refs.append(
+            MemorySourceRef(
+                source_type="story_artifact",
+                source_id=artifact.artifact_id,
+                layer="runtime_workspace",
+                domain="chapter",
+                entry_id=artifact.artifact_id,
+                revision=artifact.revision,
+                metadata={
+                    "artifact_kind": artifact.artifact_kind.value,
+                    "scene_ref": artifact.scene_ref,
+                },
+            )
+        )
+        deduped: list[MemorySourceRef] = []
+        seen: set[tuple[str, str]] = set()
+        for ref in refs:
+            key = (ref.source_type.casefold(), ref.source_id.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ref)
+        return deduped
 
     @staticmethod
     def _is_eligible_story_segment(artifact: StoryArtifact) -> bool:

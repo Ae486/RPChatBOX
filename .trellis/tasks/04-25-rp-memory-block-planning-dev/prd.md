@@ -1271,3 +1271,389 @@ Quality gate:
 - `ruff check backend\rp\models\projection_refresh.py backend\rp\services\projection_refresh_service.py backend\rp\services\core_state_dual_write_service.py backend\rp\tests\test_core_state_dual_write_services.py`
 - `ruff format --check backend\rp\models\projection_refresh.py backend\rp\services\projection_refresh_service.py backend\rp\services\core_state_dual_write_service.py backend\rp\tests\test_core_state_dual_write_services.py`
 - `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\projection_refresh.py backend\rp\services\projection_refresh_service.py backend\rp\services\core_state_dual_write_service.py backend\rp\tests\test_core_state_dual_write_services.py`
+
+## Runtime Boot Bar Spec Planning
+
+Story-runtime research under `.trellis/tasks/04-28-runtime-story-dev-task/research/` is now a requirements input for this memory task. The current task remains `rp-memory-block-planning-dev`; it does not switch to runtime implementation.
+
+New planning artifacts:
+
+- `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-boot-bar-doc-index.md`
+- `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-boot-bar-memory-spec-plan.md`
+- `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-identity-profile-compiler-technical-research.md`
+- `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-workspace-event-foundation-technical-research.md`
+- `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-branch-read-manifest-technical-research.md`
+- `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/retrieval-worker-governance-technical-research.md`
+- `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/shared-mutation-kernel-technical-research.md`
+- `.trellis/spec/backend/rp-runtime-identity-persistence-propagation.md`
+- `.trellis/spec/backend/rp-runtime-profile-snapshot-minimal-compiler.md`
+- `.trellis/spec/backend/rp-runtime-workspace-persistent-turn-material-store.md`
+- `.trellis/spec/backend/rp-persistent-memory-event-record-foundation.md`
+- `.trellis/spec/backend/rp-branch-visibility-resolver-lineage.md`
+- `.trellis/spec/backend/rp-core-projection-read-manifest-hardening.md`
+- `.trellis/spec/backend/rp-retrieval-card-usage-promotion-boot-contract.md`
+- `.trellis/spec/backend/rp-worker-memory-tool-permission-boot-contract.md`
+- `.trellis/spec/backend/rp-shared-core-mutation-kernel-direct-edit.md`
+
+Single entrypoint for this document set:
+
+- read `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/runtime-boot-bar-doc-index.md` first, then follow its read order.
+
+Ordered next spec suite:
+
+1. `rp-runtime-identity-persistence-propagation.md`
+2. `rp-runtime-profile-snapshot-minimal-compiler.md`
+3. `rp-runtime-workspace-persistent-turn-material-store.md` - written
+4. `rp-persistent-memory-event-record-foundation.md` - written
+5. `rp-branch-visibility-resolver-lineage.md` - written
+6. `rp-core-projection-read-manifest-hardening.md` - written
+7. `rp-retrieval-card-usage-promotion-boot-contract.md` - written
+8. `rp-worker-memory-tool-permission-boot-contract.md` - written
+9. `rp-shared-core-mutation-kernel-direct-edit.md` - written
+
+Planning rule for every future spec:
+
+- do one lightweight technical research pass first;
+- reuse mature frameworks/projects only when they fit the frozen RP memory boundaries;
+- keep `WritingPacketBuilder`, proposal/apply governance, retrieval-core, and the layered Memory OS truth split intact.
+
+Status on 2026-05-06:
+
+- added full-foundation technical research docs:
+  - `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/recall-branch-aware-lifecycle-technical-research.md`
+  - `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/archival-evolution-reindex-technical-research.md`
+  - `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/memory-event-debug-eval-technical-research.md`
+  - `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/registry-profile-snapshot-full-management-technical-research.md`
+  - `.trellis/tasks/04-25-rp-memory-block-planning-dev/research/memory-inspection-edit-backend-technical-research.md`
+- added full-foundation backend specs:
+  - `.trellis/spec/backend/rp-recall-branch-aware-lifecycle.md`
+  - `.trellis/spec/backend/rp-archival-evolution-reindex-governance.md`
+  - `.trellis/spec/backend/rp-memory-event-debug-eval-read-surfaces.md`
+  - `.trellis/spec/backend/rp-registry-profile-snapshot-full-management.md`
+  - `.trellis/spec/backend/rp-user-visible-memory-inspection-edit-backend-contracts.md`
+- completed one explicit proposal-to-spec coverage audit and patched two concrete omissions:
+  - `rp-registry-profile-snapshot-full-management.md` now carries block-template descriptor management explicitly, not only domain/worker/profile records;
+  - `rp-user-visible-memory-inspection-edit-backend-contracts.md` now exposes the actual backend command surface for direct Core edit, Recall review, and Archival evolution.
+- result: the planned boot-bar spec set and the planned full-foundation spec set are both fully written; remaining work returns to staged implementation and trellis-check execution.
+
+Status on 2026-05-06: Runtime Boot Bar Implementation Complete
+
+- `A + J-min` complete:
+  - persistent `BranchHead` / `StoryTurn` / `RuntimeProfileSnapshot`;
+  - activation/runtime-config patch/turn-start snapshot pinning;
+  - runtime-owned retrieval reads pinned to snapshot/session identity;
+  - completed with focused implementation checks and one `gpt-5.5 xhigh` trellis-style check/self-fix.
+- `B + I-min` complete:
+  - persistent Runtime Workspace turn-material store;
+  - persistent memory event record foundation;
+  - exact-identity queries and durable short-id uniqueness;
+  - completed with focused implementation checks and one `gpt-5.5 xhigh` trellis-style check/self-fix.
+- `C + D` complete:
+  - shared branch visibility resolver minimal runtime path;
+  - deterministic runtime read manifest;
+  - runtime projection refresh identity hardening;
+  - completed with focused implementation checks and one `gpt-5.5 xhigh` trellis-style check/self-fix.
+- `H-min + E-min` complete:
+  - retrieval card / expansion / usage boot loop through Runtime Workspace;
+  - internal worker memory service and snapshot-pinned permission guard;
+  - structured worker proposal governance metadata;
+  - completed with focused implementation checks and one `gpt-5.5 xhigh` trellis-style check/self-fix.
+- `K-min` complete:
+  - shared authoritative Core mutation envelope/kernel shape;
+  - service/controller-level direct edit path still routed through proposal/apply;
+  - worker/direct-edit mutation paths aligned on shared governance metadata;
+  - completed with focused implementation checks and one `gpt-5.5 xhigh` trellis-style check/self-fix.
+
+Result:
+
+- the `runtime boot bar` is now implemented and slice-checked in the current workspace;
+- next execution target moves to full-foundation implementation slices, starting with Recall lifecycle (`F`).
+
+## Next Executable Slice: Recall Branch-Aware Lifecycle
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-recall-branch-aware-lifecycle.md`
+
+Objective:
+
+- turn Recall from longform/session/chapter-oriented retained text into a branch-aware historical memory layer with explicit lifecycle metadata;
+- keep retrieval-core as the physical store;
+- add runtime identity / branch visibility / supersede / invalidate / recompute rules around existing Recall producers and searches;
+- keep Recall historical-only and distinct from Core current truth.
+
+Planned implementation direction:
+
+- extend existing Recall producers and retrieval metadata around canonical lifecycle fields rather than introducing a second Recall store;
+- make runtime-owned Recall search enforce active identity visibility where safely supportable in this slice;
+- add focused tests around branch-aware historical visibility, lifecycle transitions, and non-truth boundaries;
+- keep scope on Recall only, without dragging in full Archival/debug/inspection expansion in the same round.
+
+Status on 2026-05-06: Recall Branch-Aware Lifecycle Complete
+
+- implemented the full-foundation Recall lifecycle slice over the existing retrieval-core physical store:
+  - canonical Recall materialization metadata now carries runtime identity, lifecycle state, branch visibility, materialization kind, source refs, supersession refs, and invalidation refs;
+  - Recall summary/detail/continuity/character long-history/retired foreshadow/scene transcript producers now propagate runtime identity and source refs into asset/section/chunk metadata;
+  - `RecallLifecycleService` supports materialize, supersede, invalidate, and recompute maintenance without deleting historical material;
+  - runtime-owned Recall search is branch-aware through `RetrievalBroker` and `BranchVisibilityResolver`;
+  - special command / heavy regression / scene transcript paths now preserve runtime identity into Recall producers.
+- `gpt-5.5 xhigh` trellis-check completed and fixed:
+  - `RetrievalBroker._build_query()` now treats broker-level runtime identity as authoritative and overwrites caller-supplied `filters.runtime_identity`;
+  - retrieval broker regression coverage now verifies caller branch filters and caller runtime identity cannot override the pinned broker identity;
+  - `test_recall_lifecycle_service.py` formatting was normalized.
+- main-thread post-check verification passed:
+  - `python -m pytest backend/rp/tests/test_retrieval_broker.py backend/rp/tests/test_recall_lifecycle_service.py -q`
+    - result: `29 passed, 1 warning`
+  - `python -m ruff check backend/rp/services/retrieval_broker.py backend/rp/services/recall_lifecycle_service.py backend/rp/tests/test_retrieval_broker.py backend/rp/tests/test_recall_lifecycle_service.py`
+  - `python -m ruff format --check backend/rp/services/retrieval_broker.py backend/rp/services/recall_lifecycle_service.py backend/rp/tests/test_retrieval_broker.py backend/rp/tests/test_recall_lifecycle_service.py`
+  - `python -m mypy --follow-imports=skip --check-untyped-defs backend/rp/services/retrieval_broker.py backend/rp/services/recall_lifecycle_service.py backend/rp/tests/test_retrieval_broker.py backend/rp/tests/test_recall_lifecycle_service.py`
+
+Remaining risk:
+
+- broad Recall/retrieval pytest batches are slow in this workspace because they pull in heavier shared backend fixtures; focused or split checks are preferred outside final regression.
+
+Result:
+
+- full-foundation slice `F` is implemented and slice-checked;
+- next execution target moves to Archival evolution / reindex governance (`G`).
+
+## Next Executable Slice: Archival Evolution Reindex Governance
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-archival-evolution-reindex-governance.md`
+
+Objective:
+
+- add governed, versioned Story Evolution edits for Archival Knowledge while keeping retrieval-core as the physical store;
+- default setup/activation seed Archival material to story-global visibility, but runtime-created Archival evolution to current-branch visibility unless explicitly widened;
+- link every evolution action to source/chunk version provenance, reindex jobs, memory events, and later Core proposal source refs;
+- prevent active runtime search from surfacing hidden or superseded Archival versions.
+
+Planned implementation direction:
+
+- reuse `RetrievalIngestionService`, `RetrievalMaintenanceService`, `RetrievalIndexJobService`, and retrieval-core asset/chunk records;
+- add a small `ArchivalEvolutionRequest` / `ArchivalEvolutionReceipt` contract and service around version/supersession metadata;
+- make evolution receipts trace source version, replacement chunks, visibility scope, reindex job ids, and event ids;
+- extend runtime-owned archival retrieval visibility filtering only as needed for active branch reads;
+- add focused tests for default current-branch visibility, explicit widening, supersession/version provenance, reindex linkage, and hidden/superseded search exclusion.
+
+Boundaries:
+
+- no replacement of retrieval-core indexing/storage;
+- no in-place authoritative archival source overwrite path;
+- no Core current-truth mutation from Archival evolution itself;
+- no UI requirement in this slice.
+
+Status on 2026-05-06: Archival Evolution Reindex Governance Complete
+
+- implemented the full-foundation Archival evolution slice over the existing retrieval-core physical store:
+  - added governed `ArchivalEvolutionRequest` / `ArchivalEvolutionReceipt` contracts and `ArchivalEvolutionService`;
+  - runtime-authored Archival edits now create new source-asset versions instead of mutating active rows in place;
+  - default runtime visibility is current-branch, with explicit widening for selected branches / all existing branches / story-global;
+  - evolution receipts and asset/chunk metadata now preserve source-version, supersession chain, reindex job ids, memory event ids, and source refs;
+  - runtime-owned archival reads now exclude hidden/superseded material on the active read path.
+- subagent implement verification passed for the G slice.
+- trellis-check completed with `gpt-5.4 xhigh` because `gpt-5.5` was unavailable from model capacity:
+  - fixed one real issue in `RetrievalBroker._build_query()`: runtime-owned retrieval now pins `RetrievalQuery.story_id` to `runtime_identity.story_id`, so caller `filters.story_id` and broker defaults cannot drift the active runtime story;
+  - extended retrieval broker regression coverage to assert caller/default `story_id` cannot override the pinned runtime identity story.
+- main-thread post-check verification passed:
+  - `python -m pytest backend/rp/tests/test_archival_evolution_service.py -q`
+    - result: `8 passed, 1 warning`
+  - `python -m pytest backend/rp/tests/test_retrieval_broker.py::test_runtime_owned_retrieval_filters_branch_hidden_hits_even_with_branch_filter backend/rp/tests/test_retrieval_broker.py::test_runtime_owned_recall_search_uses_identity_metadata_for_branch_cutoff -q`
+    - result: `2 passed, 1 warning`
+  - `python -m ruff check backend/rp/models/archival_evolution.py backend/rp/services/archival_evolution_service.py backend/rp/retrieval/search_utils.py backend/rp/services/retrieval_broker.py backend/rp/tests/test_archival_evolution_service.py backend/rp/tests/test_retrieval_broker.py`
+  - `python -m ruff format --check backend/rp/models/archival_evolution.py backend/rp/services/archival_evolution_service.py backend/rp/retrieval/search_utils.py backend/rp/services/retrieval_broker.py backend/rp/tests/test_archival_evolution_service.py backend/rp/tests/test_retrieval_broker.py`
+  - `python -m mypy --follow-imports=skip --check-untyped-defs backend/rp/models/archival_evolution.py backend/rp/services/archival_evolution_service.py backend/rp/retrieval/search_utils.py backend/rp/services/retrieval_broker.py backend/rp/tests/test_archival_evolution_service.py backend/rp/tests/test_retrieval_broker.py`
+- trellis-update-spec:
+  - updated `.trellis/spec/backend/rp-runtime-identity-persistence-propagation.md` to record that runtime-owned retrieval must pin `story_id` from `MemoryRuntimeIdentity`, not from caller/default filters.
+
+Remaining risk:
+
+- no broad repo-wide regression was run; this slice was validated with focused Archival evolution and runtime retrieval checks only.
+- failed reindex is now traceable and does not supersede the old version early, but automatic retry success reconciliation remains outside this slice.
+
+Result:
+
+- full-foundation slice `G` is implemented, checked, and spec-synced;
+- next execution target moves to memory trace/debug/eval read surfaces.
+
+## Next Executable Slice: Memory Event Debug Eval Read Surfaces
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-memory-event-debug-eval-read-surfaces.md`
+
+Objective:
+
+- expose stable backend read surfaces that join persistent memory events, Runtime Workspace materials, deterministic read manifests, and proposal receipts under exact runtime identity;
+- keep the event spine as trace/invalidation evidence, not as a truth-replay store;
+- make runtime debug and eval able to answer what changed, what the runtime saw, what retrieval usage happened, and why dirty targets were produced after restart.
+
+Planned implementation direction:
+
+- add a read-only `MemoryTraceReadService` keyed first by exact `MemoryRuntimeIdentity`;
+- support secondary trace queries by branch, source ref, proposal id, and material ref;
+- join persisted events, workspace materials, manifests, proposal/apply receipts, and retrieval usage refs into deterministic turn/branch/source trace bundles;
+- add focused tests for identity isolation, persisted trace readback, and non-mutating trace behavior.
+
+Boundaries:
+
+- no event replay as source of truth;
+- no mutation surface widening;
+- no replacement of Core/Projection/Recall/Archival stores with trace views;
+- no dependency on external observability systems for product memory answers.
+
+Status on 2026-05-06: Memory Event Debug Eval Read Surfaces Complete
+
+- implemented the full-foundation trace/debug/eval read slice:
+  - added read-only `MemoryTraceBundle` contracts in `backend/rp/models/memory_trace.py` with explicit `source_of_truth=False`, `event_replay=False`, and `mutation_surface=False` metadata;
+  - added `MemoryTraceReadService` in `backend/rp/services/memory_trace_read_service.py` to serve exact-identity turn traces plus branch/source/proposal/material trace queries;
+  - the service now joins persistent memory events, Runtime Workspace materials, deterministic read-manifest rebuilds, proposal/apply receipts, retrieval usage refs, and dirty targets from persisted evidence;
+  - the service remains read-only and does not widen mutation or replay truth from events.
+- implement subagent verification passed for the slice.
+- trellis-check completed with `gpt-5.4 xhigh` and fixed one real issue:
+  - `get_proposal_trace()` now joins Runtime Workspace material evidence directly from proposal/core-mutation source refs, even when no separate memory event row points to that material;
+  - regression coverage was added for proposal-local source-ref material joins.
+- main-thread post-check verification passed:
+  - `python -m pytest backend/rp/tests/test_memory_trace_read_service.py -q`
+    - result: `6 passed, 1 warning`
+  - `python -m pytest backend/rp/tests/test_memory_trace_read_service.py backend/rp/tests/test_memory_change_event_service.py backend/rp/tests/test_runtime_workspace_material_service.py backend/rp/tests/test_memory_lineage_services.py -q`
+    - result: `34 passed, 1 warning`
+  - `python -m ruff check backend/rp/models/memory_trace.py backend/rp/services/memory_trace_read_service.py backend/rp/tests/test_memory_trace_read_service.py`
+  - `python -m ruff format --check backend/rp/models/memory_trace.py backend/rp/services/memory_trace_read_service.py backend/rp/tests/test_memory_trace_read_service.py`
+  - `python -m mypy --follow-imports=skip --check-untyped-defs backend/rp/models/memory_trace.py backend/rp/services/memory_trace_read_service.py backend/rp/tests/test_memory_trace_read_service.py`
+  - `git diff --check -- backend/rp/models/memory_trace.py backend/rp/services/memory_trace_read_service.py backend/rp/tests/test_memory_trace_read_service.py`
+- trellis-update-spec:
+  - updated `.trellis/spec/backend/rp-memory-event-debug-eval-read-surfaces.md` to require proposal traces to join Runtime Workspace evidence directly from proposal/apply governance source refs, not only from related memory events.
+
+Remaining risk:
+
+- `read_manifests` still use deterministic rebuild from the existing manifest contract, not a dedicated persisted manifest table; if a manifest store lands later, this service should prefer persisted manifest records.
+- no broad repo-wide regression was run; verification stayed focused on trace surfaces and their supporting event/material/lineage services.
+
+Result:
+
+- full-foundation trace/debug/eval read surfaces are implemented, checked, and spec-synced;
+- next execution target moves to registry/profile snapshot full management.
+
+## Next Executable Slice: Registry Profile Snapshot Full Management
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-registry-profile-snapshot-full-management.md`
+
+Objective:
+
+- grow the bootstrap registry and minimal snapshot compiler into persistent, configurable domain/block/worker/profile management;
+- let future turns pin immutable snapshots compiled from published/activated profiles, without hardcoding longform/roleplay/TRPG behavior back into runtime core services;
+- preserve working defaults while supporting add/hide/retire/migrate flows for descriptors and profiles.
+
+Planned implementation direction:
+
+- keep bootstrap registry as the seed/default layer and add persistent descriptor/profile records on top;
+- add a management service for listing, publishing, activating, and resolving domain/worker/block/profile descriptors;
+- reuse the existing snapshot compiler contract rather than creating a second compiler path;
+- add focused tests for descriptor lifecycle, alias/migration handling, publish/activate compilation, and future-turn-only snapshot effects.
+
+Boundaries:
+
+- no UI-first marketplace complexity;
+- no hardcoded mode branches reintroduced into scheduler/mutation kernel services;
+- no second snapshot compiler;
+- defaults must remain usable when no custom profile data exists.
+
+Status on 2026-05-06: Registry Profile Snapshot Full Management Complete
+
+- implemented the full-management registry/profile slice:
+  - added persistent descriptor/profile tables in `backend/models/rp_registry_store.py`;
+  - added `MemoryRegistryManagementService` for listing, publishing, activating, and lifecycle-managing persistent domain/worker/block/profile descriptors;
+  - extended registry contracts and bootstrap resolver to cover worker descriptors plus block alias/migration resolution;
+  - extended `RuntimeProfileSnapshotService` so snapshots compile from the effective registry + active mode profile and continue to affect future turns only;
+  - registered the new persistence tables in database bootstrap.
+- implement subagent verification passed for the slice.
+- trellis-check completed with `gpt-5.4 xhigh` and fixed two real issues:
+  - block template ids/aliases are now validated for global uniqueness in the effective registry, preventing silent resolver-map overwrite;
+  - block template descriptors now have lifecycle management parity with domain/worker descriptors through explicit hide/retire/migrate service entrypoints.
+- main-thread post-check verification passed:
+  - `python -m pytest backend/rp/tests/test_memory_registry_management_service.py backend/rp/tests/test_runtime_profile_snapshot_service.py -q`
+    - result: `7 passed, 1 warning`
+  - `python -m pytest backend/rp/tests/test_memory_contract_registry.py backend/rp/tests/test_story_runtime_identity_service.py backend/rp/tests/test_worker_memory_service.py -q`
+    - result: `29 passed, 1 warning`
+  - `python -m pytest backend/rp/tests/test_story_runtime_controller_memory_read_side.py::test_story_runtime_controller_patch_publishes_new_active_snapshot -q`
+    - result: `1 passed, 1 warning`
+  - `python -m ruff check backend/models/rp_registry_store.py backend/rp/services/memory_registry_management_service.py backend/rp/models/memory_contract_registry.py backend/rp/services/memory_contract_registry.py backend/rp/services/runtime_profile_snapshot_service.py backend/services/database.py backend/rp/tests/test_memory_registry_management_service.py backend/rp/tests/test_memory_contract_registry.py`
+  - `python -m ruff format --check backend/models/rp_registry_store.py backend/rp/services/memory_registry_management_service.py backend/rp/models/memory_contract_registry.py backend/rp/services/memory_contract_registry.py backend/rp/services/runtime_profile_snapshot_service.py backend/services/database.py backend/rp/tests/test_memory_registry_management_service.py backend/rp/tests/test_memory_contract_registry.py`
+  - `python -m mypy --follow-imports=skip --check-untyped-defs backend/models/rp_registry_store.py backend/rp/services/memory_registry_management_service.py backend/rp/models/memory_contract_registry.py backend/rp/services/memory_contract_registry.py backend/rp/services/runtime_profile_snapshot_service.py backend/services/database.py backend/rp/tests/test_memory_registry_management_service.py backend/rp/tests/test_memory_contract_registry.py`
+- trellis-update-spec:
+  - updated `.trellis/spec/backend/rp-registry-profile-snapshot-full-management.md` to state explicitly that block template ids/aliases must be globally unique and that block lifecycle management must have hide/retire/migrate parity with domain/worker descriptors.
+
+Remaining risk:
+
+- no broad repo-wide regression was run; verification stayed scoped to registry/profile, runtime identity/worker memory, and snapshot publication paths.
+- this slice remains backend-only; no operator UI/API surface is added yet, which is intentional for current scope.
+
+Result:
+
+- full-foundation registry/profile snapshot management is implemented, checked, and spec-synced;
+- next execution target moves to user-visible memory inspection/edit backend contracts.
+
+## Next Executable Slice: User-Visible Memory Inspection Edit Backend Contracts
+
+Chosen next implementation slice:
+
+- `.trellis/spec/backend/rp-user-visible-memory-inspection-edit-backend-contracts.md`
+
+Objective:
+
+- expose one branch-aware backend inspection surface across Core/Projection/Runtime Workspace/Recall/Archival;
+- route product-facing Core direct edit through the shared mutation kernel;
+- expose governed user-visible Recall review actions and Archival evolution actions through the existing `/memory/*` backend family.
+
+Planned implementation direction:
+
+- extend `MemoryInspectionReadService` into a branch-aware visible-memory inspection surface;
+- reuse the existing governed Core mutation path for direct Core edit instead of adding raw writes;
+- reuse Recall lifecycle and Archival evolution services for user-visible correction commands;
+- add focused tests for branch-aware inspection, no unrelated branch leakage, and governed routing for Core/Recall/Archival actions.
+
+Boundaries:
+
+- no monolithic generic CRUD mutation path;
+- no raw user-only Core write path;
+- no bypass of Recall/Archival lifecycle services;
+- no requirement for finished UI polish in this slice.
+
+Status on 2026-05-06: User-Visible Memory Inspection Edit Backend Contracts Complete
+
+- implemented the full user-visible inspection/edit backend slice:
+  - added `memory_inspection.py` contracts for inspection queries, Recall review commands, and action receipts;
+  - added `MemoryInspectionService` as one branch-aware inspection facade across Core/Projection/Runtime Workspace/Recall/Archival;
+  - wired Core direct edit through the shared mutation kernel, Recall review through `RecallLifecycleService`, and Archival correction through `ArchivalEvolutionService`;
+  - exposed the governed `/memory/inspection`, `/memory/core/direct-edit`, `/memory/recall/actions`, and `/memory/archival/evolution` route family through the story runtime controller and API layer.
+- implement subagent verification passed for the slice.
+- trellis-check completed with `gpt-5.4 xhigh` and fixed one real issue:
+  - Recall/Archival material validation now fails closed on `story_id` ownership before considering `story_global` visibility, preventing cross-story review/evolution misuse;
+  - regression coverage was added for foreign-story `story_global` material refs.
+- main-thread post-check verification passed:
+  - `python -m pytest backend/rp/tests/test_memory_inspection_service.py -q`
+    - result: `4 passed, 1 warning`
+  - `python -m pytest backend/tests/test_rp_story_api.py -q -k "test_story_memory"`
+    - result: `8 passed, 12 deselected, 37 warnings`
+  - `python -m pytest backend/rp/tests/test_story_runtime_controller_memory_read_side.py::test_story_runtime_controller_direct_edit_routes_through_shared_kernel backend/rp/tests/test_story_runtime_controller_memory_read_side.py::test_story_runtime_controller_direct_edit_rejects_stale_base_revision backend/rp/tests/test_recall_lifecycle_service.py backend/rp/tests/test_archival_evolution_service.py backend/rp/tests/test_memory_lineage_services.py::test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff -q`
+    - result: `12 passed, 1 warning`
+  - `python -m ruff check backend/rp/models/memory_inspection.py backend/rp/services/memory_inspection_service.py backend/rp/services/story_runtime_controller.py backend/rp/runtime/rp_runtime_factory.py backend/api/rp_story.py backend/rp/tests/test_memory_inspection_service.py backend/tests/test_rp_story_api.py`
+  - `python -m ruff format --check backend/rp/models/memory_inspection.py backend/rp/services/memory_inspection_service.py backend/rp/services/story_runtime_controller.py backend/rp/runtime/rp_runtime_factory.py backend/api/rp_story.py backend/rp/tests/test_memory_inspection_service.py backend/tests/test_rp_story_api.py`
+  - `python -m mypy --follow-imports=skip --check-untyped-defs backend/rp/models/memory_inspection.py backend/rp/services/memory_inspection_service.py backend/rp/services/story_runtime_controller.py backend/rp/runtime/rp_runtime_factory.py backend/api/rp_story.py backend/rp/tests/test_memory_inspection_service.py backend/tests/test_rp_story_api.py`
+- trellis-update-spec:
+  - updated `.trellis/spec/backend/rp-user-visible-memory-inspection-edit-backend-contracts.md` so Recall/Archival user actions must fail closed on story ownership before `story_global` visibility can make a material appear readable.
+
+Remaining risk:
+
+- no broad repo-wide regression was run; verification stayed focused on inspection service, `/memory/*` route family, controller direct-edit routing, Recall/Archival governance, and branch visibility behavior.
+- full repo `mypy` remains blocked by pre-existing repository-wide type issues; only scoped mypy for this slice was run.
+
+Result:
+
+- the planned `runtime boot bar` and `full runtime foundation bar` memory slices are now all implemented, checked, and spec-synced in this task workspace;
+- the task now moves from slice execution into finish-work / final wrap-up.

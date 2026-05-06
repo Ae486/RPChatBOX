@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_materialization import (
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
     RETIRED_FORESHADOW_SUMMARY_KIND,
@@ -20,6 +21,7 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from .recall_lifecycle_service import RecallLifecycleService
 from .retrieval_collection_service import RetrievalCollectionService
 from .retrieval_document_service import RetrievalDocumentService
 from .retrieval_ingestion_service import RetrievalIngestionService
@@ -46,6 +48,7 @@ class RecallRetiredForeshadowIngestionService:
         self._document_service = RetrievalDocumentService(session)
         self._collection_service = RetrievalCollectionService(session)
         self._ingestion_service = RetrievalIngestionService(session)
+        self._lifecycle_service = RecallLifecycleService(session)
 
     def ingest_retired_foreshadow_summaries(
         self,
@@ -58,6 +61,8 @@ class RecallRetiredForeshadowIngestionService:
         chapter_summary_text: str | None,
         continuity_notes: list[str],
         accepted_segments: list[StoryArtifact],
+        runtime_identity: MemoryRuntimeIdentity | None = None,
+        source_refs: list[MemorySourceRef] | None = None,
     ) -> list[str]:
         if not foreshadow_registry:
             return []
@@ -86,6 +91,11 @@ class RecallRetiredForeshadowIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 foreshadow_id=foreshadow_id,
+                branch_head_id=(
+                    runtime_identity.branch_head_id
+                    if runtime_identity is not None
+                    else None
+                ),
             )
             now = _utcnow()
             existing_asset = self._document_service.get_source_asset(asset_id)
@@ -111,6 +121,11 @@ class RecallRetiredForeshadowIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 domain_path=section_path,
+                identity=runtime_identity,
+                source_refs=self._build_source_refs(
+                    foreshadow_id=foreshadow_id,
+                    source_refs=source_refs,
+                ),
                 extra={
                     "foreshadow_id": foreshadow_id,
                     "terminal_status": terminal_status,
@@ -119,6 +134,11 @@ class RecallRetiredForeshadowIngestionService:
                     "accepted_segment_evidence_count": len(matched_segments),
                 },
             )
+            if existing_asset is not None:
+                metadata = self._lifecycle_service.build_recomputed_metadata(
+                    existing_metadata=existing_asset.metadata,
+                    replacement_metadata=metadata,
+                )
             asset = SourceAsset(
                 asset_id=asset_id,
                 story_id=story_id,
@@ -365,6 +385,7 @@ class RecallRetiredForeshadowIngestionService:
         session_id: str,
         chapter_index: int,
         foreshadow_id: str,
+        branch_head_id: str | None = None,
     ) -> str:
         return (
             "recall_retired_foreshadow_"
@@ -372,6 +393,7 @@ class RecallRetiredForeshadowIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 foreshadow_id=foreshadow_id,
+                branch_head_id=branch_head_id,
             )[:24]
         )
 
@@ -381,8 +403,12 @@ class RecallRetiredForeshadowIngestionService:
         session_id: str,
         chapter_index: int,
         foreshadow_id: str,
+        branch_head_id: str | None = None,
     ) -> str:
-        identity = f"{session_id}\n{chapter_index}\n{foreshadow_id}"
+        identity = (
+            f"{session_id}\n{chapter_index}\n{foreshadow_id}\n"
+            f"{(branch_head_id or '').strip()}"
+        )
         return sha256(identity.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -393,6 +419,32 @@ class RecallRetiredForeshadowIngestionService:
         raise RuntimeError(
             f"recall_retired_foreshadow_ingestion_failed:{asset_id}:{error_detail}"
         )
+
+    @staticmethod
+    def _build_source_refs(
+        *,
+        foreshadow_id: str,
+        source_refs: list[MemorySourceRef] | None,
+    ) -> list[MemorySourceRef]:
+        refs = list(source_refs or [])
+        refs.append(
+            MemorySourceRef(
+                source_type="foreshadow_registry",
+                source_id=foreshadow_id,
+                layer="core_state.authoritative_state",
+                domain="foreshadow",
+                metadata={"foreshadow_id": foreshadow_id},
+            )
+        )
+        deduped: list[MemorySourceRef] = []
+        seen: set[tuple[str, str]] = set()
+        for ref in refs:
+            key = (ref.source_type.casefold(), ref.source_id.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ref)
+        return deduped
 
     @staticmethod
     def _is_eligible_story_segment(artifact: StoryArtifact) -> bool:

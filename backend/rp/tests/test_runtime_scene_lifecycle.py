@@ -70,11 +70,20 @@ def _seed_story_runtime(retrieval_session):
 
 class _NoopRegressionService:
     async def run_light_regression(
-        self, *, session, chapter, accepted_artifact, model_id, provider_id
+        self,
+        *,
+        session,
+        chapter,
+        accepted_artifact,
+        model_id,
+        provider_id,
+        runtime_identity=None,
     ):
         return session, chapter
 
-    async def run_heavy_regression(self, *, session, chapter, model_id, provider_id):
+    async def run_heavy_regression(
+        self, *, session, chapter, model_id, provider_id, runtime_identity=None
+    ):
         return session, chapter
 
 

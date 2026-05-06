@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from rp.models.core_mutation import (
+    CORE_MUTATION_ORIGIN_DETERMINISTIC_SYSTEM_REFRESH,
+    CORE_MUTATION_ORIGIN_WORKER_PROPOSAL_APPLY,
+)
 from rp.models.dsl import Domain, Layer
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_crud import MemorySearchRecallInput, ProposalSubmitInput
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from rp.models.story_runtime import (
@@ -18,6 +23,7 @@ from rp.services.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.longform_regression_service import LongformRegressionService
+from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
@@ -29,8 +35,11 @@ from rp.services.recall_detail_ingestion_service import RecallDetailIngestionSer
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_session_service import StorySessionService
+from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.models.worker_memory import WorkerProposalGovernanceMetadata
 
 
 def _seed_story_runtime(retrieval_session):
@@ -499,6 +508,199 @@ async def test_proposal_workflow_keeps_review_required_pending(retrieval_session
 
 
 @pytest.mark.asyncio
+async def test_proposal_workflow_persists_worker_core_mutation_metadata(
+    retrieval_session,
+):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    _, repository, workflow = _build_workflow(retrieval_session)
+
+    receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id="story-1",
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Worker Proposed Chapter"},
+                }
+            ],
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="worker_memory:specialist",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.REVIEW_REQUIRED,
+        ),
+        governance_metadata=WorkerProposalGovernanceMetadata(
+            identity=MemoryRuntimeIdentity(
+                story_id=session.story_id,
+                session_id=session.session_id,
+                branch_head_id="branch:test:worker",
+                turn_id="turn:test:worker",
+                runtime_profile_snapshot_id="snapshot:test:worker",
+            ),
+            worker_id="specialist",
+            phase="outline_drafting",
+            runtime_profile_snapshot_id="snapshot:test:worker",
+            permission_decision="allowed",
+            permission_reason_codes=["allowed"],
+            source_refs=[
+                MemorySourceRef(
+                    source_type="runtime_workspace_material",
+                    source_id="mat-worker-candidate",
+                    layer="runtime_workspace",
+                    domain=Domain.CHAPTER.value,
+                    block_id="chapter.current",
+                )
+            ],
+            trace_refs=["trace:worker:test"],
+        ),
+    )
+
+    record = repository.get_proposal_record(receipt.proposal_id)
+
+    assert receipt.status == "review_required"
+    assert record is not None
+    assert record.governance_metadata_json["worker_id"] == "specialist"
+    assert record.governance_metadata_json["core_mutation"]["origin_kind"] == (
+        CORE_MUTATION_ORIGIN_WORKER_PROPOSAL_APPLY
+    )
+    assert record.governance_metadata_json["core_mutation"]["actor"] == (
+        "worker.specialist"
+    )
+    assert record.governance_metadata_json["core_mutation"]["trace_refs"] == [
+        "trace:worker:test"
+    ]
+    assert (
+        record.governance_metadata_json["core_mutation"]["source_refs"][0]["source_id"]
+        == "mat-worker-candidate"
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_core_mutation_apply_records_shared_outcomes(
+    retrieval_session,
+):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    _, repository, workflow = _build_workflow(retrieval_session)
+    identity = MemoryRuntimeIdentity(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id="branch:test:worker-apply",
+        turn_id="turn:test:worker-apply",
+        runtime_profile_snapshot_id="snapshot:test:worker-apply",
+    )
+
+    receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id="story-1",
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Worker Applied Chapter"},
+                }
+            ],
+            base_refs=[
+                {
+                    "object_id": "chapter.current",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.CHAPTER,
+                    "domain_path": "chapter.current",
+                    "scope": "story",
+                    "revision": 1,
+                }
+            ],
+            reason="worker governed apply",
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="worker_memory:specialist",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.NOTIFY_APPLY,
+        ),
+        governance_metadata=WorkerProposalGovernanceMetadata(
+            identity=identity,
+            worker_id="specialist",
+            phase="outline_drafting",
+            runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+            permission_decision="allowed",
+            permission_reason_codes=["allowed", "writer_visible"],
+            source_refs=[
+                MemorySourceRef(
+                    source_type="runtime_workspace_material",
+                    source_id="mat-worker-applied-candidate",
+                    layer="runtime_workspace",
+                    domain=Domain.CHAPTER.value,
+                    block_id="chapter.current",
+                )
+            ],
+            trace_refs=["trace:worker:applied"],
+        ),
+    )
+
+    apply_receipts = repository.list_apply_receipts_for_proposal(receipt.proposal_id)
+    events = MemoryChangeEventService(session=retrieval_session).list_events(
+        identity=identity
+    )
+    core_events = [
+        event
+        for event in events
+        if event.event_kind == "core_authoritative_mutation_applied"
+    ]
+
+    assert receipt.status == "applied"
+    assert len(apply_receipts) == 1
+    assert (
+        f"core_mutation:origin_kind={CORE_MUTATION_ORIGIN_WORKER_PROPOSAL_APPLY}"
+        in apply_receipts[0].warnings_json
+    )
+    assert "core_mutation:projection_dirty=chapter.current" in (
+        apply_receipts[0].warnings_json
+    )
+    assert len(core_events) == 1
+    core_event = core_events[0]
+    assert core_event.metadata["origin_kind"] == (
+        CORE_MUTATION_ORIGIN_WORKER_PROPOSAL_APPLY
+    )
+    assert core_event.metadata["worker_id"] == "specialist"
+    assert core_event.metadata["permission_decision"] == "allowed"
+    assert core_event.metadata["projection_refresh"] == "stale_mark_only"
+    assert any(
+        ref.source_type == "runtime_workspace_material"
+        and ref.source_id == "mat-worker-applied-candidate"
+        for ref in core_event.source_refs
+    )
+    dirty_targets_by_kind = {
+        target.target_kind: target for target in core_event.dirty_targets
+    }
+    assert "core_authoritative_block" in dirty_targets_by_kind
+    assert "projection_refresh_pending" in dirty_targets_by_kind
+    assert (
+        dirty_targets_by_kind["projection_refresh_pending"].metadata["refresh_state"]
+        == "stale_mark_only"
+    )
+
+
+@pytest.mark.asyncio
 async def test_proposal_workflow_marks_failed_for_non_authoritative_target(
     retrieval_session,
 ):
@@ -671,11 +873,19 @@ async def test_longform_regression_routes_authoritative_patch_through_workflow(
     proposal_records = repository.list_proposals_for_story("story-1")
     assert len(proposal_records) == 1
     assert proposal_records[0].submit_source == "post_write_regression"
+    assert (
+        proposal_records[0].governance_metadata_json["core_mutation"]["origin_kind"]
+        == CORE_MUTATION_ORIGIN_DETERMINISTIC_SYSTEM_REFRESH
+    )
     assert proposal_records[0].status == "applied"
     apply_receipts = repository.list_apply_receipts_for_proposal(
         proposal_records[0].proposal_id
     )
     assert len(apply_receipts) == 1
+    assert (
+        f"core_mutation:origin_kind={CORE_MUTATION_ORIGIN_DETERMINISTIC_SYSTEM_REFRESH}"
+        in apply_receipts[0].warnings_json
+    )
     assert updated_chapter.builder_snapshot_json["foundation_digest"] == [
         "Found Updated"
     ]
@@ -800,6 +1010,16 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
         session_id=accepted_primary.session_id,
         chapter_index=1,
     )
+    runtime_identity = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+            retrieval_session
+        ),
+    ).resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="complete_chapter",
+        actor="story_runtime",
+    )
     assert session is not None
     assert chapter is not None
 
@@ -808,6 +1028,7 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
         chapter=chapter,
         model_id="model-1",
         provider_id=None,
+        runtime_identity=runtime_identity,
     )
     retrieval_session.commit()
 
@@ -840,6 +1061,13 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
     )
     assert summary_asset.metadata["materialization_kind"] == "chapter_summary"
     assert summary_asset.metadata["materialized_to_recall"] is True
+    assert summary_asset.metadata["runtime_identity"]["turn_id"] == (
+        runtime_identity.turn_id
+    )
+    assert any(
+        ref["source_type"] == "story_artifact"
+        for ref in summary_asset.metadata["source_refs"]
+    )
     summary_seed = summary_asset.metadata["seed_sections"][0]
     assert summary_seed["metadata"]["materialization_kind"] == "chapter_summary"
     assert summary_seed["metadata"]["materialized_to_recall"] is True

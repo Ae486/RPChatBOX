@@ -53,3 +53,5 @@
 {"file": "backend/rp/tools/setup_tool_provider.py", "reason": "Slice 2A implementation: read-only stage draft refs and stage-aware setup.read.step_context input"}
 {"file": "backend/rp/agent_runtime/adapters.py", "reason": "Slice 2A implementation: runtime context_bundle exposes current_stage, stage_state, and prior_stage_handoff_stages"}
 {"file": "backend/rp/agent_runtime/profiles.py", "reason": "Slice 2A implementation: stage ids map to existing patch-family tool scopes without adding new write tools"}
+{"file": ".trellis/spec/backend/rp-setup-target-stage-turn-entry-contract.md", "reason": "Next slice executable contract: canonical target_stage turn ingress and current_stage/current_step coexistence boundary"}
+{"file": ".trellis/tasks/04-27-main-brain-harness-engineering/research/setup-stage-followup-convergence-slice-plan.md", "reason": "Follow-up plan that separates real blockers from rejected ghost requirements and scopes the next setup convergence slice"}

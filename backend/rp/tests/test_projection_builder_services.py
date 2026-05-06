@@ -5,12 +5,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
+from sqlalchemy import desc
+from sqlmodel import select
 
+from models.rp_story_store import BranchHeadRecord, StoryTurnRecord
 from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import RetrievalHit
+from rp.models.projection_refresh import (
+    ProjectionRefreshRequest,
+    ProjectionRefreshServiceError,
+)
 from rp.models.story_runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -21,6 +29,13 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
     StoryArtifactKind,
 )
+from rp.models.runtime_workspace_material import (
+    RuntimeWorkspaceMaterial,
+    RuntimeWorkspaceMaterialKind,
+    RuntimeWorkspaceMaterialLifecycle,
+)
+from rp.graphs.story_graph_nodes import StoryGraphNodes
+from rp.graphs.story_graph_runner import StoryGraphRunner
 from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
 from rp.services.builder_projection_context_service import (
     BuilderProjectionContextService,
@@ -35,6 +50,10 @@ from rp.services.projection_state_service import ProjectionStateService
 from rp.services.projection_refresh_service import ProjectionRefreshService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime_workspace_material_service import (
+    RuntimeWorkspaceMaterialService,
+)
 from rp.services.story_block_consumer_state_service import (
     StoryBlockConsumerStateService,
 )
@@ -47,6 +66,7 @@ from rp.services.story_block_prompt_context_service import (
 from rp.services.story_block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
+from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
@@ -121,11 +141,20 @@ def _build_boundary_services(
 
 class _NoopRegressionService:
     async def run_light_regression(
-        self, *, session, chapter, accepted_artifact, model_id, provider_id
+        self,
+        *,
+        session,
+        chapter,
+        accepted_artifact,
+        model_id,
+        provider_id,
+        runtime_identity=None,
     ):
         return session, chapter
 
-    async def run_heavy_regression(self, *, session, chapter, model_id, provider_id):
+    async def run_heavy_regression(
+        self, *, session, chapter, model_id, provider_id, runtime_identity=None
+    ):
         return session, chapter
 
 
@@ -169,6 +198,21 @@ class _StubMemoryOsService:
         return SimpleNamespace(hits=list(self._recall_hits))
 
 
+class _RecordingMemoryOsService(_StubMemoryOsService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.archival_inputs: list[Any] = []
+        self.recall_inputs: list[Any] = []
+
+    async def search_archival(self, input_model, *_args, **_kwargs):
+        self.archival_inputs.append(input_model)
+        return await super().search_archival(input_model, *_args, **_kwargs)
+
+    async def search_recall(self, input_model, *_args, **_kwargs):
+        self.recall_inputs.append(input_model)
+        return await super().search_recall(input_model, *_args, **_kwargs)
+
+
 class _FailingMemoryOsService:
     async def search_archival(self, *_args, **_kwargs):
         raise AssertionError("retrieval should not run for this plan")
@@ -183,6 +227,8 @@ def _build_turn_domain_service(
     orchestrator_service=None,
     specialist_service=None,
     block_consumer_state_service=None,
+    runtime_identity_service=None,
+    runtime_workspace_material_service=None,
 ) -> StoryTurnDomainService:
     authoritative_state_view_service, projection_state_service = (
         _build_boundary_services(service)
@@ -202,6 +248,8 @@ def _build_turn_domain_service(
         writing_worker_execution_service=SimpleNamespace(),
         regression_service=_NoopRegressionService(),
         block_consumer_state_service=block_consumer_state_service,
+        runtime_identity_service=runtime_identity_service,
+        runtime_workspace_material_service=runtime_workspace_material_service,
     )
 
 
@@ -367,6 +415,248 @@ def test_projection_refresh_service_updates_settled_slots_only(retrieval_session
 
     assert updated_chapter.builder_snapshot_json["foundation_digest"] == ["New Found"]
     assert "writer_hints" not in updated_chapter.builder_snapshot_json
+
+
+def test_projection_refresh_service_requires_identity_for_explicit_runtime_request(
+    retrieval_session,
+):
+    _, chapter, service = _seed_story_runtime(retrieval_session)
+    refresh_service = ProjectionRefreshService(service)
+
+    with pytest.raises(ProjectionRefreshServiceError) as exc_info:
+        refresh_service.refresh_from_bundle(
+            chapter=chapter,
+            bundle=SpecialistResultBundle(
+                foundation_digest=["New Found"],
+                blueprint_digest=["New Blueprint"],
+                current_outline_digest=["New Outline"],
+                recent_segment_digest=["New Segment"],
+                current_state_digest=["New State"],
+            ),
+            refresh_request=ProjectionRefreshRequest(),
+        )
+
+    assert exc_info.value.code == "projection_refresh_identity_required"
+
+
+def test_story_turn_domain_service_build_packet_attaches_deterministic_read_manifest(
+    retrieval_session,
+):
+    session, _, service = _seed_story_runtime(retrieval_session)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.packet_manifest",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    runtime_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    RuntimeWorkspaceMaterialService(session=retrieval_session).record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="packet-card-R1",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+            identity=runtime_identity,
+            domain="chapter",
+            domain_path="runtime.packet.card",
+            payload={"title": "Packet Card"},
+            visibility="writer_visible",
+            created_by="worker.retrieval",
+        )
+    )
+    turn_domain_service = _build_turn_domain_service(
+        service,
+        runtime_identity_service=identity_service,
+        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+            session=retrieval_session
+        ),
+    )
+    bundle = SpecialistResultBundle(
+        foundation_digest=["Found A"],
+        blueprint_digest=["Blueprint A"],
+        current_outline_digest=["Outline A"],
+        recent_segment_digest=["Segment A"],
+        current_state_digest=["State A"],
+        writer_hints=["Hint A"],
+    )
+
+    packet_a = turn_domain_service.build_packet(
+        session_id=session.session_id,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            writer_instruction="Write the next segment.",
+        ),
+        specialist_bundle=bundle,
+        runtime_identity=runtime_identity,
+    )
+    packet_b = turn_domain_service.build_packet(
+        session_id=session.session_id,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            writer_instruction="Write the next segment.",
+        ),
+        specialist_bundle=bundle,
+        runtime_identity=runtime_identity,
+    )
+
+    manifest_a = packet_a.metadata["runtime_read_manifest"]
+    manifest_b = packet_b.metadata["runtime_read_manifest"]
+
+    assert manifest_a["manifest_id"] == manifest_b["manifest_id"]
+    assert manifest_a["identity"]["turn_id"] == runtime_identity.turn_id
+    assert manifest_a["active_branch_lineage"] == [runtime_identity.branch_head_id]
+    assert manifest_a["retrieval_card_refs"] == ["packet-card-R1"]
+    assert any(
+        item["reason"] == "packet_visible_runtime_workspace_only"
+        for item in manifest_a["omitted_refs"]
+    )
+
+
+def test_story_turn_domain_service_build_packet_uses_runtime_workspace_retrieval_context_and_records_usage(
+    retrieval_session,
+):
+    session, _, service = _seed_story_runtime(retrieval_session)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.packet_retrieval_usage",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    runtime_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    material_service = RuntimeWorkspaceMaterialService(session=retrieval_session)
+    material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="packet-card-R1",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+            identity=runtime_identity,
+            domain="chapter",
+            domain_path="chapter.runtime.packet.card",
+            short_id="R1",
+            payload={
+                "summary": "A recalled storm callback matters here.",
+                "title": "Storm Callback",
+            },
+            visibility="writer_visible",
+            created_by="worker.specialist",
+        )
+    )
+    material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="packet-expanded-X1",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_EXPANDED_CHUNK,
+            identity=runtime_identity,
+            domain="chapter",
+            domain_path="chapter.runtime.packet.expanded",
+            short_id="X1",
+            payload={
+                "summary": "Expanded detail: the seal broke during the first storm.",
+                "text": "Expanded detail: the seal broke during the first storm.",
+                "title": "Storm Callback Expanded",
+            },
+            lifecycle=RuntimeWorkspaceMaterialLifecycle.EXPANDED,
+            visibility="writer_visible",
+            created_by="worker.specialist",
+        )
+    )
+    turn_domain_service = _build_turn_domain_service(
+        service,
+        runtime_identity_service=identity_service,
+        runtime_workspace_material_service=material_service,
+    )
+    bundle = SpecialistResultBundle(
+        foundation_digest=["Found A"],
+        blueprint_digest=["Blueprint A"],
+        current_outline_digest=["Outline A"],
+        recent_segment_digest=["Segment A"],
+        current_state_digest=["State A"],
+        writer_hints=["Hint A"],
+    )
+    plan = OrchestratorPlan(
+        output_kind=StoryArtifactKind.STORY_SEGMENT,
+        writer_instruction="Write the next segment.",
+    )
+
+    packet = turn_domain_service.build_packet(
+        session_id=session.session_id,
+        plan=plan,
+        specialist_bundle=bundle,
+        runtime_identity=runtime_identity,
+    )
+
+    retrieval_sections = [
+        section
+        for section in packet.context_sections
+        if section.get("label") == "retrieval_context"
+    ]
+    assert len(retrieval_sections) == 1
+    assert retrieval_sections[0]["items"] == [
+        "R1 [retrieval_card] Storm Callback: A recalled storm callback matters here.",
+        "X1 [retrieval_expanded_chunk] Storm Callback Expanded: Expanded detail: the seal broke during the first storm.",
+    ]
+    bundle_metadata = packet.metadata["worker_source_ref_bundle"]
+    assert bundle_metadata["retrieval_card_material_ids"] == ["packet-card-R1"]
+    assert bundle_metadata["retrieval_expanded_chunk_material_ids"] == [
+        "packet-expanded-X1"
+    ]
+    assert bundle_metadata["retrieval_usage_material_ids"] == []
+
+    usage_records = material_service.list_materials(
+        identity=runtime_identity,
+        material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
+    )
+    assert usage_records == []
+
+    response = turn_domain_service.persist_generated_artifact(
+        request=LongformTurnRequest(
+            session_id=session.session_id,
+            command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+            model_id="model",
+        ),
+        packet=packet,
+        plan=plan,
+        text="Generated segment text.",
+        specialist_bundle=bundle,
+        pending_artifact_id=None,
+    )
+    artifact = service.get_artifact(response.artifact_id)
+
+    usage_records = material_service.list_materials(
+        identity=runtime_identity,
+        material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
+    )
+    assert len(usage_records) == 1
+    assert usage_records[0].payload["used_card_material_ids"] == ["packet-card-R1"]
+    assert usage_records[0].payload["used_expanded_chunk_material_ids"] == [
+        "packet-expanded-X1"
+    ]
+
+    assert artifact is not None
+    artifact_bundle = artifact.metadata["worker_source_ref_bundle"]
+    assert artifact_bundle["retrieval_card_material_ids"] == ["packet-card-R1"]
+    assert artifact_bundle["retrieval_expanded_chunk_material_ids"] == [
+        "packet-expanded-X1"
+    ]
+    assert artifact_bundle["retrieval_usage_material_ids"] == [
+        usage_records[0].material_id
+    ]
+    assert (
+        artifact.metadata["runtime_read_manifest_id"]
+        == packet.metadata["runtime_read_manifest_id"]
+    )
 
 
 def test_orchestrator_fallback_uses_projection_slots_not_writer_hints(
@@ -624,6 +914,172 @@ async def test_story_turn_domain_service_marks_consumers_synced(retrieval_sessio
 
 
 @pytest.mark.asyncio
+async def test_story_graph_runner_pins_runtime_identity_before_special_command(
+    retrieval_session,
+):
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=LongformChapterPhase.OUTLINE_REVIEW,
+    )
+    service.update_session(
+        session_id=session.session_id,
+        current_phase=LongformChapterPhase.OUTLINE_REVIEW,
+    )
+    outline = service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.CHAPTER_OUTLINE,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Pinned Identity Outline",
+    )
+    service.commit()
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+            retrieval_session
+        ),
+    )
+    runner = StoryGraphRunner(
+        nodes=StoryGraphNodes(
+            domain_service=_build_turn_domain_service(
+                service,
+                runtime_identity_service=identity_service,
+            )
+        )
+    )
+
+    response = await runner.run_turn(
+        LongformTurnRequest(
+            session_id=session.session_id,
+            command_kind=LongformTurnCommandKind.ACCEPT_OUTLINE,
+            model_id="model",
+            target_artifact_id=outline.artifact_id,
+        )
+    )
+    debug = runner.get_runtime_debug(session_id=session.session_id)
+    turn = retrieval_session.exec(
+        select(StoryTurnRecord)
+        .where(StoryTurnRecord.session_id == session.session_id)
+        .order_by(desc(StoryTurnRecord.created_at))
+    ).first()
+    branch = retrieval_session.exec(
+        select(BranchHeadRecord).where(
+            BranchHeadRecord.session_id == session.session_id
+        )
+    ).first()
+
+    assert response.current_phase == LongformChapterPhase.SEGMENT_DRAFTING
+    assert branch is not None
+    assert turn is not None
+    assert turn.branch_head_id == branch.branch_head_id
+    assert turn.runtime_profile_snapshot_id
+    assert turn.status == "completed"
+    assert turn.completed_at is not None
+    meaningful_state = debug["latest_meaningful_checkpoint"]["state"]
+    assert meaningful_state["branch_head_id"] == branch.branch_head_id
+    assert meaningful_state["turn_id"] == turn.turn_id
+    assert (
+        meaningful_state["runtime_profile_snapshot_id"]
+        == turn.runtime_profile_snapshot_id
+    )
+    assert meaningful_state["runtime_identity"]["turn_id"] == turn.turn_id
+
+
+@pytest.mark.asyncio
+async def test_story_graph_runner_marks_pinned_turn_failed_on_command_error(
+    retrieval_session,
+):
+    session, _, service = _seed_story_runtime(retrieval_session)
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+            retrieval_session
+        ),
+    )
+    runner = StoryGraphRunner(
+        nodes=StoryGraphNodes(
+            domain_service=_build_turn_domain_service(
+                service,
+                runtime_identity_service=identity_service,
+            )
+        )
+    )
+
+    with pytest.raises(ValueError):
+        await runner.run_turn(
+            LongformTurnRequest(
+                session_id=session.session_id,
+                command_kind=LongformTurnCommandKind.ACCEPT_OUTLINE,
+                model_id="model",
+            )
+        )
+    turn = retrieval_session.exec(
+        select(StoryTurnRecord)
+        .where(StoryTurnRecord.session_id == session.session_id)
+        .order_by(desc(StoryTurnRecord.created_at))
+    ).first()
+
+    assert turn is not None
+    assert turn.status == "failed"
+    assert turn.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_specialist_retrieval_inputs_carry_runtime_identity_filters(
+    retrieval_session,
+):
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    authoritative_state_view_service, projection_state_service = (
+        _build_boundary_services(service)
+    )
+    recorder = _RecordingMemoryOsService()
+    specialist_service = LongformSpecialistService(
+        authoritative_state_view_service=authoritative_state_view_service,
+        projection_state_service=projection_state_service,
+        memory_os_factory=lambda story_id, **_kwargs: recorder,
+    )
+    runtime_identity = MemoryRuntimeIdentity(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id="branch:test:main",
+        turn_id="turn:test:1",
+        runtime_profile_snapshot_id="snapshot:test:1",
+    )
+
+    await specialist_service.analyze(
+        session=session,
+        chapter=chapter,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            needs_retrieval=True,
+            archival_queries=["archive pin"],
+            recall_queries=["recall pin"],
+            writer_instruction="Write the next segment.",
+        ),
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt="Continue.",
+        accepted_segments=[],
+        pending_artifact=None,
+        runtime_identity=runtime_identity,
+    )
+
+    assert recorder.archival_inputs
+    assert recorder.recall_inputs
+    assert (
+        recorder.archival_inputs[0].filters["runtime_identity"][
+            "runtime_profile_snapshot_id"
+        ]
+        == "snapshot:test:1"
+    )
+    assert recorder.recall_inputs[0].filters["runtime_identity"]["turn_id"] == (
+        "turn:test:1"
+    )
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_and_specialist_include_block_prompt_context(
     retrieval_session,
 ):
@@ -669,7 +1125,7 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
         response_text=json.dumps(
             {
                 "output_kind": StoryArtifactKind.STORY_SEGMENT.value,
-                    "needs_retrieval": True,
+                "needs_retrieval": True,
                 "archival_queries": ["archive policy"],
                 "recall_queries": ["storm callback"],
                 "specialist_focus": ["segment continuity"],

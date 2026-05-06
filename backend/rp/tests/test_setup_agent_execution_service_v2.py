@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from models.chat import ProviderConfig
+from rp.agent_runtime.profiles import build_setup_agent_tool_scope
 from rp.agent_runtime.contracts import (
     RpAgentTurnResult,
     RuntimeToolResult,
@@ -803,6 +804,67 @@ async def test_setup_agent_execution_service_v2_uses_current_stage_metadata(
     assert "setup.patch.story_config" not in turn_input.tool_scope
 
 
+@pytest.mark.asyncio
+async def test_setup_agent_execution_service_v2_uses_target_stage_override(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    adapter = SetupRuntimeAdapter()
+    service = SetupAgentExecutionService(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        adapter=adapter,
+        runtime_executor=None,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-target-stage-override-1",
+        mode=StoryMode.LONGFORM,
+    )
+    request = SetupAgentTurnRequest(
+        workspace_id=workspace.workspace_id,
+        model_id="model-1",
+        user_prompt="Continue character design.",
+        target_stage=SetupStageId.CHARACTER_DESIGN,
+        history=[],
+        user_edit_delta_ids=[],
+    )
+    provider = ProviderConfig(
+        type="openai",
+        api_key="sk-test",
+        api_url="https://example.com/v1",
+        custom_headers={},
+    )
+
+    service._ensure_agent_model_compatible = lambda model_id: None  # type: ignore[method-assign]
+    service._resolve_provider = (  # type: ignore[method-assign]
+        lambda *, model_id, provider_id: provider
+    )
+    service._resolve_model_name = (  # type: ignore[method-assign]
+        lambda *, model_id, fallback_provider_id: "gpt-4o-mini"
+    )
+
+    launch = service._prepare_turn_launch(request)
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
+        adapter=adapter,
+        request=request,
+        workspace=workspace,
+        model_name="gpt-4o-mini",
+        provider=provider,
+    )
+
+    assert launch.current_stage == SetupStageId.CHARACTER_DESIGN
+    assert launch.current_step == SetupStepId.FOUNDATION
+    assert context_packet.current_stage == SetupStageId.CHARACTER_DESIGN
+    assert context_packet.current_step == "foundation"
+    assert turn_input.context_bundle["current_step"] == "foundation"
+    assert turn_input.context_bundle["current_stage"] == "character_design"
+    assert turn_input.context_bundle["stage_state"]["stage_id"] == "character_design"
+    assert turn_input.tool_scope == build_setup_agent_tool_scope("character_design")
+
+
 def test_setup_agent_execution_service_prepare_turn_launch_reuses_shared_preflight(
     retrieval_session,
     monkeypatch,
@@ -856,6 +918,111 @@ def test_setup_agent_execution_service_prepare_turn_launch_reuses_shared_preflig
     assert launch.current_step == SetupStepId.STORY_CONFIG
     assert launch.model_name == "gpt-4o-mini"
     assert launch.provider == provider
+
+
+def test_setup_agent_execution_service_prepare_turn_launch_rejects_target_stage_step_mismatch(
+    retrieval_session,
+    monkeypatch,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    service = SetupAgentExecutionService(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-launch-stage-mismatch-1",
+        mode=StoryMode.LONGFORM,
+    )
+    request = SetupAgentTurnRequest(
+        workspace_id=workspace.workspace_id,
+        model_id="model-1",
+        user_prompt="Adjust setup.",
+        target_stage=SetupStageId.CHARACTER_DESIGN,
+        target_step=SetupStepId.STORY_CONFIG,
+        history=[],
+        user_edit_delta_ids=[],
+    )
+    provider = ProviderConfig(
+        type="openai",
+        api_key="sk-test",
+        api_url="https://example.com/v1",
+        custom_headers={},
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_ensure_agent_model_compatible",
+        lambda model_id: None,
+    )
+    monkeypatch.setattr(
+        service,
+        "_resolve_provider",
+        lambda *, model_id, provider_id: provider,
+    )
+    monkeypatch.setattr(
+        service,
+        "_resolve_model_name",
+        lambda *, model_id, fallback_provider_id: "gpt-4o-mini",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="setup_target_stage_step_mismatch:character_design:story_config:foundation",
+    ):
+        service._prepare_turn_launch(request)
+
+
+def test_setup_agent_execution_service_prepare_turn_launch_rejects_target_stage_outside_stage_plan(
+    retrieval_session,
+    monkeypatch,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    service = SetupAgentExecutionService(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-launch-stage-plan-1",
+        mode=StoryMode.ROLEPLAY,
+    )
+    request = SetupAgentTurnRequest(
+        workspace_id=workspace.workspace_id,
+        model_id="model-1",
+        user_prompt="Adjust setup.",
+        target_stage=SetupStageId.PLOT_BLUEPRINT,
+        history=[],
+        user_edit_delta_ids=[],
+    )
+    provider = ProviderConfig(
+        type="openai",
+        api_key="sk-test",
+        api_url="https://example.com/v1",
+        custom_headers={},
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_ensure_agent_model_compatible",
+        lambda model_id: None,
+    )
+    monkeypatch.setattr(
+        service,
+        "_resolve_provider",
+        lambda *, model_id, provider_id: provider,
+    )
+    monkeypatch.setattr(
+        service,
+        "_resolve_model_name",
+        lambda *, model_id, fallback_provider_id: "gpt-4o-mini",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="setup_target_stage_not_in_stage_plan:plot_blueprint:roleplay",
+    ):
+        service._prepare_turn_launch(request)
 
 
 @pytest.mark.asyncio

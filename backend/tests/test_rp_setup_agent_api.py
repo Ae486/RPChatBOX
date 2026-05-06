@@ -135,6 +135,39 @@ class _CaptureStepLLMService:
         }
 
 
+class _CaptureStepStageLLMService:
+    async def chat_completion_stream(self, request):
+        raise AssertionError("stream path not expected")
+
+    async def chat_completion(self, request):
+        system_prompt = request.messages[0].content or ""
+        current_step = "unknown"
+        current_stage = "none"
+        step_marker = "Current step: "
+        stage_marker = "Current stage: "
+        if step_marker in system_prompt:
+            current_step = system_prompt.split(step_marker, 1)[1].split(
+                "\n", 1
+            )[0].strip()
+        if stage_marker in system_prompt:
+            current_stage = system_prompt.split(stage_marker, 1)[1].split(
+                "\n", 1
+            )[0].strip()
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": (
+                            f"step={current_step} stage={current_stage or 'none'}"
+                        ),
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
 class _CaptureDeltaCountLLMService:
     async def chat_completion_stream(self, request):
         raise AssertionError("stream path not expected")
@@ -633,6 +666,76 @@ def test_setup_agent_target_step_overrides_workspace_current_step(client, monkey
 
     assert response.status_code == 200
     assert response.json()["assistant_text"] == "step=foundation"
+
+
+def test_setup_agent_target_stage_override_survives_runtime_debug(client, monkeypatch):
+    client.put("/api/providers/provider-setup", json=_provider_payload())
+    client.put(
+        "/api/providers/provider-setup/models/model-setup",
+        json=_model_payload(),
+    )
+    workspace_id = _create_workspace(client)
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _CaptureStepStageLLMService(),
+    )
+
+    response = client.post(
+        f"/api/rp/setup/workspaces/{workspace_id}/turn",
+        json={
+            "workspace_id": workspace_id,
+            "model_id": "model-setup",
+            "target_stage": "character_design",
+            "target_step": "foundation",
+            "history": [],
+            "user_prompt": "请继续角色设定。",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_text"] == (
+        "step=foundation stage=character_design"
+    )
+
+    debug_response = client.get(
+        f"/api/rp/setup/workspaces/{workspace_id}/runtime/debug"
+    )
+    assert debug_response.status_code == 200
+    payload = debug_response.json()
+    latest_state = payload["latest_meaningful_checkpoint"]["state"]
+    assert latest_state["target_stage"] == "character_design"
+    assert latest_state["target_step"] == "foundation"
+
+
+def test_setup_agent_turn_rejects_mismatched_target_stage_and_step(client, monkeypatch):
+    client.put("/api/providers/provider-setup", json=_provider_payload())
+    client.put(
+        "/api/providers/provider-setup/models/model-setup",
+        json=_model_payload(),
+    )
+    workspace_id = _create_workspace(client)
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _CaptureStepStageLLMService(),
+    )
+
+    response = client.post(
+        f"/api/rp/setup/workspaces/{workspace_id}/turn",
+        json={
+            "workspace_id": workspace_id,
+            "model_id": "model-setup",
+            "target_stage": "character_design",
+            "target_step": "story_config",
+            "history": [],
+            "user_prompt": "请继续角色设定。",
+        },
+    )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]["error"]["message"]
+        == "setup_target_stage_step_mismatch:character_design:story_config:foundation"
+    )
 
 
 def test_setup_runtime_debug_exposes_checkpoint_state(client, monkeypatch):

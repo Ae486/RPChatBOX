@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from rp.models.memory_contract_registry import (
     MemoryBlockTemplate,
     MemoryContractRegistry,
@@ -9,6 +11,8 @@ from rp.models.memory_contract_registry import (
     MemoryLifecycleState,
     MemoryModeDefault,
     MemoryPermissionDefaults,
+    MemoryWorkerDescriptor,
+    MemoryWorkerModeDefault,
 )
 
 
@@ -109,6 +113,73 @@ _DOMAIN_ALIASES: dict[str, tuple[str, ...]] = {
     "plot_thread": ("thread", "story_thread"),
 }
 
+BOOTSTRAP_MEMORY_WORKER_IDS: tuple[str, ...] = (
+    "orchestrator",
+    "specialist",
+    "writer",
+    "graph_extraction",
+)
+
+_WORKER_LABELS: dict[str, str] = {
+    "orchestrator": "Story Orchestrator",
+    "specialist": "Memory Specialist",
+    "writer": "Writer",
+    "graph_extraction": "Graph Extraction",
+}
+
+_WORKER_DESCRIPTIONS: dict[str, str] = {
+    "orchestrator": "Plans the next story-runtime action and dispatches workers.",
+    "specialist": "Reads memory and prepares digest/proposal context.",
+    "writer": "Produces final user-facing story text from packet input.",
+    "graph_extraction": "Maintains archival/retrieval graph projections.",
+}
+
+_WORKER_PERMISSION_DEFAULTS: dict[str, dict[str, object]] = {
+    "orchestrator": {
+        "read": True,
+        "propose": False,
+        "refresh_projection": False,
+    },
+    "specialist": {
+        "read": True,
+        "propose": True,
+        "refresh_projection": True,
+    },
+    "writer": {
+        "read": False,
+        "propose": False,
+        "refresh_projection": False,
+    },
+    "graph_extraction": {
+        "read": True,
+        "propose": False,
+        "refresh_projection": False,
+    },
+}
+
+_WORKER_MODE_ROLES: dict[str, dict[str, str]] = {
+    "orchestrator": {
+        "longform": "planner",
+        "roleplay": "scene_dispatch",
+        "trpg": "gm_dispatch",
+    },
+    "specialist": {
+        "longform": "context_digest",
+        "roleplay": "memory_digest",
+        "trpg": "rule_context_digest",
+    },
+    "writer": {
+        "longform": "final_output",
+        "roleplay": "response_generation",
+        "trpg": "response_generation",
+    },
+    "graph_extraction": {
+        "longform": "retrieval_maintenance",
+        "roleplay": "retrieval_maintenance",
+        "trpg": "retrieval_maintenance",
+    },
+}
+
 
 class MemoryContractRegistryError(ValueError):
     """Stable registry error with a machine-readable code."""
@@ -131,6 +202,24 @@ class MemoryContractRegistryService:
         for domain in self._registry.domains:
             for alias in domain.aliases:
                 self._aliases_by_id[_normalize_key(alias)] = domain.domain_id
+        self._workers_by_id = {
+            _normalize_key(worker.worker_id): worker
+            for worker in self._registry.workers
+        }
+        self._worker_aliases_by_id: dict[str, str] = {}
+        for worker in self._registry.workers:
+            for alias in worker.aliases:
+                self._worker_aliases_by_id[_normalize_key(alias)] = worker.worker_id
+        self._block_templates_by_id: dict[str, MemoryBlockTemplate] = {}
+        self._block_template_aliases_by_id: dict[str, str] = {}
+        for domain in self._registry.domains:
+            for template in domain.block_templates:
+                template_key = _normalize_key(template.block_template_id)
+                self._block_templates_by_id[template_key] = template
+                for alias in template.aliases:
+                    self._block_template_aliases_by_id[_normalize_key(alias)] = (
+                        template.block_template_id
+                    )
 
     def registry_version(self) -> str:
         return self._registry.version
@@ -211,6 +300,7 @@ class MemoryContractRegistryService:
         *,
         domain_id: str | None = None,
         layer: str | None = None,
+        include_hidden: bool = False,
     ) -> list[MemoryBlockTemplate]:
         normalized_layer = _normalize_key(layer) if layer is not None else None
         domains = (
@@ -222,7 +312,7 @@ class MemoryContractRegistryService:
         templates: list[MemoryBlockTemplate] = []
         for domain in domains:
             for template in domain.block_templates:
-                if template.lifecycle != MemoryLifecycleState.ACTIVE:
+                if not self._is_listable(template, include_hidden=include_hidden):
                     continue
                 if (
                     normalized_layer is not None
@@ -232,20 +322,139 @@ class MemoryContractRegistryService:
                 templates.append(template)
         return templates
 
+    def get_block_template(self, block_template_id: str) -> MemoryBlockTemplate | None:
+        resolved_id = self.resolve_block_template_alias(block_template_id)
+        return self._block_templates_by_id.get(_normalize_key(resolved_id))
+
+    def require_block_template(self, block_template_id: str) -> MemoryBlockTemplate:
+        template = self.get_block_template(block_template_id)
+        if template is None:
+            raise MemoryContractRegistryError(
+                "memory_block_template_not_registered",
+                _normalize_key(block_template_id),
+            )
+        return template
+
+    def resolve_block_template_alias(self, block_template_id: str) -> str:
+        return self._resolve_registry_alias(
+            value=block_template_id,
+            items_by_id=self._block_templates_by_id,
+            aliases_by_id=self._block_template_aliases_by_id,
+            id_getter=lambda item: item.block_template_id,
+            migrated_to_getter=lambda item: item.migrated_to,
+            cycle_code="memory_block_template_migration_cycle",
+            target_missing_code="memory_block_template_migration_target_missing",
+        )
+
+    def list_workers(
+        self,
+        *,
+        mode: str | None = None,
+        include_hidden: bool = False,
+    ) -> list[MemoryWorkerDescriptor]:
+        normalized_mode = _normalize_key(mode) if mode is not None else None
+        workers: list[MemoryWorkerDescriptor] = []
+        for worker in self._registry.workers:
+            if not self._is_listable(worker, include_hidden=include_hidden):
+                continue
+            if normalized_mode is not None and not self._is_worker_active_for_mode(
+                worker,
+                normalized_mode,
+            ):
+                continue
+            workers.append(worker)
+        return workers
+
+    def get_worker(self, worker_id: str) -> MemoryWorkerDescriptor | None:
+        resolved_id = self.resolve_worker_alias(worker_id)
+        return self._workers_by_id.get(_normalize_key(resolved_id))
+
+    def require_worker(self, worker_id: str) -> MemoryWorkerDescriptor:
+        worker = self.get_worker(worker_id)
+        if worker is None:
+            raise MemoryContractRegistryError(
+                "memory_worker_not_registered",
+                _normalize_key(worker_id),
+            )
+        return worker
+
+    def resolve_worker_alias(self, worker_id: str) -> str:
+        return self._resolve_registry_alias(
+            value=worker_id,
+            items_by_id=self._workers_by_id,
+            aliases_by_id=self._worker_aliases_by_id,
+            id_getter=lambda item: item.worker_id,
+            migrated_to_getter=lambda item: item.migrated_to,
+            cycle_code="memory_worker_migration_cycle",
+            target_missing_code="memory_worker_migration_target_missing",
+        )
+
     @staticmethod
     def _is_listable(
-        domain: MemoryDomainContract,
+        item: Any,
         *,
         include_hidden: bool,
     ) -> bool:
-        if domain.lifecycle == MemoryLifecycleState.ACTIVE:
+        if item.lifecycle == MemoryLifecycleState.ACTIVE:
             return True
-        return include_hidden and domain.lifecycle == MemoryLifecycleState.HIDDEN
+        return include_hidden and item.lifecycle == MemoryLifecycleState.HIDDEN
 
     @staticmethod
     def _is_active_for_mode(domain: MemoryDomainContract, mode: str) -> bool:
         defaults = domain.mode_defaults.get(mode)
         return bool(defaults and defaults.active)
+
+    @staticmethod
+    def _is_worker_active_for_mode(
+        worker: MemoryWorkerDescriptor,
+        mode: str,
+    ) -> bool:
+        defaults = worker.mode_defaults.get(mode)
+        return bool(defaults and defaults.active)
+
+    @staticmethod
+    def _resolve_registry_alias(
+        *,
+        value: str,
+        items_by_id: dict[str, Any],
+        aliases_by_id: dict[str, str],
+        id_getter,
+        migrated_to_getter,
+        cycle_code: str,
+        target_missing_code: str,
+    ) -> str:
+        current_id = aliases_by_id.get(
+            _normalize_key(value),
+            _normalize_key(value),
+        )
+        seen: set[str] = set()
+        while True:
+            current_key = _normalize_key(current_id)
+            if current_key in seen:
+                raise MemoryContractRegistryError(cycle_code, current_key)
+            seen.add(current_key)
+
+            item = items_by_id.get(current_key)
+            if item is None:
+                return current_key
+            if getattr(item, "lifecycle") != MemoryLifecycleState.MIGRATED:
+                return str(id_getter(item))
+            migrated_to = migrated_to_getter(item)
+            if migrated_to is None:
+                raise MemoryContractRegistryError(
+                    target_missing_code,
+                    str(id_getter(item)),
+                )
+            migrated_to_key = _normalize_key(str(migrated_to))
+            if (
+                migrated_to_key not in items_by_id
+                and migrated_to_key not in aliases_by_id
+            ):
+                raise MemoryContractRegistryError(
+                    target_missing_code,
+                    str(id_getter(item)),
+                )
+            current_id = aliases_by_id.get(migrated_to_key, migrated_to_key)
 
 
 def build_bootstrap_memory_contract_registry() -> MemoryContractRegistry:
@@ -256,6 +465,10 @@ def build_bootstrap_memory_contract_registry() -> MemoryContractRegistry:
         domains=[
             _build_bootstrap_domain(domain_id)
             for domain_id in BOOTSTRAP_MEMORY_DOMAIN_IDS
+        ],
+        workers=[
+            _build_bootstrap_worker(worker_id)
+            for worker_id in BOOTSTRAP_MEMORY_WORKER_IDS
         ],
     )
 
@@ -301,6 +514,29 @@ def _build_mode_defaults(domain_id: str) -> dict[str, MemoryModeDefault]:
             ui_visible=domain_id in TRPG_ACTIVE_DOMAIN_IDS,
         ),
     }
+
+
+def _build_bootstrap_worker(worker_id: str) -> MemoryWorkerDescriptor:
+    metadata: dict[str, object] = {"bootstrap": True}
+    if worker_id == "graph_extraction":
+        metadata["activation_policy"] = {
+            "retrieval_policy_field": "graph_extraction_enabled"
+        }
+    return MemoryWorkerDescriptor(
+        worker_id=worker_id,
+        label=_WORKER_LABELS[worker_id],
+        description=_WORKER_DESCRIPTIONS[worker_id],
+        mode_defaults={
+            mode: MemoryWorkerModeDefault(
+                active=True,
+                permission_defaults=dict(_WORKER_PERMISSION_DEFAULTS[worker_id]),
+                metadata={"role": role},
+            )
+            for mode, role in _WORKER_MODE_ROLES[worker_id].items()
+        },
+        permission_defaults=dict(_WORKER_PERMISSION_DEFAULTS[worker_id]),
+        metadata=metadata,
+    )
 
 
 def _build_default_block_templates(

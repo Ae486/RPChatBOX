@@ -14,6 +14,7 @@ def test_build_setup_trace_emits_cognitive_artifacts_and_attributes():
             "model_id": "model-trace-1",
             "provider_id": "provider-trace-1",
             "target_step": "foundation",
+            "target_stage": "character_design",
             "history": [],
             "user_prompt": "请根据最新修改继续收敛。",
         }
@@ -130,6 +131,8 @@ def test_build_setup_trace_emits_cognitive_artifacts_and_attributes():
     assert root_span.attributes["context_summary_action"] == "rebuilt"
     assert root_span.attributes["context_fallback_reason"] is None
     assert root_span.attributes["story_id"] == "story-trace-1"
+    assert root_span.attributes["target_stage"] == "character_design"
+    assert root_span.attributes["setup_stage"] == "character_design"
     assert root_span.attributes["cognitive_state_invalidated"] is True
     assert root_span.attributes["cognitive_ready_for_review"] is False
     assert root_span.attributes["cognitive_remaining_issue_count"] == 1

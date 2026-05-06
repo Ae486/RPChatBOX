@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from config import get_settings
 from rp.graphs.story_graph_runner import StoryGraphRunner
+from rp.models.archival_evolution import ArchivalEvolutionRequest
 from rp.models.block_view import BlockSource
+from rp.models.core_mutation import DirectCoreEditRequest
 from rp.models.dsl import Domain, Layer
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import MemoryBlockProposalSubmitRequest
+from rp.models.memory_inspection import RecallReviewCommand
 from rp.models.story_runtime import ChapterWorkspaceSnapshot
 from rp.models.story_runtime import LongformTurnRequest, StoryRuntimeConfigPatchRequest
 from rp.services.story_block_mutation_service import (
@@ -173,6 +177,18 @@ def _memory_block_consumer_not_found(consumer_key: str) -> HTTPException:
     )
 
 
+def _memory_inspection_invalid(exc: Exception, *, code: str) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": code,
+            }
+        },
+    )
+
+
 @router.get("/api/rp/story-sessions")
 async def list_story_sessions(
     controller: StoryRuntimeController = Depends(_story_controller),
@@ -293,6 +309,137 @@ async def get_story_memory_overview(
         raise HTTPException(
             status_code=404,
             detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/inspection")
+async def get_story_memory_inspection(
+    session_id: str,
+    branch_head_id: str,
+    turn_id: str,
+    runtime_profile_snapshot_id: str,
+    layers: list[Layer] | None = Query(default=None),
+    domains: list[Domain] | None = Query(default=None),
+    include_hidden_audit: bool = False,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        session = controller.read_session(session_id=session_id).session
+        identity = MemoryRuntimeIdentity(
+            story_id=session.story_id,
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            runtime_profile_snapshot_id=runtime_profile_snapshot_id,
+        )
+        return controller.inspect_visible_memory(
+            session_id=session_id,
+            identity=identity,
+            layers=None if layers is None else [item.value for item in layers],
+            domains=None if domains is None else [item.value for item in domains],
+            include_hidden_audit=include_hidden_audit,
+        )
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _memory_inspection_invalid(
+            exc,
+            code="memory_inspection_invalid",
+        ) from exc
+
+
+@router.post("/api/rp/story-sessions/{session_id}/memory/core/direct-edit")
+async def direct_edit_story_core_memory(
+    session_id: str,
+    payload: DirectCoreEditRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = await controller.direct_edit_core_memory(
+            session_id=session_id,
+            payload=payload,
+        )
+        return {"session_id": session_id, "item": item}
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _memory_inspection_invalid(
+            exc,
+            code="memory_core_direct_edit_invalid",
+        ) from exc
+
+
+@router.post("/api/rp/story-sessions/{session_id}/memory/recall/actions")
+async def review_story_recall_memory(
+    session_id: str,
+    payload: RecallReviewCommand,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = controller.review_recall_memory(
+            session_id=session_id,
+            command=payload,
+        )
+        return {"session_id": session_id, "item": item}
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _memory_inspection_invalid(
+            exc,
+            code="memory_recall_action_invalid",
+        ) from exc
+
+
+@router.post("/api/rp/story-sessions/{session_id}/memory/archival/evolution")
+async def evolve_story_archival_memory(
+    session_id: str,
+    payload: ArchivalEvolutionRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        item = controller.evolve_archival_memory(
+            session_id=session_id,
+            request=payload,
+        )
+        return {"session_id": session_id, "item": item}
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _memory_inspection_invalid(
+            exc,
+            code="memory_archival_evolution_invalid",
         ) from exc
 
 

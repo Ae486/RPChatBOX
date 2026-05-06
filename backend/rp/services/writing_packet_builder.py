@@ -20,6 +20,8 @@ class WritingPacketBuilder:
         projection_context_sections: list[dict[str, object]],
         runtime_writer_hints: list[str],
         user_instruction: str,
+        runtime_retrieval_sections: list[dict[str, object]] | None = None,
+        packet_metadata: dict[str, object] | None = None,
     ) -> WritingPacket:
         writer_contract = session.writer_contract
         system_sections = [
@@ -42,8 +44,14 @@ class WritingPacketBuilder:
             )
 
         context_sections = list(projection_context_sections)
+        if runtime_retrieval_sections:
+            context_sections.extend(
+                dict(section) for section in runtime_retrieval_sections
+            )
         if runtime_writer_hints:
-            context_sections.append({"label": "writer_hints", "items": list(runtime_writer_hints)})
+            context_sections.append(
+                {"label": "writer_hints", "items": list(runtime_writer_hints)}
+            )
 
         metadata = {
             "story_id": session.story_id,
@@ -52,6 +60,8 @@ class WritingPacketBuilder:
             "output_kind": plan.output_kind.value,
             "plan_notes": list(plan.notes),
         }
+        if packet_metadata:
+            metadata.update(dict(packet_metadata))
         return WritingPacket(
             packet_id=uuid4().hex,
             session_id=session.session_id,

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Mapping
+import inspect
 import json
 from typing import Any
 
 from models.chat import ChatMessage
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import MemorySearchArchivalInput, MemorySearchRecallInput
 from rp.models.story_runtime import (
     ChapterWorkspace,
@@ -19,6 +22,7 @@ from rp.models.story_runtime import (
 from .authoritative_state_view_service import AuthoritativeStateViewService
 from .memory_os_service import MemoryOsService
 from .projection_state_service import ProjectionStateService
+from .runtime_retrieval_card_service import RuntimeRetrievalCardService
 from .retrieval_block_adapter_service import RetrievalBlockAdapterService
 from .retrieval_broker import RetrievalBroker
 from .story_block_prompt_compile_service import StoryBlockPromptCompileService
@@ -40,6 +44,7 @@ class LongformSpecialistService:
         projection_state_service: ProjectionStateService,
         memory_os_factory=None,
         retrieval_block_adapter_service: RetrievalBlockAdapterService | None = None,
+        runtime_retrieval_card_service: RuntimeRetrievalCardService | None = None,
         story_block_prompt_compile_service: StoryBlockPromptCompileService
         | None = None,
         story_block_prompt_context_service: StoryBlockPromptContextService
@@ -50,13 +55,19 @@ class LongformSpecialistService:
         self._authoritative_state_view_service = authoritative_state_view_service
         self._projection_state_service = projection_state_service
         self._memory_os_factory = memory_os_factory or (
-            lambda story_id: MemoryOsService(
+            lambda story_id, session_id=None, runtime_identity=None: MemoryOsService(
                 retrieval_broker=RetrievalBroker(default_story_id=story_id)
+                if runtime_identity is None
+                else RetrievalBroker(
+                    default_story_id=story_id,
+                    runtime_identity=runtime_identity,
+                )
             )
         )
         self._retrieval_block_adapter_service = (
             retrieval_block_adapter_service or RetrievalBlockAdapterService()
         )
+        self._runtime_retrieval_card_service = runtime_retrieval_card_service
         self._story_block_prompt_compile_service = story_block_prompt_compile_service
         self._story_block_prompt_context_service = story_block_prompt_context_service
         self._story_block_prompt_render_service = (
@@ -75,24 +86,52 @@ class LongformSpecialistService:
         user_prompt: str | None,
         accepted_segments: list[StoryArtifact],
         pending_artifact: StoryArtifact | None,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> SpecialistResultBundle:
-        memory_os = self._memory_os_factory(session.story_id)
+        memory_os = self._build_memory_os(
+            story_id=session.story_id,
+            session_id=session.session_id,
+            runtime_identity=runtime_identity,
+        )
         archival_hits = []
         recall_hits = []
         if plan.needs_retrieval:
             for query in plan.archival_queries:
                 if not query:
                     continue
-                result = await memory_os.search_archival(
-                    MemorySearchArchivalInput(query=query, top_k=3)
+                input_model = MemorySearchArchivalInput(
+                    query=query,
+                    top_k=3,
+                    filters=self._runtime_retrieval_filters(runtime_identity),
                 )
+                result = await memory_os.search_archival(input_model)
+                if runtime_identity is not None:
+                    self._retrieval_cards().materialize_search_result(
+                        identity=runtime_identity,
+                        result=result,
+                        actor="worker.specialist",
+                        query_text=input_model.query,
+                        search_kind="archival",
+                    )
                 archival_hits.extend(result.hits)
             for query in plan.recall_queries:
                 if not query:
                     continue
-                result = await memory_os.search_recall(
-                    MemorySearchRecallInput(query=query, top_k=3, scope="story")
+                input_model = MemorySearchRecallInput(
+                    query=query,
+                    top_k=3,
+                    scope="story",
+                    filters=self._runtime_retrieval_filters(runtime_identity),
                 )
+                result = await memory_os.search_recall(input_model)
+                if runtime_identity is not None:
+                    self._retrieval_cards().materialize_search_result(
+                        identity=runtime_identity,
+                        result=result,
+                        actor="worker.specialist",
+                        query_text=input_model.query,
+                        search_kind="recall",
+                    )
                 recall_hits.extend(result.hits)
         archival_payload_hits = archival_hits[:4]
         recall_payload_hits = recall_hits[:4]
@@ -153,6 +192,7 @@ class LongformSpecialistService:
             recall_hits=recall_hits,
             projection_state=projection_state,
             authoritative_state=authoritative_state,
+            runtime_identity=runtime_identity,
         )
         if command_kind in {
             LongformTurnCommandKind.ACCEPT_OUTLINE,
@@ -269,6 +309,7 @@ class LongformSpecialistService:
         recall_hits: list,
         projection_state: dict[str, list[str]],
         authoritative_state: dict[str, object],
+        runtime_identity: MemoryRuntimeIdentity | None,
     ) -> SpecialistResultBundle:
         blueprint_digest = list(projection_state.get("blueprint_digest", []))
         foundation_digest = list(projection_state.get("foundation_digest", []))
@@ -299,9 +340,13 @@ class LongformSpecialistService:
             )
             if value
         )
-        retrieval_digest = [
-            hit.excerpt_text[:220] for hit in [*archival_hits[:2], *recall_hits[:2]]
-        ]
+        retrieval_digest = (
+            self._runtime_retrieval_digest(runtime_identity)
+            if runtime_identity is not None
+            else [
+                hit.excerpt_text[:220] for hit in [*archival_hits[:2], *recall_hits[:2]]
+            ]
+        )
         if not current_outline_digest and chapter.accepted_outline_json is not None:
             current_outline_digest.append(
                 str(
@@ -381,6 +426,62 @@ class LongformSpecialistService:
             summary_updates=retrieval_digest[:3],
             recall_summary_text=recall_summary,
         )
+
+    def _build_memory_os(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        runtime_identity: MemoryRuntimeIdentity | None,
+    ) -> MemoryOsService:
+        factory = self._memory_os_factory
+        parameters: Mapping[str, inspect.Parameter]
+        try:
+            parameters = inspect.signature(factory).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "story_id" in parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        ):
+            return factory(
+                story_id=story_id,
+                session_id=session_id,
+                runtime_identity=runtime_identity,
+            )
+        return factory(story_id)
+
+    @staticmethod
+    def _runtime_retrieval_filters(
+        runtime_identity: MemoryRuntimeIdentity | None,
+    ) -> dict[str, Any]:
+        if runtime_identity is None:
+            return {}
+        return {
+            "runtime_identity": runtime_identity.model_dump(mode="json"),
+        }
+
+    def _retrieval_cards(self) -> RuntimeRetrievalCardService:
+        if self._runtime_retrieval_card_service is not None:
+            return self._runtime_retrieval_card_service
+        return RuntimeRetrievalCardService()
+
+    def _runtime_retrieval_digest(
+        self,
+        runtime_identity: MemoryRuntimeIdentity,
+    ) -> list[str]:
+        digests: list[str] = []
+        for item in self._retrieval_cards().list_writer_visible_context(
+            identity=runtime_identity
+        ):
+            summary = str(item.get("summary") or "").strip()
+            short_id = str(item.get("short_id") or "").strip()
+            kind = str(item.get("kind") or "").strip()
+            if not summary:
+                continue
+            label = f"{short_id} " if short_id else ""
+            digests.append(f"{label}[{kind}] {summary}"[:220])
+        return digests[:4]
 
     @classmethod
     def _build_terminal_foreshadow_patch(

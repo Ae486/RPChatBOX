@@ -30,6 +30,7 @@ from rp.models.setup_workspace import (
     CommitProposalStatus,
     QuestionSeverity,
     QuestionStatus,
+    SetupStepId,
 )
 from rp.services.setup_agent_prompt_service import SetupAgentPromptService
 
@@ -61,12 +62,22 @@ class SetupRuntimeAdapter:
         cognitive_state: SetupCognitiveStateSnapshot | None = None,
         cognitive_state_summary: SetupCognitiveStateSummary | None = None,
     ) -> RpAgentTurnInput:
-        current_step = request.target_step or workspace.current_step
+        current_step = SetupStepId(context_packet.current_step)
         current_stage = getattr(context_packet, "current_stage", None)
+        selected_stage = (
+            request.target_stage
+            if request.target_stage is not None
+            else (
+                current_stage
+                if request.target_step is None
+                or request.target_step == workspace.current_step
+                else None
+            )
+        )
         system_prompt = self._prompt_service.build_system_prompt(
             mode=workspace.mode,
             current_step=current_step,
-            current_stage=current_stage,
+            current_stage=selected_stage,
             context_packet=context_packet,
         )
         open_questions = [
@@ -83,7 +94,7 @@ class SetupRuntimeAdapter:
         latest_proposal = self._latest_step_proposal(
             workspace=workspace,
             current_step=current_step,
-            current_stage=current_stage,
+            current_stage=selected_stage,
         )
         step_state = next(
             (item for item in workspace.step_states if item.step_id == current_step),
@@ -93,12 +104,12 @@ class SetupRuntimeAdapter:
             (
                 item
                 for item in workspace.stage_states
-                if current_stage is not None and item.stage_id == current_stage
+                if selected_stage is not None and item.stage_id == selected_stage
             ),
             None,
         )
         tool_scope_key = (
-            current_stage.value if current_stage is not None else current_step.value
+            selected_stage.value if selected_stage is not None else current_step.value
         )
         return RpAgentTurnInput(
             profile_id="setup_agent",

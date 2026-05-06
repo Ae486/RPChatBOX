@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
+from typing import AsyncIterator, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -43,12 +43,12 @@ class SetupGraphRunner:
     async def run_turn(self, request: SetupAgentTurnRequest) -> SetupAgentTurnResponse:
         initial_state = self._initial_state(request=request, stream_mode=False)
         async with open_async_checkpointed_graph(self._compile_graph) as graph:
-            prepared_state = await graph.ainvoke(
+            await graph.ainvoke(
                 initial_state,
                 config=self._thread_config(request.workspace_id),
             )
             snapshot = await graph.aget_state(self._thread_config(request.workspace_id))
-            final_state = dict(snapshot.values or {})
+            final_state = cast(SetupGraphState, dict(snapshot.values or {}))
         self._raise_if_error(final_state)
         return SetupAgentTurnResponse(
             assistant_text=str(final_state.get("assistant_text") or ""),
@@ -158,6 +158,7 @@ class SetupGraphRunner:
         return {
             "workspace_id": request.workspace_id,
             "target_step": request.target_step.value if request.target_step else None,
+            "target_stage": request.target_stage.value if request.target_stage else None,
             "model_id": request.model_id,
             "provider_id": request.provider_id,
             "user_prompt": request.user_prompt,
@@ -214,11 +215,7 @@ class SetupGraphRunner:
         return {
             "checkpoint_id": snapshot_checkpoint_id(snapshot),
             "parent_checkpoint_id": snapshot_parent_checkpoint_id(snapshot),
-            "created_at": (
-                created_at.isoformat()
-                if hasattr(created_at, "isoformat")
-                else str(created_at) if created_at is not None else None
-            ),
+            "created_at": SetupGraphRunner._serialize_snapshot_time(created_at),
             "status": (snapshot.values or {}).get("status"),
             "state_keys": sorted((snapshot.values or {}).keys()),
         }
@@ -257,3 +254,12 @@ class SetupGraphRunner:
             ):
                 return item
         return snapshot
+
+    @staticmethod
+    def _serialize_snapshot_time(value) -> str | None:
+        if value is None:
+            return None
+        isoformat = getattr(value, "isoformat", None)
+        if callable(isoformat):
+            return str(isoformat())
+        return str(value)

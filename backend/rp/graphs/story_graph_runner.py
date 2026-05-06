@@ -1,8 +1,10 @@
 """Phase-1 LangGraph workflow shell for story turns."""
+
 from __future__ import annotations
 
+from collections.abc import Mapping
 import json
-from typing import AsyncIterator, cast
+from typing import Any, AsyncIterator, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -47,13 +49,17 @@ class StoryGraphRunner:
             snapshot = await graph.aget_state(self._thread_config(request.session_id))
             final_state = cast(StoryGraphState, dict(snapshot.values or {}))
         self._raise_if_error(final_state)
-        return LongformTurnResponse.model_validate(final_state.get("response_payload") or {})
+        return LongformTurnResponse.model_validate(
+            final_state.get("response_payload") or {}
+        )
 
     async def run_turn_stream(self, request: LongformTurnRequest) -> AsyncIterator[str]:
         if request.command_kind in self._SPECIAL_COMMANDS:
             response = await self.run_turn(request)
             if response.assistant_text:
-                yield self._typed({"type": "text_delta", "delta": response.assistant_text})
+                yield self._typed(
+                    {"type": "text_delta", "delta": response.assistant_text}
+                )
             yield self._typed({"type": "done"})
             return
         initial_state = self._initial_state(request=request, stream_mode=True)
@@ -61,11 +67,13 @@ class StoryGraphRunner:
             base_config = self._thread_config(request.session_id)
             prepared_state = await graph.ainvoke(initial_state, config=base_config)
             self._raise_if_error(prepared_state)
-            checkpoint_id = require_snapshot_checkpoint_id(await graph.aget_state(base_config))
+            checkpoint_id = require_snapshot_checkpoint_id(
+                await graph.aget_state(base_config)
+            )
 
             current_state = (
                 await graph.aget_state(
-                self._thread_config(request.session_id, checkpoint_id=checkpoint_id)
+                    self._thread_config(request.session_id, checkpoint_id=checkpoint_id)
                 )
             ).values
             text_parts: list[str] = []
@@ -76,17 +84,25 @@ class StoryGraphRunner:
                         if payload.get("type") == "done":
                             break
                         if payload.get("type") == "error":
-                            await graph.aupdate_state(
-                                self._thread_config(request.session_id, checkpoint_id=checkpoint_id),
-                                values={
-                                    "assistant_text": "".join(text_parts),
-                                    "status": "failed",
-                                    "error": payload.get("error")
-                                    or {
-                                        "message": "story_stream_failed",
-                                        "type": "story_turn_failed",
-                                    },
+                            final_values = {
+                                "assistant_text": "".join(text_parts),
+                                "status": "failed",
+                                "error": payload.get("error")
+                                or {
+                                    "message": "story_stream_failed",
+                                    "type": "story_turn_failed",
                                 },
+                            }
+                            final_state = self._merge_state(
+                                current_state,
+                                final_values,
+                            )
+                            final_values.update(self._nodes.finalize_turn(final_state))
+                            await graph.aupdate_state(
+                                self._thread_config(
+                                    request.session_id, checkpoint_id=checkpoint_id
+                                ),
+                                values=final_values,
                                 as_node="finalize_turn",
                             )
                             yield chunk
@@ -98,7 +114,9 @@ class StoryGraphRunner:
                     yield chunk
 
                 new_config = await graph.aupdate_state(
-                    self._thread_config(request.session_id, checkpoint_id=checkpoint_id),
+                    self._thread_config(
+                        request.session_id, checkpoint_id=checkpoint_id
+                    ),
                     {
                         "assistant_text": "".join(text_parts),
                         "status": "writer_completed",
@@ -110,41 +128,57 @@ class StoryGraphRunner:
                 current_state = dict(snapshot.values or {})
                 current_state = self._nodes.persist_generated_artifact(current_state)
                 new_config = await graph.aupdate_state(
-                    self._thread_config(request.session_id, checkpoint_id=checkpoint_id),
+                    self._thread_config(
+                        request.session_id, checkpoint_id=checkpoint_id
+                    ),
                     current_state,
                     as_node="persist_generated_artifact",
                 )
                 snapshot = await graph.aget_state(new_config)
                 checkpoint_id = require_snapshot_checkpoint_id(snapshot)
                 current_state = dict(snapshot.values or {})
-                regression_update = await self._nodes.post_write_regression(current_state)
+                regression_update = await self._nodes.post_write_regression(
+                    current_state
+                )
                 current_state = {**current_state, **regression_update}
                 await graph.aupdate_state(
-                    self._thread_config(request.session_id, checkpoint_id=checkpoint_id),
+                    self._thread_config(
+                        request.session_id, checkpoint_id=checkpoint_id
+                    ),
                     regression_update,
                     as_node="post_write_regression",
                 )
+                final_values = {
+                    "assistant_text": "".join(text_parts),
+                    "response_payload": current_state.get("response_payload") or {},
+                    "status": "completed",
+                }
+                final_state = self._merge_state(current_state, final_values)
+                final_values.update(self._nodes.finalize_turn(final_state))
                 await graph.aupdate_state(
-                    self._thread_config(request.session_id, checkpoint_id=checkpoint_id),
-                    values={
-                        "assistant_text": "".join(text_parts),
-                        "response_payload": current_state.get("response_payload") or {},
-                        "status": "completed",
-                    },
+                    self._thread_config(
+                        request.session_id, checkpoint_id=checkpoint_id
+                    ),
+                    values=final_values,
                     as_node="finalize_turn",
                 )
                 yield self._typed({"type": "done"})
             except Exception as exc:
-                await graph.aupdate_state(
-                    self._thread_config(request.session_id, checkpoint_id=checkpoint_id),
-                    values={
-                        "assistant_text": "".join(text_parts),
-                        "status": "failed",
-                        "error": {
-                            "message": str(exc),
-                            "type": "story_turn_failed",
-                        },
+                final_values = {
+                    "assistant_text": "".join(text_parts),
+                    "status": "failed",
+                    "error": {
+                        "message": str(exc),
+                        "type": "story_turn_failed",
                     },
+                }
+                final_state = self._merge_state(current_state, final_values)
+                final_values.update(self._nodes.finalize_turn(final_state))
+                await graph.aupdate_state(
+                    self._thread_config(
+                        request.session_id, checkpoint_id=checkpoint_id
+                    ),
+                    values=final_values,
                     as_node="finalize_turn",
                 )
                 yield self._typed(
@@ -162,7 +196,11 @@ class StoryGraphRunner:
         with open_checkpointed_graph(self._compile_graph) as graph:
             config = self._thread_config(session_id)
             snapshot = graph.get_state(config)
-            history = list(graph.get_state_history(config)) if snapshot_exists(snapshot) else []
+            history = (
+                list(graph.get_state_history(config))
+                if snapshot_exists(snapshot)
+                else []
+            )
         latest_snapshot = history[-1] if history else snapshot
         meaningful_snapshot = self._pick_meaningful_snapshot(
             snapshot=snapshot,
@@ -178,20 +216,28 @@ class StoryGraphRunner:
 
     def _compile_graph(self, checkpointer):
         builder = StateGraph(StoryGraphState)
-        builder.add_node("load_session_and_chapter", self._nodes.load_session_and_chapter)
+        builder.add_node("pin_runtime_identity", self._nodes.pin_runtime_identity)
+        builder.add_node(
+            "load_session_and_chapter", self._nodes.load_session_and_chapter
+        )
         builder.add_node("validate_command", self._nodes.validate_command)
-        builder.add_node("prepare_generation_inputs", self._nodes.prepare_generation_inputs)
+        builder.add_node(
+            "prepare_generation_inputs", self._nodes.prepare_generation_inputs
+        )
         builder.add_node("orchestrator_plan", self._nodes.orchestrator_plan)
         builder.add_node("specialist_analyze", self._nodes.specialist_analyze)
         builder.add_node("build_packet", self._nodes.build_packet)
         builder.add_node("writer_run", self._nodes.writer_run)
-        builder.add_node("persist_generated_artifact", self._nodes.persist_generated_artifact)
+        builder.add_node(
+            "persist_generated_artifact", self._nodes.persist_generated_artifact
+        )
         builder.add_node("post_write_regression", self._nodes.post_write_regression)
         builder.add_node("accept_outline", self._nodes.accept_outline)
         builder.add_node("accept_pending_segment", self._nodes.accept_pending_segment)
         builder.add_node("complete_chapter", self._nodes.complete_chapter)
         builder.add_node("finalize_turn", self._nodes.finalize_turn)
-        builder.add_edge(START, "load_session_and_chapter")
+        builder.add_edge(START, "pin_runtime_identity")
+        builder.add_edge("pin_runtime_identity", "load_session_and_chapter")
         builder.add_edge("load_session_and_chapter", "validate_command")
         builder.add_conditional_edges(
             "validate_command",
@@ -203,9 +249,9 @@ class StoryGraphRunner:
                 "prepare_generation_inputs": "prepare_generation_inputs",
             },
         )
-        builder.add_edge("accept_outline", END)
-        builder.add_edge("accept_pending_segment", END)
-        builder.add_edge("complete_chapter", END)
+        builder.add_edge("accept_outline", "finalize_turn")
+        builder.add_edge("accept_pending_segment", "finalize_turn")
+        builder.add_edge("complete_chapter", "finalize_turn")
         builder.add_edge("prepare_generation_inputs", "orchestrator_plan")
         builder.add_edge("orchestrator_plan", "specialist_analyze")
         builder.add_edge("specialist_analyze", "build_packet")
@@ -219,7 +265,8 @@ class StoryGraphRunner:
         )
         builder.add_edge("writer_run", "persist_generated_artifact")
         builder.add_edge("persist_generated_artifact", "post_write_regression")
-        builder.add_edge("post_write_regression", END)
+        builder.add_edge("post_write_regression", "finalize_turn")
+        builder.add_edge("finalize_turn", END)
         return builder.compile(checkpointer=checkpointer)
 
     @staticmethod
@@ -232,6 +279,10 @@ class StoryGraphRunner:
         # fields must be cleared before the new execution starts.
         return {
             "session_id": request.session_id,
+            "runtime_identity": {},
+            "branch_head_id": "",
+            "turn_id": "",
+            "runtime_profile_snapshot_id": "",
             "command_kind": request.command_kind.value,
             "model_id": request.model_id,
             "provider_id": request.provider_id,
@@ -286,6 +337,13 @@ class StoryGraphRunner:
             return None
 
     @staticmethod
+    def _merge_state(
+        state: Mapping[str, Any] | None,
+        values: dict[str, Any],
+    ) -> StoryGraphState:
+        return cast(StoryGraphState, {**dict(state or {}), **values})
+
+    @staticmethod
     def _raise_if_error(state: StoryGraphState) -> None:
         error = state.get("error")
         if not error:
@@ -321,7 +379,9 @@ class StoryGraphRunner:
             "created_at": (
                 isoformat()
                 if callable(isoformat)
-                else str(created_at) if created_at is not None else None
+                else str(created_at)
+                if created_at is not None
+                else None
             ),
             "status": (snapshot.values or {}).get("status"),
             "state_keys": sorted((snapshot.values or {}).keys()),

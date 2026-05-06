@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy import desc
 from sqlmodel import select
 
 from models.rp_setup_store import SetupDraftBlockRecord, SetupWorkspaceRecord
@@ -26,6 +27,23 @@ class RetrievalRuntimeConfigService:
         session_config = self._story_session_config(story_id=story_id)
         return workspace_config.overlay(override=session_config)
 
+    def resolve_session_config(self, *, session_id: str) -> RetrievalRuntimeConfig:
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            return RetrievalRuntimeConfig()
+
+        session_record = self._session.get(StorySessionRecord, normalized_session_id)
+        if session_record is None:
+            return RetrievalRuntimeConfig()
+
+        workspace_config = self._setup_workspace_config(
+            story_id=session_record.story_id
+        )
+        session_config = self._config_from_payload(
+            session_record.runtime_story_config_json or {}
+        )
+        return workspace_config.overlay(override=session_config)
+
     def _setup_workspace_config(self, *, story_id: str) -> RetrievalRuntimeConfig:
         workspace = self._session.exec(
             select(SetupWorkspaceRecord).where(
@@ -48,7 +66,7 @@ class RetrievalRuntimeConfigService:
         session = self._session.exec(
             select(StorySessionRecord)
             .where(StorySessionRecord.story_id == story_id)
-            .order_by(StorySessionRecord.updated_at.desc())
+            .order_by(desc(StorySessionRecord.updated_at))
         ).first()
         if session is None:
             return None

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.story_runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
@@ -89,6 +92,7 @@ class LongformRegressionService:
         accepted_artifact: StoryArtifact,
         model_id: str,
         provider_id: str | None,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> tuple[StorySession, ChapterWorkspace]:
         plan = await self._orchestrator_service.plan(
             session=session,
@@ -122,9 +126,15 @@ class LongformRegressionService:
         chapter: ChapterWorkspace,
         model_id: str,
         provider_id: str | None,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> tuple[StorySession, ChapterWorkspace]:
         accepted_segments = self._list_accepted_story_segments(
             chapter_workspace_id=chapter.chapter_workspace_id
+        )
+        recall_source_refs = self._build_recall_source_refs(
+            session=session,
+            chapter=chapter,
+            accepted_segments=accepted_segments,
         )
         plan = await self._orchestrator_service.plan(
             session=session,
@@ -161,6 +171,8 @@ class LongformRegressionService:
                 chapter_index=chapter.chapter_index,
                 source_workspace_id=session.source_workspace_id,
                 summary_text=bundle.recall_summary_text,
+                runtime_identity=runtime_identity,
+                source_refs=recall_source_refs,
             )
         if self._recall_detail_ingestion_service is not None and accepted_segments:
             self._recall_detail_ingestion_service.ingest_accepted_story_segments(
@@ -169,6 +181,8 @@ class LongformRegressionService:
                 chapter_index=chapter.chapter_index,
                 source_workspace_id=session.source_workspace_id,
                 accepted_segments=accepted_segments,
+                runtime_identity=runtime_identity,
+                source_refs=recall_source_refs,
             )
         if (
             self._recall_continuity_note_ingestion_service is not None
@@ -180,6 +194,8 @@ class LongformRegressionService:
                 chapter_index=chapter.chapter_index,
                 source_workspace_id=session.source_workspace_id,
                 summary_updates=bundle.summary_updates,
+                runtime_identity=runtime_identity,
+                source_refs=recall_source_refs,
             )
         if (
             self._recall_character_long_history_ingestion_service is not None
@@ -198,6 +214,8 @@ class LongformRegressionService:
                     chapter_summary_text=bundle.recall_summary_text,
                     continuity_notes=bundle.summary_updates,
                     accepted_segments=accepted_segments,
+                    runtime_identity=runtime_identity,
+                    source_refs=recall_source_refs,
                 )
         if self._recall_retired_foreshadow_ingestion_service is not None and isinstance(
             updated_session.current_state_json, dict
@@ -215,6 +233,8 @@ class LongformRegressionService:
                     chapter_summary_text=bundle.recall_summary_text,
                     continuity_notes=bundle.summary_updates,
                     accepted_segments=accepted_segments,
+                    runtime_identity=runtime_identity,
+                    source_refs=recall_source_refs,
                 )
         return updated_session, updated_chapter
 
@@ -279,3 +299,93 @@ class LongformRegressionService:
                 and item.artifact_kind == StoryArtifactKind.STORY_SEGMENT
             )
         ]
+
+    @staticmethod
+    def _build_recall_source_refs(
+        *,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        accepted_segments: list[StoryArtifact],
+    ) -> list[MemorySourceRef]:
+        refs: list[MemorySourceRef] = [
+            MemorySourceRef(
+                source_type="story_session_chapter",
+                source_id=f"{session.session_id}:chapter:{chapter.chapter_index}",
+                layer="core_state.derived_projection",
+                domain="chapter",
+                metadata={"chapter_index": chapter.chapter_index},
+            )
+        ]
+        seen_artifact_ids: set[str] = set()
+        for artifact in accepted_segments:
+            if artifact.artifact_id in seen_artifact_ids:
+                continue
+            seen_artifact_ids.add(artifact.artifact_id)
+            refs.append(
+                MemorySourceRef(
+                    source_type="story_artifact",
+                    source_id=artifact.artifact_id,
+                    layer="runtime_workspace",
+                    domain="chapter",
+                    entry_id=artifact.artifact_id,
+                    revision=artifact.revision,
+                    metadata={
+                        "artifact_kind": artifact.artifact_kind.value,
+                        "scene_ref": artifact.scene_ref,
+                    },
+                )
+            )
+            refs.extend(
+                LongformRegressionService._worker_source_refs_from_metadata(
+                    artifact.metadata
+                )
+            )
+        return LongformRegressionService._dedupe_source_refs(refs)
+
+    @staticmethod
+    def _worker_source_refs_from_metadata(
+        metadata: dict[str, Any] | None,
+    ) -> list[MemorySourceRef]:
+        if not isinstance(metadata, dict):
+            return []
+        bundle_payload = metadata.get("worker_source_ref_bundle")
+        if not isinstance(bundle_payload, dict):
+            return []
+        card_ids = list(bundle_payload.get("retrieval_card_material_ids") or [])
+        expanded_ids = list(
+            bundle_payload.get("retrieval_expanded_chunk_material_ids") or []
+        )
+        usage_ids = list(bundle_payload.get("retrieval_usage_material_ids") or [])
+        refs: list[MemorySourceRef] = []
+        for source_type, material_ids in (
+            ("retrieval_card_material", card_ids),
+            ("retrieval_expanded_chunk_material", expanded_ids),
+            ("retrieval_usage_material", usage_ids),
+        ):
+            for material_id in material_ids:
+                normalized = str(material_id or "").strip()
+                if not normalized:
+                    continue
+                refs.append(
+                    MemorySourceRef(
+                        source_type=source_type,
+                        source_id=normalized,
+                        layer="runtime_workspace",
+                        metadata={"source_of_truth": False},
+                    )
+                )
+        return refs
+
+    @staticmethod
+    def _dedupe_source_refs(
+        source_refs: list[MemorySourceRef],
+    ) -> list[MemorySourceRef]:
+        deduped: list[MemorySourceRef] = []
+        seen: set[tuple[str, str]] = set()
+        for ref in source_refs:
+            key = (ref.source_type.casefold(), ref.source_id.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ref)
+        return deduped

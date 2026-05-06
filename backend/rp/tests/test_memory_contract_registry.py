@@ -236,6 +236,43 @@ def test_registry_accepts_test_only_domain_extension_without_service_edits():
     ] == ["magic_system.runtime_workspace"]
 
 
+def test_registry_rejects_ambiguous_block_template_aliases():
+    bootstrap = build_bootstrap_memory_contract_registry()
+
+    with pytest.raises(ValidationError, match="duplicate block template alias"):
+        MemoryContractRegistry(
+            version=bootstrap.version,
+            domains=[
+                *bootstrap.domains,
+                MemoryDomainContract(
+                    domain_id="magic_system",
+                    label="Magic System",
+                    allowed_layers=[
+                        CORE_STATE_AUTHORITATIVE_LAYER,
+                        RUNTIME_WORKSPACE_LAYER,
+                    ],
+                    block_templates=[
+                        {
+                            "block_template_id": "magic_system.authoritative",
+                            "domain_id": "magic_system",
+                            "layer": CORE_STATE_AUTHORITATIVE_LAYER,
+                            "label": "Magic System Authoritative State",
+                            "aliases": ["magic.current"],
+                        },
+                        {
+                            "block_template_id": "magic_system.runtime_workspace",
+                            "domain_id": "magic_system",
+                            "layer": RUNTIME_WORKSPACE_LAYER,
+                            "label": "Magic System Runtime Workspace",
+                            "aliases": ["magic.current"],
+                        },
+                    ],
+                ),
+            ],
+            workers=bootstrap.workers,
+        )
+
+
 @pytest.mark.parametrize(
     "missing_field",
     [

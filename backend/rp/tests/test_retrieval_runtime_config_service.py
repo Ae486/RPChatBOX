@@ -255,3 +255,56 @@ def test_resolve_story_config_ignores_none_graph_defaults_in_session_payload(
     assert config.graph_extraction_max_output_tokens == 1024
     assert config.graph_extraction_timeout_ms == 45000
     assert config.graph_extraction_enabled is True
+
+
+def test_resolve_session_config_pins_exact_session_instead_of_latest_story_session(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    workspace = workspace_service.create_workspace(
+        story_id="story-runtime-config-session-pinned",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_story_config(
+        workspace_id=workspace.workspace_id,
+        patch=StoryConfigDraft(
+            retrieval_rerank_model_id="rerank-model-setup",
+            retrieval_rerank_provider_id="provider-rerank-setup",
+        ),
+    )
+    session_service = StorySessionService(retrieval_session)
+    pinned_session = session_service.create_session(
+        story_id="story-runtime-config-session-pinned",
+        source_workspace_id=workspace.workspace_id,
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={
+            "retrieval_embedding_model_id": "embedding-model-session-a",
+            "graph_extraction_model_id": "graph-model-session-a",
+        },
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    session_service.create_session(
+        story_id="story-runtime-config-session-pinned",
+        source_workspace_id=workspace.workspace_id,
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={
+            "retrieval_embedding_model_id": "embedding-model-session-b",
+            "graph_extraction_model_id": "graph-model-session-b",
+        },
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+
+    service = RetrievalRuntimeConfigService(retrieval_session)
+    pinned_config = service.resolve_session_config(session_id=pinned_session.session_id)
+    latest_story_config = service.resolve_story_config(
+        story_id="story-runtime-config-session-pinned"
+    )
+
+    assert pinned_config.embedding_model_id == "embedding-model-session-a"
+    assert pinned_config.graph_extraction_model_id == "graph-model-session-a"
+    assert pinned_config.rerank_model_id == "rerank-model-setup"
+    assert latest_story_config.embedding_model_id == "embedding-model-session-b"

@@ -323,6 +323,11 @@ class EvalRunner:
                     if request.target_step is not None
                     else workspace.current_step.value
                 ),
+                "target_stage": (
+                    request.target_stage.value
+                    if request.target_stage is not None
+                    else None
+                ),
                 "model_id": request.model_id,
                 "provider_id": request.provider_id,
                 "stream_mode": bool(case.runtime_target.stream),

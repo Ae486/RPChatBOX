@@ -455,6 +455,8 @@ Freeze canonical JSON / DSL block format for user-visible memory:
 
 Core State can support direct governed editing. Recall is mostly review / invalidate / recompute. Archival edits must go through Story Evolution / ingestion / reindex.
 
+Story Evolution visibility should be modeled as a single evolution artifact with visibility scope, not as per-branch physical copies by default. The scope can target current branch, selected branches, all existing branches, or story-global visibility. This keeps provenance, governance, and cleanup simpler while still supporting branch-specific visibility.
+
 Expected benefit:
 
 Frontend editing and backend worker operations use the same memory semantics instead of parallel formats.
@@ -625,6 +627,7 @@ Memory-related DTOs / records should carry the identity when relevant:
 - Core State authoritative revisions: `story_id`, `session_id`, `branch_id` or `branch_head_id`, `turn_id` or `turn_seq`, `profile_snapshot_id`.
 - Projection slots / refresh records: same identity plus source authoritative refs and source turn refs.
 - Runtime Workspace materials: same identity is mandatory.
+- Runtime Workspace materials, worker candidates, pending marks, and unfinished post-write results stay attached to the `BranchHead` that produced them. Branch switching must not carry those temporary or candidate materials into another branch.
 - Recall materializations: same identity for branch-scoped material; story-global imported material may carry story/global scope plus optional branch visibility metadata.
 - Archival edits: story-global by default, branch-scoped only when explicitly created by branch-specific Story Evolution.
 - Retrieval queries/cards/usage records: same identity, because retrieval evidence must be attributable to the turn that used it.

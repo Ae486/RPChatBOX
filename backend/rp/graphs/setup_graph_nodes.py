@@ -1,6 +1,7 @@
 """Node adapters for the phase-1 SetupGraph shell."""
 from __future__ import annotations
 
+from rp.models.setup_stage import SetupStageId
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_workspace import SetupStepId
 from rp.services.setup_agent_execution_service import SetupAgentExecutionService
@@ -38,6 +39,7 @@ class SetupGraphNodes:
             "mode": workspace.mode.value,
             "current_step": workspace.current_step.value,
             "target_step": target_step,
+            "target_stage": state.get("target_stage"),
             "status": "workspace_loaded",
         }
 
@@ -80,6 +82,11 @@ class SetupGraphNodes:
             provider_id=state.get("provider_id"),
             target_step=(
                 SetupStepId(state["target_step"]) if state.get("target_step") else None
+            ),
+            target_stage=(
+                SetupStageId(state["target_stage"])
+                if state.get("target_stage")
+                else None
             ),
             history=[
                 SetupAgentDialogueMessage.model_validate(item)

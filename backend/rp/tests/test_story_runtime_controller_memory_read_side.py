@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from types import SimpleNamespace
 
 import pytest
+from sqlmodel import select
 
+from models.rp_story_store import RuntimeProfileSnapshotRecord
+from rp.models.core_mutation import (
+    CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
+    DirectCoreEditRequest,
+)
 from rp.models.dsl import Domain, Layer
+from rp.models.memory_contract_registry import MemorySourceRef
 from rp.models.memory_crud import (
     MemoryBlockProposalSubmitRequest,
     ProposalSubmitInput,
 )
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.runtime_workspace_material import (
+    RuntimeWorkspaceMaterial,
+    RuntimeWorkspaceMaterialKind,
+    RuntimeWorkspaceMaterialLifecycle,
+    RuntimeWorkspaceMaterialVisibility,
+)
+from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import (
     LongformChapterPhase,
     StoryArtifactKind,
@@ -25,6 +40,7 @@ from rp.services.chapter_workspace_projection_adapter import (
 )
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
+from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection_state_service import ProjectionStateService
 from rp.services.proposal_apply_service import ProposalApplyService
@@ -32,7 +48,13 @@ from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
 from rp.services.projection_read_service import ProjectionReadService
 from rp.services.provenance_read_service import ProvenanceReadService
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime_workspace_material_service import (
+    RuntimeWorkspaceMaterialService,
+)
 from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.story_activation_service import StoryActivationService
 from rp.services.story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
     StoryBlockMutationService,
@@ -42,9 +64,15 @@ from rp.services.story_runtime_controller import (
     StoryRuntimeController,
 )
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.version_history_read_service import VersionHistoryReadService
+
+
+class _Dumpable(dict):
+    def model_dump(self, *, mode: str = "json"):
+        return dict(self)
 
 
 def _seed_story_runtime(retrieval_session):
@@ -191,13 +219,34 @@ def _build_controller(
     )
     return StoryRuntimeController(
         story_session_service=story_session_service,
-        story_activation_service=SimpleNamespace(),
+        story_activation_service=cast(Any, SimpleNamespace()),
         version_history_read_service=version_history_read_service,
         provenance_read_service=provenance_read_service,
         projection_read_service=projection_read_service,
         memory_inspection_read_service=memory_inspection_read_service,
         rp_block_read_service=rp_block_read_service,
         story_block_mutation_service=block_mutation_service,
+        runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+            retrieval_session
+        ),
+    )
+
+
+def _build_runtime_identity(retrieval_session, *, session_id: str):
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session_id,
+        created_from="test.story_runtime_controller.direct_edit",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    return identity_service.resolve_runtime_entry_identity(
+        session_id=session_id,
+        command_kind="write_next_segment",
+        actor="memory_direct_edit_test",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
     )
 
 
@@ -876,7 +925,7 @@ async def test_story_runtime_controller_reviews_and_applies_authoritative_block_
                     "domain": Domain.CHAPTER,
                     "domain_path": "chapter.current",
                     "scope": "story",
-                    "revision": 3,
+                    "revision": 1,
                 }
             ],
             reason="controller review detail",
@@ -1002,3 +1051,394 @@ async def test_story_runtime_controller_reviews_and_applies_authoritative_block_
             block_id=authoritative_row.authoritative_object_id,
             proposal_id=other_session_proposal.proposal_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_story_runtime_controller_direct_edit_routes_through_shared_kernel(
+    retrieval_session,
+):
+    session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    controller = _build_controller(retrieval_session, story_session_service, repository)
+    runtime_identity = _build_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+    )
+    candidate_service = RuntimeWorkspaceMaterialService(session=retrieval_session)
+    candidate_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="mat-worker-candidate-direct-edit",
+            material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
+            identity=runtime_identity,
+            domain=Domain.CHAPTER.value,
+            domain_path="chapter.current",
+            short_id="CAND1",
+            payload={
+                "candidate_patch": {"title": "Candidate Chapter"},
+                "target_ref": {"domain_path": "chapter.current"},
+            },
+            visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
+            created_by="worker.specialist",
+        )
+    )
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    authoritative_row = core_repo.upsert_authoritative_object(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        object_id="chapter.current",
+        scope="story",
+        current_revision=3,
+        data_json={"current_chapter": 1, "title": "Block Store Chapter"},
+        metadata_json={"test_marker": "controller_direct_edit"},
+        latest_apply_id="apply-controller-direct-edit",
+        payload_schema_ref="schema://core-state/chapter-current",
+    )
+    core_repo.upsert_authoritative_revision(
+        authoritative_object_id=authoritative_row.authoritative_object_id,
+        story_id=session.story_id,
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        object_id="chapter.current",
+        scope="story",
+        revision=3,
+        data_json={"current_chapter": 1, "title": "Block Store Chapter"},
+        revision_source_kind="controller_test",
+        source_apply_id="apply-controller-direct-edit",
+        metadata_json={"test_marker": "controller_direct_edit_revision"},
+    )
+
+    receipt = await controller.direct_edit_memory_block(
+        session_id=session.session_id,
+        block_id=authoritative_row.authoritative_object_id,
+        payload=DirectCoreEditRequest(
+            identity=runtime_identity,
+            actor="user.memory_editor",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                        "revision": 3,
+                    },
+                    "field_patch": {"title": "Direct Edited Chapter"},
+                }
+            ],
+            base_refs=[
+                {
+                    "object_id": "chapter.current",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.CHAPTER,
+                    "domain_path": "chapter.current",
+                    "scope": "story",
+                    "revision": 3,
+                }
+            ],
+            source_refs=[
+                MemorySourceRef(
+                    source_type="review_overlay",
+                    source_id="overlay-1",
+                    layer="runtime_workspace",
+                    domain=Domain.CHAPTER.value,
+                    block_id="chapter.current",
+                )
+            ],
+            reason="user corrected chapter title",
+        ),
+    )
+
+    proposal_record = repository.get_proposal_record(receipt["proposal_id"])
+    apply_receipts = repository.list_apply_receipts_for_proposal(receipt["proposal_id"])
+    updated_session = story_session_service.get_session(session.session_id)
+    candidate = candidate_service.require_material(
+        identity=runtime_identity,
+        material_id="mat-worker-candidate-direct-edit",
+    )
+    events = MemoryChangeEventService(session=retrieval_session).list_events(
+        identity=runtime_identity
+    )
+    core_events = [
+        event
+        for event in events
+        if event.event_kind == "core_authoritative_mutation_applied"
+    ]
+
+    assert receipt is not None
+    assert receipt["status"] == "applied"
+    assert proposal_record is not None
+    assert proposal_record.governance_metadata_json["core_mutation"]["origin_kind"] == (
+        CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT
+    )
+    assert proposal_record.governance_metadata_json["core_mutation"]["actor"] == (
+        "user.memory_editor"
+    )
+    assert len(apply_receipts) == 1
+    assert (
+        "core_mutation:origin_kind=user_direct_edit" in apply_receipts[0].warnings_json
+    )
+    assert (
+        "core_mutation:invalidated_candidate=mat-worker-candidate-direct-edit"
+        in apply_receipts[0].warnings_json
+    )
+    assert updated_session is not None
+    assert updated_session.current_state_json["chapter_digest"]["title"] == (
+        "Direct Edited Chapter"
+    )
+    assert candidate.lifecycle == RuntimeWorkspaceMaterialLifecycle.INVALIDATED
+    assert len(core_events) == 1
+    core_event = core_events[0]
+    assert core_event.actor == "user.memory_editor"
+    assert core_event.metadata["origin_kind"] == CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT
+    assert core_event.metadata["projection_refresh"] == "stale_mark_only"
+    assert core_event.metadata["invalidated_candidate_ids"] == [
+        "mat-worker-candidate-direct-edit"
+    ]
+    assert any(
+        ref.source_type == "review_overlay" and ref.source_id == "overlay-1"
+        for ref in core_event.source_refs
+    )
+    dirty_targets_by_kind = {
+        target.target_kind: target for target in core_event.dirty_targets
+    }
+    assert "core_authoritative_block" in dirty_targets_by_kind
+    assert "projection_refresh_pending" in dirty_targets_by_kind
+    assert (
+        dirty_targets_by_kind["projection_refresh_pending"].metadata["refresh_state"]
+        == "stale_mark_only"
+    )
+    assert any(
+        event.event_kind == "runtime_workspace_material_lifecycle_updated"
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_story_runtime_controller_direct_edit_rejects_stale_base_revision(
+    retrieval_session,
+):
+    session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    controller = _build_controller(retrieval_session, story_session_service, repository)
+    runtime_identity = _build_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+    )
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    authoritative_row = core_repo.upsert_authoritative_object(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        object_id="chapter.current",
+        scope="story",
+        current_revision=3,
+        data_json={"current_chapter": 1, "title": "Block Store Chapter"},
+        metadata_json={"test_marker": "controller_direct_edit_conflict"},
+        latest_apply_id="apply-controller-direct-edit-conflict",
+        payload_schema_ref="schema://core-state/chapter-current",
+    )
+    core_repo.upsert_authoritative_revision(
+        authoritative_object_id=authoritative_row.authoritative_object_id,
+        story_id=session.story_id,
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        object_id="chapter.current",
+        scope="story",
+        revision=3,
+        data_json={"current_chapter": 1, "title": "Block Store Chapter"},
+        revision_source_kind="controller_test",
+        source_apply_id="apply-controller-direct-edit-conflict",
+        metadata_json={"test_marker": "controller_direct_edit_conflict_revision"},
+    )
+
+    await controller.direct_edit_memory_block(
+        session_id=session.session_id,
+        block_id=authoritative_row.authoritative_object_id,
+        payload=DirectCoreEditRequest(
+            identity=runtime_identity,
+            actor="user.memory_editor",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                        "revision": 3,
+                    },
+                    "field_patch": {"title": "Fresh Direct Edit"},
+                }
+            ],
+            base_refs=[
+                {
+                    "object_id": "chapter.current",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.CHAPTER,
+                    "domain_path": "chapter.current",
+                    "scope": "story",
+                    "revision": 3,
+                }
+            ],
+            reason="fresh direct edit",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="phase_e_apply_base_revision_conflict"):
+        await controller.direct_edit_memory_block(
+            session_id=session.session_id,
+            block_id=authoritative_row.authoritative_object_id,
+            payload=DirectCoreEditRequest(
+                identity=runtime_identity,
+                actor="user.memory_editor",
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                operations=[
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": {
+                            "object_id": "chapter.current",
+                            "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                            "domain": Domain.CHAPTER,
+                            "domain_path": "chapter.current",
+                            "revision": 3,
+                        },
+                        "field_patch": {"title": "Stale Direct Edit"},
+                    }
+                ],
+                base_refs=[
+                    {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                        "scope": "story",
+                        "revision": 3,
+                    }
+                ],
+                reason="stale direct edit",
+            ),
+        )
+
+    proposal_records = repository.list_proposals_for_story(session.story_id)
+    assert proposal_records[-1].status == "failed"
+    assert proposal_records[-1].error_message is not None
+    assert proposal_records[-1].error_message.startswith(
+        "phase_e_apply_base_revision_conflict"
+    )
+
+
+def test_story_activation_service_publishes_first_active_runtime_snapshot(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    workspace = workspace_service.create_workspace(
+        story_id="story-activation-snapshot",
+        mode=StoryMode.LONGFORM,
+    )
+    handoff = SimpleNamespace(
+        story_id="story-activation-snapshot",
+        workspace_id=workspace.workspace_id,
+        mode=SimpleNamespace(value="longform"),
+        runtime_story_config=_Dumpable(
+            {
+                "retrieval_rerank_model_id": "rerank-activation",
+                "retrieval_rerank_provider_id": "provider-activation",
+            }
+        ),
+        writer_contract=_Dumpable({"style_rules": ["Tight"]}),
+    )
+
+    class _FakeSetupController:
+        def run_activation_check(self, *, workspace_id: str):
+            assert workspace_id == workspace.workspace_id
+            return SimpleNamespace(ready=True, handoff=handoff, blocking_issues=[])
+
+    activation_service = StoryActivationService(
+        setup_controller=_FakeSetupController(),
+        workspace_service=workspace_service,
+        story_session_service=StorySessionService(retrieval_session),
+        runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+            retrieval_session
+        ),
+    )
+
+    result = activation_service.activate_workspace(workspace_id=workspace.workspace_id)
+
+    snapshots = retrieval_session.exec(
+        select(RuntimeProfileSnapshotRecord).where(
+            RuntimeProfileSnapshotRecord.session_id == result.session_id
+        )
+    ).all()
+
+    assert len(snapshots) == 1
+    assert snapshots[0].status == "active"
+    assert snapshots[0].created_from == "story_runtime.activate_workspace"
+    assert snapshots[0].activated_at is not None
+
+
+def test_story_runtime_controller_patch_publishes_new_active_snapshot(
+    retrieval_session,
+):
+    session, _, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    controller = _build_controller(retrieval_session, story_session_service, repository)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    initial = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.runtime_config.initial",
+    )
+    retrieval_session.commit()
+
+    snapshot = controller.update_runtime_story_config(
+        session_id=session.session_id,
+        patch={
+            "retrieval_rerank_model_id": "rerank-patched",
+            "retrieval_rerank_provider_id": "provider-patched",
+        },
+    )
+
+    published = snapshot_service.require_active_snapshot(session_id=session.session_id)
+    refreshed_initial = snapshot_service.require_snapshot(
+        initial.runtime_profile_snapshot_id
+    )
+    refreshed_published = snapshot_service.require_snapshot(
+        published.runtime_profile_snapshot_id
+    )
+
+    assert snapshot.session.session_id == session.session_id
+    assert (
+        snapshot.session.runtime_story_config["retrieval_rerank_model_id"]
+        == "rerank-patched"
+    )
+    assert refreshed_initial.runtime_profile_snapshot_id != (
+        refreshed_published.runtime_profile_snapshot_id
+    )
+    assert refreshed_initial.status == "superseded"
+    assert refreshed_initial.superseded_at is not None
+    assert refreshed_published.status == "active"
+    assert refreshed_published.created_from == "story_runtime.runtime_config_patch"
+    assert (
+        refreshed_published.compiled_profile_json["retrieval_policy"]["rerank_model_id"]
+        == "rerank-patched"
+    )
+    assert (
+        refreshed_published.compiled_profile_json["retrieval_policy"][
+            "rerank_provider_id"
+        ]
+        == "provider-patched"
+    )

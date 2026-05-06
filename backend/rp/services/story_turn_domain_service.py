@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import AsyncIterator
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.runtime_identity import StoryTurnStatus
 from rp.models.story_runtime import (
     ChapterWorkspace,
     LongformChapterPhase,
@@ -19,6 +21,8 @@ from rp.models.story_runtime import (
     StorySegmentStructuredMetadata,
     StorySession,
 )
+from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.worker_memory import WorkerSourceRefBundle
 from rp.models.writing_runtime import WritingPacket
 from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_regression_service import LongformRegressionService
@@ -29,7 +33,11 @@ from .recall_scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
+from .story_runtime_identity_service import StoryRuntimeIdentityService
 from .story_session_service import StorySessionService
+from .runtime_retrieval_card_service import RuntimeRetrievalCardService
+from .runtime_read_manifest_service import RuntimeReadManifestService
+from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 from .writing_packet_builder import WritingPacketBuilder
 from .writing_worker_execution_service import WritingWorkerExecutionService
 
@@ -52,6 +60,10 @@ class StoryTurnDomainService:
         recall_scene_transcript_ingestion_service: (
             RecallSceneTranscriptIngestionService | None
         ) = None,
+        runtime_identity_service: StoryRuntimeIdentityService | None = None,
+        runtime_read_manifest_service: RuntimeReadManifestService | None = None,
+        runtime_workspace_material_service: RuntimeWorkspaceMaterialService
+        | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
@@ -65,6 +77,26 @@ class StoryTurnDomainService:
         self._recall_scene_transcript_ingestion_service = (
             recall_scene_transcript_ingestion_service
         )
+        self._runtime_identity_by_session: dict[str, MemoryRuntimeIdentity] = {}
+        self._runtime_identity_service = runtime_identity_service
+        self._runtime_workspace_material_service = runtime_workspace_material_service
+        self._runtime_read_manifest_service: RuntimeReadManifestService | None
+        if runtime_read_manifest_service is not None:
+            self._runtime_read_manifest_service = runtime_read_manifest_service
+        else:
+            resolver_session = (
+                getattr(runtime_identity_service, "_session", None)
+                if runtime_identity_service is not None
+                else None
+            )
+            self._runtime_read_manifest_service = (
+                RuntimeReadManifestService(
+                    session=resolver_session,
+                    runtime_workspace_material_service=runtime_workspace_material_service,
+                )
+                if resolver_session is not None
+                else None
+            )
 
     def prepare_generation_inputs(
         self,
@@ -134,6 +166,7 @@ class StoryTurnDomainService:
         plan: OrchestratorPlan,
         pending_artifact_id: str | None,
         accepted_segment_ids: list[str],
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> SpecialistResultBundle:
         session = self.require_session(session_id)
         chapter = self.require_current_chapter(session_id)
@@ -158,12 +191,46 @@ class StoryTurnDomainService:
             user_prompt=user_prompt,
             accepted_segments=accepted_segments,
             pending_artifact=pending_artifact,
+            runtime_identity=runtime_identity,
         )
+        if runtime_identity is not None:
+            self._runtime_identity_by_session[session.session_id] = runtime_identity
         self._mark_block_consumer_synced(
             session_id=session_id,
             consumer_key="story.specialist",
         )
         return bundle
+
+    def resolve_runtime_entry_identity(
+        self,
+        *,
+        session_id: str,
+        command_kind: LongformTurnCommandKind,
+        actor: str = "story_runtime",
+    ) -> MemoryRuntimeIdentity | None:
+        if self._runtime_identity_service is None:
+            return None
+        return self._runtime_identity_service.resolve_runtime_entry_identity(
+            session_id=session_id,
+            command_kind=command_kind.value,
+            actor=actor,
+        )
+
+    def finalize_runtime_turn(self, *, turn_id: str | None, failed: bool) -> None:
+        if self._runtime_identity_service is None:
+            return
+        normalized_turn_id = str(turn_id or "").strip()
+        if not normalized_turn_id:
+            return
+        self._runtime_identity_service.update_turn_status(
+            turn_id=normalized_turn_id,
+            status=StoryTurnStatus.FAILED if failed else StoryTurnStatus.COMPLETED,
+        )
+        self._runtime_identity_by_session = {
+            session_id: identity
+            for session_id, identity in self._runtime_identity_by_session.items()
+            if identity.turn_id != normalized_turn_id
+        }
 
     def build_packet(
         self,
@@ -171,19 +238,68 @@ class StoryTurnDomainService:
         session_id: str,
         plan: OrchestratorPlan,
         specialist_bundle: SpecialistResultBundle,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> WritingPacket:
         session = self.require_session(session_id)
         chapter = self.require_current_chapter(session_id)
+        resolved_runtime_identity = (
+            runtime_identity or self._runtime_identity_by_session.get(session_id)
+        )
+        projection_context_sections = (
+            self._builder_projection_context_service.build_context_sections(
+                session_id=session_id,
+            )
+        )
+        runtime_retrieval_sections: list[dict[str, object]] = []
+        packet_metadata: dict[str, object] = {}
+        if resolved_runtime_identity is not None:
+            packet_metadata["runtime_identity"] = resolved_runtime_identity.model_dump(
+                mode="json"
+            )
+            (
+                runtime_retrieval_sections,
+                source_ref_bundle,
+            ) = self._build_runtime_retrieval_packet_context(
+                identity=resolved_runtime_identity
+            )
+            if not source_ref_bundle.is_empty():
+                packet_metadata["worker_source_ref_bundle"] = (
+                    source_ref_bundle.model_dump(mode="json")
+                )
         packet = self._writing_packet_builder.build(
             session=session,
             chapter=chapter,
             plan=plan,
-            projection_context_sections=self._builder_projection_context_service.build_context_sections(
-                session_id=session_id,
-            ),
+            projection_context_sections=projection_context_sections,
+            runtime_retrieval_sections=runtime_retrieval_sections,
             runtime_writer_hints=list(specialist_bundle.writer_hints),
             user_instruction=plan.writer_instruction,
+            packet_metadata=packet_metadata,
         )
+        if (
+            resolved_runtime_identity is not None
+            and self._runtime_read_manifest_service is not None
+        ):
+            manifest = self._runtime_read_manifest_service.build_writer_manifest(
+                identity=resolved_runtime_identity,
+                packet_kind="writer",
+                packet_sections=projection_context_sections,
+                selected_section_labels=[
+                    str(section.get("label") or "").strip()
+                    for section in packet.context_sections
+                    if str(section.get("label") or "").strip()
+                ],
+                policy_versions={"packet_kind": "writer"},
+            )
+            packet = packet.model_copy(
+                update={
+                    "metadata": {
+                        **dict(packet.metadata),
+                        "runtime_read_manifest_id": manifest.manifest_id,
+                        "runtime_read_manifest": manifest.model_dump(mode="json"),
+                    }
+                }
+            )
         self._mark_block_consumer_synced(
             session_id=session_id,
             consumer_key="story.writer_packet",
@@ -308,6 +424,7 @@ class StoryTurnDomainService:
         self,
         *,
         request: LongformTurnRequest,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
         chapter = self.require_current_chapter(request.session_id)
@@ -345,11 +462,18 @@ class StoryTurnDomainService:
             accepted_artifact=accepted,
             model_id=request.model_id,
             provider_id=request.provider_id,
+            runtime_identity=runtime_identity,
         )
         self._materialize_closed_scene_transcript_if_needed(
             session=updated_session,
             chapter=updated_chapter,
             scene_ref=accepted.scene_ref,
+            runtime_identity=runtime_identity,
+            source_refs=self._runtime_turn_source_refs(
+                identity=runtime_identity,
+                session_id=session.session_id,
+                chapter_index=chapter.chapter_index,
+            ),
         )
         self._story_session_service.commit()
         return LongformTurnResponse(
@@ -364,7 +488,10 @@ class StoryTurnDomainService:
         )
 
     async def complete_chapter(
-        self, *, request: LongformTurnRequest
+        self,
+        *,
+        request: LongformTurnRequest,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
         chapter = self.require_current_chapter(request.session_id)
@@ -376,12 +503,19 @@ class StoryTurnDomainService:
             chapter=chapter,
             model_id=request.model_id,
             provider_id=request.provider_id,
+            runtime_identity=runtime_identity,
         )
         self._materialize_closed_scene_transcript_if_needed(
             session=updated_session,
             chapter=updated_chapter,
             scene_ref=updated_chapter.current_scene_ref,
             allow_current_scene=True,
+            runtime_identity=runtime_identity,
+            source_refs=self._runtime_turn_source_refs(
+                identity=runtime_identity,
+                session_id=session.session_id,
+                chapter_index=chapter.chapter_index,
+            ),
         )
         closed_scene_refs = list(updated_chapter.closed_scene_refs)
         last_closed_scene_ref = updated_chapter.last_closed_scene_ref
@@ -532,6 +666,8 @@ class StoryTurnDomainService:
         chapter: ChapterWorkspace,
         scene_ref: str | None,
         allow_current_scene: bool = False,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
+        source_refs: list[MemorySourceRef] | None = None,
     ) -> None:
         if self._recall_scene_transcript_ingestion_service is None:
             return
@@ -557,11 +693,39 @@ class StoryTurnDomainService:
                 source_workspace_id=session.source_workspace_id,
                 discussion_entries=snapshot.discussion_entries,
                 artifacts=snapshot.artifacts,
+                runtime_identity=runtime_identity,
+                source_refs=source_refs or [],
             )
         )
         self._recall_scene_transcript_ingestion_service.ingest_scene_transcript(
             input_model
         )
+
+    @staticmethod
+    def _runtime_turn_source_refs(
+        *,
+        identity: MemoryRuntimeIdentity | None,
+        session_id: str,
+        chapter_index: int,
+    ) -> list[MemorySourceRef]:
+        if identity is None:
+            return []
+        return [
+            MemorySourceRef(
+                source_type="story_turn",
+                source_id=identity.turn_id,
+                layer="runtime_identity",
+                domain="chapter",
+                metadata={
+                    "session_id": session_id,
+                    "chapter_index": chapter_index,
+                    "branch_head_id": identity.branch_head_id,
+                    "runtime_profile_snapshot_id": (
+                        identity.runtime_profile_snapshot_id
+                    ),
+                },
+            )
+        ]
 
     def _persist_generated_artifact_impl(
         self,
@@ -596,6 +760,16 @@ class StoryTurnDomainService:
             "packet_id": packet.packet_id,
             "writer_hints": specialist_bundle.writer_hints,
         }
+        self._record_runtime_retrieval_usage_for_artifact(
+            packet=packet,
+            artifact_metadata=artifact_metadata,
+        )
+        runtime_read_manifest_id = packet.metadata.get("runtime_read_manifest_id")
+        if (
+            isinstance(runtime_read_manifest_id, str)
+            and runtime_read_manifest_id.strip()
+        ):
+            artifact_metadata["runtime_read_manifest_id"] = runtime_read_manifest_id
         if plan.output_kind == StoryArtifactKind.STORY_SEGMENT:
             artifact_metadata.update(
                 specialist_bundle.story_segment_metadata.to_artifact_metadata()
@@ -664,3 +838,88 @@ class StoryTurnDomainService:
             next_chapter.chapter_workspace_id
         )
         return artifact, refreshed_chapter or next_chapter
+
+    def _build_runtime_retrieval_packet_context(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+    ) -> tuple[list[dict[str, object]], WorkerSourceRefBundle]:
+        retrieval_service = self._runtime_retrieval_cards()
+        writer_visible_materials = retrieval_service.list_writer_visible_materials(
+            identity=identity
+        )
+        card_ids = [
+            material.material_id
+            for material in writer_visible_materials
+            if material.material_kind == RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD
+        ]
+        expanded_ids = [
+            material.material_id
+            for material in writer_visible_materials
+            if material.material_kind
+            == RuntimeWorkspaceMaterialKind.RETRIEVAL_EXPANDED_CHUNK
+        ]
+        if not card_ids and not expanded_ids:
+            return [], WorkerSourceRefBundle()
+        items = []
+        for item in retrieval_service.list_writer_visible_context(identity=identity):
+            summary = str(item.get("summary") or "").strip()
+            if not summary:
+                continue
+            short_id = str(item.get("short_id") or "").strip()
+            kind = str(item.get("kind") or "").strip()
+            title = str(item.get("title") or "").strip()
+            prefix = f"{short_id} " if short_id else ""
+            title_prefix = f"{title}: " if title else ""
+            items.append(f"{prefix}[{kind}] {title_prefix}{summary}".strip())
+        return (
+            [{"label": "retrieval_context", "items": items}] if items else [],
+            WorkerSourceRefBundle(
+                retrieval_card_material_ids=card_ids,
+                retrieval_expanded_chunk_material_ids=expanded_ids,
+            ),
+        )
+
+    def _runtime_retrieval_cards(self) -> RuntimeRetrievalCardService:
+        return RuntimeRetrievalCardService(
+            runtime_workspace_material_service=self._runtime_workspace_material_service
+        )
+
+    def _record_runtime_retrieval_usage_for_artifact(
+        self,
+        *,
+        packet: WritingPacket,
+        artifact_metadata: dict[str, object],
+    ) -> None:
+        bundle_payload = packet.metadata.get("worker_source_ref_bundle")
+        if not isinstance(bundle_payload, dict):
+            return
+        source_ref_bundle = WorkerSourceRefBundle.model_validate(bundle_payload)
+        identity_payload = packet.metadata.get("runtime_identity")
+        if not isinstance(identity_payload, dict):
+            artifact_metadata["worker_source_ref_bundle"] = (
+                source_ref_bundle.model_dump(mode="json")
+            )
+            return
+        identity = MemoryRuntimeIdentity.model_validate(identity_payload)
+        usage_ids = list(source_ref_bundle.retrieval_usage_material_ids)
+        if (
+            source_ref_bundle.retrieval_card_material_ids
+            or source_ref_bundle.retrieval_expanded_chunk_material_ids
+        ) and not usage_ids:
+            usage = self._runtime_retrieval_cards().record_writer_usage(
+                identity=identity,
+                used_card_ids=source_ref_bundle.retrieval_card_material_ids,
+                used_expanded_chunk_ids=(
+                    source_ref_bundle.retrieval_expanded_chunk_material_ids
+                ),
+                actor="worker.writer_output",
+            )
+            usage_ids.append(usage.material_id)
+        artifact_metadata["worker_source_ref_bundle"] = WorkerSourceRefBundle(
+            retrieval_card_material_ids=(source_ref_bundle.retrieval_card_material_ids),
+            retrieval_expanded_chunk_material_ids=(
+                source_ref_bundle.retrieval_expanded_chunk_material_ids
+            ),
+            retrieval_usage_material_ids=usage_ids,
+        ).model_dump(mode="json")

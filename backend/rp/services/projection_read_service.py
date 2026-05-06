@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.dsl import Layer
 from rp.models.memory_crud import (
     MemoryGetSummaryInput,
@@ -33,17 +34,22 @@ class ProjectionReadService:
         core_state_store_repository: CoreStateStoreRepository | None = None,
         store_read_enabled: bool = False,
         core_state_backfill_service: CoreStateBackfillService | None = None,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> None:
         self._adapter = adapter
         self._core_state_store_repository = core_state_store_repository
         self._store_read_enabled = store_read_enabled
         self._core_state_backfill_service = core_state_backfill_service
+        self._runtime_identity = runtime_identity
 
     async def get_summary(
         self, input_model: MemoryGetSummaryInput
     ) -> SummaryReadResult:
         summary_ids, resolution_warnings = self._resolve_summary_ids(input_model)
-        session, chapter, payload = self._adapter.get_projection_payload()
+        session_id = self._runtime_session_id()
+        session, chapter, payload = self._adapter.get_projection_payload(
+            session_id=session_id
+        )
         items: list[SummaryEntry] = []
         warnings: list[str] = list(resolution_warnings)
         projection_store_hydrated = False
@@ -127,6 +133,7 @@ class ProjectionReadService:
         *,
         session_id: str | None = None,
     ) -> VersionListResult:
+        effective_session_id = session_id or self._runtime_session_id()
         ref = input_model.target_ref.model_copy(
             update={
                 "layer": Layer.CORE_STATE_PROJECTION,
@@ -136,7 +143,9 @@ class ProjectionReadService:
             }
         )
         if self._store_read_enabled and self._core_state_store_repository is not None:
-            _, chapter = self._adapter.get_current_chapter(session_id=session_id)
+            _, chapter = self._adapter.get_current_chapter(
+                session_id=effective_session_id
+            )
             if chapter is not None:
                 revisions = (
                     self._core_state_store_repository.list_projection_slot_revisions(
@@ -161,6 +170,7 @@ class ProjectionReadService:
         *,
         session_id: str | None = None,
     ) -> ProvenanceResult:
+        effective_session_id = session_id or self._runtime_session_id()
         ref = input_model.target_ref.model_copy(
             update={
                 "layer": Layer.CORE_STATE_PROJECTION,
@@ -170,7 +180,9 @@ class ProjectionReadService:
             }
         )
         if self._store_read_enabled and self._core_state_store_repository is not None:
-            _, chapter = self._adapter.get_current_chapter(session_id=session_id)
+            _, chapter = self._adapter.get_current_chapter(
+                session_id=effective_session_id
+            )
             if chapter is not None:
                 row = self._core_state_store_repository.get_projection_slot(
                     chapter_workspace_id=chapter.chapter_workspace_id,
@@ -218,3 +230,8 @@ class ProjectionReadService:
                 f"phase_e_projection_domain_not_materialized:{domain.value}"
             )
         return summary_ids, warnings
+
+    def _runtime_session_id(self) -> str | None:
+        if self._runtime_identity is None:
+            return None
+        return self._runtime_identity.session_id

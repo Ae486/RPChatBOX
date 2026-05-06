@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_materialization import (
     CHARACTER_LONG_HISTORY_SUMMARY_KIND,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
@@ -20,6 +21,7 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from .recall_lifecycle_service import RecallLifecycleService
 from .retrieval_collection_service import RetrievalCollectionService
 from .retrieval_document_service import RetrievalDocumentService
 from .retrieval_ingestion_service import RetrievalIngestionService
@@ -36,6 +38,7 @@ class RecallCharacterLongHistoryIngestionService:
         self._document_service = RetrievalDocumentService(session)
         self._collection_service = RetrievalCollectionService(session)
         self._ingestion_service = RetrievalIngestionService(session)
+        self._lifecycle_service = RecallLifecycleService(session)
 
     def ingest_character_summaries(
         self,
@@ -48,6 +51,8 @@ class RecallCharacterLongHistoryIngestionService:
         chapter_summary_text: str | None,
         continuity_notes: list[str],
         accepted_segments: list[StoryArtifact],
+        runtime_identity: MemoryRuntimeIdentity | None = None,
+        source_refs: list[MemorySourceRef] | None = None,
     ) -> list[str]:
         if not character_state_digest:
             return []
@@ -78,6 +83,11 @@ class RecallCharacterLongHistoryIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 character_key=character_key,
+                branch_head_id=(
+                    runtime_identity.branch_head_id
+                    if runtime_identity is not None
+                    else None
+                ),
             )
             now = _utcnow()
             existing_asset = self._document_service.get_source_asset(asset_id)
@@ -102,6 +112,11 @@ class RecallCharacterLongHistoryIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 domain_path=section_path,
+                identity=runtime_identity,
+                source_refs=self._build_source_refs(
+                    character_key=character_key,
+                    source_refs=source_refs,
+                ),
                 extra={
                     "character_key": character_key,
                     "includes_chapter_summary": normalized_summary is not None,
@@ -109,6 +124,11 @@ class RecallCharacterLongHistoryIngestionService:
                     "accepted_segment_evidence_count": len(matched_segments),
                 },
             )
+            if existing_asset is not None:
+                metadata = self._lifecycle_service.build_recomputed_metadata(
+                    existing_metadata=existing_asset.metadata,
+                    replacement_metadata=metadata,
+                )
             asset = SourceAsset(
                 asset_id=asset_id,
                 story_id=story_id,
@@ -311,6 +331,7 @@ class RecallCharacterLongHistoryIngestionService:
         session_id: str,
         chapter_index: int,
         character_key: str,
+        branch_head_id: str | None = None,
     ) -> str:
         return (
             "recall_character_long_history_"
@@ -318,6 +339,7 @@ class RecallCharacterLongHistoryIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 character_key=character_key,
+                branch_head_id=branch_head_id,
             )[:24]
         )
 
@@ -327,8 +349,12 @@ class RecallCharacterLongHistoryIngestionService:
         session_id: str,
         chapter_index: int,
         character_key: str,
+        branch_head_id: str | None = None,
     ) -> str:
-        identity = f"{session_id}\n{chapter_index}\n{character_key}"
+        identity = (
+            f"{session_id}\n{chapter_index}\n{character_key}\n"
+            f"{(branch_head_id or '').strip()}"
+        )
         return sha256(identity.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -339,6 +365,32 @@ class RecallCharacterLongHistoryIngestionService:
         raise RuntimeError(
             f"recall_character_long_history_ingestion_failed:{asset_id}:{error_detail}"
         )
+
+    @staticmethod
+    def _build_source_refs(
+        *,
+        character_key: str,
+        source_refs: list[MemorySourceRef] | None,
+    ) -> list[MemorySourceRef]:
+        refs = list(source_refs or [])
+        refs.append(
+            MemorySourceRef(
+                source_type="character_state_digest",
+                source_id=character_key,
+                layer="core_state.authoritative_state",
+                domain="character",
+                metadata={"character_key": character_key},
+            )
+        )
+        deduped: list[MemorySourceRef] = []
+        seen: set[tuple[str, str]] = set()
+        for ref in refs:
+            key = (ref.source_type.casefold(), ref.source_id.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ref)
+        return deduped
 
     @staticmethod
     def _is_eligible_story_segment(artifact: StoryArtifact) -> bool:

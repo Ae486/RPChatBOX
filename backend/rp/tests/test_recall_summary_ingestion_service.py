@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.retrieval_records import IndexJob
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
@@ -69,6 +70,13 @@ def _seed_story_runtime(retrieval_session):
 
 def test_ingest_chapter_summary_persists_recall_metadata(retrieval_session):
     session, chapter = _seed_story_runtime(retrieval_session)
+    runtime_identity = MemoryRuntimeIdentity(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id="branch-main",
+        turn_id="turn-1",
+        runtime_profile_snapshot_id="snapshot-1",
+    )
 
     asset_id = RecallSummaryIngestionService(retrieval_session).ingest_chapter_summary(
         session_id=session.session_id,
@@ -76,6 +84,14 @@ def test_ingest_chapter_summary_persists_recall_metadata(retrieval_session):
         chapter_index=chapter.chapter_index,
         source_workspace_id=session.source_workspace_id,
         summary_text="Chapter one settled into a tense marketplace truce.",
+        runtime_identity=runtime_identity,
+        source_refs=[
+            MemorySourceRef(
+                source_type="story_turn",
+                source_id="turn-1",
+                layer="runtime_identity",
+            )
+        ],
     )
     retrieval_session.commit()
 
@@ -95,9 +111,61 @@ def test_ingest_chapter_summary_persists_recall_metadata(retrieval_session):
     assert asset.metadata["domain_path"] == f"recall.chapter.{chapter.chapter_index}"
     assert asset.metadata["session_id"] == session.session_id
     assert asset.metadata["chapter_index"] == chapter.chapter_index
+    assert asset.metadata["runtime_identity"]["turn_id"] == "turn-1"
+    assert asset.metadata["owning_branch_head_id"] == "branch-main"
+    assert asset.metadata["lifecycle_state"] == "active"
+    assert asset.metadata["source_refs"][0]["source_type"] == "story_turn"
     seed_section = asset.metadata["seed_sections"][0]
     assert seed_section["metadata"]["source_type"] == "chapter_summary"
     assert seed_section["metadata"]["materialized_to_recall"] is True
+
+
+def test_ingest_chapter_summary_recomputes_existing_asset(retrieval_session):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    service = RecallSummaryIngestionService(retrieval_session)
+    runtime_identity = MemoryRuntimeIdentity(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id="branch-main",
+        turn_id="turn-1",
+        runtime_profile_snapshot_id="snapshot-1",
+    )
+    asset_id = service.ingest_chapter_summary(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=chapter.chapter_index,
+        source_workspace_id=session.source_workspace_id,
+        summary_text="First summary.",
+        runtime_identity=runtime_identity,
+    )
+    retrieval_session.commit()
+
+    recomputed_identity = runtime_identity.model_copy(update={"turn_id": "turn-2"})
+    second_asset_id = service.ingest_chapter_summary(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        chapter_index=chapter.chapter_index,
+        source_workspace_id=session.source_workspace_id,
+        summary_text="Second summary after recompute.",
+        runtime_identity=recomputed_identity,
+        source_refs=[
+            MemorySourceRef(
+                source_type="story_turn",
+                source_id="turn-2",
+                layer="runtime_identity",
+            )
+        ],
+    )
+    retrieval_session.commit()
+
+    assert second_asset_id == asset_id
+    asset = RetrievalDocumentService(retrieval_session).get_source_asset(asset_id)
+    assert asset is not None
+    assert asset.raw_excerpt == "Second summary after recompute."
+    assert asset.metadata["lifecycle_state"] == "recomputed"
+    assert asset.metadata["visibility_state"] == "active"
+    assert asset.metadata["runtime_identity"]["turn_id"] == "turn-2"
+    assert "story_turn:turn-1" in asset.metadata["supersedes_refs"]
 
 
 def test_ingest_chapter_summary_surfaces_failed_index_jobs(

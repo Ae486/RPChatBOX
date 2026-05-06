@@ -866,6 +866,7 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
         workspaceId: workspace.workspaceId,
         modelId: modelId,
         providerId: modelWithProvider.provider.id,
+        targetStage: _targetStageForSelectedStage(workspace),
         targetStep: _targetStepForSelectedStage(workspace),
         history: history,
         userPrompt: userPrompt,
@@ -2245,6 +2246,14 @@ class _PrestorySetupPageState extends State<PrestorySetupPage> {
       return null;
     }
     return _stageMetaFor(stageId).legacyStepId ?? workspace.currentStep;
+  }
+
+  String? _targetStageForSelectedStage(RpSetupWorkspace workspace) {
+    final stageId = _stageIdFor(_selectedStage);
+    if (!_stagePlanFor(workspace).contains(stageId)) {
+      return null;
+    }
+    return stageId;
   }
 
   List<Map<String, dynamic>> _foundationEntries(RpSetupWorkspace workspace) {

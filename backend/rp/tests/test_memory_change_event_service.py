@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from sqlmodel import Session, select
 
+from models.rp_memory_store import MemoryChangeEventRecord
 from rp.models.memory_contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
@@ -23,10 +25,13 @@ from rp.services.memory_change_event_service import (
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
+from services.database import get_engine
 
 
-def test_record_event_normalizes_alias_and_lists_by_full_identity_only():
-    service = MemoryChangeEventService()
+def test_record_event_normalizes_alias_and_lists_by_full_identity_only(
+    retrieval_session,
+):
+    service = MemoryChangeEventService(session=retrieval_session)
     identity = _identity()
     other_branch = _identity(branch_head_id="branch-head-2")
     other_turn = _identity(turn_id="turn-2")
@@ -48,21 +53,51 @@ def test_record_event_normalizes_alias_and_lists_by_full_identity_only():
             ],
         )
     )
+    retrieval_session.commit()
 
-    assert event.domain == "knowledge_boundary"
-    assert service.list_events(identity=identity) == [event]
-    assert service.list_events(identity=identity, domain="knowledge") == [event]
-    assert service.list_events(
-        identity=identity,
-        domain="knowledge_boundary",
-    ) == [event]
-    assert service.list_events(identity=other_branch) == []
-    assert service.list_events(identity=other_turn) == []
-    assert service.list_events(identity=other_profile) == []
+    with Session(get_engine()) as later_session:
+        later_service = MemoryChangeEventService(session=later_session)
+        persisted = later_session.exec(
+            select(MemoryChangeEventRecord).where(
+                MemoryChangeEventRecord.event_id == "event-1"
+            )
+        ).one()
+
+        assert event.domain == "knowledge_boundary"
+        assert persisted.domain == "knowledge_boundary"
+        assert later_service.list_events(identity=identity) == [event]
+        assert later_service.list_events(identity=identity, domain="knowledge") == [
+            event
+        ]
+        assert later_service.list_events(
+            identity=identity,
+            domain="knowledge_boundary",
+        ) == [event]
+        assert later_service.list_events(identity=other_branch) == []
+        assert later_service.list_events(identity=other_turn) == []
+        assert later_service.list_events(identity=other_profile) == []
 
 
-def test_record_event_rejects_unknown_domain_and_duplicate_event_id():
+def test_default_event_service_uses_persistent_store_not_process_local(
+    retrieval_session,
+):
+    identity = _identity()
     service = MemoryChangeEventService()
+
+    event = service.record_event(
+        _event(
+            event_id="event-default-persistent",
+            identity=identity,
+            domain="knowledge",
+        )
+    )
+
+    assert service.store.events_by_identity == {}
+    assert MemoryChangeEventService().list_events(identity=identity) == [event]
+
+
+def test_record_event_rejects_unknown_domain_and_duplicate_event_id(retrieval_session):
+    service = MemoryChangeEventService(session=retrieval_session)
     identity = _identity()
 
     with pytest.raises(MemoryChangeEventServiceError) as exc:
@@ -83,8 +118,10 @@ def test_record_event_rejects_unknown_domain_and_duplicate_event_id():
     assert exc.value.code == "memory_change_event_id_conflict"
 
 
-def test_list_events_filters_by_layer_kind_operation_source_dirty_target_and_visibility():
-    service = MemoryChangeEventService()
+def test_list_events_filters_by_layer_kind_operation_source_dirty_target_and_visibility(
+    retrieval_session,
+):
+    service = MemoryChangeEventService(session=retrieval_session)
     identity = _identity()
 
     first = service.record_event(
@@ -127,38 +164,46 @@ def test_list_events_filters_by_layer_kind_operation_source_dirty_target_and_vis
             ],
         )
     )
+    retrieval_session.commit()
 
-    assert service.list_events(identity=identity, layer="runtime_workspace") == [first]
-    assert service.list_events(
-        identity=identity,
-        event_kind="projection_refreshed",
-    ) == [second]
-    assert service.list_events(
-        identity=identity,
-        operation_kind="projection.refresh",
-    ) == [second]
-    assert service.list_events(
-        identity=identity,
-        source_type="writer_input_ref",
-    ) == [second]
-    assert service.list_events(
-        identity=identity,
-        dirty_target_kind="packet_window",
-    ) == [first]
-    assert service.list_events(
-        identity=identity,
-        visibility_effect=RuntimeWorkspaceMaterialVisibility.REVIEW_VISIBLE.value,
-    ) == [second]
-    assert service.list_events(
-        identity=identity,
-        source_type="writer_input_ref",
-        dirty_target_kind="worker_refresh",
-        visibility_effect=RuntimeWorkspaceMaterialVisibility.REVIEW_VISIBLE.value,
-    ) == [second]
+    with Session(get_engine()) as later_session:
+        later_service = MemoryChangeEventService(session=later_session)
+
+        assert later_service.list_events(
+            identity=identity, layer="runtime_workspace"
+        ) == [first]
+        assert later_service.list_events(
+            identity=identity,
+            event_kind="projection_refreshed",
+        ) == [second]
+        assert later_service.list_events(
+            identity=identity,
+            operation_kind="projection.refresh",
+        ) == [second]
+        assert later_service.list_events(
+            identity=identity,
+            source_type="writer_input_ref",
+        ) == [second]
+        assert later_service.list_events(
+            identity=identity,
+            dirty_target_kind="packet_window",
+        ) == [first]
+        assert later_service.list_events(
+            identity=identity,
+            visibility_effect=RuntimeWorkspaceMaterialVisibility.REVIEW_VISIBLE.value,
+        ) == [second]
+        assert later_service.list_events(
+            identity=identity,
+            source_type="writer_input_ref",
+            dirty_target_kind="worker_refresh",
+            visibility_effect=RuntimeWorkspaceMaterialVisibility.REVIEW_VISIBLE.value,
+        ) == [second]
 
 
-def test_list_dirty_targets_flattens_matching_events_without_fabrication():
-    service = MemoryChangeEventService()
+def test_list_dirty_targets_flattens_matching_events_without_fabrication(
+    retrieval_session,
+):
+    service = MemoryChangeEventService(session=retrieval_session)
     identity = _identity()
     first_packet = _dirty_target(
         target_kind="packet_window",
@@ -201,37 +246,43 @@ def test_list_dirty_targets_flattens_matching_events_without_fabrication():
             ],
         )
     )
+    retrieval_session.commit()
 
-    assert service.list_dirty_targets(identity=identity) == [
-        first_packet,
-        first_worker,
-        second_packet,
-    ]
-    assert service.list_dirty_targets(
-        identity=identity,
-        target_kind="packet_window",
-    ) == [first_packet, second_packet]
-    assert service.list_dirty_targets(
-        identity=identity,
-        domain="knowledge",
-    ) == [first_packet, first_worker]
-    assert service.list_dirty_targets(
-        identity=identity,
-        domain="character",
-        layer="core_state.projection",
-    ) == [second_packet]
-    assert (
-        service.list_dirty_targets(
-            identity=_identity(turn_id="turn-2"),
+    with Session(get_engine()) as later_session:
+        later_service = MemoryChangeEventService(session=later_session)
+
+        assert later_service.list_dirty_targets(identity=identity) == [
+            first_packet,
+            first_worker,
+            second_packet,
+        ]
+        assert later_service.list_dirty_targets(
+            identity=identity,
+            target_kind="packet_window",
+        ) == [first_packet, second_packet]
+        assert later_service.list_dirty_targets(
+            identity=identity,
+            domain="knowledge",
+        ) == [first_packet, first_worker]
+        assert later_service.list_dirty_targets(
+            identity=identity,
+            domain="character",
+            layer="core_state.projection",
+        ) == [second_packet]
+        assert (
+            later_service.list_dirty_targets(
+                identity=_identity(turn_id="turn-2"),
+            )
+            == []
         )
-        == []
-    )
 
 
-def test_runtime_workspace_material_service_publishes_receipts_to_shared_spine():
-    event_service = MemoryChangeEventService()
+def test_runtime_workspace_material_service_publishes_receipts_to_shared_spine(
+    retrieval_session,
+):
+    event_service = MemoryChangeEventService(session=retrieval_session)
     material_service = RuntimeWorkspaceMaterialService(
-        memory_change_event_service=event_service
+        session=retrieval_session, memory_change_event_service=event_service
     )
     identity = _identity()
 
@@ -255,19 +306,23 @@ def test_runtime_workspace_material_service_publishes_receipts_to_shared_spine()
         lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
         reason="writer_output_referenced_material",
     )
+    retrieval_session.commit()
 
-    assert material_service.store.events == [receipt.event, lifecycle_receipt.event]
-    assert event_service.list_events(identity=identity) == [
-        receipt.event,
-        lifecycle_receipt.event,
-    ]
-    assert (
-        material_service.require_material(
-            identity=identity,
-            material_id="mat-retrieval-r1",
-        ).lifecycle
-        == lifecycle_receipt.material.lifecycle
-    )
+    with Session(get_engine()) as later_session:
+        later_event_service = MemoryChangeEventService(session=later_session)
+
+        assert material_service.store.events == [receipt.event, lifecycle_receipt.event]
+        assert later_event_service.list_events(identity=identity) == [
+            receipt.event,
+            lifecycle_receipt.event,
+        ]
+        assert (
+            material_service.require_material(
+                identity=identity,
+                material_id="mat-retrieval-r1",
+            ).lifecycle
+            == lifecycle_receipt.material.lifecycle
+        )
 
 
 def _identity(**overrides: str) -> MemoryRuntimeIdentity:

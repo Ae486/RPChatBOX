@@ -1,4 +1,5 @@
 """Memory CRUD contracts for RP Phase A."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,6 +7,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.dsl import Domain, ObjectRef
 
 
@@ -106,6 +108,7 @@ class RetrievalQuery(BaseModel):
     query_id: str
     query_kind: Literal["structured", "recall", "archival", "hybrid"]
     story_id: str
+    identity: MemoryRuntimeIdentity | None = None
     scope: str | None = None
     domains: list[Domain] = Field(default_factory=list)
     text_query: str | None = None

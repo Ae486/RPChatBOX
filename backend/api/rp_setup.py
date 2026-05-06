@@ -481,6 +481,7 @@ async def run_setup_agent_turn(
         "request_id": request_id,
         "workspace_id": workspace_id,
         "target_step": payload.target_step.value if payload.target_step is not None else None,
+        "target_stage": payload.target_stage.value if payload.target_stage is not None else None,
         "stream": False,
     }
     with langfuse.propagate_attributes(
@@ -563,6 +564,7 @@ async def run_setup_agent_turn_stream(
             "request_id": request_id,
             "workspace_id": workspace_id,
             "target_step": payload.target_step.value if payload.target_step is not None else None,
+            "target_stage": payload.target_stage.value if payload.target_stage is not None else None,
             "stream": True,
         }
         with langfuse.propagate_attributes(

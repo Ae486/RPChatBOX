@@ -6,7 +6,10 @@ from uuid import uuid4
 
 from rp.models.dsl import Layer
 from rp.models.memory_contract_registry import MemoryChangeEvent, MemoryDirtyTarget
-from rp.models.projection_refresh import ProjectionRefreshRequest
+from rp.models.projection_refresh import (
+    ProjectionRefreshRequest,
+    ProjectionRefreshServiceError,
+)
 from rp.models.story_runtime import ChapterWorkspace, SpecialistResultBundle
 
 from .core_state_dual_write_service import CoreStateDualWriteService
@@ -49,6 +52,11 @@ class ProjectionRefreshService:
         bundle: SpecialistResultBundle,
         refresh_request: ProjectionRefreshRequest | None = None,
     ) -> ChapterWorkspace:
+        if refresh_request is not None and refresh_request.identity is None:
+            raise ProjectionRefreshServiceError(
+                "projection_refresh_identity_required",
+                chapter.chapter_workspace_id,
+            )
         request = refresh_request or ProjectionRefreshRequest()
         snapshot = self._projection_compatibility_mirror_service.read_mirror_snapshot(
             chapter=chapter

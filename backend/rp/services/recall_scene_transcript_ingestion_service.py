@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_materialization import (
     SCENE_CLOSE_EVENT,
     SCENE_TRANSCRIPT_KIND,
@@ -22,6 +23,7 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
     StoryDiscussionEntry,
 )
+from .recall_lifecycle_service import RecallLifecycleService
 from .retrieval_collection_service import RetrievalCollectionService
 from .retrieval_document_service import RetrievalDocumentService
 from .retrieval_ingestion_service import RetrievalIngestionService
@@ -39,6 +41,8 @@ class SceneTranscriptPromotionInput(BaseModel):
     chapter_index: int
     scene_ref: str
     source_workspace_id: str
+    runtime_identity: MemoryRuntimeIdentity | None = None
+    source_refs: list[MemorySourceRef] = Field(default_factory=list)
     discussion_entries: list[StoryDiscussionEntry] = Field(default_factory=list)
     accepted_segments: list[StoryArtifact] = Field(default_factory=list)
 
@@ -60,6 +64,7 @@ class RecallSceneTranscriptIngestionService:
         self._document_service = RetrievalDocumentService(session)
         self._collection_service = RetrievalCollectionService(session)
         self._ingestion_service = RetrievalIngestionService(session)
+        self._lifecycle_service = RecallLifecycleService(session)
 
     def build_promotion_input(
         self,
@@ -71,6 +76,8 @@ class RecallSceneTranscriptIngestionService:
         source_workspace_id: str,
         discussion_entries: list[StoryDiscussionEntry],
         artifacts: list[StoryArtifact],
+        runtime_identity: MemoryRuntimeIdentity | None = None,
+        source_refs: list[MemorySourceRef] | None = None,
     ) -> SceneTranscriptPromotionInput:
         normalized_scene_ref = scene_ref.strip()
         if not normalized_scene_ref:
@@ -87,6 +94,8 @@ class RecallSceneTranscriptIngestionService:
             chapter_index=chapter_index,
             scene_ref=normalized_scene_ref,
             source_workspace_id=source_workspace_id,
+            runtime_identity=runtime_identity,
+            source_refs=list(source_refs or []),
             discussion_entries=[
                 entry
                 for entry in discussion_entries
@@ -129,6 +138,11 @@ class RecallSceneTranscriptIngestionService:
             session_id=input_model.session_id,
             chapter_index=input_model.chapter_index,
             scene_ref=input_model.scene_ref,
+            branch_head_id=(
+                input_model.runtime_identity.branch_head_id
+                if input_model.runtime_identity is not None
+                else None
+            ),
         )
         now = _utcnow()
         existing_asset = self._document_service.get_source_asset(asset_id)
@@ -144,8 +158,10 @@ class RecallSceneTranscriptIngestionService:
             session_id=input_model.session_id,
             chapter_index=input_model.chapter_index,
             domain_path=section_path,
+            identity=input_model.runtime_identity,
+            source_refs=self._build_source_refs(input_model=input_model),
+            scene_ref=input_model.scene_ref,
             extra={
-                "scene_ref": input_model.scene_ref,
                 "transcript_source_count": len(source_items),
                 "transcript_includes_discussion": any(
                     item.source_kind == "discussion" for item in source_items
@@ -155,6 +171,11 @@ class RecallSceneTranscriptIngestionService:
                 ),
             },
         )
+        if existing_asset is not None:
+            metadata = self._lifecycle_service.build_recomputed_metadata(
+                existing_metadata=existing_asset.metadata,
+                replacement_metadata=metadata,
+            )
         asset = SourceAsset(
             asset_id=asset_id,
             story_id=input_model.story_id,
@@ -319,6 +340,7 @@ class RecallSceneTranscriptIngestionService:
         session_id: str,
         chapter_index: int,
         scene_ref: str,
+        branch_head_id: str | None = None,
     ) -> str:
         return (
             "recall_scene_transcript_"
@@ -326,12 +348,22 @@ class RecallSceneTranscriptIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 scene_ref=scene_ref,
+                branch_head_id=branch_head_id,
             )[:24]
         )
 
     @staticmethod
-    def _scene_digest(*, session_id: str, chapter_index: int, scene_ref: str) -> str:
-        identity = f"{session_id}\n{chapter_index}\n{scene_ref.strip()}"
+    def _scene_digest(
+        *,
+        session_id: str,
+        chapter_index: int,
+        scene_ref: str,
+        branch_head_id: str | None = None,
+    ) -> str:
+        identity = (
+            f"{session_id}\n{chapter_index}\n{scene_ref.strip()}\n"
+            f"{(branch_head_id or '').strip()}"
+        )
         return sha256(identity.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -354,3 +386,51 @@ class RecallSceneTranscriptIngestionService:
         raise RuntimeError(
             f"recall_scene_transcript_ingestion_failed:{asset_id}:{error_detail}"
         )
+
+    @staticmethod
+    def _build_source_refs(
+        *,
+        input_model: SceneTranscriptPromotionInput,
+    ) -> list[MemorySourceRef]:
+        refs = list(input_model.source_refs)
+        for entry in input_model.discussion_entries:
+            if (
+                entry.role not in {"user", "assistant"}
+                or not entry.content_text.strip()
+            ):
+                continue
+            refs.append(
+                MemorySourceRef(
+                    source_type="discussion_entry",
+                    source_id=entry.entry_id,
+                    layer="runtime_workspace",
+                    domain="chapter",
+                    entry_id=entry.entry_id,
+                    metadata={"role": entry.role, "scene_ref": entry.scene_ref},
+                )
+            )
+        for artifact in input_model.accepted_segments:
+            if not RecallSceneTranscriptIngestionService._is_eligible_story_segment(
+                artifact
+            ):
+                continue
+            refs.append(
+                MemorySourceRef(
+                    source_type="story_artifact",
+                    source_id=artifact.artifact_id,
+                    layer="runtime_workspace",
+                    domain="chapter",
+                    entry_id=artifact.artifact_id,
+                    revision=artifact.revision,
+                    metadata={"scene_ref": artifact.scene_ref},
+                )
+            )
+        deduped: list[MemorySourceRef] = []
+        seen: set[tuple[str, str]] = set()
+        for ref in refs:
+            key = (ref.source_type.casefold(), ref.source_id.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ref)
+        return deduped

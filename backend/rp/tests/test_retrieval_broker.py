@@ -15,6 +15,7 @@ from models.rp_retrieval_store import (
     SourceAssetRecord,
 )
 from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.memory_contract_registry import MemorySourceRef
 from rp.models.memory_crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
@@ -54,7 +55,9 @@ from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_session_service import StorySessionService
+from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
 
 
@@ -874,6 +877,478 @@ async def test_memory_search_policy_profile_default_enables_rerank_without_story
 
     assert captured_queries[0].story_id == "*"
     assert captured_queries[0].rerank is True
+
+
+def test_runtime_owned_retrieval_uses_snapshot_pinned_policy_not_latest_story_drift(
+    retrieval_session,
+):
+    session_service = StorySessionService(retrieval_session)
+    story_session = session_service.create_session(
+        story_id="story-runtime-pinned-retrieval",
+        source_workspace_id="workspace-runtime-pinned-retrieval",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={
+            "retrieval_rerank_model_id": "rerank-pinned",
+            "retrieval_rerank_provider_id": "provider-pinned",
+        },
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot_service.ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.runtime_retrieval_pinned",
+    )
+    identity = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    ).resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    session_service.update_session(
+        session_id=story_session.session_id,
+        runtime_story_config_patch={
+            "retrieval_rerank_model_id": None,
+            "retrieval_rerank_provider_id": None,
+        },
+    )
+    session_service.commit()
+
+    broker = RetrievalBroker(
+        default_story_id=story_session.story_id,
+        runtime_identity=identity,
+    )
+    query = broker._build_query(
+        query_kind="recall",
+        text_query="pinned policy",
+        scope="story",
+        domains=[Domain.CHAPTER],
+        top_k=5,
+        filters={},
+    )
+    resolved_query = broker._query_with_runtime_search_policy(
+        query=query,
+        session=retrieval_session,
+    )
+    retrieval_service = broker._build_retrieval_service(
+        session=retrieval_session,
+        query=resolved_query,
+    )
+    resolved_config = (
+        retrieval_service._retrieval_runtime_config_service.resolve_story_config(
+            story_id=story_session.story_id
+        )
+    )
+
+    assert resolved_query.rerank is True
+    assert resolved_query.filters["runtime_identity"]["turn_id"] == identity.turn_id
+    assert resolved_config.rerank_model_id == "rerank-pinned"
+    assert resolved_config.rerank_provider_id == "provider-pinned"
+
+
+@pytest.mark.asyncio
+async def test_runtime_owned_retrieval_filters_branch_hidden_hits_even_with_branch_filter(
+    retrieval_session,
+):
+    session_service = StorySessionService(retrieval_session)
+    story_session = session_service.create_session(
+        story_id="story-runtime-branch-filter",
+        source_workspace_id="workspace-runtime-branch-filter",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    session_service.create_chapter_workspace(
+        session_id=story_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.OUTLINE_DRAFTING,
+        builder_snapshot_json={"foundation_digest": ["Found A"]},
+    )
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.runtime_branch_filter",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    branch = identity_service.ensure_default_branch(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+    )
+    turn_one = identity_service.create_turn(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        branch_head_id=branch.branch_head_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        turn_kind="generation",
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    turn_two = identity_service.create_turn(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        branch_head_id=branch.branch_head_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        turn_kind="generation",
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    retrieval_session.commit()
+    identity = identity_service.resolve_memory_identity(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        branch_head_id=branch.branch_head_id,
+        turn_id=turn_one.turn_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+
+    class StubRetrievalService:
+        def __init__(self) -> None:
+            self.seen_query: RetrievalQuery | None = None
+
+        async def search_chunks(self, query: RetrievalQuery) -> RetrievalSearchResult:
+            self.seen_query = query
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[
+                    RetrievalHit(
+                        hit_id="hit-visible",
+                        query_id=query.query_id,
+                        layer="recall",
+                        domain=Domain.CHAPTER,
+                        domain_path="recall.visible",
+                        excerpt_text="Visible turn one hit",
+                        score=0.9,
+                        rank=1,
+                        metadata={
+                            "visibility_scope": "branch_scoped",
+                            "visibility_state": "active",
+                            "owning_branch_head_id": branch.branch_head_id,
+                            "origin_turn_id": turn_one.turn_id,
+                        },
+                    ),
+                    RetrievalHit(
+                        hit_id="hit-hidden",
+                        query_id=query.query_id,
+                        layer="recall",
+                        domain=Domain.CHAPTER,
+                        domain_path="recall.hidden",
+                        excerpt_text="Hidden turn two hit",
+                        score=0.8,
+                        rank=2,
+                        metadata={
+                            "visibility_scope": "branch_scoped",
+                            "visibility_state": "active",
+                            "owning_branch_head_id": branch.branch_head_id,
+                            "origin_turn_id": turn_two.turn_id,
+                        },
+                    ),
+                ],
+                trace=RetrievalTrace(
+                    trace_id="trace-runtime-branch-filter",
+                    query_id=query.query_id,
+                    route="retrieval.stub.runtime_branch_filter",
+                    result_kind="chunk",
+                    returned_count=2,
+                    candidate_count=2,
+                ),
+            )
+
+    stub_retrieval_service = StubRetrievalService()
+    broker = RetrievalBroker(
+        default_story_id="caller-default-story",
+        runtime_identity=identity,
+        retrieval_service_factory=lambda _session: stub_retrieval_service,
+    )
+
+    result = await broker.search_recall(
+        MemorySearchRecallInput(
+            query="runtime branch filter",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=10,
+            filters={
+                "story_id": "caller-filter-story",
+                "branch_ids": [branch.branch_head_id],
+                "runtime_identity": {
+                    "story_id": story_session.story_id,
+                    "session_id": story_session.session_id,
+                    "branch_head_id": "caller-supplied-branch",
+                    "turn_id": "caller-supplied-turn",
+                    "runtime_profile_snapshot_id": "caller-supplied-snapshot",
+                },
+            },
+        )
+    )
+
+    assert stub_retrieval_service.seen_query is not None
+    assert stub_retrieval_service.seen_query.story_id == identity.story_id
+    assert "branch_ids" not in stub_retrieval_service.seen_query.filters
+    assert (
+        stub_retrieval_service.seen_query.filters["runtime_identity"]["branch_head_id"]
+        == identity.branch_head_id
+    )
+    assert (
+        stub_retrieval_service.seen_query.filters["runtime_identity"]["turn_id"]
+        == identity.turn_id
+    )
+    assert (
+        stub_retrieval_service.seen_query.filters["runtime_identity"][
+            "runtime_profile_snapshot_id"
+        ]
+        == identity.runtime_profile_snapshot_id
+    )
+    assert stub_retrieval_service.seen_query.filters[
+        "_runtime_branch_visibility_ignored_filters"
+    ] == {
+        "ignored_filter_keys": ["branch_ids"],
+        "reason": "runtime_identity_branch_visibility_is_authoritative",
+    }
+    assert [hit.hit_id for hit in result.hits] == ["hit-visible"]
+    assert result.trace is not None
+    assert result.trace.returned_count == 1
+    assert "runtime_branch_filters_ignored:branch_ids" in result.warnings
+    assert "runtime_branch_visibility_filtered" in result.trace.warnings
+    assert any(
+        warning.startswith("runtime_branch_visibility_filtered:")
+        for warning in result.warnings
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_owned_recall_search_uses_identity_metadata_for_branch_cutoff(
+    retrieval_session,
+):
+    session_service = StorySessionService(retrieval_session)
+    story_session = session_service.create_session(
+        story_id="story-runtime-recall-cutoff",
+        source_workspace_id="workspace-runtime-recall-cutoff",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    session_service.create_chapter_workspace(
+        session_id=story_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.OUTLINE_DRAFTING,
+        builder_snapshot_json={},
+    )
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.runtime_recall_branch_cutoff",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    branch = identity_service.ensure_default_branch(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+    )
+    turn_one = identity_service.create_turn(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        branch_head_id=branch.branch_head_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        turn_kind="generation",
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    turn_two = identity_service.create_turn(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        branch_head_id=branch.branch_head_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        turn_kind="generation",
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    retrieval_session.commit()
+    identity_one = identity_service.resolve_memory_identity(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        branch_head_id=branch.branch_head_id,
+        turn_id=turn_one.turn_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    identity_two = identity_service.resolve_memory_identity(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        branch_head_id=branch.branch_head_id,
+        turn_id=turn_two.turn_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+
+    continuity_service = RecallContinuityNoteIngestionService(retrieval_session)
+    continuity_service.ingest_continuity_notes(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        chapter_index=1,
+        source_workspace_id=story_session.source_workspace_id,
+        summary_updates=["Harbor bell debt first-turn recall."],
+        runtime_identity=identity_one,
+        source_refs=[
+            MemorySourceRef(
+                source_type="story_turn",
+                source_id=turn_one.turn_id,
+                layer="runtime_identity",
+            )
+        ],
+    )
+    continuity_service.ingest_continuity_notes(
+        session_id=story_session.session_id,
+        story_id=story_session.story_id,
+        chapter_index=1,
+        source_workspace_id=story_session.source_workspace_id,
+        summary_updates=["Harbor bell debt second-turn recall."],
+        runtime_identity=identity_two,
+        source_refs=[
+            MemorySourceRef(
+                source_type="story_turn",
+                source_id=turn_two.turn_id,
+                layer="runtime_identity",
+            )
+        ],
+    )
+    retrieval_session.commit()
+
+    result = await RetrievalBroker(
+        default_story_id=story_session.story_id,
+        runtime_identity=identity_one,
+    ).search_recall(
+        MemorySearchRecallInput(
+            query="harbor bell debt recall",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=10,
+        )
+    )
+
+    assert result.hits
+    assert all(
+        hit.metadata["runtime_identity"]["turn_id"] == turn_one.turn_id
+        for hit in result.hits
+    )
+    assert all(hit.metadata["lifecycle_state"] == "active" for hit in result.hits)
+
+
+@pytest.mark.asyncio
+async def test_runtime_owned_get_state_and_summary_pin_exact_session_not_story_latest(
+    retrieval_session,
+):
+    session_service = StorySessionService(retrieval_session)
+    original_session = session_service.create_session(
+        story_id="story-runtime-read-pin",
+        source_workspace_id="workspace-runtime-read-pin-a",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={
+            "chapter_digest": {"current_chapter": 1, "title": "Pinned Session"},
+            "narrative_progress": {
+                "current_phase": "outline_drafting",
+                "accepted_segments": 0,
+            },
+            "timeline_spine": [],
+            "active_threads": [],
+            "foreshadow_registry": [],
+            "character_state_digest": {},
+        },
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    session_service.create_chapter_workspace(
+        session_id=original_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.OUTLINE_DRAFTING,
+        builder_snapshot_json={
+            "foundation_digest": ["Pinned Foundation"],
+            "blueprint_digest": ["Pinned Blueprint"],
+            "current_outline_digest": ["Pinned Outline"],
+            "recent_segment_digest": ["Pinned Segment"],
+            "current_state_digest": ["Pinned State"],
+        },
+    )
+    newer_session = session_service.create_session(
+        story_id="story-runtime-read-pin",
+        source_workspace_id="workspace-runtime-read-pin-b",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={
+            "chapter_digest": {"current_chapter": 1, "title": "Latest Session"},
+            "narrative_progress": {
+                "current_phase": "outline_drafting",
+                "accepted_segments": 0,
+            },
+            "timeline_spine": [],
+            "active_threads": [],
+            "foreshadow_registry": [],
+            "character_state_digest": {},
+        },
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    session_service.create_chapter_workspace(
+        session_id=newer_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.OUTLINE_DRAFTING,
+        builder_snapshot_json={
+            "foundation_digest": ["Latest Foundation"],
+            "blueprint_digest": ["Latest Blueprint"],
+            "current_outline_digest": ["Latest Outline"],
+            "recent_segment_digest": ["Latest Segment"],
+            "current_state_digest": ["Latest State"],
+        },
+    )
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=original_session.session_id,
+        created_from="test.runtime_read_pin",
+    )
+    identity = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    ).resolve_runtime_entry_identity(
+        session_id=original_session.session_id,
+        command_kind="continue",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    retrieval_session.commit()
+    broker = RetrievalBroker(
+        default_story_id=original_session.story_id,
+        runtime_identity=identity,
+    )
+
+    state = await broker.get_state(
+        MemoryGetStateInput(
+            refs=[
+                ObjectRef(
+                    object_id="chapter.current",
+                    layer=Layer.CORE_STATE_AUTHORITATIVE,
+                    domain=Domain.CHAPTER,
+                    domain_path="chapter.current",
+                )
+            ]
+        )
+    )
+    summary = await broker.get_summary(
+        MemoryGetSummaryInput(
+            summary_ids=["projection.foundation_digest"], scope="chapter"
+        )
+    )
+
+    assert state.items[0].data["title"] == "Pinned Session"
+    assert summary.items[0].summary_text == "Pinned Foundation"
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,11 @@ from sqlmodel import Session as SqlSession
 from config import get_settings
 from rp.models.dsl import Domain, Layer
 from rp.models.memory_crud import ProposalSubmitInput
+from rp.models.runtime_workspace_material import (
+    RuntimeWorkspaceMaterial,
+    RuntimeWorkspaceMaterialKind,
+    RuntimeWorkspaceMaterialVisibility,
+)
 from rp.models.story_runtime import (
     LongformChapterPhase,
     StoryArtifactKind,
@@ -17,6 +22,11 @@ from rp.models.story_runtime import (
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime_workspace_material_service import (
+    RuntimeWorkspaceMaterialService,
+)
+from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from services.database import get_engine
@@ -359,6 +369,49 @@ def _authoritative_block_patch_payload(*, title: str, domain: str = "chapter") -
         ],
         "reason": "api governed block mutation",
     }
+
+
+def _seed_memory_inspection_identity(session_id: str) -> dict[str, str]:
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.get_session(session_id)
+        if story_session is None:
+            raise AssertionError(f"Story session not found: {session_id}")
+        snapshot_service = RuntimeProfileSnapshotService(db_session)
+        snapshot = snapshot_service.ensure_active_snapshot(
+            session_id=session_id,
+            created_from="test.api.memory_inspection",
+        )
+        identity_service = StoryRuntimeIdentityService(
+            db_session,
+            runtime_profile_snapshot_service=snapshot_service,
+        )
+        identity = identity_service.resolve_runtime_entry_identity(
+            session_id=session_id,
+            command_kind="memory_inspection",
+            actor="api.memory_inspection_test",
+            requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        )
+        RuntimeWorkspaceMaterialService(session=db_session).record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.memory.inspection.overlay",
+                material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
+                identity=identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.current",
+                payload={"title": "API visible review overlay"},
+                visibility=RuntimeWorkspaceMaterialVisibility.REVIEW_VISIBLE.value,
+                created_by="api.memory_inspection_test",
+            )
+        )
+        db_session.commit()
+        return {
+            "story_id": story_session.story_id,
+            "session_id": identity.session_id,
+            "branch_head_id": identity.branch_head_id,
+            "turn_id": identity.turn_id,
+            "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+        }
 
 
 class _MockStoryLLMService:
@@ -1942,6 +1995,40 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
         missing_session_versions.json()["detail"]["error"]["code"]
         == "story_session_not_found"
     )
+
+
+def test_story_memory_inspection_route_uses_memory_family_and_identity_scope(
+    client, monkeypatch
+):
+    monkeypatch.setenv(
+        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+        "true",
+    )
+    get_settings.cache_clear()
+    seeded = _seed_formal_memory_block_session()
+    identity = _seed_memory_inspection_identity(seeded["session_id"])
+
+    inspection = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/memory/inspection",
+        params={
+            "branch_head_id": identity["branch_head_id"],
+            "turn_id": identity["turn_id"],
+            "runtime_profile_snapshot_id": identity["runtime_profile_snapshot_id"],
+        },
+    )
+
+    assert inspection.status_code == 200
+    payload = inspection.json()
+    assert payload["identity"]["session_id"] == seeded["session_id"]
+    assert (
+        payload["branch_scope"]["active_branch_head_id"] == (identity["branch_head_id"])
+    )
+    assert Layer.CORE_STATE_AUTHORITATIVE.value in payload["layers"]
+    assert Layer.RUNTIME_WORKSPACE.value in payload["layers"]
+    assert {
+        item["material_id"]
+        for item in payload["layers"][Layer.RUNTIME_WORKSPACE.value]["items"]
+    } == {"api.memory.inspection.overlay"}
 
 
 def test_story_memory_block_proposal_submission_is_governed(client, monkeypatch):

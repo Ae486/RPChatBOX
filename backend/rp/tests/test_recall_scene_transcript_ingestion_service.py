@@ -32,6 +32,7 @@ from rp.services.recall_scene_transcript_ingestion_service import (
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.story_runtime_controller import StoryRuntimeController
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
@@ -107,11 +108,20 @@ def _seed_story_runtime(
 
 class _NoopRegressionService:
     async def run_light_regression(
-        self, *, session, chapter, accepted_artifact, model_id, provider_id
+        self,
+        *,
+        session,
+        chapter,
+        accepted_artifact,
+        model_id,
+        provider_id,
+        runtime_identity=None,
     ):
         return session, chapter
 
-    async def run_heavy_regression(self, *, session, chapter, model_id, provider_id):
+    async def run_heavy_regression(
+        self, *, session, chapter, model_id, provider_id, runtime_identity=None
+    ):
         return session, chapter
 
 
@@ -149,7 +159,10 @@ def _build_turn_domain_service(
         projection_state_service=projection_state_service,
         writing_packet_builder=WritingPacketBuilder(),
         writing_worker_execution_service=SimpleNamespace(),
-        regression_service=_NoopRegressionService(),
+        regression_service=cast(
+            LongformRegressionService,
+            _NoopRegressionService(),
+        ),
         recall_scene_transcript_ingestion_service=transcript_service,
     )
 
@@ -439,7 +452,9 @@ def test_ingest_scene_transcript_rejects_blank_scene_ref_without_builder(
     with pytest.raises(
         ValueError, match="scene transcript promotion requires a non-empty scene_ref"
     ):
-        RecallSceneTranscriptIngestionService(retrieval_session).ingest_scene_transcript(
+        RecallSceneTranscriptIngestionService(
+            retrieval_session
+        ).ingest_scene_transcript(
             SceneTranscriptPromotionInput(
                 session_id=session.session_id,
                 story_id=session.story_id,

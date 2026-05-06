@@ -42,9 +42,11 @@ def create_db_and_tables() -> None:
     )
     from models.custom_role import CustomRoleRecord
     from models.rp_memory_store import (
+        MemoryChangeEventRecord,
         MemoryApplyReceiptRecord,
         MemoryApplyTargetLinkRecord,
         MemoryProposalRecord,
+        RuntimeWorkspaceMaterialRecord,
         ensure_memory_store_compatible_schema,
     )
     from models.rp_core_state_store import (
@@ -67,6 +69,13 @@ def create_db_and_tables() -> None:
         SourceAssetRecord,
         ensure_retrieval_store_compatible_schema,
     )
+    from models.rp_registry_store import (
+        MemoryBlockTemplateDescriptorRecord,
+        MemoryDomainDescriptorRecord,
+        MemoryModeProfileRecord,
+        MemoryWorkerDescriptorRecord,
+        ensure_registry_store_compatible_schema,
+    )
     from models.rp_setup_store import (
         SetupAcceptedCommitRecord,
         SetupAgentRuntimeStateRecord,
@@ -82,11 +91,14 @@ def create_db_and_tables() -> None:
         ensure_setup_store_compatible_schema,
     )
     from models.rp_story_store import (
+        BranchHeadRecord,
         ChapterWorkspaceRecord,
+        RuntimeProfileSnapshotRecord,
         StoryArtifactRecord,
         StoryBlockConsumerStateRecord,
         StoryDiscussionEntryRecord,
         StorySessionRecord,
+        StoryTurnRecord,
         ensure_story_store_compatible_schema,
     )
 
@@ -114,9 +126,14 @@ def create_db_and_tables() -> None:
         StoryArtifactRecord,
         StoryBlockConsumerStateRecord,
         StoryDiscussionEntryRecord,
+        BranchHeadRecord,
+        RuntimeProfileSnapshotRecord,
+        StoryTurnRecord,
         MemoryProposalRecord,
         MemoryApplyReceiptRecord,
         MemoryApplyTargetLinkRecord,
+        RuntimeWorkspaceMaterialRecord,
+        MemoryChangeEventRecord,
         CoreStateAuthoritativeObjectRecord,
         CoreStateAuthoritativeRevisionRecord,
         CoreStateProjectionSlotRecord,
@@ -131,6 +148,10 @@ def create_db_and_tables() -> None:
         MemoryGraphEdgeRecord,
         MemoryGraphEvidenceRecord,
         MemoryGraphExtractionJobRecord,
+        MemoryDomainDescriptorRecord,
+        MemoryWorkerDescriptorRecord,
+        MemoryBlockTemplateDescriptorRecord,
+        MemoryModeProfileRecord,
     )
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
@@ -138,6 +159,7 @@ def create_db_and_tables() -> None:
     ensure_memory_store_compatible_schema(engine)
     ensure_core_state_store_compatible_schema(engine)
     ensure_retrieval_store_compatible_schema(engine)
+    ensure_registry_store_compatible_schema(engine)
     ensure_story_store_compatible_schema(engine)
 
 

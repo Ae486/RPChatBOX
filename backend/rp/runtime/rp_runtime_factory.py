@@ -18,6 +18,7 @@ from rp.services.authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,
 )
 from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
+from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.longform_specialist_service import LongformSpecialistService
@@ -34,6 +35,7 @@ from rp.services.legacy_state_patch_proposal_builder import (
 )
 from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
+from rp.services.memory_inspection_service import MemoryInspectionService
 from rp.services.memory_os_service import MemoryOsService
 from rp.services.minimal_retrieval_ingestion_service import (
     MinimalRetrievalIngestionService,
@@ -59,11 +61,17 @@ from rp.services.recall_detail_ingestion_service import RecallDetailIngestionSer
 from rp.services.recall_retired_foreshadow_ingestion_service import (
     RecallRetiredForeshadowIngestionService,
 )
+from rp.services.recall_lifecycle_service import RecallLifecycleService
 from rp.services.recall_scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
+from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
+from rp.services.runtime_read_manifest_service import BranchVisibilityResolver
+from rp.services.runtime_workspace_material_service import (
+    RuntimeWorkspaceMaterialService,
+)
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.setup_agent_execution_service import SetupAgentExecutionService
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
@@ -85,10 +93,12 @@ from rp.services.story_block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
 from rp.services.story_runtime_controller import StoryRuntimeController
+from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.version_history_read_service import VersionHistoryReadService
 from rp.services.writing_packet_builder import WritingPacketBuilder
 from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
@@ -421,6 +431,12 @@ class RpRuntimeFactory:
             recall_scene_transcript_ingestion_service=(
                 RecallSceneTranscriptIngestionService(self._session)
             ),
+            runtime_identity_service=StoryRuntimeIdentityService(
+                self._session,
+                runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+                    self._session
+                ),
+            ),
         )
         return turn_domain_service
 
@@ -438,6 +454,9 @@ class RpRuntimeFactory:
             workspace_service=workspace_service,
             story_session_service=StorySessionService(self._session),
             core_state_dual_write_service=self._build_core_state_dual_write_service(),
+            runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+                self._session
+            ),
         )
         return story_activation_service
 
@@ -528,6 +547,18 @@ class RpRuntimeFactory:
             proposal_apply_service=proposal_apply_service,
             proposal_workflow_service=proposal_workflow_service,
         )
+        memory_inspection_service = MemoryInspectionService(
+            memory_inspection_read_service=memory_inspection_read_service,
+            rp_block_read_service=rp_block_read_service,
+            story_block_mutation_service=block_mutation_service,
+            branch_visibility_resolver=BranchVisibilityResolver(self._session),
+            runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+                session=self._session,
+            ),
+            retrieval_document_service=RetrievalDocumentService(self._session),
+            recall_lifecycle_service=RecallLifecycleService(self._session),
+            archival_evolution_service=ArchivalEvolutionService(self._session),
+        )
         return StoryRuntimeController(
             story_session_service=story_session_service,
             story_activation_service=story_activation_service,
@@ -535,11 +566,15 @@ class RpRuntimeFactory:
             provenance_read_service=provenance_read_service,
             projection_read_service=projection_read_service,
             memory_inspection_read_service=memory_inspection_read_service,
+            memory_inspection_service=memory_inspection_service,
             rp_block_read_service=rp_block_read_service,
             story_block_mutation_service=block_mutation_service,
             story_block_consumer_state_service=block_consumer_state_service,
             recall_scene_transcript_ingestion_service=(
                 RecallSceneTranscriptIngestionService(self._session)
+            ),
+            runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+                self._session
             ),
         )
 

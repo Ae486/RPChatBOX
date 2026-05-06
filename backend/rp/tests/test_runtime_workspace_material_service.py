@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
+
+from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 
 from rp.models.memory_contract_registry import (
     MemoryBlockTemplate,
@@ -30,6 +34,7 @@ from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
     RuntimeWorkspaceMaterialServiceError,
 )
+from services.database import get_engine
 
 
 def test_material_kind_and_lifecycle_enums_match_spec():
@@ -98,8 +103,8 @@ def test_material_rejects_blank_short_id_but_defaults_payload_and_source_refs():
     assert material.metadata["archival_truth"] is False
 
 
-def test_record_list_get_and_require_material_by_full_identity():
-    service = RuntimeWorkspaceMaterialService()
+def test_record_list_get_and_require_material_by_full_identity(retrieval_session):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
     identity = _identity()
     source_ref = MemorySourceRef(
         source_type="recall_hit",
@@ -119,34 +124,48 @@ def test_record_list_get_and_require_material_by_full_identity():
     )
 
     receipt = service.record_material(material)
+    retrieval_session.commit()
 
-    assert receipt.material.domain == "knowledge_boundary"
-    assert receipt.material.lifecycle == RuntimeWorkspaceMaterialLifecycle.ACTIVE
-    assert service.get_material(identity=identity, material_id="mat-retrieval-r1") == (
-        receipt.material
-    )
-    assert (
-        service.require_material(
-            identity=identity,
-            material_id="mat-retrieval-r1",
+    with Session(get_engine()) as later_session:
+        later_service = RuntimeWorkspaceMaterialService(session=later_session)
+        persisted_record = later_session.exec(
+            select(RuntimeWorkspaceMaterialRecord).where(
+                RuntimeWorkspaceMaterialRecord.material_id == "mat-retrieval-r1"
+            )
+        ).one()
+
+        assert receipt.material.domain == "knowledge_boundary"
+        assert receipt.material.lifecycle == RuntimeWorkspaceMaterialLifecycle.ACTIVE
+        assert persisted_record.short_id == "R1"
+        assert (
+            later_service.get_material(
+                identity=identity,
+                material_id="mat-retrieval-r1",
+            )
+            == receipt.material
         )
-        == receipt.material
-    )
-    assert service.list_materials(identity=identity) == [receipt.material]
-    assert service.list_materials(
-        identity=identity,
-        material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
-    ) == [receipt.material]
-    assert service.list_materials(identity=identity, domain="knowledge") == [
-        receipt.material
-    ]
-    assert (
-        service.list_materials(
-            identity=identity,
-            lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
+        assert (
+            later_service.require_material(
+                identity=identity,
+                material_id="mat-retrieval-r1",
+            )
+            == receipt.material
         )
-        == []
-    )
+        assert later_service.list_materials(identity=identity) == [receipt.material]
+        assert later_service.list_materials(
+            identity=identity,
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+        ) == [receipt.material]
+        assert later_service.list_materials(identity=identity, domain="knowledge") == [
+            receipt.material
+        ]
+        assert (
+            later_service.list_materials(
+                identity=identity,
+                lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
+            )
+            == []
+        )
 
     event = receipt.event
     assert event.identity == identity
@@ -167,8 +186,35 @@ def test_record_list_get_and_require_material_by_full_identity():
     assert event.metadata["source_of_truth"] is False
 
 
-def test_materials_are_isolated_by_full_runtime_identity_not_session_only():
+def test_default_material_service_uses_persistent_store_not_process_local(
+    retrieval_session,
+):
+    identity = _identity()
     service = RuntimeWorkspaceMaterialService()
+
+    receipt = service.record_material(
+        _material(
+            material_id="mat-default-persistent-r1",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+            identity=identity,
+            short_id="R1",
+        )
+    )
+
+    assert service.store.materials_by_identity == {}
+    assert (
+        RuntimeWorkspaceMaterialService().require_material(
+            identity=identity,
+            material_id="mat-default-persistent-r1",
+        )
+        == receipt.material
+    )
+
+
+def test_materials_are_isolated_by_full_runtime_identity_not_session_only(
+    retrieval_session,
+):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
     base_identity = _identity()
     branch_identity = _identity(branch_head_id="branch-head-2")
     turn_identity = _identity(turn_id="turn-2")
@@ -183,37 +229,52 @@ def test_materials_are_isolated_by_full_runtime_identity_not_session_only():
             short_id="OV1",
         )
     )
+    retrieval_session.commit()
 
-    assert service.list_materials(identity=base_identity) == [receipt.material]
-    assert (
-        service.get_material(identity=branch_identity, material_id="mat-scene-1")
-        is None
-    )
-    assert (
-        service.get_material(identity=turn_identity, material_id="mat-scene-1") is None
-    )
-    assert (
-        service.get_material(identity=profile_identity, material_id="mat-scene-1")
-        is None
-    )
+    with Session(get_engine()) as later_session:
+        later_service = RuntimeWorkspaceMaterialService(session=later_session)
 
-    for wrong_identity in [branch_identity, turn_identity, profile_identity]:
-        with pytest.raises(RuntimeWorkspaceMaterialServiceError) as exc:
-            service.require_material(
-                identity=wrong_identity,
+        assert later_service.list_materials(identity=base_identity) == [
+            receipt.material
+        ]
+        assert (
+            later_service.get_material(
+                identity=branch_identity, material_id="mat-scene-1"
+            )
+            is None
+        )
+        assert (
+            later_service.get_material(
+                identity=turn_identity, material_id="mat-scene-1"
+            )
+            is None
+        )
+        assert (
+            later_service.get_material(
+                identity=profile_identity,
                 material_id="mat-scene-1",
             )
-        assert exc.value.code == "runtime_workspace_material_not_found"
+            is None
+        )
+
+        for wrong_identity in [branch_identity, turn_identity, profile_identity]:
+            with pytest.raises(RuntimeWorkspaceMaterialServiceError) as exc:
+                later_service.require_material(
+                    identity=wrong_identity,
+                    material_id="mat-scene-1",
+                )
+            assert exc.value.code == "runtime_workspace_material_not_found"
 
 
-def test_domain_registry_validation_and_test_only_extension():
-    service = RuntimeWorkspaceMaterialService()
+def test_domain_registry_validation_and_test_only_extension(retrieval_session):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
 
     with pytest.raises(RuntimeWorkspaceMaterialServiceError) as exc:
         service.record_material(_material(domain="unknown_domain"))
     assert exc.value.code == "runtime_workspace_domain_not_registered"
 
     extended_service = RuntimeWorkspaceMaterialService(
+        session=retrieval_session,
         registry_service=MemoryContractRegistryService(
             registry=_registry_with_domains(
                 MemoryDomainContract(
@@ -233,7 +294,7 @@ def test_domain_registry_validation_and_test_only_extension():
                     ],
                 )
             )
-        )
+        ),
     )
 
     receipt = extended_service.record_material(
@@ -248,8 +309,8 @@ def test_domain_registry_validation_and_test_only_extension():
     assert receipt.material.domain == "magic_system"
 
 
-def test_short_id_uniqueness_is_identity_scoped():
-    service = RuntimeWorkspaceMaterialService()
+def test_short_id_uniqueness_is_identity_scoped(retrieval_session):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
     identity = _identity()
     branch_identity = _identity(branch_head_id="branch-head-2")
     next_turn_identity = _identity(turn_id="turn-2")
@@ -309,8 +370,46 @@ def test_short_id_uniqueness_is_identity_scoped():
     assert len(service.list_materials(identity=profile_identity)) == 1
 
 
-def test_lifecycle_update_returns_receipt_and_trace_event():
-    service = RuntimeWorkspaceMaterialService()
+def test_short_id_uniqueness_is_enforced_by_durable_constraint(retrieval_session):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
+    identity = _identity()
+    service.record_material(
+        _material(
+            material_id="mat-r1-db",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+            identity=identity,
+            short_id="R1",
+        )
+    )
+
+    duplicate = RuntimeWorkspaceMaterialRecord(
+        material_id="mat-r1-db-duplicate",
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        branch_head_id=identity.branch_head_id,
+        turn_id=identity.turn_id,
+        runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+        material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_EXPANDED_CHUNK.value,
+        domain="knowledge_boundary",
+        domain_path="knowledge_boundary.runtime.turn",
+        short_id="r1",
+        short_id_key="r1",
+        lifecycle=RuntimeWorkspaceMaterialLifecycle.ACTIVE.value,
+        visibility=RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value,
+        created_by="writer.retrieval",
+        payload_json={"excerpt": "Duplicate evidence."},
+        source_refs_json=[],
+        metadata_json={},
+    )
+
+    retrieval_session.add(duplicate)
+    with pytest.raises(IntegrityError):
+        retrieval_session.flush()
+    retrieval_session.rollback()
+
+
+def test_lifecycle_update_returns_receipt_and_trace_event(retrieval_session):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
     identity = _identity()
     service.record_material(
         _material(
@@ -327,25 +426,39 @@ def test_lifecycle_update_returns_receipt_and_trace_event():
         lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
         reason="writer_output_referenced_material",
     )
+    retrieval_session.commit()
 
-    assert receipt.material.lifecycle == RuntimeWorkspaceMaterialLifecycle.USED
-    assert (
-        service.require_material(
-            identity=identity,
-            material_id="mat-used-r1",
-        ).lifecycle
-        == RuntimeWorkspaceMaterialLifecycle.USED
-    )
-    assert receipt.event.identity == identity
-    assert receipt.event.layer == RUNTIME_WORKSPACE_MATERIAL_LAYER
-    assert receipt.event.domain == "knowledge_boundary"
-    assert receipt.event.operation_kind == "runtime_material.lifecycle.update"
-    assert receipt.event.source_refs[-1].entry_id == "mat-used-r1"
-    assert receipt.event.dirty_targets[0].reason == "writer_output_referenced_material"
-    assert receipt.event.metadata["previous_lifecycle"] == "active"
-    assert receipt.event.metadata["lifecycle"] == "used"
-    assert receipt.event.metadata["temporary"] is True
-    assert receipt.event.metadata["source_of_truth"] is False
+    with Session(get_engine()) as later_session:
+        later_service = RuntimeWorkspaceMaterialService(session=later_session)
+        persisted_record = later_session.get(
+            RuntimeWorkspaceMaterialRecord,
+            "mat-used-r1",
+        )
+
+        assert persisted_record is not None
+        assert receipt.material.lifecycle == RuntimeWorkspaceMaterialLifecycle.USED
+        assert (
+            later_service.require_material(
+                identity=identity,
+                material_id="mat-used-r1",
+            ).lifecycle
+            == RuntimeWorkspaceMaterialLifecycle.USED
+        )
+        assert (
+            persisted_record.lifecycle == RuntimeWorkspaceMaterialLifecycle.USED.value
+        )
+        assert receipt.event.identity == identity
+        assert receipt.event.layer == RUNTIME_WORKSPACE_MATERIAL_LAYER
+        assert receipt.event.domain == "knowledge_boundary"
+        assert receipt.event.operation_kind == "runtime_material.lifecycle.update"
+        assert receipt.event.source_refs[-1].entry_id == "mat-used-r1"
+        assert (
+            receipt.event.dirty_targets[0].reason == "writer_output_referenced_material"
+        )
+        assert receipt.event.metadata["previous_lifecycle"] == "active"
+        assert receipt.event.metadata["lifecycle"] == "used"
+        assert receipt.event.metadata["temporary"] is True
+        assert receipt.event.metadata["source_of_truth"] is False
 
     with pytest.raises(RuntimeWorkspaceMaterialServiceError) as exc:
         service.update_lifecycle(
@@ -357,8 +470,79 @@ def test_lifecycle_update_returns_receipt_and_trace_event():
     assert exc.value.code == "runtime_workspace_material_not_found"
 
 
-def test_retrieval_card_and_worker_candidate_remain_runtime_material_only():
-    service = RuntimeWorkspaceMaterialService()
+def test_lifecycle_persists_expired_and_invalidated_timestamps(retrieval_session):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
+    identity = _identity()
+
+    service.record_material(
+        _material(
+            material_id="mat-expired",
+            material_kind=RuntimeWorkspaceMaterialKind.POST_WRITE_TRACE,
+            identity=identity,
+            short_id="TRACE1",
+        )
+    )
+    service.record_material(
+        _material(
+            material_id="mat-invalidated",
+            material_kind=RuntimeWorkspaceMaterialKind.PACKET_REF,
+            identity=identity,
+            short_id="PACK1",
+        )
+    )
+
+    service.update_lifecycle(
+        identity=identity,
+        material_id="mat-expired",
+        lifecycle=RuntimeWorkspaceMaterialLifecycle.EXPIRED,
+        reason="turn_closed",
+    )
+    service.update_lifecycle(
+        identity=identity,
+        material_id="mat-invalidated",
+        lifecycle=RuntimeWorkspaceMaterialLifecycle.INVALIDATED,
+        reason="packet_rebuilt",
+    )
+    retrieval_session.commit()
+
+    with Session(get_engine()) as later_session:
+        later_service = RuntimeWorkspaceMaterialService(session=later_session)
+        expired = later_session.get(RuntimeWorkspaceMaterialRecord, "mat-expired")
+        invalidated = later_session.get(
+            RuntimeWorkspaceMaterialRecord,
+            "mat-invalidated",
+        )
+
+        assert expired is not None
+        assert expired.lifecycle == RuntimeWorkspaceMaterialLifecycle.EXPIRED.value
+        assert expired.expired_at is not None
+        assert expired.invalidated_at is None
+        assert (
+            later_service.require_material(
+                identity=identity,
+                material_id="mat-expired",
+            ).metadata["expired_at"]
+            == expired.expired_at.isoformat()
+        )
+        assert invalidated is not None
+        assert (
+            invalidated.lifecycle == RuntimeWorkspaceMaterialLifecycle.INVALIDATED.value
+        )
+        assert invalidated.expired_at is None
+        assert invalidated.invalidated_at is not None
+        assert (
+            later_service.require_material(
+                identity=identity,
+                material_id="mat-invalidated",
+            ).metadata["invalidated_at"]
+            == invalidated.invalidated_at.isoformat()
+        )
+
+
+def test_retrieval_card_and_worker_candidate_remain_runtime_material_only(
+    retrieval_session,
+):
+    service = RuntimeWorkspaceMaterialService(session=retrieval_session)
     identity = _identity()
 
     retrieval_receipt = service.record_material(

@@ -102,6 +102,7 @@ class BackendRpSetupService {
     required String modelId,
     String? providerId,
     String? targetStep,
+    String? targetStage,
     required List<SetupDialogueMessage> history,
     required String userPrompt,
   }) async* {
@@ -112,6 +113,7 @@ class BackendRpSetupService {
         'model_id': modelId,
         if (providerId != null) 'provider_id': providerId,
         if (targetStep != null) 'target_step': targetStep,
+        if (targetStage != null) 'target_stage': targetStage,
         'history': history.map((item) => item.toJson()).toList(),
         'user_prompt': userPrompt,
       },
@@ -153,6 +155,7 @@ class BackendRpSetupService {
     required String modelId,
     String? providerId,
     String? targetStep,
+    String? targetStage,
     required List<SetupDialogueMessage> history,
     required String userPrompt,
   }) async {
@@ -163,6 +166,7 @@ class BackendRpSetupService {
         'model_id': modelId,
         if (providerId != null) 'provider_id': providerId,
         if (targetStep != null) 'target_step': targetStep,
+        if (targetStage != null) 'target_stage': targetStage,
         'history': history.map((item) => item.toJson()).toList(),
         'user_prompt': userPrompt,
       },

@@ -633,7 +633,27 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
 - Verification:
   - `flutter test test/unit/models/rp_setup_test.dart` -> `2 passed`
   - `flutter analyze lib/models/rp_setup.dart lib/pages/prestory_setup_page.dart test/unit/models/rp_setup_test.dart` -> `No issues found`
-  - full Flutter analyze was not used as this slice gate because the existing app still has unrelated historical analyzer issues
+- full Flutter analyze was not used as this slice gate because the existing app still has unrelated historical analyzer issues
+
+### Setup Stage Follow-Up Convergence (2026-05-06)
+
+- Scope decision:
+  - the next real setup follow-up slice is not "one patch tool per stage"
+  - the next real blocker is canonical stage selection at turn ingress
+- Code-review conclusion:
+  - genuine blocker: setup turn requests still only carry `target_step`, so canonical stage selection collapses back to shared legacy buckets such as `foundation`
+  - genuine migration debt: `current_stage` is canonical in workspace/context truth, but coexistence rules with `current_step` are still implicit rather than frozen in one contract
+  - rejected blocker claims:
+    - stage-specific patch tools are not required because canonical stage writes already go through shared `setup.truth.write`
+    - prior-stage handoff is not still purely 4-stage; canonical-stage handoff selection is already implemented
+    - frontend/backend wire protocol is not currently blocked by camelCase stage ids because the frontend already maps stage values to snake_case before serialization
+- Planned next slice:
+  - add `target_stage` to setup turn ingress and graph shell
+  - preserve `target_stage` through runtime launch, context assembly, tool scope, and traces
+  - keep `target_step` only as a compatibility mirror
+  - freeze this coexistence rule in a dedicated executable backend spec before broader cleanup
+- Research artifact:
+  - [`research/setup-stage-followup-convergence-slice-plan.md`](research/setup-stage-followup-convergence-slice-plan.md)
 
 ### Output Artifacts
 
