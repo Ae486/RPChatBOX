@@ -194,7 +194,28 @@ debug 页必须只读：
 - rollback 后，如果 `chapter.pending_segment_artifact_id` 指向隐藏 artifact，snapshot 中的 pending 指针必须返回 `None`
 - rewrite candidate 即使没有进入 `visible_output_ref / selected_output_ref`，也必须通过 artifact runtime metadata 归属到 producing `Turn / BranchHead`
 
-## 7.4 测试夹具
+## 7.4 Branch / Rollback / LangGraph 能力验证测试
+
+后续 `GraphCheckpointPointer capture / binding` 与 branch/rollback check 必须做能力验证，而不是只看字段或 mock 返回值。最低验证矩阵：
+
+1. settled turn checkpoint binding
+   - non-stream 与 stream finalize 后，settled `Turn` 自动持有 branch-scoped `graph_checkpoint_binding`。
+   - binding identity 必须匹配 `Turn / BranchHead / RuntimeProfileSnapshot`，且不能由调用方伪造覆盖。
+   - 同一 settled turn 已有 checkpoint binding 后，debug/replay/fork 或重复 finalize 只能幂等返回原 binding，不能覆盖应用层回退锚点。
+2. rollback receipt checkpoint binding
+   - 目标 turn 有 binding 时，`rollback_applied` receipt 自动携带目标 checkpoint binding 或 `target_checkpoint_id`。
+   - 目标 turn 无 binding 时，rollback 仍成功，但 receipt 写入 `checkpoint_binding_missing_reason` 或等价稳定 reason。
+3. branch control actions stay out of story turns
+   - `branch_created` 与 `branch_switched` 不创建 `StoryTurnRecord`。
+   - branch create 后立即更新 active branch，但不复制整套 memory / workspace。
+4. rollback visibility integrity
+   - rollback cutoff 之后的 turns 不再出现在当前 active branch 线性读中。
+   - later Runtime Workspace materials、draft/rewrite candidates、pending jobs、packet/window metadata、branch-visible reads 不再污染当前主线。
+5. LangGraph shell boundary
+   - debug / replay / fork 相关测试只验证 LangGraph checkpoint shell 可用。
+   - 任何产品级 branch / rollback / visibility / Memory OS truth 断言都必须落在 RP 应用层 identity、receipt、read manifest、workspace lifecycle 和 memory visibility 上。
+
+## 7.5 测试夹具
 
 建议新增统一测试夹具：
 

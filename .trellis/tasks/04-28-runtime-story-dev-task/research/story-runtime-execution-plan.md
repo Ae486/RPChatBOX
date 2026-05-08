@@ -320,9 +320,86 @@
       - R1-R5 backend contract check 修复 identity collision、full rewrite old-text gate、request identity metadata、adoption source refs
       - R1-R6 check 修复 read ensure 幂等、candidate identity metadata、R6 API 专项测试覆盖
 
+### Phase J: LangGraph Branch / Rollback Preflight
+
+- `[x]` J1. LangGraph Branch / Rollback Preflight
+  - 结果：
+    - 已产出 `research/story-runtime-langgraph-branch-rollback-preflight.md`
+    - 结论：LangGraph 可继续作为 checkpoint / replay / fork / debug history 的薄执行壳，但不能替代 RP 应用层 branch / rollback 真相
+    - 当前代码已具备应用层 branch / rollback、turn-scoped job ledger、Runtime Workspace invalidation、branch-aware read scope 和 debug inspect surface
+    - 下一最小实现 slice 应聚焦 `GraphCheckpointPointer capture / binding`，把 settled turn 与 LangGraph checkpoint pointer 自动绑定
+    - 模块级 check 已补齐后续能力验证要求：checkpoint binding、rollback receipt binding / missing reason、branch create/switch 不造 turn、rollback 后 later materials 不污染当前主线、LangGraph debug/replay/fork 不替代 RP 应用层 truth
+    - 暂不进入完整 branch UI、physical purge、branch merge、跨分支 Evolution 管理或 R 模块功能改动
+
+- `[x]` J2. GraphCheckpointPointer capture / binding
+  - 结果：
+    - `StoryGraphRunner` 在 non-stream `ainvoke` finalize 后、stream `aupdate_state(... as_node="finalize_turn")` 后捕获 LangGraph snapshot checkpoint pointer
+    - checkpoint pointer 只写入已 `settled` turn 对应 branch metadata：`graph_checkpoint_binding` 与 `graph_checkpoint_bindings_by_turn_id[turn_id]`
+    - binding 字段包含 `graph_thread_id / checkpoint_ns / checkpoint_id / parent_checkpoint_id / captured_after_node / captured_at / turn_id / branch_head_id / runtime_profile_snapshot_id`
+    - `rollback_to_turn()` 从目标 settled turn 所属 branch metadata 自动解析 checkpoint binding；调用方传入的 checkpoint id / binding 只记录为 ignored input，不作为 truth
+    - 目标 turn 缺少 binding 时，rollback 仍按应用层 visibility contract 成功，并在 receipt metadata 写入 `checkpoint_binding_missing_reason=target_turn_has_no_graph_checkpoint_binding`
+    - 同一 settled turn 的 checkpoint pointer 一次绑定后保持幂等；后续 debug/replay/fork 或重复 finalize 捕获到的新 LangGraph checkpoint 不覆盖原应用层回退锚点
+    - branch create / switch 不创建 story turn 的既有合同保持不变；rollback 后 later turns / Runtime Workspace materials / branch-visible read head 的既有合同保持不变
+    - LangGraph checkpoint pointer 只作为技术锚点；settled / job-ledger / visibility 判定仍由 RP 应用层负责
+  - 验证：
+    - `pytest backend\rp\tests\test_story_runtime_identity_service.py -q`
+    - `pytest backend\rp\tests\test_projection_builder_services.py::test_story_graph_runner_stream_persists_usage_metadata_into_writing_result backend\rp\tests\test_projection_builder_services.py::test_graph_thread_binding_reports_rollback_visible_turn_head -q`
+    - `ruff check backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\graphs\story_graph_nodes.py backend\rp\graphs\story_graph_runner.py backend\rp\tests\test_story_runtime_identity_service.py backend\rp\tests\test_projection_builder_services.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\graphs\story_graph_nodes.py backend\rp\graphs\story_graph_runner.py`
+
+- `[x]` J3. J module-level trellis-check
+  - 结果：
+    - check 修复同一 settled turn 的 `graph_checkpoint_binding` 可被后续 capture 覆盖的问题
+    - checkpoint binding 现在一次绑定后幂等返回原 binding，debug / replay / fork 产生的新 LangGraph checkpoint 不能替代 RP 应用层 rollback 锚点
+    - 补充“重复 capture 不覆盖 settled turn binding”的回归测试
+    - 同步补充 J 模块相关文档与 `.trellis/spec/backend/rp-branch-visibility-resolver-lineage.md` 的幂等边界
+  - 验证：
+    - `ruff check backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\graphs\story_graph_nodes.py backend\rp\graphs\story_graph_runner.py backend\rp\tests\test_story_runtime_identity_service.py backend\rp\tests\test_projection_builder_services.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\graphs\story_graph_nodes.py backend\rp\graphs\story_graph_runner.py`
+    - `pytest backend\rp\tests\test_story_runtime_identity_service.py -q`
+    - `pytest backend\rp\tests\test_projection_builder_services.py::test_story_graph_runner_stream_persists_usage_metadata_into_writing_result backend\rp\tests\test_projection_builder_services.py::test_graph_thread_binding_reports_rollback_visible_turn_head backend\rp\tests\test_projection_builder_services.py::test_story_graph_runner_pins_runtime_identity_before_special_command -q`
+    - `pytest backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_hides_rollback_future_but_allows_new_future -q`
+    - `pytest backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_service_is_deterministic_and_separates_visible_selected_omitted -q`
+    - `pytest backend\tests\test_rp_story_api.py::test_story_runtime_debug_exposes_checkpoint_state -q`
+
+### Phase K: Runtime Acceptance / Minimal Runnable Loop
+
+- `[x]` K1. first-stage runtime acceptance
+  - 结果：
+    - longform writing turn 最小闭环已通过现有 stream 主链测试验证：用户 `WRITE_NEXT_SEGMENT` 输入进入 writer，产出 `story_segment` draft artifact，Runtime Workspace 记录 `writer_input_ref / packet_ref / writer_output_ref / token_usage_metadata` 的具体 payload 和引用链，turn 以 `settled` 状态完成，并保留 post-write/job settlement 与 graph checkpoint binding。
+    - 下一轮 continuation base 的 canonical 入口已用 revision/adoption 测试收口：selection 不等于 adoption；只有 `accept_and_continue` 采用的 candidate 才会成为 `canonical_continuation_base`，未采用 candidate 不进入续写基底。
+    - rollback 回归已验证：目标 checkpoint binding 作为技术锚点随 receipt 携带；重复 capture 不覆盖首个 settled turn binding；rollback 后 later turns / workspace materials / branch-visible chapter reads 不污染当前主线。
+    - PRD 剩余两项 acceptance criteria 已在测试通过后勾选。
+    - 本阶段未进入完整 branch UI、physical purge、branch merge、跨分支 Evolution 或完整 roleplay/TRPG runtime。
+  - 验证：
+    - `pytest backend\rp\tests\test_projection_builder_services.py::test_story_graph_runner_stream_persists_usage_metadata_into_writing_result -q`
+    - `pytest backend\rp\tests\test_draft_selection_service.py::test_next_continuation_base_ignores_unadopted_revision_candidates -q`
+    - `pytest backend\rp\tests\test_story_runtime_identity_service.py::test_rollback_read_scope_hides_later_materials_and_keeps_checkpoint_anchor -q`
+
+- `[x]` K2. K module-level trellis-check
+  - 结果：
+    - check 补强 `test_story_graph_runner_stream_persists_usage_metadata_into_writing_result`，让 Runtime Workspace 的 `writer_input_ref / packet_ref / writer_output_ref / token_usage_metadata` 验证具体 payload、`source_refs` 和用户写作指令进入 writer packet 的证据，而不是只验证材料数量。
+    - check 补强 `test_rollback_read_scope_hides_later_materials_and_keeps_checkpoint_anchor`，显式验证 rollback 后 active branch head / last settled turn 回到目标 turn，later turn 进入 `hidden_by_rollback`，workspace material 被 invalidated，branch-visible chapter snapshot 不暴露 cutoff 之后的 artifact / discussion / pending pointer。
+    - PRD 两个剩余勾选项保持有效：K focused tests、相关 identity / draft selection 回归、branch visibility/debug 回归、lint 和 typecheck 均通过。
+    - 本阶段未扩大到完整 branch UI、physical purge、branch merge、跨分支 Evolution、完整 roleplay/TRPG runtime。
+  - 验证：
+    - `pytest backend\rp\tests\test_projection_builder_services.py::test_story_graph_runner_stream_persists_usage_metadata_into_writing_result backend\rp\tests\test_draft_selection_service.py::test_next_continuation_base_ignores_unadopted_revision_candidates backend\rp\tests\test_story_runtime_identity_service.py::test_rollback_read_scope_hides_later_materials_and_keeps_checkpoint_anchor -q`
+    - `pytest backend\rp\tests\test_story_runtime_identity_service.py -q`
+    - `pytest backend\rp\tests\test_draft_selection_service.py -q`
+    - `pytest backend\rp\tests\test_projection_builder_services.py::test_story_graph_runner_stream_persists_usage_metadata_into_writing_result backend\rp\tests\test_projection_builder_services.py::test_graph_thread_binding_reports_rollback_visible_turn_head backend\rp\tests\test_projection_builder_services.py::test_story_turn_domain_service_marks_consumers_synced -q`
+    - `pytest backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_hides_rollback_future_but_allows_new_future backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_service_is_deterministic_and_separates_visible_selected_omitted backend\tests\test_rp_story_api.py::test_story_runtime_debug_exposes_checkpoint_state -q`
+    - `ruff check backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\graphs\story_graph_nodes.py backend\rp\graphs\story_graph_runner.py backend\rp\tests\test_story_runtime_identity_service.py backend\rp\tests\test_projection_builder_services.py backend\rp\tests\test_draft_selection_service.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\graphs\story_graph_nodes.py backend\rp\graphs\story_graph_runner.py`
+
+- `[x]` K3. trellis-update-spec
+  - 结果：
+    - 已更新 `.trellis/spec/backend/rp-runtime-workspace-turn-material-store.md`
+    - 新增 first-stage longform runtime acceptance 合同，明确最小可运行闭环不能只验证 Workspace rows 存在，必须验证 writer input / packet / output / token usage / source refs / settlement / checkpoint binding
+    - 补入 revision/adoption continuation base、rollback read-scope 回归、checkpoint binding 技术锚点的测试要求与 wrong/correct 示例
+
 ## 7. 当前执行策略
 
-当前 `Longform Revision Overlay / Rewrite` 模块已完成 `R1-R6`，并通过两轮模块级 `trellis-check`。后续不应继续在 R 模块内扩 scope，下一步应切换到新的批次规划或由用户指定下一模块。
+当前第一阶段最终 K 模块已完成模块级 `trellis-check`，并已完成 `trellis-update-spec`。`R1-R6` 已完成并通过模块级 check；`J1/J2/J3` 已完成并通过模块级 check。本阶段不重开 R/J/K 模块，不进入完整 branch UI、physical purge、branch merge、跨分支 Evolution 管理或完整 roleplay/TRPG runtime。第一阶段可以进入 finish 判断。
 
 当前并行策略：
 

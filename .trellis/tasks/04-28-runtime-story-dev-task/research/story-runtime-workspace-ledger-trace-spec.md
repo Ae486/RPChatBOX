@@ -448,6 +448,9 @@ def evaluate_turn_settlement(turn_id: str):
 4. required jobs 未完成时 turn 不能 settled
 5. retrieval raw materials 没有 usage record 时不能直接视为可完成
 6. `trace_refs / source_ref_ids / result_ref_ids` 能串起一轮完整链路
+7. rollback 后 cutoff 之后的 Runtime Workspace materials、pending jobs、packet/window metadata 必须 invalidated、hidden 或被 branch-visible reads 过滤
+8. branch-visible read manifest / debug inspect / writer packet 构建必须证明 later branch materials 不会污染当前 active branch
+9. LangGraph checkpoint pointer 只能作为 settled turn 的一次性技术锚点；重复捕获、debug replay 或 fork 不能覆盖已用于 rollback receipt 的应用层 binding
 
 ## 9. 已知风险
 

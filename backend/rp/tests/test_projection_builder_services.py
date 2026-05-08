@@ -2083,10 +2083,10 @@ def test_story_turn_accept_outline_updates_projection_via_boundary_service(
 
 
 class _AsyncOrchestratorService:
-    async def plan(self, **_kwargs):
+    async def plan(self, **kwargs):
         return OrchestratorPlan(
             output_kind=StoryArtifactKind.STORY_SEGMENT,
-            writer_instruction="Write the next segment.",
+            writer_instruction=kwargs.get("user_prompt") or "Write the next segment.",
         )
 
 
@@ -2605,7 +2605,12 @@ async def test_story_graph_runner_stream_persists_usage_metadata_into_writing_re
         if item.artifact_kind == StoryArtifactKind.STORY_SEGMENT
         and item.status == StoryArtifactStatus.DRAFT
     )
+    assert draft_segment.content_text == "Streamed outline."
     assert draft_segment.metadata["command_kind"] == "write_next_segment"
+    assert snapshot.chapter.pending_segment_artifact_id == draft_segment.artifact_id
+    assert snapshot.chapter.builder_snapshot_json["recent_segment_digest"][-1] == (
+        "Streamed outline."
+    )
 
     turn = retrieval_session.exec(
         select(StoryTurnRecord)
@@ -2616,6 +2621,25 @@ async def test_story_graph_runner_stream_persists_usage_metadata_into_writing_re
     assert turn is not None
     assert turn.status == "settled"
     assert turn.settlement_reason == "required_jobs_deferred_by_policy"
+    branch = retrieval_session.get(BranchHeadRecord, turn.branch_head_id)
+    assert branch is not None
+    graph_binding = branch.metadata_json["graph_checkpoint_bindings_by_turn_id"][
+        turn.turn_id
+    ]
+    assert graph_binding["turn_id"] == turn.turn_id
+    assert graph_binding["branch_head_id"] == turn.branch_head_id
+    assert graph_binding["runtime_profile_snapshot_id"] == (
+        turn.runtime_profile_snapshot_id
+    )
+    assert graph_binding["checkpoint_ns"] == "rp_story"
+    assert graph_binding["checkpoint_id"]
+    assert graph_binding["captured_after_node"] == "finalize_turn"
+    assert graph_binding["source"] == "langgraph_checkpoint"
+    assert graph_binding["graph_thread_id"] == (
+        "story_session:"
+        f"{session.session_id}:branch_head:{turn.branch_head_id}"
+    )
+    assert branch.metadata_json["graph_checkpoint_binding"] == graph_binding
     workflow_jobs = retrieval_session.exec(
         select(RuntimeWorkflowJobRecord).where(
             RuntimeWorkflowJobRecord.turn_id == turn.turn_id
@@ -2648,6 +2672,54 @@ async def test_story_graph_runner_stream_persists_usage_metadata_into_writing_re
         "prompt_tokens": 42,
         "completion_tokens": 11,
         "total_tokens": 53,
+    }
+    writer_output_materials = material_service.list_materials(
+        identity=identity,
+        material_kind=RuntimeWorkspaceMaterialKind.WRITER_OUTPUT_REF,
+    )
+    packet_materials = material_service.list_materials(
+        identity=identity,
+        material_kind=RuntimeWorkspaceMaterialKind.PACKET_REF,
+    )
+    writer_input_materials = material_service.list_materials(
+        identity=identity,
+        material_kind=RuntimeWorkspaceMaterialKind.WRITER_INPUT_REF,
+    )
+    assert len(writer_output_materials) == 1
+    assert writer_output_materials[0].payload["artifact_id"] == draft_segment.artifact_id
+    assert writer_output_materials[0].payload["artifact_kind"] == (
+        StoryArtifactKind.STORY_SEGMENT.value
+    )
+    assert len(packet_materials) == 1
+    assert packet_materials[0].payload["packet_id"] == (
+        writer_output_materials[0].payload["packet_id"]
+    )
+    assert packet_materials[0].payload["output_kind"] == (
+        StoryArtifactKind.STORY_SEGMENT.value
+    )
+    assert packet_materials[0].payload["runtime_read_manifest_id"]
+    assert writer_output_materials[0].source_refs[0].entry_id == (
+        packet_materials[0].material_id
+    )
+    assert len(writer_input_materials) == 1
+    assert writer_input_materials[0].payload["packet_id"] == (
+        packet_materials[0].payload["packet_id"]
+    )
+    assert writer_input_materials[0].payload["output_kind"] == (
+        StoryArtifactKind.STORY_SEGMENT.value
+    )
+    assert writer_input_materials[0].payload["user_instruction_preview"] == (
+        "Continue."
+    )
+    assert writer_input_materials[0].material_id in {
+        source_ref.entry_id for source_ref in packet_materials[0].source_refs
+    }
+    assert usage_materials[0].payload["artifact_id"] == draft_segment.artifact_id
+    assert usage_materials[0].payload["packet_id"] == (
+        packet_materials[0].payload["packet_id"]
+    )
+    assert writer_output_materials[0].material_id in {
+        source_ref.entry_id for source_ref in usage_materials[0].source_refs
     }
 
 
@@ -3207,7 +3279,9 @@ async def test_orchestrator_and_specialist_include_block_prompt_context(
     assert 'label="projection.current_outline_digest"' in orchestrator_system_prompt
     assert "[BLOCK_PROMPT_CONTEXT]" in specialist_system_prompt
     assert 'label="chapter.current"' in specialist_system_prompt
-    assert plan.notes == ["gateway"]
+    assert "gateway" in plan.notes
+    assert "adapter_input:legacy_orchestrator_plan" in plan.notes
+    assert "not_canonical_worker_plan" in plan.notes
     assert bundle.writer_hints == ["Hint A"]
     assert [
         item.model_dump(mode="json", exclude_none=True)

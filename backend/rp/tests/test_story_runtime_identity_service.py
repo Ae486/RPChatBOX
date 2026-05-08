@@ -413,6 +413,137 @@ def test_switch_branch_writes_receipt_without_creating_turn(retrieval_session):
     assert next_identity.branch_head_id == origin_identity.branch_head_id
 
 
+def test_record_graph_checkpoint_binding_persists_branch_scoped_turn_pointer(
+    retrieval_session,
+):
+    story_session, snapshot, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-checkpoint-binding",
+        count=1,
+    )
+    identity = identities[0]
+
+    result = service.record_graph_checkpoint_binding(
+        turn_id=identity.turn_id,
+        checkpoint_id="checkpoint:settled-turn",
+        parent_checkpoint_id="checkpoint:parent",
+        captured_after_node="finalize_turn",
+    )
+
+    branch = retrieval_session.get(BranchHeadRecord, identity.branch_head_id)
+
+    assert result["recorded"] is True
+    binding = result["binding"]
+    assert binding == {
+        "graph_thread_id": (
+            "story_session:"
+            f"{story_session.session_id}:branch_head:{identity.branch_head_id}"
+        ),
+        "checkpoint_ns": "rp_story",
+        "checkpoint_id": "checkpoint:settled-turn",
+        "parent_checkpoint_id": "checkpoint:parent",
+        "captured_after_node": "finalize_turn",
+        "captured_at": binding["captured_at"],
+        "turn_id": identity.turn_id,
+        "branch_head_id": identity.branch_head_id,
+        "runtime_profile_snapshot_id": snapshot.runtime_profile_snapshot_id,
+        "source": "langgraph_checkpoint",
+    }
+    assert branch is not None
+    assert branch.metadata_json["graph_checkpoint_binding"] == binding
+    assert branch.metadata_json["graph_checkpoint_bindings_by_turn_id"][
+        identity.turn_id
+    ] == binding
+
+
+def test_graph_checkpoint_binding_is_idempotent_after_settled_turn_capture(
+    retrieval_session,
+):
+    story_session, _, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-checkpoint-binding-idempotent",
+        count=1,
+    )
+    identity = identities[0]
+
+    first_result = service.record_graph_checkpoint_binding(
+        turn_id=identity.turn_id,
+        checkpoint_id="checkpoint:initial-capture",
+        parent_checkpoint_id="checkpoint:initial-parent",
+        captured_after_node="finalize_turn",
+    )
+    replay_result = service.record_graph_checkpoint_binding(
+        turn_id=identity.turn_id,
+        checkpoint_id="checkpoint:debug-replay",
+        parent_checkpoint_id="checkpoint:debug-parent",
+        captured_after_node="debug_replay",
+    )
+
+    branch = retrieval_session.get(BranchHeadRecord, identity.branch_head_id)
+    assert branch is not None
+    assert first_result["recorded"] is True
+    assert replay_result == {
+        "recorded": True,
+        "binding": first_result["binding"],
+        "idempotent": True,
+        "reason": "graph_checkpoint_binding_already_recorded",
+    }
+    assert branch.metadata_json["graph_checkpoint_binding"] == first_result["binding"]
+    assert branch.metadata_json["graph_checkpoint_bindings_by_turn_id"][
+        identity.turn_id
+    ] == first_result["binding"]
+    assert branch.metadata_json["graph_checkpoint_binding"]["checkpoint_id"] == (
+        "checkpoint:initial-capture"
+    )
+    assert branch.metadata_json["graph_checkpoint_binding"]["graph_thread_id"] == (
+        "story_session:"
+        f"{story_session.session_id}:branch_head:{identity.branch_head_id}"
+    )
+
+
+def test_graph_checkpoint_binding_does_not_make_unsettled_turn_rollback_anchor(
+    retrieval_session,
+):
+    story_session = _seed_story_session(
+        retrieval_session,
+        story_id="identity-checkpoint-binding-unsettled",
+    )
+    snapshot = RuntimeProfileSnapshotService(retrieval_session).ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.identity.checkpoint_unsettled",
+    )
+    service = StoryRuntimeIdentityService(retrieval_session)
+    identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="continue",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+
+    result = service.record_graph_checkpoint_binding(
+        turn_id=identity.turn_id,
+        checkpoint_id="checkpoint:unsettled",
+    )
+
+    branch = retrieval_session.get(BranchHeadRecord, identity.branch_head_id)
+    assert result == {
+        "recorded": False,
+        "reason": "turn_not_settled",
+        "turn_id": identity.turn_id,
+        "turn_status": "started",
+    }
+    assert branch is not None
+    assert "graph_checkpoint_binding" not in branch.metadata_json
+    assert "graph_checkpoint_bindings_by_turn_id" not in branch.metadata_json
+    with pytest.raises(StoryRuntimeIdentityServiceError) as exc_info:
+        service.rollback_to_turn(
+            session_id=story_session.session_id,
+            target_turn_id=identity.turn_id,
+            actor="user",
+        )
+    assert exc_info.value.code == "runtime_branch_control_invalid_turn"
+
+
 def test_delete_active_branch_marks_deleted_and_falls_back_without_creating_turn(
     retrieval_session,
 ):
@@ -544,7 +675,7 @@ def test_rollback_to_settled_turn_writes_receipt_and_hides_later_turns(
         session_id=story_session.session_id,
         target_turn_id=target_identity.turn_id,
         actor="user",
-        metadata={"target_checkpoint_id": "checkpoint:target-turn"},
+        metadata={"target_checkpoint_id": "checkpoint:caller-spoof"},
     )
 
     branch = retrieval_session.get(BranchHeadRecord, target_identity.branch_head_id)
@@ -578,16 +709,28 @@ def test_rollback_to_settled_turn_writes_receipt_and_hides_later_turns(
     assert receipt.metadata["visibility_transition"][
         "invalidated_workspace_material_ids"
     ] == ["rollback-worker-candidate"]
-    assert receipt.metadata["checkpoint_binding"] == {
-        "binding_kind": "branch_scoped_thread",
-        "graph_thread_id": (
-            "story_session:"
-            f"{story_session.session_id}:branch_head:{target_identity.branch_head_id}"
-        ),
-        "branch_head_id": target_identity.branch_head_id,
-        "target_turn_id": target_identity.turn_id,
-        "target_checkpoint_id": "checkpoint:target-turn",
-        "source": "application_visibility_contract",
+    assert receipt.metadata["checkpoint_binding"]["binding_kind"] == (
+        "branch_scoped_thread"
+    )
+    assert receipt.metadata["checkpoint_binding"]["graph_thread_id"] == (
+        "story_session:"
+        f"{story_session.session_id}:branch_head:{target_identity.branch_head_id}"
+    )
+    assert receipt.metadata["checkpoint_binding"]["branch_head_id"] == (
+        target_identity.branch_head_id
+    )
+    assert receipt.metadata["checkpoint_binding"]["target_turn_id"] == (
+        target_identity.turn_id
+    )
+    assert receipt.metadata["checkpoint_binding"]["target_checkpoint_id"] is None
+    assert receipt.metadata["checkpoint_binding"][
+        "checkpoint_binding_missing_reason"
+    ] == "target_turn_has_no_graph_checkpoint_binding"
+    assert receipt.metadata["checkpoint_binding_missing_reason"] == (
+        "target_turn_has_no_graph_checkpoint_binding"
+    )
+    assert receipt.metadata["previous"]["ignored_checkpoint_inputs"] == {
+        "target_checkpoint_id": "checkpoint:caller-spoof"
     }
     assert len(receipt_records) == 1
     assert receipt_records[0].receipt_id == receipt.receipt_id
@@ -602,6 +745,9 @@ def test_rollback_to_settled_turn_writes_receipt_and_hides_later_turns(
     assert branch.metadata_json["checkpoint_binding"]["target_turn_id"] == (
         target_identity.turn_id
     )
+    assert branch.metadata_json["checkpoint_binding"][
+        "checkpoint_binding_missing_reason"
+    ] == "target_turn_has_no_graph_checkpoint_binding"
     assert target_turn is not None
     assert target_turn.visibility_state == "active"
     assert hidden_turn is not None
@@ -620,6 +766,69 @@ def test_rollback_to_settled_turn_writes_receipt_and_hides_later_turns(
     assert refreshed_session is not None
     assert refreshed_session.active_branch_head_id == target_identity.branch_head_id
     assert refreshed_session.active_runtime_profile_snapshot_id == (
+        snapshot.runtime_profile_snapshot_id
+    )
+
+
+def test_rollback_receipt_uses_captured_target_checkpoint_binding(
+    retrieval_session,
+):
+    story_session, snapshot, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-rollback-checkpoint-binding",
+        count=3,
+    )
+    target_identity = identities[1]
+    hidden_identity = identities[2]
+    binding_result = service.record_graph_checkpoint_binding(
+        turn_id=target_identity.turn_id,
+        checkpoint_id="checkpoint:captured-target",
+        parent_checkpoint_id="checkpoint:captured-parent",
+        captured_after_node="finalize_turn",
+    )
+
+    receipt = service.rollback_to_turn(
+        session_id=story_session.session_id,
+        target_turn_id=target_identity.turn_id,
+        actor="user",
+        metadata={
+            "target_checkpoint_id": "checkpoint:caller-spoof",
+            "graph_checkpoint_binding": {"checkpoint_id": "checkpoint:fake"},
+        },
+    )
+
+    branch = retrieval_session.get(BranchHeadRecord, target_identity.branch_head_id)
+
+    assert binding_result["recorded"] is True
+    captured_binding = binding_result["binding"]
+    assert receipt.trace_refs == [f"turn:{hidden_identity.turn_id}"]
+    assert receipt.metadata["target_checkpoint_id"] == "checkpoint:captured-target"
+    assert receipt.metadata["graph_checkpoint_binding"] == captured_binding
+    assert receipt.metadata["checkpoint_binding"] == {
+        "binding_kind": "branch_scoped_thread",
+        "graph_thread_id": (
+            "story_session:"
+            f"{story_session.session_id}:branch_head:{target_identity.branch_head_id}"
+        ),
+        "branch_head_id": target_identity.branch_head_id,
+        "target_turn_id": target_identity.turn_id,
+        "target_checkpoint_id": "checkpoint:captured-target",
+        "graph_checkpoint_binding": captured_binding,
+        "source": "captured_graph_checkpoint_binding",
+    }
+    assert receipt.metadata["previous"]["ignored_checkpoint_inputs"] == {
+        "target_checkpoint_id": "checkpoint:caller-spoof",
+        "graph_checkpoint_binding": {"checkpoint_id": "checkpoint:fake"},
+    }
+    assert branch is not None
+    assert branch.metadata_json["graph_checkpoint_binding"] == captured_binding
+    assert branch.metadata_json["graph_checkpoint_bindings_by_turn_id"][
+        target_identity.turn_id
+    ] == captured_binding
+    assert branch.metadata_json["checkpoint_binding"][
+        "target_checkpoint_id"
+    ] == "checkpoint:captured-target"
+    assert captured_binding["runtime_profile_snapshot_id"] == (
         snapshot.runtime_profile_snapshot_id
     )
 
@@ -836,3 +1045,144 @@ def test_chapter_snapshot_hides_artifact_bound_to_rollback_future_turn(
     assert hidden_discussion.entry_id not in {
         entry.entry_id for entry in snapshot.discussion_entries
     }
+
+
+def test_rollback_read_scope_hides_later_materials_and_keeps_checkpoint_anchor(
+    retrieval_session,
+):
+    story_session, _, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-rollback-k-acceptance",
+        count=3,
+    )
+    target_identity = identities[1]
+    hidden_identity = identities[2]
+    story_session_service = StorySessionService(retrieval_session)
+    chapter = story_session_service.create_chapter_workspace(
+        session_id=story_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.SEGMENT_DRAFTING,
+    )
+    target_artifact = story_session_service.create_artifact(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="rollback target segment",
+    )
+    hidden_artifact = story_session_service.create_artifact(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="rollback future segment",
+    )
+    hidden_candidate = story_session_service.create_artifact(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="rollback future rewrite candidate",
+        metadata={
+            "runtime_turn_id": hidden_identity.turn_id,
+            "runtime_branch_head_id": hidden_identity.branch_head_id,
+        },
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=LongformChapterPhase.SEGMENT_REVIEW,
+        pending_segment_artifact_id=hidden_candidate.artifact_id,
+    )
+    target_discussion = story_session_service.create_discussion_entry(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        role="assistant",
+        content_text="visible target discussion",
+        linked_artifact_id=target_artifact.artifact_id,
+    )
+    hidden_discussion = story_session_service.create_discussion_entry(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        role="assistant",
+        content_text="hidden future discussion",
+        linked_artifact_id=hidden_artifact.artifact_id,
+    )
+    service.update_turn_status(
+        turn_id=target_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref=target_artifact.artifact_id,
+        selected_output_ref=target_artifact.artifact_id,
+        settlement_reason="test_visible_artifact_binding",
+    )
+    service.update_turn_status(
+        turn_id=hidden_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref=hidden_artifact.artifact_id,
+        selected_output_ref=hidden_artifact.artifact_id,
+        settlement_reason="test_hidden_artifact_binding",
+    )
+    workspace_service = RuntimeWorkspaceMaterialService(session=retrieval_session)
+    workspace_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="rollback-k-future-material",
+            material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
+            identity=hidden_identity,
+            domain="chapter",
+            domain_path="chapter.runtime.worker_candidate",
+            payload={"candidate": "future material must not leak"},
+            visibility="worker_visible",
+            created_by="test.rollback.k",
+        )
+    )
+    first_binding = service.record_graph_checkpoint_binding(
+        turn_id=target_identity.turn_id,
+        checkpoint_id="checkpoint:k-target",
+        parent_checkpoint_id="checkpoint:k-parent",
+    )
+    repeated_binding = service.record_graph_checkpoint_binding(
+        turn_id=target_identity.turn_id,
+        checkpoint_id="checkpoint:k-replay-should-not-win",
+        parent_checkpoint_id="checkpoint:k-replay-parent",
+    )
+
+    receipt = service.rollback_to_turn(
+        session_id=story_session.session_id,
+        target_turn_id=target_identity.turn_id,
+        actor="user",
+    )
+    branch = retrieval_session.get(BranchHeadRecord, target_identity.branch_head_id)
+    hidden_turn = retrieval_session.get(StoryTurnRecord, hidden_identity.turn_id)
+    snapshot = story_session_service.build_chapter_snapshot(
+        session_id=story_session.session_id,
+        chapter_index=1,
+    )
+    material = retrieval_session.get(
+        RuntimeWorkspaceMaterialRecord,
+        "rollback-k-future-material",
+    )
+
+    assert repeated_binding["idempotent"] is True
+    assert repeated_binding["binding"] == first_binding["binding"]
+    assert branch is not None
+    assert branch.head_turn_id == target_identity.turn_id
+    assert branch.last_settled_turn_id == target_identity.turn_id
+    assert branch.metadata_json["rollback_hidden_turn_ids"] == [hidden_identity.turn_id]
+    assert hidden_turn is not None
+    assert hidden_turn.visibility_state == "hidden_by_rollback"
+    assert hidden_turn.hidden_after_turn_id == target_identity.turn_id
+    assert receipt.metadata["target_checkpoint_id"] == "checkpoint:k-target"
+    assert receipt.metadata["graph_checkpoint_binding"] == first_binding["binding"]
+    assert {artifact.artifact_id for artifact in snapshot.artifacts} == {
+        target_artifact.artifact_id
+    }
+    assert snapshot.chapter.pending_segment_artifact_id is None
+    assert {entry.entry_id for entry in snapshot.discussion_entries} == {
+        target_discussion.entry_id
+    }
+    assert hidden_discussion.entry_id not in {
+        entry.entry_id for entry in snapshot.discussion_entries
+    }
+    assert material is not None
+    assert material.lifecycle == RuntimeWorkspaceMaterialLifecycle.INVALIDATED.value
+    assert material.metadata_json["visibility_state"] == "hidden_by_rollback"
+    assert material.metadata_json["hidden_after_turn_id"] == target_identity.turn_id

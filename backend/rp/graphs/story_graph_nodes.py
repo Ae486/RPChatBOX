@@ -414,6 +414,23 @@ class StoryGraphNodes:
         )
         return {"status": "failed" if failed else "completed"}
 
+    def record_graph_checkpoint_binding(
+        self,
+        *,
+        turn_id: str | None,
+        checkpoint_id: str | None,
+        parent_checkpoint_id: str | None = None,
+        captured_after_node: str = "finalize_turn",
+        checkpoint_ns: str = "rp_story",
+    ) -> dict:
+        return self._domain_service.record_graph_checkpoint_binding(
+            turn_id=turn_id,
+            checkpoint_id=checkpoint_id,
+            parent_checkpoint_id=parent_checkpoint_id,
+            captured_after_node=captured_after_node,
+            checkpoint_ns=checkpoint_ns,
+        )
+
     @staticmethod
     def _request_from_state(state: StoryGraphState) -> LongformTurnRequest:
         return LongformTurnRequest(

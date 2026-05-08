@@ -4,7 +4,7 @@
 >
 > Purpose: maintain the FIFO grill-me queue for story runtime requirements, design, and architecture discussion.
 >
-> Last updated: 2026-05-04
+> Last updated: 2026-05-08
 
 ## Queue Rules
 
@@ -19,7 +19,7 @@
 
 ## Current Pointer
 
-Next discussion batch: Module 21 branch operation semantics. Continue in FIFO order.
+Next discussion batch: none. Module 21 branch operation semantics and Module 22 longform revision / rewrite scope are confirmed; continue via implementation plan.
 
 ## Module 1: Overall Boundary / First-stage Goal
 
@@ -438,25 +438,30 @@ Next discussion batch: Module 21 branch operation semantics. Continue in FIFO or
   - Recommended direction: 是。selection 只是暂定状态，adoption 只在继续写作动作发生时确认。
   - Confirmed direction: 是。只有点击 `accept_and_continue / 续写` 时，当前被选中的 draft 才正式成为 canonical continuation base；当前 selection 可变、可解除，不等于 adoption。
 
-- [ ] Q4. 第一阶段 `rewrite` 是否只保留两种语义：`full rewrite` 与 `paragraph rewrite`？
+- [x] Q4. 第一阶段 `rewrite` 是否只保留两种语义：`full rewrite` 与 `paragraph rewrite`？
   - Why it matters: 这决定产品动作数量、packet 组织方式和后端实现复杂度。如果分类过多，容易把 rewrite 流程做成到处散落的 if/else。
   - Recommended direction: 是。第一阶段只保留 `full rewrite` 与 `paragraph rewrite` 两种语义：`full rewrite` 用于整篇改写，`paragraph rewrite` 用于局部 block 重写。`full rewrite` 内部再区分两种输入形态：仅有全文批注时允许携带旧正文全文；存在明确全文要求时不携带旧正文全文。
+  - Confirmed direction: 是。第一阶段只保留 `full rewrite` 与 `paragraph rewrite`。全局重写当且仅当只有批注、没有显式全局要求时携带旧全文；存在显式全局要求时不携带旧全文。局部重写只作用于单一 target block / paragraph，并输出 patch-shaped replacement。
 
-- [ ] Q5. `full rewrite` 与 `paragraph rewrite` 的正式触发入口是否要在 UI 上显式区分？
+- [x] Q5. `full rewrite` 与 `paragraph rewrite` 的正式触发入口是否要在 UI 上显式区分？
   - Why it matters: 如果入口不清楚，用户很难知道这次重写会作用于整篇还是局部；如果入口过多，又会使 longform 动作面膨胀。
   - Recommended direction: 第一阶段显式区分。普通 `rewrite` 默认表示“按当前 review overlay 做 paragraph rewrite”；另给一个明确的“带要求 rewrite”或等价入口，表示全文重写。
+  - Confirmed direction: 是。UI / API 语义上显式区分全局重写与局部重写。全局重写是整篇动作，可带 optional 全局要求；局部重写从具体 block / paragraph 的修订上下文触发，替换目标 block，而不是隐式改全篇。
 
-- [ ] Q6. 当局部修订很多、几乎覆盖全篇时，第一阶段是否仍坚持按 `paragraph rewrite` 处理，而不是自动升级为 `full rewrite`？
+- [x] Q6. 当局部修订很多、几乎覆盖全篇时，第一阶段是否仍坚持按 `paragraph rewrite` 处理，而不是自动升级为 `full rewrite`？
   - Why it matters: 自动升级能减少 packet 膨胀，但会引入隐藏规则；坚持局部 rewrite 则实现更直白，但可能在大批量修订时变重。
   - Recommended direction: 第一阶段先不做自动升级。是否全文 rewrite 只由用户显式入口决定，避免出现难解释的隐式切换。
+  - Confirmed direction: 是。第一阶段不做“局部修订过多自动升级全文重写”的隐藏规则。全局还是局部只由用户选择的入口决定。
 
-- [ ] Q7. `paragraph rewrite` 是一次性处理当前轮所有局部修订，还是允许一轮里分多次局部 rewrite？
+- [x] Q7. `paragraph rewrite` 是一次性处理当前轮所有局部修订，还是允许一轮里分多次局部 rewrite？
   - Why it matters: 这决定 turn 语义、candidate 数量和上下文组织。分多次会让同轮候选树和 overlay 生命周期迅速变复杂。
   - Recommended direction: 第一阶段按“一次性处理当前轮所有已选局部修订”为一轮 paragraph rewrite，不在同一轮里再拆多次局部 rewrite。
+  - Confirmed direction: 修正为第一阶段一次只 rewrite 一处，不做批量局部 rewrite。多处局部修改由用户分别触发，避免批量编排、跨 block patch 和候选生命周期复杂化。
 
-- [ ] Q8. `paragraph rewrite` 给 writer 的上下文，第一阶段是“只发被命中的段落”，还是“命中段落 + 前后窗口 + 全局 rewrite 要求”？
+- [x] Q8. `paragraph rewrite` 给 writer 的上下文，第一阶段是“只发被命中的段落”，还是“命中段落 + 前后窗口 + 全局 rewrite 要求”？
   - Why it matters: 只发命中段落容易丢过渡和语气；发整篇又违背局部 rewrite 的控域目标。
   - Recommended direction: 发送“命中段落 + 有限前后窗口 + 全局 rewrite 要求 + 对应 review overlay annotations”，不直接发整篇旧正文。
+  - Confirmed direction: 局部重写第一阶段采用“旧全文 + 目标 block 信息 + 目标批注 / tracked changes”的输入组织，让 writer 能保持上下文连续性；但输出只允许返回目标 block 的替换段落 / patch，前端据 block identity 精确替换并保留版本切换能力。
 
 - [x] Q9. 修订模块是否以 SuperDoc/Word 能力为 substrate，只聚焦“把修订内容传给 writer”，而不重造整套文档编辑语义？
   - Recommended direction: 是。优先借用 SuperDoc/Word 已成熟的修订、批注、tracked changes、selection、block/range 锚点能力；只要不与本 task 需求冲突，就直接参考其行为。

@@ -57,6 +57,10 @@ class StoryGraphRunner:
                 self._thread_config(binding["graph_thread_id"])
             )
             final_state = cast(StoryGraphState, dict(snapshot.values or {}))
+            self._record_graph_checkpoint_binding(
+                snapshot=snapshot,
+                state=final_state,
+            )
         self._raise_if_error(final_state)
         return LongformTurnResponse.model_validate(
             final_state.get("response_payload") or {}
@@ -152,13 +156,21 @@ class StoryGraphRunner:
                                     final_values,
                                 )
                                 final_values.update(self._nodes.finalize_turn(final_state))
-                                await graph.aupdate_state(
+                                new_config = await graph.aupdate_state(
                                     self._thread_config(
                                         binding["graph_thread_id"],
                                         checkpoint_id=checkpoint_id,
                                     ),
                                     values=final_values,
                                     as_node="finalize_turn",
+                                )
+                                final_snapshot = await graph.aget_state(new_config)
+                                self._record_graph_checkpoint_binding(
+                                    snapshot=final_snapshot,
+                                    state=cast(
+                                        StoryGraphState,
+                                        dict(final_snapshot.values or final_state),
+                                    ),
                                 )
                                 yield chunk
                                 yield self._typed({"type": "done"})
@@ -217,12 +229,20 @@ class StoryGraphRunner:
                 }
                 final_state = self._merge_state(current_state, final_values)
                 final_values.update(self._nodes.finalize_turn(final_state))
-                await graph.aupdate_state(
+                final_config = await graph.aupdate_state(
                     self._thread_config(
                         binding["graph_thread_id"], checkpoint_id=checkpoint_id
                     ),
                     values=final_values,
                     as_node="finalize_turn",
+                )
+                final_snapshot = await graph.aget_state(final_config)
+                self._record_graph_checkpoint_binding(
+                    snapshot=final_snapshot,
+                    state=cast(
+                        StoryGraphState,
+                        dict(final_snapshot.values or final_state),
+                    ),
                 )
                 yield self._typed({"type": "done"})
             except Exception as exc:
@@ -236,12 +256,20 @@ class StoryGraphRunner:
                 }
                 final_state = self._merge_state(current_state, final_values)
                 final_values.update(self._nodes.finalize_turn(final_state))
-                await graph.aupdate_state(
+                final_config = await graph.aupdate_state(
                     self._thread_config(
                         binding["graph_thread_id"], checkpoint_id=checkpoint_id
                     ),
                     values=final_values,
                     as_node="finalize_turn",
+                )
+                final_snapshot = await graph.aget_state(final_config)
+                self._record_graph_checkpoint_binding(
+                    snapshot=final_snapshot,
+                    state=cast(
+                        StoryGraphState,
+                        dict(final_snapshot.values or final_state),
+                    ),
                 )
                 yield self._typed(
                     {
@@ -399,6 +427,23 @@ class StoryGraphRunner:
 
     def _graph_thread_binding(self, *, session_id: str) -> dict[str, str]:
         return self._nodes.resolve_graph_thread_binding(session_id=session_id)
+
+    def _record_graph_checkpoint_binding(
+        self,
+        *,
+        snapshot: Any,
+        state: StoryGraphState,
+    ) -> None:
+        checkpoint_id = snapshot_checkpoint_id(snapshot)
+        if not checkpoint_id:
+            return
+        self._nodes.record_graph_checkpoint_binding(
+            turn_id=state.get("turn_id"),
+            checkpoint_id=checkpoint_id,
+            parent_checkpoint_id=snapshot_parent_checkpoint_id(snapshot),
+            captured_after_node="finalize_turn",
+            checkpoint_ns="rp_story",
+        )
 
     @staticmethod
     def _parse_typed_payload(line: str) -> dict | None:

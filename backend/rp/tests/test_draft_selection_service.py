@@ -222,6 +222,65 @@ def test_active_selection_drives_adoption_but_not_before_accept_and_continue(
     )
 
 
+def test_next_continuation_base_ignores_unadopted_revision_candidates(
+    retrieval_session,
+):
+    identity = _identity(turn_id="turn-r5-continuation-base")
+    first = _create_full_candidate(
+        retrieval_session,
+        identity=identity,
+        draft_ref="draft:r5-continuation-base",
+        output_text="First candidate should stay unadopted.",
+    )
+    adopted = _create_full_candidate(
+        retrieval_session,
+        identity=identity,
+        draft_ref="draft:r5-continuation-base",
+        output_text="Adopted continuation text.",
+    )
+    later_unadopted = _create_full_candidate(
+        retrieval_session,
+        identity=identity,
+        draft_ref="draft:r5-continuation-base",
+        output_text="Later unadopted candidate.",
+    )
+    service = DraftSelectionService(session=retrieval_session)
+
+    service.select_candidate(
+        identity=identity,
+        turn_id=identity.turn_id,
+        draft_ref=first.draft_ref,
+        candidate_output_refs=[
+            first.candidate_output_ref,
+            adopted.candidate_output_ref,
+            later_unadopted.candidate_output_ref,
+        ],
+        selected_output_ref=adopted.candidate_output_ref,
+    )
+
+    assert service.adopted_output_anchor_for_next_turn(
+        identity=identity,
+        draft_ref=first.draft_ref,
+    ) is None
+
+    receipt = service.adopt_for_continue(
+        identity=identity,
+        turn_id=identity.turn_id,
+        draft_ref=first.draft_ref,
+    )
+    anchor = service.adopted_output_anchor_for_next_turn(
+        identity=identity,
+        draft_ref=first.draft_ref,
+    )
+
+    assert receipt.adopted_output_ref == adopted.candidate_output_ref
+    assert anchor is not None
+    assert anchor["adopted_output_ref"] == adopted.candidate_output_ref
+    assert anchor["adopted_output_ref"] != first.candidate_output_ref
+    assert anchor["adopted_output_ref"] != later_unadopted.candidate_output_ref
+    assert anchor["canonical_continuation_base"] is True
+
+
 def test_selected_output_must_be_visible_candidate_for_current_identity_and_draft(
     retrieval_session,
 ):

@@ -786,7 +786,7 @@ StoryGraphRunner
 > - `[ ]` 表示这项需要等后续实现或测试完成后才能勾选。
 
 - [x] `prd.md` 明确记录 worker 层定位、当前实现地图、差距和第一阶段边界。
-- [ ] 第一阶段实现后，新 runtime 的 longform writing turn 最小闭环可运行。
+- [x] 第一阶段实现后，新 runtime 的 longform writing turn 最小闭环可运行。
 - [x] Orchestrator 输出能表达至少一个 selected worker execution，而不只是 writer 指令。
 - [x] Memory worker 分析能通过显式 worker/context 合同接收本轮上下文；旧 single specialist 可作为参考或 adapter，但不作为硬约束。
 - [x] PRD / spec 能表达 Core Store block ownership 到 worker catalog 的映射原则。
@@ -821,7 +821,7 @@ StoryGraphRunner
 - [x] PRD / spec 能表达 retrieval usage hook：发生 retrieval 后，writer final output 前必须记录 used cards、expanded cards、unused cards 和 knowledge gaps。
 - [x] PRD / spec 能表达检索 miss 的受控重试与 gap 记录策略，以及 retrieval-triggered turn 必须走 post-write 调度。
 - [x] Builder 仍只消费 worker 消化后的结构化结果，不消费 raw retrieval hits。
-- [ ] 新增或调整的 runtime contract 有单元测试或现有 story runtime 测试覆盖。
+- [x] 新增或调整的 runtime contract 有单元测试或现有 story runtime 测试覆盖。
 - [x] 不修改 eval 模块主流程。
 
 ## Technical Approach

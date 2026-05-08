@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import asc
@@ -49,6 +50,8 @@ class StoryRuntimeIdentityService:
     _DEFAULT_BRANCH_NAME = "main"
     _DEFAULT_VISIBILITY_SCOPE = "active_lineage"
     _DEFAULT_BRANCH_VISIBILITY_STATE = BranchVisibilityState.VISIBLE.value
+    _GRAPH_CHECKPOINT_BINDING_KEY = "graph_checkpoint_binding"
+    _GRAPH_CHECKPOINT_BINDINGS_BY_TURN_KEY = "graph_checkpoint_bindings_by_turn_id"
 
     def __init__(
         self,
@@ -341,12 +344,17 @@ class StoryRuntimeIdentityService:
 
         later_turns = self._later_turns_on_branch(target_turn)
         now = _utcnow()
+        target_checkpoint_binding = self._graph_checkpoint_binding_for_turn(
+            branch=branch,
+            target_turn=target_turn,
+        )
         metadata_json = self._rollback_metadata(
             branch=branch,
             target_turn=target_turn,
             later_turns=later_turns,
             metadata=metadata,
             applied_at=now,
+            target_checkpoint_binding=target_checkpoint_binding,
         )
         receipt = self._write_branch_control_receipt(
             session_record=session_record,
@@ -619,6 +627,103 @@ class StoryRuntimeIdentityService:
     def get_turn(self, turn_id: str) -> StoryTurnRecord | None:
         return self._session.get(StoryTurnRecord, turn_id)
 
+    def record_graph_checkpoint_binding(
+        self,
+        *,
+        turn_id: str,
+        checkpoint_id: str,
+        parent_checkpoint_id: str | None = None,
+        captured_after_node: str = "finalize_turn",
+        captured_at: datetime | None = None,
+        checkpoint_ns: str = "rp_story",
+    ) -> dict:
+        """Bind a settled turn to the LangGraph checkpoint captured after finalize."""
+
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_checkpoint_id = str(checkpoint_id or "").strip()
+        if not normalized_turn_id:
+            return {"recorded": False, "reason": "turn_id_missing"}
+        if not normalized_checkpoint_id:
+            return {"recorded": False, "reason": "checkpoint_id_missing"}
+        turn = self._session.get(StoryTurnRecord, normalized_turn_id)
+        if turn is None:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_turn_not_found",
+                normalized_turn_id,
+            )
+        if turn.status != StoryTurnStatus.SETTLED.value:
+            return {
+                "recorded": False,
+                "reason": "turn_not_settled",
+                "turn_id": turn.turn_id,
+                "turn_status": turn.status,
+            }
+        branch = self._session.get(BranchHeadRecord, turn.branch_head_id)
+        if branch is None:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_head_not_found",
+                turn.branch_head_id,
+            )
+        if branch.session_id != turn.session_id or branch.story_id != turn.story_id:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_identity_resolution_failed",
+                f"branch_turn_mismatch:{turn.turn_id}",
+            )
+        metadata_json = dict(branch.metadata_json or {})
+        existing_by_turn = metadata_json.get(self._GRAPH_CHECKPOINT_BINDINGS_BY_TURN_KEY)
+        bindings_by_turn = (
+            dict(existing_by_turn) if isinstance(existing_by_turn, dict) else {}
+        )
+        existing_binding = bindings_by_turn.get(turn.turn_id)
+        if self._valid_graph_checkpoint_binding(
+            binding=existing_binding,
+            target_turn=turn,
+        ):
+            # LangGraph replay/fork may produce later technical checkpoints for
+            # the same application turn. The first settled-turn binding remains
+            # the RP rollback anchor; subsequent captures are idempotent reads.
+            return {
+                "recorded": True,
+                "binding": dict(cast(dict[str, Any], existing_binding)),
+                "idempotent": True,
+                "reason": "graph_checkpoint_binding_already_recorded",
+            }
+        now = captured_at or _utcnow()
+        binding = {
+            "graph_thread_id": self.build_graph_thread_id(
+                session_id=turn.session_id,
+                branch_head_id=turn.branch_head_id,
+            ),
+            "checkpoint_ns": str(checkpoint_ns or "rp_story").strip() or "rp_story",
+            "checkpoint_id": normalized_checkpoint_id,
+            "parent_checkpoint_id": (
+                str(parent_checkpoint_id).strip()
+                if parent_checkpoint_id is not None
+                and str(parent_checkpoint_id).strip()
+                else None
+            ),
+            "captured_after_node": (
+                str(captured_after_node or "").strip() or "finalize_turn"
+            ),
+            "captured_at": now.isoformat(),
+            "turn_id": turn.turn_id,
+            "branch_head_id": turn.branch_head_id,
+            "runtime_profile_snapshot_id": turn.runtime_profile_snapshot_id,
+            "source": "langgraph_checkpoint",
+        }
+        bindings_by_turn[turn.turn_id] = binding
+        metadata_json[self._GRAPH_CHECKPOINT_BINDINGS_BY_TURN_KEY] = bindings_by_turn
+        if (
+            branch.head_turn_id == turn.turn_id
+            or branch.last_settled_turn_id == turn.turn_id
+        ):
+            metadata_json[self._GRAPH_CHECKPOINT_BINDING_KEY] = dict(binding)
+        branch.metadata_json = metadata_json
+        branch.updated_at = now
+        self._session.add(branch)
+        self._session.flush()
+        return {"recorded": True, "binding": binding}
+
     @staticmethod
     def _default_branch_id(session_id: str) -> str:
         return f"branch:{session_id}:main"
@@ -754,6 +859,45 @@ class StoryRuntimeIdentityService:
             return False
         return turn.turn_id in {str(item).strip() for item in hidden_turn_ids}
 
+    def _graph_checkpoint_binding_for_turn(
+        self,
+        *,
+        branch: BranchHeadRecord,
+        target_turn: StoryTurnRecord,
+    ) -> dict | None:
+        metadata_json = dict(branch.metadata_json or {})
+        bindings_by_turn = metadata_json.get(self._GRAPH_CHECKPOINT_BINDINGS_BY_TURN_KEY)
+        if isinstance(bindings_by_turn, dict):
+            binding = bindings_by_turn.get(target_turn.turn_id)
+            if self._valid_graph_checkpoint_binding(
+                binding=binding,
+                target_turn=target_turn,
+            ):
+                return dict(cast(dict[str, Any], binding))
+        latest_binding = metadata_json.get(self._GRAPH_CHECKPOINT_BINDING_KEY)
+        if self._valid_graph_checkpoint_binding(
+            binding=latest_binding,
+            target_turn=target_turn,
+        ):
+            return dict(cast(dict[str, Any], latest_binding))
+        return None
+
+    @staticmethod
+    def _valid_graph_checkpoint_binding(
+        *,
+        binding: object,
+        target_turn: StoryTurnRecord,
+    ) -> bool:
+        if not isinstance(binding, dict):
+            return False
+        return (
+            binding.get("turn_id") == target_turn.turn_id
+            and binding.get("branch_head_id") == target_turn.branch_head_id
+            and binding.get("runtime_profile_snapshot_id")
+            == target_turn.runtime_profile_snapshot_id
+            and bool(str(binding.get("checkpoint_id") or "").strip())
+        )
+
     @staticmethod
     def _rollback_metadata(
         *,
@@ -762,14 +906,23 @@ class StoryRuntimeIdentityService:
         later_turns: list[StoryTurnRecord],
         metadata: dict | None,
         applied_at: datetime,
+        target_checkpoint_binding: dict | None,
     ) -> dict:
         incoming = dict(metadata or {})
-        graph_thread_id = incoming.get("graph_thread_id") or (
-            StoryRuntimeIdentityService.build_graph_thread_id(
-                session_id=target_turn.session_id,
-                branch_head_id=branch.branch_head_id,
-            )
+        incoming.pop("graph_thread_id", None)
+        graph_thread_id = StoryRuntimeIdentityService.build_graph_thread_id(
+            session_id=target_turn.session_id,
+            branch_head_id=branch.branch_head_id,
         )
+        ignored_checkpoint_inputs = {
+            key: incoming.pop(key)
+            for key in (
+                "target_checkpoint_id",
+                "graph_checkpoint_binding",
+                "checkpoint_binding",
+            )
+            if key in incoming
+        }
         previous_head_turn_id = branch.head_turn_id
         previous_last_settled_turn_id = branch.last_settled_turn_id
         previous = {
@@ -779,11 +932,34 @@ class StoryRuntimeIdentityService:
                 "previous_last_settled_turn_id",
                 "hidden_turn_ids",
                 "visibility_transition",
-                "checkpoint_binding",
             )
             if key in incoming
         }
-        return {
+        if ignored_checkpoint_inputs:
+            previous["ignored_checkpoint_inputs"] = ignored_checkpoint_inputs
+        checkpoint_binding: dict[str, object] = {
+            "binding_kind": "branch_scoped_thread",
+            "graph_thread_id": graph_thread_id,
+            "branch_head_id": branch.branch_head_id,
+            "target_turn_id": target_turn.turn_id,
+            "target_checkpoint_id": None,
+            "source": "application_visibility_contract",
+        }
+        if isinstance(target_checkpoint_binding, dict) and target_checkpoint_binding.get(
+            "checkpoint_id"
+        ):
+            checkpoint_binding.update(
+                {
+                    "target_checkpoint_id": target_checkpoint_binding["checkpoint_id"],
+                    "graph_checkpoint_binding": dict(target_checkpoint_binding),
+                    "source": "captured_graph_checkpoint_binding",
+                }
+            )
+        else:
+            checkpoint_binding["checkpoint_binding_missing_reason"] = (
+                "target_turn_has_no_graph_checkpoint_binding"
+            )
+        result = {
             **incoming,
             "previous": previous,
             "previous_head_turn_id": previous_head_turn_id,
@@ -793,16 +969,17 @@ class StoryRuntimeIdentityService:
                 "hidden_turn_ids": [turn.turn_id for turn in later_turns],
                 "invalidated_workspace_material_ids": [],
             },
-            "checkpoint_binding": {
-                "binding_kind": "branch_scoped_thread",
-                "graph_thread_id": graph_thread_id,
-                "branch_head_id": branch.branch_head_id,
-                "target_turn_id": target_turn.turn_id,
-                "target_checkpoint_id": incoming.get("target_checkpoint_id"),
-                "source": "application_visibility_contract",
-            },
+            "checkpoint_binding": checkpoint_binding,
             "rollback_applied_at": applied_at.isoformat(),
         }
+        if checkpoint_binding["target_checkpoint_id"]:
+            result["target_checkpoint_id"] = checkpoint_binding["target_checkpoint_id"]
+            result["graph_checkpoint_binding"] = dict(target_checkpoint_binding or {})
+        else:
+            result["checkpoint_binding_missing_reason"] = checkpoint_binding[
+                "checkpoint_binding_missing_reason"
+            ]
+        return result
 
     def _hide_later_turns_after_rollback(
         self,
@@ -914,6 +1091,11 @@ class StoryRuntimeIdentityService:
         checkpoint_binding = receipt.metadata_json.get("checkpoint_binding")
         if isinstance(checkpoint_binding, dict):
             metadata_json["checkpoint_binding"] = dict(checkpoint_binding)
+        graph_checkpoint_binding = receipt.metadata_json.get("graph_checkpoint_binding")
+        if isinstance(graph_checkpoint_binding, dict):
+            metadata_json[
+                StoryRuntimeIdentityService._GRAPH_CHECKPOINT_BINDING_KEY
+            ] = dict(graph_checkpoint_binding)
         return metadata_json
 
     def _branch_count(self, *, session_id: str) -> int:

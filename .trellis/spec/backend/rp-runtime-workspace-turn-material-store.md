@@ -194,3 +194,149 @@ candidate = service.record_material(worker_candidate_material)
 ```
 
 The worker candidate remains Runtime Workspace material until a later governed proposal/apply or review path consumes it.
+
+## Scenario: First-stage longform runtime acceptance proves the minimal runnable loop
+
+### 1. Scope / Trigger
+
+- Trigger: first-stage story runtime acceptance must prove an actual longform writing turn loop, not just isolated material DTO behavior.
+- Applies when backend changes touch story graph runner finalize, writer packet/material persistence, draft artifact production, post-write settlement, rewrite/adoption continuation base, or rollback-visible read scope.
+- This scenario must not expand into full branch UI, physical purge, branch merge, cross-branch Story Evolution, or full roleplay/TRPG runtime.
+
+### 2. Signatures
+
+The first-stage longform acceptance path must be able to observe these backend surfaces:
+
+```text
+StoryGraphRunner stream/non-stream turn execution
+StoryTurnRecord.status / acceptance / settlement fields
+RuntimeWorkspaceMaterial kinds:
+  writer_input_ref
+  packet_ref
+  writer_output_ref
+  token_usage_metadata
+StoryArtifact kind:
+  story_segment draft
+Branch metadata:
+  graph_checkpoint_binding
+  graph_checkpoint_bindings_by_turn_id[turn_id]
+Draft selection/adoption:
+  selection receipt
+  adoption receipt
+  canonical_continuation_base
+```
+
+### 3. Contracts
+
+#### Minimal runnable loop contract
+
+- A first-stage longform writing turn is runnable only when the test can prove:
+  - the user writing command/prompt reaches the writer packet;
+  - the writer produces a `story_segment` draft artifact;
+  - Runtime Workspace records `writer_input_ref`, `packet_ref`, `writer_output_ref`, and `token_usage_metadata` with useful payloads and source refs;
+  - post-write/job settlement reaches `settled` or an explicitly allowed deferred/accepted state;
+  - graph checkpoint binding is captured only as a technical anchor.
+- Counting materials is insufficient. Tests must assert payload content, identity, source refs, lifecycle, and settlement state.
+
+#### Continuation-base contract
+
+- `selection` is reversible UI/runtime state and is not adoption.
+- Only an `accept_and_continue` adoption receipt may create or update `canonical_continuation_base`.
+- Unadopted rewrite/revision candidates must not become the next continuation base, even if they are selected or visible in the review surface.
+
+#### Rollback acceptance contract
+
+- Rollback acceptance must prove active branch truth, not only receipt shape:
+  - `BranchHead.head_turn_id` and `last_settled_turn_id` return to the target turn;
+  - later turns become `hidden_by_rollback`;
+  - later Runtime Workspace materials become invalidated or hidden from active branch reads;
+  - branch-visible chapter snapshots do not expose cutoff-after artifacts, discussion entries, or pending pointers.
+- `graph_checkpoint_binding` is a one-time checkpoint/debug anchor. It never replaces application-layer settled/job-ledger/visibility checks.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Writer packet omits the user command/prompt | Acceptance test fails; minimal loop is not proven |
+| `story_segment` draft is absent | Acceptance test fails |
+| Runtime Workspace has material rows but missing payload/source refs | Acceptance test fails |
+| Turn ends without settled or allowed deferred/accepted state | Acceptance test fails |
+| A selected but unadopted candidate exists | It is not used as `canonical_continuation_base` |
+| `accept_and_continue` adopts a candidate | Adopted draft becomes `canonical_continuation_base` |
+| Rollback targets a turn with checkpoint binding | Receipt carries the target binding as technical metadata |
+| Rollback targets a turn without binding | Rollback still succeeds through application visibility and records a stable missing reason |
+| Later branch material appears in active branch snapshot after rollback | Acceptance test fails |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a focused graph-runner test asserts writer input payload, packet payload, output payload, token usage payload, source refs, draft artifact kind, turn settlement, and checkpoint binding.
+- Good: a draft-selection test asserts selection alone does not affect the continuation base, then `accept_and_continue` does.
+- Good: a rollback test asserts both branch head state and active branch read snapshots after rollback.
+- Base: post-write may be explicitly deferred when policy allows it, but the deferred state must be recorded and visible to the next-turn gate.
+- Bad: declaring the first-stage runtime complete because a service inserted any `writer_output_ref`.
+- Bad: treating a selected rewrite candidate as adopted continuation truth.
+- Bad: using LangGraph replay/fork checkpoint state as proof that RP branch visibility is correct.
+
+### 6. Tests Required
+
+- Longform minimal loop test must assert:
+  - writer command/prompt enters packet;
+  - `story_segment` draft and pending pointer are produced when expected;
+  - `writer_input_ref / packet_ref / writer_output_ref / token_usage_metadata` payloads and source refs are inspectable;
+  - settlement/deferred state is explicit;
+  - graph checkpoint binding exists for settled turns.
+- Revision/adoption tests must assert:
+  - selection can exist without adoption;
+  - unadopted candidates are ignored by the next continuation base;
+  - adopted candidates become the canonical continuation base.
+- Branch/rollback regression tests must assert:
+  - checkpoint binding is carried or missing reason is recorded;
+  - repeated checkpoint capture is idempotent;
+  - later turns/materials/read snapshots do not pollute the active branch after rollback.
+- Focused lint/type checks must include graph runner, turn-domain, identity service, draft selection, and projection/graph-runner tests when those surfaces change.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+materials = workspace.list_materials(identity=identity)
+assert materials
+```
+
+This proves only that some Runtime Workspace rows exist. It does not prove that the user prompt reached the writer, that the draft is usable, or that the turn is safe for continuation.
+
+#### Correct
+
+```python
+writer_input = workspace.require_material(identity=identity, material_id=turn.writer_input_ref)
+packet = workspace.require_material(identity=identity, material_id=turn.packet_ref)
+writer_output = workspace.require_material(identity=identity, material_id=turn.writer_output_ref)
+
+assert "WRITE_NEXT_SEGMENT" in writer_input.payload["user_prompt"]
+assert packet.payload["identity"]["turn_id"] == identity.turn_id
+assert writer_output.payload["artifact_kind"] == "story_segment"
+assert turn.status in {"settled", "post_write_deferred"}
+```
+
+The test proves the runnable loop contract: input, packet, output, material identity, and settlement all line up.
+
+#### Wrong
+
+```python
+chapter.pending_segment_artifact_id = selected_candidate_id
+```
+
+This promotes selection state into continuation truth without adoption.
+
+#### Correct
+
+```python
+selection = selection_service.select_candidate(candidate_id)
+assert selection.adoption_receipt_id is None
+
+adoption = selection_service.accept_and_continue(selected_candidate_id=candidate_id)
+assert adoption.canonical_continuation_base == candidate_id
+```
+
+Selection stays reversible; only explicit adoption updates the continuation base.

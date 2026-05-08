@@ -398,6 +398,31 @@ class StoryTurnDomainService:
             if identity.turn_id != normalized_turn_id
         }
 
+    def record_graph_checkpoint_binding(
+        self,
+        *,
+        turn_id: str | None,
+        checkpoint_id: str | None,
+        parent_checkpoint_id: str | None = None,
+        captured_after_node: str = "finalize_turn",
+        checkpoint_ns: str = "rp_story",
+    ) -> dict:
+        if self._runtime_identity_service is None:
+            return {"recorded": False, "reason": "runtime_identity_service_missing"}
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_checkpoint_id = str(checkpoint_id or "").strip()
+        if not normalized_turn_id:
+            return {"recorded": False, "reason": "turn_id_missing"}
+        if not normalized_checkpoint_id:
+            return {"recorded": False, "reason": "checkpoint_id_missing"}
+        return self._runtime_identity_service.record_graph_checkpoint_binding(
+            turn_id=normalized_turn_id,
+            checkpoint_id=normalized_checkpoint_id,
+            parent_checkpoint_id=parent_checkpoint_id,
+            captured_after_node=captured_after_node,
+            checkpoint_ns=checkpoint_ns,
+        )
+
     def build_packet(
         self,
         *,

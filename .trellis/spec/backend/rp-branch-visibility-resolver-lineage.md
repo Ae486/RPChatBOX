@@ -93,6 +93,9 @@ These fields are required because draft/rewrite candidates may exist without bei
 
 - Branch visibility is an application-layer read contract.
 - LangGraph checkpoints/forks remain workflow-shell primitives only.
+- A captured LangGraph checkpoint pointer is a one-time technical anchor for a
+  settled `StoryTurn`; replay/fork/debug checkpoints must not overwrite the
+  application-layer rollback binding for that turn.
 - Runtime memory visibility must be enforced by RP application storage/services across:
   - Core State reads
   - Projection reads
@@ -179,6 +182,10 @@ These fields are required because draft/rewrite candidates may exist without bei
   - runtime scope construction from `MemoryRuntimeIdentity`;
   - lineage-based visibility for shared vs post-fork branch material;
   - rollback cutoff behavior.
+- Checkpoint pointer tests cover:
+  - repeated captures for the same settled turn return the original binding;
+  - replay/fork/debug checkpoints do not replace the rollback binding used by
+    branch control receipts.
 - Integration tests cover:
   - Core / Projection / Runtime Workspace / Recall / RetrievalBroker runtime reads all respect active visibility;
   - optional `branch_ids` style filters do not bypass active visibility for runtime paths.

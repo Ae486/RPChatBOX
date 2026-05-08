@@ -430,10 +430,14 @@ def rollback_to_turn(session_id: str, target_turn_id: str, actor: str):
 1. rollback 后当前 branch 只剩目标 turn 之前的线性历史
 2. rollback 不改变 active snapshot
 3. branch create 后立即切换到新 branch
-4. branch switch 不创建新的 story turn
+4. branch create / switch 都不创建新的 story turn，只写 branch/control receipt 与 trace
 5. fork 前共享 truth 在新旧 branch 都可见
 6. fork 后旧 branch 的 pending/workspace 不进入新 branch
 7. branch delete 不会删掉共享 settled memory
+8. rollback receipt 必须从目标 settled turn / branch metadata 自动携带 checkpoint binding；若目标缺少 binding，receipt 必须写明稳定缺失原因
+9. rollback 后 later turns、Runtime Workspace materials、draft/rewrite candidates、pending jobs、packet/window metadata 不再污染当前 active branch 的线性读、debug inspect 或 writer packet
+10. LangGraph checkpoint / replay / fork 只能作为 graph shell 技术锚点测试，不能替代应用层 branch / rollback truth 测试
+11. 同一 settled turn 的 checkpoint binding 一次写入后必须幂等；后续 replay/fork/debug checkpoint 不得覆盖 rollback 使用的目标 turn binding
 
 ## 11. 已知风险
 
