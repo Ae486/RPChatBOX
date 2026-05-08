@@ -19,7 +19,7 @@
 
 ## Current Pointer
 
-Next discussion batch: Module 16 residual spec-coding ambiguities. Continue in FIFO order.
+Next discussion batch: Module 21 branch operation semantics. Continue in FIFO order.
 
 ## Module 1: Overall Boundary / First-stage Goal
 
@@ -339,6 +339,9 @@ Next discussion batch: Module 16 residual spec-coding ambiguities. Continue in F
 - [x] Q3. longform 的 `discussion / review / writing` 是否要统一挂到同一 `StoryTurnRecord.turn_kind` 主记录之下，再由 artifact / overlay / workspace refs 作为子材料，而不是继续维持“两套主记录”？
   - Recommended direction: 要。统一 turn 主记录更符合新 runtime；artifact、review overlay、discussion summary、writer retrieval materials 都应成为 turn 的子材料。
   - Confirmed direction: 要。longform 的 `discussion / review / writing` 都统一挂到同一 `StoryTurnRecord` 主记录之下，通过 `turn_kind` 区分具体行为。artifact、review overlay、discussion summary、retrieval cards、worker trace、workspace refs 都作为该 turn 的子材料，而不是继续维持多套平行主记录。
+- [x] Q3.1. review overlay、brainstorm summary、rewrite 采用结果、retrieval materials 等是否继续统一挂在 `Turn` 之下，而不是再长一套平行主记录？
+  - Recommended direction: 是。允许有各自的记录类型，但都只作为 `Turn` 的子材料或关联记录，不形成新的主时间线。
+  - Confirmed direction: 是。`Turn` 继续是唯一主锚点；review overlay、brainstorm change summary、brainstorm apply receipt、rewrite 候选与确定版本选择结果、retrieval cards / usage、worker trace、proposal/apply receipts 都统一从 `Turn` 归属和追溯，不再长成平行主记录系统。
 - [x] Q4. `BranchHead` 是否也要在第一阶段就成为独立持久化实体，而不是先假装永远只有一条主线，等分支功能来了再补？
   - Recommended direction: 要。即使第一阶段不做完整分支 UI，`BranchHead` 也应先成为正式持久化实体，并默认只有一条 active 分支。否则 `Turn`、Runtime Workspace、rollback、未来 fork 都会继续挂在 session 上，后面很难无痛补齐。
   - Confirmed direction: 要。`BranchHead` 第一阶段就成为独立持久化实体；即使产品层暂时只有一条默认 active 分支，底层也按 branch-aware 方式建模，避免 turn、workspace、rollback 和 retrieval visibility 继续硬绑到 session。
@@ -381,3 +384,84 @@ Next discussion batch: Module 16 residual spec-coding ambiguities. Continue in F
 - [x] Q2. 运行时可随时修改的配置，是否主要包括调度频率、worker 启停与权限、provider/model 选择、retrieval 配置、上下文窗口与预算等？
   - Recommended direction: 是。优先开放这类“改变系统怎么跑”的运行时配置，并统一放进独立页面；修改后发布新 snapshot，从下一轮生效。
   - Confirmed direction: 是。运行时可随时调整的配置主要包括：调度频率、worker 启用/禁用、worker 权限 level、writer/worker/retrieval 的 provider-model 选择、retrieval rerank / graph extraction 配置、上下文窗口大小、packet/token budget、manual refresh / trigger 策略等；这些统一归入独立配置页面，不受故事线回溯影响。
+
+## Module 20: Roleplay / TRPG Message Tree And Branch Contract
+
+- [x] Q1. RP / TRPG 的“重试/切换候选回复”，到底只是同一轮里的候选切换，还是要直接长成正式分支？
+  - Why it matters: 这决定消息树是“轻量候选树”还是“真正带 memory / rollback / branch 语义的故事树”。如果不先定清楚，后面 `Turn`、`BranchHead`、回退和 UI 都会混。
+  - Recommended direction: 当前设计不采用“同一 Turn 候选切换”这条路。RP/TRPG 单个 `Turn` 只保留当前正式可见结果；若要改写未来，必须手动从历史消息创建正式分支。
+  - Confirmed direction: 是。按照当前设计，同一个 `Turn` 中不会出现其他候选，只有手动触发的分支；因此 RP/TRPG 的核心结构是 branch/rollback tree，而不是同 turn candidate tree。
+
+- [x] Q2. 当某一 `Turn` 产出分支时，分支锚点应当落在“该 turn 开始前的状态”，还是“该 turn 结束后的状态”？
+  - Why it matters: 这决定 fork 后继承的是上一轮 settled state，还是把当前 turn 的输出一并算作分支基底，也会影响前端“从这里分支”按钮的直觉和后端恢复逻辑。
+  - Recommended direction: 以“该 turn 开始前，也就是上一 turn 结束后”的状态作为分支锚点，更符合直觉，也更容易和 settled-turn / branch-head 恢复逻辑对齐。
+  - Confirmed direction: 是。当前冻结为“以该 turn 开始前、也就是上一 turn 结束后的 settled 状态作为分支锚点”。这意味着在某个历史 turn 上手动创建分支，本质上是“从这一轮开始改写未来”，而不是“保留这一轮并从下一轮开始改写未来”。
+
+- [x] Q3. RP / TRPG 的消息树，产品上最小需要暴露到什么粒度：只显示 turn 级节点，还是还要显示额外树杈节点？
+  - Why it matters: 这决定第一版前端树控件和 branch 入口复杂度。若一开始把主聊天流画成重树状，前端和状态管理都会明显变厚。
+  - Recommended direction: 第一版主聊天流保持当前 active branch 的线性 `Turn` 列表；分支信息单独放到 branch 入口 / 面板中，只先把“从这里分支”的入口做出来，后续再做更重的树形设计和优化。
+  - Confirmed direction: 是。第一版只做 branch 入口和最小 branch 面板，不在主聊天流里直接渲染复杂树杈；后续再做专门的树形设计与优化。
+
+- [x] Q4. RP / TRPG 的“回退”与“切分支”在产品语义上是否必须强区分？
+  - Why it matters: 这决定用户操作后旧未来是“隐藏失效”还是“保留为另一个未来”。如果语义不分清，后端会把 rollback 和 fork 做成一团。
+  - Recommended direction: 必须强区分。`rollback` 是当前分支回到旧 `Turn`，之后内容对当前主线失效；`fork/branch` 是保留旧未来，同时从旧 `Turn` 派生新未来。
+  - Confirmed direction: 是。第一版产品动作就必须明确区分 `回退到这里` 和 `从这里分支`，不能混成一个模糊的“从这里继续”按钮。
+
+- [x] Q5. RP / TRPG 第一版是否需要额外记录“查看/尝试/切换”这类非状态变更历史？
+  - Why it matters: 要判断哪些留痕真有工程价值，哪些只是额外工序和噪音。
+  - Recommended direction: 不需要额外做。第一版只保留真正改变状态的正式动作记录，例如 `fork created`、`branch switched`、`rollback applied`。像“看过哪条分支”“点开过哪个历史消息”“准备分支但取消了”这类不改变 story state 的浏览/尝试行为，不单独入 trace。
+  - Confirmed direction: 是。第一版不额外记录浏览/尝试类历史；现有正式动作 receipts 和 job/event trace 已足够支撑 debug、恢复和审计。
+
+## Module 21: Branch Operation Semantics
+
+- [x] Q1. 用户在历史消息上点击“从这里分支”后，系统是否应立即切换到新分支？
+  - Why it matters: 这决定前端交互和 runtime active branch 的切换时机。如果创建后不自动切过去，用户还停留在旧分支继续输入，很容易把“我以为正在新线写作”和“实际还在旧线”混在一起。
+  - Recommended direction: 默认立即切换到新分支。创建分支本身就是一次明确的“我要从这里改写未来”动作；保留旧分支作为历史线，但当前活跃上下文、后续输入和 writer packet 都切到新 branch。
+  - Confirmed direction: 是。创建分支后立即切换到新 branch；主聊天区只保留当前 active branch 的线性历史，fork 点之后原路径的后续消息从主视图消失。第一版前端只做轻量 branch UX：消息级 `从这里分支` 入口、顶部当前分支标识、fork 点提示条、最小 branch 面板；不在主聊天流里直接做重树状图。
+
+- [x] Q2. `fork created` / `branch switched` 这类分支操作，本身是否应算作新的 story turn？
+  - Why it matters: 这会直接影响 `Turn` 模型、回退锚点、branch receipts 和前端“当前线变化但正文没变”的处理方式。如果把分支切换也做成 turn，产品时间线会混入大量非正文动作；如果不做成 turn，就需要独立的 control/receipt 记录。
+  - Recommended direction: 不算 story turn。`fork created`、`branch switched`、`branch deleted` 属于 branch control actions，应写 branch/control receipts 和 trace，但不创建新的 `Turn`，也不成为正文回退锚点。
+  - Confirmed direction: 是。分支创建、切换、删除都不算新的 story turn；它们属于 branch/control actions，只写 branch/control receipts 与必要 trace，不进入正文时间线，也不成为正文回退锚点。
+
+## Module 22: Longform Revision / Rewrite Scope
+
+- [x] Q1. longform 的 `discussion / brainstorm` 是否与 `review overlay / 修订 -> rewrite` 严格分流？
+  - Recommended direction: 是。discussion 只承接用户不确定、想讨论、想改设定/方向的内容；明确段落修改要求走 review overlay / tracked changes / comments，再进入 rewrite。
+  - Confirmed direction: 是。`discussion` 只服务 writer brainstorm；明确修订/批注不进入 discussion，而是进入 `review overlay -> rewrite`。
+
+- [x] Q2. longform 修订前端第一阶段是否冻结为 `viewing / editing / suggesting` 三态？
+  - Recommended direction: 是。`viewing` 只读，`editing` 表示用户自己改稿不默认形成 LLM 修订指令，`suggesting` 表示 tracked changes / comments 进入 review overlay 供 rewrite 消费。
+  - Confirmed direction: 是。longform 修订前端第一阶段冻结为 `viewing / editing / suggesting` 三态，风格尽量靠近 Word / SuperDoc，但仅保留修订/批注相关功能。
+
+- [x] Q3. longform draft 的 adoption 是否只在用户点击 `accept_and_continue / 续写` 时正式发生？
+  - Recommended direction: 是。selection 只是暂定状态，adoption 只在继续写作动作发生时确认。
+  - Confirmed direction: 是。只有点击 `accept_and_continue / 续写` 时，当前被选中的 draft 才正式成为 canonical continuation base；当前 selection 可变、可解除，不等于 adoption。
+
+- [ ] Q4. 第一阶段 `rewrite` 是否只保留两种语义：`full rewrite` 与 `paragraph rewrite`？
+  - Why it matters: 这决定产品动作数量、packet 组织方式和后端实现复杂度。如果分类过多，容易把 rewrite 流程做成到处散落的 if/else。
+  - Recommended direction: 是。第一阶段只保留 `full rewrite` 与 `paragraph rewrite` 两种语义：`full rewrite` 用于整篇改写，`paragraph rewrite` 用于局部 block 重写。`full rewrite` 内部再区分两种输入形态：仅有全文批注时允许携带旧正文全文；存在明确全文要求时不携带旧正文全文。
+
+- [ ] Q5. `full rewrite` 与 `paragraph rewrite` 的正式触发入口是否要在 UI 上显式区分？
+  - Why it matters: 如果入口不清楚，用户很难知道这次重写会作用于整篇还是局部；如果入口过多，又会使 longform 动作面膨胀。
+  - Recommended direction: 第一阶段显式区分。普通 `rewrite` 默认表示“按当前 review overlay 做 paragraph rewrite”；另给一个明确的“带要求 rewrite”或等价入口，表示全文重写。
+
+- [ ] Q6. 当局部修订很多、几乎覆盖全篇时，第一阶段是否仍坚持按 `paragraph rewrite` 处理，而不是自动升级为 `full rewrite`？
+  - Why it matters: 自动升级能减少 packet 膨胀，但会引入隐藏规则；坚持局部 rewrite 则实现更直白，但可能在大批量修订时变重。
+  - Recommended direction: 第一阶段先不做自动升级。是否全文 rewrite 只由用户显式入口决定，避免出现难解释的隐式切换。
+
+- [ ] Q7. `paragraph rewrite` 是一次性处理当前轮所有局部修订，还是允许一轮里分多次局部 rewrite？
+  - Why it matters: 这决定 turn 语义、candidate 数量和上下文组织。分多次会让同轮候选树和 overlay 生命周期迅速变复杂。
+  - Recommended direction: 第一阶段按“一次性处理当前轮所有已选局部修订”为一轮 paragraph rewrite，不在同一轮里再拆多次局部 rewrite。
+
+- [ ] Q8. `paragraph rewrite` 给 writer 的上下文，第一阶段是“只发被命中的段落”，还是“命中段落 + 前后窗口 + 全局 rewrite 要求”？
+  - Why it matters: 只发命中段落容易丢过渡和语气；发整篇又违背局部 rewrite 的控域目标。
+  - Recommended direction: 发送“命中段落 + 有限前后窗口 + 全局 rewrite 要求 + 对应 review overlay annotations”，不直接发整篇旧正文。
+
+- [x] Q9. 修订模块是否以 SuperDoc/Word 能力为 substrate，只聚焦“把修订内容传给 writer”，而不重造整套文档编辑语义？
+  - Recommended direction: 是。优先借用 SuperDoc/Word 已成熟的修订、批注、tracked changes、selection、block/range 锚点能力；只要不与本 task 需求冲突，就直接参考其行为。
+  - Confirmed direction: 是。修订模块的重点是需求功能：将修订内容传递给 writer。SuperDoc 作为修订交互 substrate，其他行为若与需求不冲突，可直接参考；发生冲突时，以当前 task 文档和讨论结论为准。
+
+- [x] Q10. comment 在 rewrite 生成新 candidate 后，第一阶段是否默认保留并由用户手动 resolve，而不是系统自动 resolve？
+  - Recommended direction: 是。自动判断“已经满足批注”会过早替用户做主观决定；更稳的语义是保持 comment active，等待用户显式 resolve。
+  - Confirmed direction: 是。rewrite 后 comment 默认继续保留，不自动删除、不自动 resolve；resolved comment 从主修订视图收起，但保留留痕、锚点和 provenance。

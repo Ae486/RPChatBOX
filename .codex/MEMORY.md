@@ -404,3 +404,17 @@ Maintainer: Codex Agent
 - `docs/migration/10-typed-stream-review-and-plan.md`
 - `docs/migration/11-typed-stream-schema.md`
 - `docs/migration/12-provider-model-single-source-plan.md`
+
+## SetupAgent Stage SkillPack Pilot (2026-05-07)
+- implemented: stage-keyed SkillPack registry at `backend/rp/agent_runtime/skill_packs/`.
+  - `SkillPackRecord` is a 4-field pydantic model: `name`, `stage_id`, `description`, `body`.
+  - `STAGE_SKILL_PACKS` dict is populated at import time by `load_registry()` scanning leaf dirs containing `SKILL.md`.
+  - frontmatter parser is regex-based to avoid adding `pyyaml` as a hard dep.
+  - malformed packs log a warning and are skipped; runtime continues.
+- implemented: pilot SkillPack `character_design/SKILL.md` per PRD `04-30-skills-builder`.
+- implemented: `SetupAgentPromptService._stage_overlay(...)` short-circuits to render the SkillPack body when the resolved stage has a registered pack, otherwise falls through to legacy 9-stage prose unchanged.
+- implemented: `build_system_prompt(...)` inserts a specialist-hat preamble between the `You are SetupAgent...` block and `Core rules:` only when a SkillPack is loaded; no-pack prompts remain byte-for-byte identical to legacy.
+- implemented: `SetupRuntimeAdapter.build_turn_input(...)` exposes optional `metadata["skill_pack_name"]` for trace correlation only; behavior never depends on it.
+- not changed: `build_setup_agent_tool_scope`, `SETUP_STAGE_PATCH_TOOLS`, `setup.truth.write` runtime injection, `SetupAgentTurnRequest`, `SetupGraphState`, prior-stage handoff selection.
+- spec: `.trellis/spec/backend/rp-setup-agent-stage-skill-pack.md` (added to backend index).
+

@@ -40,13 +40,22 @@ class StoryGraphRunner:
         self._nodes = nodes
 
     async def run_turn(self, request: LongformTurnRequest) -> LongformTurnResponse:
-        initial_state = self._initial_state(request=request, stream_mode=False)
+        binding = self._graph_thread_binding(session_id=request.session_id)
+        initial_state = self._initial_state(
+            request=request,
+            stream_mode=False,
+            graph_thread_id=binding["graph_thread_id"],
+            branch_head_id=binding["branch_head_id"],
+            graph_thread_binding=binding,
+        )
         async with open_async_checkpointed_graph(self._compile_graph) as graph:
             await graph.ainvoke(
                 initial_state,
-                config=self._thread_config(request.session_id),
+                config=self._thread_config(binding["graph_thread_id"]),
             )
-            snapshot = await graph.aget_state(self._thread_config(request.session_id))
+            snapshot = await graph.aget_state(
+                self._thread_config(binding["graph_thread_id"])
+            )
             final_state = cast(StoryGraphState, dict(snapshot.values or {}))
         self._raise_if_error(final_state)
         return LongformTurnResponse.model_validate(
@@ -62,9 +71,16 @@ class StoryGraphRunner:
                 )
             yield self._typed({"type": "done"})
             return
-        initial_state = self._initial_state(request=request, stream_mode=True)
+        binding = self._graph_thread_binding(session_id=request.session_id)
+        initial_state = self._initial_state(
+            request=request,
+            stream_mode=True,
+            graph_thread_id=binding["graph_thread_id"],
+            branch_head_id=binding["branch_head_id"],
+            graph_thread_binding=binding,
+        )
         async with open_async_checkpointed_graph(self._compile_graph) as graph:
-            base_config = self._thread_config(request.session_id)
+            base_config = self._thread_config(binding["graph_thread_id"])
             prepared_state = await graph.ainvoke(initial_state, config=base_config)
             self._raise_if_error(prepared_state)
             checkpoint_id = require_snapshot_checkpoint_id(
@@ -73,63 +89,108 @@ class StoryGraphRunner:
 
             current_state = (
                 await graph.aget_state(
-                    self._thread_config(request.session_id, checkpoint_id=checkpoint_id)
+                    self._thread_config(
+                        binding["graph_thread_id"], checkpoint_id=checkpoint_id
+                    )
                 )
             ).values
             text_parts: list[str] = []
+            usage_metadata: dict[str, object] = {}
             try:
-                async for chunk in self._nodes.writer_run_stream(current_state):
-                    payload = self._parse_typed_payload(chunk)
-                    if payload is not None:
-                        if payload.get("type") == "done":
-                            break
-                        if payload.get("type") == "error":
-                            final_values = {
-                                "assistant_text": "".join(text_parts),
-                                "status": "failed",
-                                "error": payload.get("error")
-                                or {
-                                    "message": "story_stream_failed",
-                                    "type": "story_turn_failed",
-                                },
-                            }
-                            final_state = self._merge_state(
-                                current_state,
-                                final_values,
-                            )
-                            final_values.update(self._nodes.finalize_turn(final_state))
-                            await graph.aupdate_state(
-                                self._thread_config(
-                                    request.session_id, checkpoint_id=checkpoint_id
-                                ),
-                                values=final_values,
-                                as_node="finalize_turn",
-                            )
-                            yield chunk
-                            yield self._typed({"type": "done"})
-                            return
-                    delta = self._nodes.extract_text_delta(chunk)
-                    if delta:
-                        text_parts.append(delta)
-                    yield chunk
-
-                new_config = await graph.aupdate_state(
-                    self._thread_config(
-                        request.session_id, checkpoint_id=checkpoint_id
-                    ),
-                    {
-                        "assistant_text": "".join(text_parts),
+                if self._nodes.writer_stream_requires_buffered_execution(
+                    cast(StoryGraphState, dict(current_state or {}))
+                ):
+                    writer_update = await self._nodes.writer_run(
+                        cast(StoryGraphState, dict(current_state or {}))
+                    )
+                    writing_result = writer_update.get("writing_result") or {}
+                    if isinstance(writing_result, Mapping):
+                        usage_metadata = self._usage_payload(
+                            cast(Mapping[str, Any], writing_result.get("usage_metadata") or {})
+                        )
+                    assistant_text = str(writer_update.get("assistant_text") or "")
+                    if assistant_text:
+                        text_parts.append(assistant_text)
+                        yield self._typed(
+                            {"type": "text_delta", "delta": assistant_text}
+                        )
+                    if usage_metadata:
+                        yield self._typed({"type": "usage", **dict(usage_metadata)})
+                    writer_values = {
+                        **dict(writer_update),
+                        "assistant_text": assistant_text,
+                        "stream_usage_metadata": dict(usage_metadata),
                         "status": "writer_completed",
-                    },
-                    as_node="writer_run",
-                )
+                    }
+                    new_config = await graph.aupdate_state(
+                        self._thread_config(
+                            binding["graph_thread_id"], checkpoint_id=checkpoint_id
+                        ),
+                        writer_values,
+                        as_node="writer_run",
+                    )
+                else:
+                    async for chunk in self._nodes.writer_run_stream(current_state):
+                        payload = self._parse_typed_payload(chunk)
+                        if payload is not None:
+                            if payload.get("type") == "done":
+                                break
+                            if payload.get("type") == "usage":
+                                usage_metadata = self._usage_payload(payload)
+                            if payload.get("type") == "error":
+                                final_values = {
+                                    "assistant_text": "".join(text_parts),
+                                    "status": "failed",
+                                    "error": payload.get("error")
+                                    or {
+                                        "message": "story_stream_failed",
+                                        "type": "story_turn_failed",
+                                    },
+                                }
+                                final_state = self._merge_state(
+                                    current_state,
+                                    final_values,
+                                )
+                                final_values.update(self._nodes.finalize_turn(final_state))
+                                await graph.aupdate_state(
+                                    self._thread_config(
+                                        binding["graph_thread_id"],
+                                        checkpoint_id=checkpoint_id,
+                                    ),
+                                    values=final_values,
+                                    as_node="finalize_turn",
+                                )
+                                yield chunk
+                                yield self._typed({"type": "done"})
+                                return
+                        delta = self._nodes.extract_text_delta(chunk)
+                        if delta:
+                            text_parts.append(delta)
+                        yield chunk
+
+                    new_config = await graph.aupdate_state(
+                        self._thread_config(
+                            binding["graph_thread_id"], checkpoint_id=checkpoint_id
+                        ),
+                        {
+                            "assistant_text": "".join(text_parts),
+                            "stream_usage_metadata": dict(usage_metadata),
+                            "writing_result": self._nodes.build_stream_writing_result(
+                                cast(StoryGraphState, dict(current_state or {})),
+                                assistant_text="".join(text_parts),
+                                usage_metadata=usage_metadata,
+                            ),
+                            "status": "writer_completed",
+                        },
+                        as_node="writer_run",
+                    )
                 snapshot = await graph.aget_state(new_config)
                 checkpoint_id = require_snapshot_checkpoint_id(snapshot)
                 current_state = dict(snapshot.values or {})
                 current_state = self._nodes.persist_generated_artifact(current_state)
                 new_config = await graph.aupdate_state(
                     self._thread_config(
-                        request.session_id, checkpoint_id=checkpoint_id
+                        binding["graph_thread_id"], checkpoint_id=checkpoint_id
                     ),
                     current_state,
                     as_node="persist_generated_artifact",
@@ -143,13 +204,14 @@ class StoryGraphRunner:
                 current_state = {**current_state, **regression_update}
                 await graph.aupdate_state(
                     self._thread_config(
-                        request.session_id, checkpoint_id=checkpoint_id
+                        binding["graph_thread_id"], checkpoint_id=checkpoint_id
                     ),
                     regression_update,
                     as_node="post_write_regression",
                 )
                 final_values = {
                     "assistant_text": "".join(text_parts),
+                    "post_write_trigger": current_state.get("post_write_trigger") or {},
                     "response_payload": current_state.get("response_payload") or {},
                     "status": "completed",
                 }
@@ -157,7 +219,7 @@ class StoryGraphRunner:
                 final_values.update(self._nodes.finalize_turn(final_state))
                 await graph.aupdate_state(
                     self._thread_config(
-                        request.session_id, checkpoint_id=checkpoint_id
+                        binding["graph_thread_id"], checkpoint_id=checkpoint_id
                     ),
                     values=final_values,
                     as_node="finalize_turn",
@@ -176,7 +238,7 @@ class StoryGraphRunner:
                 final_values.update(self._nodes.finalize_turn(final_state))
                 await graph.aupdate_state(
                     self._thread_config(
-                        request.session_id, checkpoint_id=checkpoint_id
+                        binding["graph_thread_id"], checkpoint_id=checkpoint_id
                     ),
                     values=final_values,
                     as_node="finalize_turn",
@@ -193,8 +255,9 @@ class StoryGraphRunner:
                 yield self._typed({"type": "done"})
 
     def get_runtime_debug(self, *, session_id: str) -> dict:
+        binding = self._graph_thread_binding(session_id=session_id)
         with open_checkpointed_graph(self._compile_graph) as graph:
-            config = self._thread_config(session_id)
+            config = self._thread_config(binding["graph_thread_id"])
             snapshot = graph.get_state(config)
             history = (
                 list(graph.get_state_history(config))
@@ -207,8 +270,11 @@ class StoryGraphRunner:
             history=history,
         )
         return {
-            "thread_id": f"{session_id}:rp_story",
+            "thread_id": binding["graph_thread_id"] + ":rp_story",
+            "graph_thread_id": binding["graph_thread_id"],
             "namespace": "rp_story",
+            "branch_head_id": binding["branch_head_id"],
+            "graph_thread_binding": dict(binding),
             "latest_checkpoint": self._snapshot_detail(latest_snapshot),
             "latest_meaningful_checkpoint": self._snapshot_detail(meaningful_snapshot),
             "history": [self._snapshot_summary(item) for item in history[:10]],
@@ -274,13 +340,18 @@ class StoryGraphRunner:
         *,
         request: LongformTurnRequest,
         stream_mode: bool,
+        graph_thread_id: str,
+        branch_head_id: str,
+        graph_thread_binding: dict[str, str],
     ) -> StoryGraphState:
-        # Each story turn reuses the same LangGraph thread, so transient runtime
-        # fields must be cleared before the new execution starts.
+        # Each branch reuses one LangGraph thread, so transient per-turn fields
+        # must be cleared before the new execution starts.
         return {
             "session_id": request.session_id,
+            "graph_thread_id": graph_thread_id,
+            "graph_thread_binding": dict(graph_thread_binding),
             "runtime_identity": {},
-            "branch_head_id": "",
+            "branch_head_id": branch_head_id,
             "turn_id": "",
             "runtime_profile_snapshot_id": "",
             "command_kind": request.command_kind.value,
@@ -302,10 +373,13 @@ class StoryGraphRunner:
             "plan": {},
             "specialist_bundle": {},
             "writing_packet": {},
+            "writing_result": {},
+            "post_write_trigger": {},
             "artifact_id": None,
             "artifact_kind": None,
             "warnings": [],
             "assistant_text": "",
+            "stream_usage_metadata": {},
             "response_payload": {},
             "error": None,
             "status": "received",
@@ -313,15 +387,18 @@ class StoryGraphRunner:
 
     @staticmethod
     def _thread_config(
-        session_id: str,
+        graph_thread_id: str,
         *,
         checkpoint_id: str | None = None,
     ) -> dict[str, dict[str, str]]:
         return build_thread_config(
-            thread_id=session_id,
+            thread_id=graph_thread_id,
             namespace="rp_story",
             checkpoint_id=checkpoint_id,
         )
+
+    def _graph_thread_binding(self, *, session_id: str) -> dict[str, str]:
+        return self._nodes.resolve_graph_thread_binding(session_id=session_id)
 
     @staticmethod
     def _parse_typed_payload(line: str) -> dict | None:
@@ -335,6 +412,15 @@ class StoryGraphRunner:
             return json.loads(payload)
         except json.JSONDecodeError:
             return None
+
+    @staticmethod
+    def _usage_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+        usage: dict[str, object] = {}
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = payload.get(key)
+            if isinstance(value, (int, float)):
+                usage[key] = int(value)
+        return usage
 
     @staticmethod
     def _merge_state(
@@ -399,13 +485,27 @@ class StoryGraphRunner:
 
     @staticmethod
     def _pick_meaningful_snapshot(*, snapshot, history: list):
+        candidates = [*history, snapshot]
+        for item in reversed(candidates):
+            post_write_trigger = (item.values or {}).get("post_write_trigger")
+            if (
+                isinstance(post_write_trigger, Mapping)
+                and post_write_trigger.get("run_kind")
+            ):
+                return item
         for item in reversed(history):
             values = item.values or {}
             if (
                 values.get("assistant_text")
                 or values.get("response_payload")
                 or values.get("error")
-                or values.get("status") in {"completed", "failed", "artifact_persisted"}
+                or values.get("status")
+                in {
+                    "completed",
+                    "failed",
+                    "artifact_persisted",
+                    "post_write_triggered",
+                }
             ):
                 return item
         return snapshot

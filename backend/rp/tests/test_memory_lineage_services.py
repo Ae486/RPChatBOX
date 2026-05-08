@@ -45,6 +45,7 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
 )
+from rp.models.runtime_identity import StoryTurnStatus
 
 
 def _seed_story_runtime(retrieval_session):
@@ -435,6 +436,91 @@ def test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff(
     )
 
 
+def test_branch_visibility_resolver_hides_rollback_future_but_allows_new_future(
+    retrieval_session,
+):
+    session, _, _ = _seed_story_runtime(retrieval_session)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.branch_visibility.rollback",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    identities = []
+    for index in range(3):
+        identity = identity_service.resolve_runtime_entry_identity(
+            session_id=session.session_id,
+            command_kind=f"continue-{index}",
+            actor="story_runtime",
+            requested_runtime_profile_snapshot_id=(
+                snapshot.runtime_profile_snapshot_id
+            ),
+        )
+        identity_service.update_turn_status(
+            turn_id=identity.turn_id,
+            status=StoryTurnStatus.SETTLED,
+            visible_output_ref=f"artifact:{index}",
+            selected_output_ref=f"artifact:{index}",
+            settlement_reason="test_settled",
+        )
+        identities.append(identity)
+    target_identity = identities[1]
+    hidden_identity = identities[2]
+
+    identity_service.rollback_to_turn(
+        session_id=session.session_id,
+        target_turn_id=target_identity.turn_id,
+        actor="user",
+    )
+    resolver = BranchVisibilityResolver(retrieval_session)
+    target_scope = resolver.build_runtime_scope(identity=target_identity)
+
+    assert target_scope.turn_cutoff_by_branch[target_identity.branch_head_id] == (
+        target_identity.turn_id
+    )
+    assert target_scope.hidden_turn_ids_by_branch[target_identity.branch_head_id] == [
+        hidden_identity.turn_id
+    ]
+    assert not resolver.is_visible(
+        scope=target_scope,
+        visibility_scope="branch_scoped",
+        visibility_state="active",
+        owning_branch_head_id=hidden_identity.branch_head_id,
+        origin_turn_id=hidden_identity.turn_id,
+    )
+
+    new_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="continue-after-rollback",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    new_scope = BranchVisibilityResolver(retrieval_session).build_runtime_scope(
+        identity=new_identity
+    )
+
+    assert new_scope.turn_cutoff_by_branch[new_identity.branch_head_id] == (
+        new_identity.turn_id
+    )
+    assert resolver.is_visible(
+        scope=new_scope,
+        visibility_scope="branch_scoped",
+        visibility_state="active",
+        owning_branch_head_id=new_identity.branch_head_id,
+        origin_turn_id=new_identity.turn_id,
+    )
+    assert not resolver.is_visible(
+        scope=new_scope,
+        visibility_scope="branch_scoped",
+        visibility_state="active",
+        owning_branch_head_id=hidden_identity.branch_head_id,
+        origin_turn_id=hidden_identity.turn_id,
+    )
+
+
 def test_runtime_read_manifest_service_is_deterministic_and_separates_visible_selected_omitted(
     retrieval_session,
 ):
@@ -480,6 +566,19 @@ def test_runtime_read_manifest_service_is_deterministic_and_separates_visible_se
             metadata={"visibility_scope": "branch_scoped"},
         )
     )
+    workspace_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="miss-M1",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_MISS,
+            identity=identity,
+            domain="chapter",
+            domain_path="runtime.retrieval.miss",
+            payload={"query_text": "unknown tavern"},
+            visibility="runtime_private",
+            created_by="writer",
+            metadata={"visibility_scope": "branch_scoped"},
+        )
+    )
     packet_sections = [
         {"label": "foundation_digest", "items": ["Found A"]},
         {"label": "current_outline_digest", "items": ["Outline A"]},
@@ -511,8 +610,15 @@ def test_runtime_read_manifest_service_is_deterministic_and_separates_visible_se
         "packet_visible_runtime_workspace_only",
     }
     assert manifest_a.retrieval_card_refs == ["card-R1"]
+    assert manifest_a.retrieval_miss_refs == []
     assert manifest_a.writer_usage_refs == ["usage-U1"]
     assert manifest_a.active_branch_lineage == [identity.branch_head_id]
+    visible_ids = {str(item["ref_id"]) for item in manifest_a.visible_refs}
+    selected_ids = {str(item["ref_id"]) for item in manifest_a.selected_refs}
+    assert "usage-U1" not in visible_ids
+    assert "usage-U1" not in selected_ids
+    assert "miss-M1" not in visible_ids
+    assert "miss-M1" not in selected_ids
 
 
 def test_runtime_read_manifest_hash_is_stable_for_equivalent_json_shapes(

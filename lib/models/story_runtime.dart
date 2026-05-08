@@ -22,8 +22,7 @@ class RpStoryActivationResult {
       sourceWorkspaceId: json['source_workspace_id'] as String,
       currentChapterIndex: json['current_chapter_index'] as int? ?? 1,
       currentPhase: json['current_phase'] as String? ?? 'outline_drafting',
-      initialOutlineRequired:
-          json['initial_outline_required'] as bool? ?? true,
+      initialOutlineRequired: json['initial_outline_required'] as bool? ?? true,
     );
   }
 }
@@ -229,7 +228,9 @@ class RpChapterSnapshot {
   });
 
   List<RpStoryArtifact> get acceptedOutlineArtifacts => artifacts
-      .where((item) => item.artifactKind == 'chapter_outline' && item.isAccepted)
+      .where(
+        (item) => item.artifactKind == 'chapter_outline' && item.isAccepted,
+      )
       .toList();
 
   List<RpStoryArtifact> get acceptedSegmentArtifacts => artifacts
@@ -254,6 +255,10 @@ class RpChapterSnapshot {
     return items.isEmpty ? null : items.last;
   }
 
+  List<RpStoryArtifact> get pendingSegmentCandidates =>
+      artifacts.where((item) => item.isPendingSegment).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
   factory RpChapterSnapshot.fromJson(Map<String, dynamic> json) {
     return RpChapterSnapshot(
       session: RpStorySession.fromJson(
@@ -264,13 +269,16 @@ class RpChapterSnapshot {
       ),
       artifacts: (json['artifacts'] as List? ?? const [])
           .whereType<Map>()
-          .map((item) => RpStoryArtifact.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) => RpStoryArtifact.fromJson(Map<String, dynamic>.from(item)),
+          )
           .toList(),
       discussionEntries: (json['discussion_entries'] as List? ?? const [])
           .whereType<Map>()
           .map(
-            (item) =>
-                RpStoryDiscussionEntry.fromJson(Map<String, dynamic>.from(item)),
+            (item) => RpStoryDiscussionEntry.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
           )
           .toList(),
     );
@@ -313,6 +321,259 @@ class RpStoryTurnResponse {
       warnings: (json['warnings'] as List? ?? const [])
           .map((item) => item.toString())
           .toList(),
+    );
+  }
+}
+
+class RpDraftDocumentBlock {
+  final String blockId;
+  final int order;
+  final String blockKind;
+  final String text;
+  final String? selectedExcerpt;
+  final String? selectedExcerptHash;
+  final Map<String, dynamic> metadataJson;
+
+  const RpDraftDocumentBlock({
+    required this.blockId,
+    required this.order,
+    required this.blockKind,
+    required this.text,
+    required this.selectedExcerpt,
+    required this.selectedExcerptHash,
+    required this.metadataJson,
+  });
+
+  factory RpDraftDocumentBlock.fromJson(Map<String, dynamic> json) {
+    return RpDraftDocumentBlock(
+      blockId: json['block_id'] as String? ?? '',
+      order: json['order'] as int? ?? 0,
+      blockKind: json['block_kind'] as String? ?? 'unknown',
+      text: json['text'] as String? ?? '',
+      selectedExcerpt: json['selected_excerpt'] as String?,
+      selectedExcerptHash: json['selected_excerpt_hash'] as String?,
+      metadataJson: json['metadata_json'] is Map
+          ? Map<String, dynamic>.from(json['metadata_json'] as Map)
+          : const {},
+    );
+  }
+}
+
+class RpDraftDocumentRecord {
+  final String draftDocumentId;
+  final String turnId;
+  final String draftRef;
+  final String sourceOutputRef;
+  final String sourceFormat;
+  final List<RpDraftDocumentBlock> blocks;
+  final String materializationVersion;
+  final Map<String, dynamic> metadataJson;
+
+  const RpDraftDocumentRecord({
+    required this.draftDocumentId,
+    required this.turnId,
+    required this.draftRef,
+    required this.sourceOutputRef,
+    required this.sourceFormat,
+    required this.blocks,
+    required this.materializationVersion,
+    required this.metadataJson,
+  });
+
+  factory RpDraftDocumentRecord.fromJson(Map<String, dynamic> json) {
+    return RpDraftDocumentRecord(
+      draftDocumentId: json['draft_document_id'] as String? ?? '',
+      turnId: json['turn_id'] as String? ?? '',
+      draftRef: json['draft_ref'] as String? ?? '',
+      sourceOutputRef: json['source_output_ref'] as String? ?? '',
+      sourceFormat: json['source_format'] as String? ?? 'markdown',
+      blocks: (json['blocks'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                RpDraftDocumentBlock.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(),
+      materializationVersion: json['materialization_version'] as String? ?? '',
+      metadataJson: json['metadata_json'] is Map
+          ? Map<String, dynamic>.from(json['metadata_json'] as Map)
+          : const {},
+    );
+  }
+}
+
+class RpRevisionAnchorRef {
+  final String anchorScope;
+  final List<String> blockIds;
+  final int? startOffset;
+  final int? endOffset;
+  final String? selectedExcerptHash;
+  final String? superdocAnchorId;
+
+  const RpRevisionAnchorRef({
+    required this.anchorScope,
+    required this.blockIds,
+    required this.startOffset,
+    required this.endOffset,
+    required this.selectedExcerptHash,
+    required this.superdocAnchorId,
+  });
+
+  factory RpRevisionAnchorRef.fromJson(Map<String, dynamic> json) {
+    return RpRevisionAnchorRef(
+      anchorScope: json['anchor_scope'] as String? ?? 'single_block',
+      blockIds: (json['block_ids'] as List? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      startOffset: (json['start_offset'] as num?)?.toInt(),
+      endOffset: (json['end_offset'] as num?)?.toInt(),
+      selectedExcerptHash: json['selected_excerpt_hash'] as String?,
+      superdocAnchorId: json['superdoc_anchor_id'] as String?,
+    );
+  }
+}
+
+class RpRevisionComment {
+  final String commentId;
+  final String turnId;
+  final String draftRef;
+  final String overlayId;
+  final RpRevisionAnchorRef anchorRef;
+  final String? selectedExcerpt;
+  final String instructionText;
+  final String status;
+  final String createdBy;
+
+  const RpRevisionComment({
+    required this.commentId,
+    required this.turnId,
+    required this.draftRef,
+    required this.overlayId,
+    required this.anchorRef,
+    required this.selectedExcerpt,
+    required this.instructionText,
+    required this.status,
+    required this.createdBy,
+  });
+
+  bool get isActive => status == 'active';
+
+  factory RpRevisionComment.fromJson(Map<String, dynamic> json) {
+    return RpRevisionComment(
+      commentId: json['comment_id'] as String? ?? '',
+      turnId: json['turn_id'] as String? ?? '',
+      draftRef: json['draft_ref'] as String? ?? '',
+      overlayId: json['overlay_id'] as String? ?? '',
+      anchorRef: RpRevisionAnchorRef.fromJson(
+        Map<String, dynamic>.from(json['anchor_ref'] as Map? ?? const {}),
+      ),
+      selectedExcerpt: json['selected_excerpt'] as String?,
+      instructionText: json['instruction_text'] as String? ?? '',
+      status: json['status'] as String? ?? 'active',
+      createdBy: json['created_by'] as String? ?? 'user',
+    );
+  }
+}
+
+class RpTrackedChange {
+  final String trackedChangeId;
+  final String turnId;
+  final String draftRef;
+  final String overlayId;
+  final RpRevisionAnchorRef anchorRef;
+  final String changeKind;
+  final String? originalText;
+  final String? suggestedText;
+  final String status;
+
+  const RpTrackedChange({
+    required this.trackedChangeId,
+    required this.turnId,
+    required this.draftRef,
+    required this.overlayId,
+    required this.anchorRef,
+    required this.changeKind,
+    required this.originalText,
+    required this.suggestedText,
+    required this.status,
+  });
+
+  bool get isActive => status == 'active';
+
+  factory RpTrackedChange.fromJson(Map<String, dynamic> json) {
+    return RpTrackedChange(
+      trackedChangeId: json['tracked_change_id'] as String? ?? '',
+      turnId: json['turn_id'] as String? ?? '',
+      draftRef: json['draft_ref'] as String? ?? '',
+      overlayId: json['overlay_id'] as String? ?? '',
+      anchorRef: RpRevisionAnchorRef.fromJson(
+        Map<String, dynamic>.from(json['anchor_ref'] as Map? ?? const {}),
+      ),
+      changeKind: json['change_kind'] as String? ?? 'replace',
+      originalText: json['original_text'] as String?,
+      suggestedText: json['suggested_text'] as String?,
+      status: json['status'] as String? ?? 'active',
+    );
+  }
+}
+
+class RpRevisionReviewSurface {
+  final String sessionId;
+  final String artifactId;
+  final String draftText;
+  final RpDraftDocumentRecord draftDocument;
+  final Map<String, dynamic> overlay;
+  final List<RpRevisionComment> comments;
+  final List<RpTrackedChange> trackedChanges;
+  final List<String> activeCommentRefs;
+  final List<String> activeTrackedChangeRefs;
+  final bool canonicalTruth;
+
+  const RpRevisionReviewSurface({
+    required this.sessionId,
+    required this.artifactId,
+    required this.draftText,
+    required this.draftDocument,
+    required this.overlay,
+    required this.comments,
+    required this.trackedChanges,
+    required this.activeCommentRefs,
+    required this.activeTrackedChangeRefs,
+    required this.canonicalTruth,
+  });
+
+  factory RpRevisionReviewSurface.fromJson(Map<String, dynamic> json) {
+    return RpRevisionReviewSurface(
+      sessionId: json['session_id'] as String? ?? '',
+      artifactId: json['artifact_id'] as String? ?? '',
+      draftText: json['draft_text'] as String? ?? '',
+      draftDocument: RpDraftDocumentRecord.fromJson(
+        Map<String, dynamic>.from(json['draft_document'] as Map? ?? const {}),
+      ),
+      overlay: json['overlay'] is Map
+          ? Map<String, dynamic>.from(json['overlay'] as Map)
+          : const {},
+      comments: (json['comments'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                RpRevisionComment.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(),
+      trackedChanges: (json['tracked_changes'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => RpTrackedChange.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(),
+      activeCommentRefs: (json['active_comment_refs'] as List? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      activeTrackedChangeRefs:
+          (json['active_tracked_change_refs'] as List? ?? const [])
+              .map((item) => item.toString())
+              .toList(),
+      canonicalTruth: json['canonical_truth'] as bool? ?? false,
     );
   }
 }

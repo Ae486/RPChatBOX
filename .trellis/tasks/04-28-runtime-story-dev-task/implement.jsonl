@@ -1,9 +1,27 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend RP runtime specs and quality checklist for active story changes."}
-{"file": ".trellis/spec/backend/rp-active-story-block-prompt-context.md", "reason": "Story orchestrator/specialist prompt context boundaries and Block-backed runtime context."}
-{"file": ".trellis/spec/backend/rp-active-story-block-prompt-rendering.md", "reason": "Deterministic prompt overlay rendering for orchestrator and specialist."}
-{"file": ".trellis/spec/backend/rp-active-story-block-lazy-rebuild.md", "reason": "Cached prompt overlay and block consumer sync semantics used by story runtime."}
-{"file": ".trellis/spec/backend/rp-runtime-workspace-block-views.md", "reason": "Runtime Workspace read-only boundary for draft/discussion state."}
-{"file": ".trellis/spec/backend/rp-memory-temporal-materialization.md", "reason": "Layer ownership rules for current truth, projection, historical recall, source archival, and runtime scratch."}
-{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-design-gap-analysis.md", "reason": "Task-specific design gap analysis and agreed worker/mode-profile scope."}
-{"file": "docs/research/rp-redesign/new-architecture-overview.md", "reason": "Source design for Memory OS, Orchestrator Worker, Specialist Workers, WritingPacketBuilder, and WritingWorker."}
-{"file": "docs/research/rp-redesign/x08-memory-os-redesign-draft.md", "reason": "Source design for worker as Memory OS/runtime context manager and orchestrator worker output contract."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend project spec index and quality checklist for all RP runtime implementation work."}
+{"file": ".trellis/spec/backend/rp-runtime-identity-persistence-propagation.md", "reason": "Persistent BranchHead/StoryTurn identity, branch-aware propagation, and runtime-owned identity requirements."}
+{"file": ".trellis/spec/backend/rp-runtime-profile-snapshot-minimal-compiler.md", "reason": "Immutable RuntimeProfileSnapshot compile/publish/pin contract and turn-start pinning behavior."}
+{"file": ".trellis/spec/backend/rp-runtime-workspace-persistent-turn-material-store.md", "reason": "Durable Runtime Workspace turn-material persistence contract keyed by full runtime identity."}
+{"file": ".trellis/spec/backend/rp-persistent-memory-event-record-foundation.md", "reason": "Durable memory event record foundation for trace/invalidation without becoming a truth store."}
+{"file": ".trellis/spec/backend/rp-branch-visibility-resolver-lineage.md", "reason": "Branch lineage visibility rules across Core, Projection, Runtime Workspace, Recall, and Retrieval reads."}
+{"file": ".trellis/spec/backend/rp-core-projection-read-manifest-hardening.md", "reason": "Strict fact/view separation and deterministic packet-visible read manifest contract."}
+{"file": ".trellis/spec/backend/rp-retrieval-card-usage-promotion-boot-contract.md", "reason": "Retrieval-card materialization, explicit writer usage, and governed promotion inputs."}
+{"file": ".trellis/spec/backend/rp-worker-memory-tool-permission-boot-contract.md", "reason": "Worker-facing memory services, snapshot-derived permissions, and governed proposal/refresh metadata."}
+{"file": ".trellis/spec/backend/rp-shared-core-mutation-kernel-direct-edit.md", "reason": "Shared governed Core mutation kernel used by direct edit, worker apply, and related flows."}
+{"file": ".trellis/spec/backend/rp-memory-change-event-spine.md", "reason": "Shared lightweight event spine for trace, invalidation, and dirty-target reads."}
+{"file": ".trellis/spec/backend/rp-memory-temporal-materialization.md", "reason": "Layer ownership rules for current truth, projections, historical recall, archival sources, and runtime scratch."}
+{"file": ".trellis/spec/backend/rp-projection-refresh-write-contract.md", "reason": "Projection refresh metadata, source refs, freshness checks, and dirty marker contract."}
+{"file": ".trellis/spec/backend/rp-core-state-base-revision-conflict-enforcement.md", "reason": "Apply-side base revision conflict enforcement so stale mutations cannot overwrite newer truth."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/prd.md", "reason": "Task-level frozen product/runtime semantics and acceptance criteria."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-execution-plan.md", "reason": "Authoritative execution plan, slice order, concurrency limit, and main-brain rules for implementation phase."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-development-master-spec.md", "reason": "Canonical module map, contract freeze list, and parallel-development ownership rules."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-identity-profile-spec.md", "reason": "Canonical identity/profile/session/branch/snapshot contracts."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-workspace-ledger-trace-spec.md", "reason": "Canonical Turn/Workspace/Job/Trace contracts and settlement rules."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-worker-scheduler-spec.md", "reason": "Canonical worker registry, scheduler, and orchestrator plan contracts."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-context-packet-spec.md", "reason": "Canonical WritingPacket/WorkerContextPacket/ReadManifest contracts and packet boundaries."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-writing-worker-spec.md", "reason": "WritingWorker modes, longform action surface, discussion/rewrite rules, and finalize boundary."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-retrieval-spec.md", "reason": "Writer-side bounded retrieval, retrieval-card schema, usage hook, and knowledge-gap rules."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-postwrite-memory-governance-spec.md", "reason": "Post-write trigger rules, creation-time obligations, governance order, and settlement logic."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-spec.md", "reason": "Rollback anchor, branch receipts, visibility rules, and branch control semantics."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-adapter-debug-test-spec.md", "reason": "Adapter policy, debug read surfaces, test matrix, migration strategy, and phase-one support matrix."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-technical-research-and-pseudocode.md", "reason": "Additional technical research and pseudocode support for implementation slices."}

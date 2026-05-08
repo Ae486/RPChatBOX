@@ -22,7 +22,7 @@ from .story_llm_gateway import StoryLlmGateway
 
 
 class LongformOrchestratorService:
-    """Produce one minimal worker plan per story turn."""
+    """Produce legacy longform OrchestratorPlan values as adapter inputs."""
 
     def __init__(
         self,
@@ -164,8 +164,17 @@ class LongformOrchestratorService:
                 temperature=0.2,
                 max_tokens=600,
             )
-            return OrchestratorPlan.model_validate(
+            plan = OrchestratorPlan.model_validate(
                 self._llm_gateway.extract_json_object(raw)
+            )
+            return plan.model_copy(
+                update={
+                    "notes": [
+                        "adapter_input:legacy_orchestrator_plan",
+                        "not_canonical_worker_plan",
+                        *list(plan.notes),
+                    ]
+                }
             )
         except Exception:
             return fallback
@@ -205,7 +214,11 @@ class LongformOrchestratorService:
                     user_prompt
                     or "Draft a chapter outline that matches the blueprint and chapter goal."
                 ),
-                notes=["fallback_plan"],
+                notes=[
+                    "adapter_input:legacy_orchestrator_plan",
+                    "not_canonical_worker_plan",
+                    "fallback_plan",
+                ],
             )
         if command_kind == LongformTurnCommandKind.DISCUSS_OUTLINE:
             return OrchestratorPlan(
@@ -216,7 +229,11 @@ class LongformOrchestratorService:
                     user_prompt
                     or "Respond as a planning assistant about the current outline."
                 ),
-                notes=["fallback_plan"],
+                notes=[
+                    "adapter_input:legacy_orchestrator_plan",
+                    "not_canonical_worker_plan",
+                    "fallback_plan",
+                ],
             )
         if command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT:
             return OrchestratorPlan(
@@ -227,7 +244,11 @@ class LongformOrchestratorService:
                     user_prompt
                     or "Rewrite the pending segment while preserving chapter continuity."
                 ),
-                notes=["fallback_plan"],
+                notes=[
+                    "adapter_input:legacy_orchestrator_plan",
+                    "not_canonical_worker_plan",
+                    "fallback_plan",
+                ],
             )
         if command_kind in {
             LongformTurnCommandKind.ACCEPT_OUTLINE,
@@ -241,7 +262,12 @@ class LongformOrchestratorService:
                 recall_queries=[],
                 specialist_focus=["deterministic post-write regression"],
                 writer_instruction="Apply deterministic post-write regression without retrieval.",
-                notes=["fallback_plan", "deterministic_post_write"],
+                notes=[
+                    "adapter_input:legacy_orchestrator_plan",
+                    "not_canonical_worker_plan",
+                    "fallback_plan",
+                    "deterministic_post_write",
+                ],
             )
         return OrchestratorPlan(
             output_kind=StoryArtifactKind.STORY_SEGMENT,
@@ -279,7 +305,12 @@ class LongformOrchestratorService:
                 user_prompt
                 or "Write the next longform story segment for the current chapter."
             ),
-            notes=["fallback_plan", f"mode={session.mode}"],
+            notes=[
+                "adapter_input:legacy_orchestrator_plan",
+                "not_canonical_worker_plan",
+                "fallback_plan",
+                f"mode={session.mode}",
+            ],
         )
 
     @staticmethod

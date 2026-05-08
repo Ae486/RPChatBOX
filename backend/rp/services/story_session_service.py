@@ -10,10 +10,12 @@ from sqlalchemy import asc, desc
 from sqlmodel import Session, select
 
 from models.rp_story_store import (
+    BranchHeadRecord,
     ChapterWorkspaceRecord,
     StoryArtifactRecord,
     StoryDiscussionEntryRecord,
     StorySessionRecord,
+    StoryTurnRecord,
 )
 from rp.models.story_runtime import (
     ChapterWorkspace,
@@ -87,12 +89,15 @@ class StorySessionService:
         initial_phase: LongformChapterPhase,
     ) -> StorySession:
         now = _utcnow()
+        session_id = uuid4().hex
         record = StorySessionRecord(
-            session_id=uuid4().hex,
+            session_id=session_id,
             story_id=story_id,
             source_workspace_id=source_workspace_id,
             mode=mode,
             session_state=StorySessionState.ACTIVE.value,
+            active_branch_head_id=f"branch:{session_id}:main",
+            active_runtime_profile_snapshot_id=None,
             current_chapter_index=1,
             current_phase=initial_phase.value,
             runtime_story_config_json=dict(runtime_story_config),
@@ -115,6 +120,8 @@ class StorySessionService:
         current_phase: LongformChapterPhase | None = None,
         runtime_story_config_patch: dict | None = None,
         current_state_json: dict | None = None,
+        active_branch_head_id: str | None | object = _UNSET,
+        active_runtime_profile_snapshot_id: str | None | object = _UNSET,
     ) -> StorySession:
         record = self._require_session_record(session_id)
         if session_state is not None:
@@ -129,6 +136,13 @@ class StorySessionService:
             record.runtime_story_config_json = next_runtime_story_config
         if current_state_json is not None:
             record.current_state_json = dict(current_state_json)
+        if active_branch_head_id is not _UNSET:
+            record.active_branch_head_id = cast(str | None, active_branch_head_id)
+        if active_runtime_profile_snapshot_id is not _UNSET:
+            record.active_runtime_profile_snapshot_id = cast(
+                str | None,
+                active_runtime_profile_snapshot_id,
+            )
         record.updated_at = _utcnow()
         self._session.add(record)
         self._session.flush()
@@ -421,16 +435,142 @@ class StorySessionService:
             raise ValueError(
                 f"ChapterWorkspace not found: session={session_id} chapter={chapter_index}"
             )
+        artifacts = self.list_artifacts(
+            chapter_workspace_id=chapter.chapter_workspace_id
+        )
+        discussion_entries = self.list_discussion_entries(
+            chapter_workspace_id=chapter.chapter_workspace_id
+        )
+        (
+            artifacts,
+            discussion_entries,
+            hidden_artifact_ids,
+        ) = self._filter_active_branch_snapshot_items(
+            session_record=self._require_session_record(session_id),
+            artifacts=artifacts,
+            discussion_entries=discussion_entries,
+        )
+        if chapter.pending_segment_artifact_id in hidden_artifact_ids:
+            chapter = chapter.model_copy(update={"pending_segment_artifact_id": None})
         return ChapterWorkspaceSnapshot(
             session=session,
             chapter=chapter,
-            artifacts=self.list_artifacts(
-                chapter_workspace_id=chapter.chapter_workspace_id
-            ),
-            discussion_entries=self.list_discussion_entries(
-                chapter_workspace_id=chapter.chapter_workspace_id
-            ),
+            artifacts=artifacts,
+            discussion_entries=discussion_entries,
         )
+
+    def _filter_active_branch_snapshot_items(
+        self,
+        *,
+        session_record: StorySessionRecord,
+        artifacts: list[StoryArtifact],
+        discussion_entries: list[StoryDiscussionEntry],
+    ) -> tuple[list[StoryArtifact], list[StoryDiscussionEntry], set[str]]:
+        visible_turn_ids = self._active_branch_visible_turn_ids(
+            session_record=session_record
+        )
+        artifact_turn_ids = self._artifact_turn_ids_by_output_ref(
+            session_id=session_record.session_id
+        )
+        visible_artifacts: list[StoryArtifact] = []
+        hidden_artifact_ids: set[str] = set()
+        for artifact in artifacts:
+            turn_id = self._artifact_runtime_turn_id(artifact) or artifact_turn_ids.get(
+                artifact.artifact_id
+            )
+            if turn_id is None or turn_id in visible_turn_ids:
+                visible_artifacts.append(artifact)
+                continue
+            hidden_artifact_ids.add(artifact.artifact_id)
+
+        visible_discussion_entries = [
+            entry
+            for entry in discussion_entries
+            if not (
+                entry.linked_artifact_id is not None
+                and entry.linked_artifact_id in hidden_artifact_ids
+            )
+        ]
+        return visible_artifacts, visible_discussion_entries, hidden_artifact_ids
+
+    def _active_branch_visible_turn_ids(
+        self,
+        *,
+        session_record: StorySessionRecord,
+    ) -> set[str]:
+        branch_id = str(session_record.active_branch_head_id or "").strip()
+        if not branch_id:
+            return set()
+        visible_turn_ids: set[str] = set()
+        cutoff_turn_id: str | None = None
+        seen_branch_ids: set[str] = set()
+        branch = self._session.get(BranchHeadRecord, branch_id)
+        while branch is not None and branch.branch_head_id not in seen_branch_ids:
+            seen_branch_ids.add(branch.branch_head_id)
+            branch_cutoff = cutoff_turn_id or branch.head_turn_id
+            visible_turn_ids.update(
+                self._visible_turn_ids_through_cutoff(
+                    session_id=session_record.session_id,
+                    branch_head_id=branch.branch_head_id,
+                    cutoff_turn_id=branch_cutoff,
+                )
+            )
+            cutoff_turn_id = branch.forked_from_turn_id
+            parent_branch_id = str(branch.parent_branch_head_id or "").strip()
+            branch = (
+                self._session.get(BranchHeadRecord, parent_branch_id)
+                if parent_branch_id
+                else None
+            )
+        return visible_turn_ids
+
+    def _visible_turn_ids_through_cutoff(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str,
+        cutoff_turn_id: str | None,
+    ) -> set[str]:
+        normalized_cutoff = str(cutoff_turn_id or "").strip()
+        if not normalized_cutoff:
+            return set()
+        stmt = (
+            select(StoryTurnRecord)
+            .where(StoryTurnRecord.session_id == session_id)
+            .where(StoryTurnRecord.branch_head_id == branch_head_id)
+            .order_by(asc(StoryTurnRecord.created_at))
+            .order_by(asc(StoryTurnRecord.turn_id))
+        )
+        visible_turn_ids: set[str] = set()
+        for turn in self._session.exec(stmt).all():
+            if str(turn.visibility_state or "").strip() not in {
+                "hidden",
+                "invalidated",
+                "hidden_by_rollback",
+            }:
+                visible_turn_ids.add(turn.turn_id)
+            if turn.turn_id == normalized_cutoff:
+                break
+        return visible_turn_ids
+
+    def _artifact_turn_ids_by_output_ref(self, *, session_id: str) -> dict[str, str]:
+        stmt = select(StoryTurnRecord).where(StoryTurnRecord.session_id == session_id)
+        result: dict[str, str] = {}
+        for turn in self._session.exec(stmt).all():
+            for output_ref in (turn.visible_output_ref, turn.selected_output_ref):
+                artifact_id = str(output_ref or "").strip()
+                if artifact_id:
+                    result[artifact_id] = turn.turn_id
+        return result
+
+    @staticmethod
+    def _artifact_runtime_turn_id(artifact: StoryArtifact) -> str | None:
+        metadata = dict(artifact.metadata or {})
+        for key in ("runtime_turn_id", "turn_id"):
+            turn_id = str(metadata.get(key) or "").strip()
+            if turn_id:
+                return turn_id
+        return None
 
     def _require_session_record(self, session_id: str) -> StorySessionRecord:
         record = self._session.get(StorySessionRecord, session_id)
@@ -479,6 +619,10 @@ class StorySessionService:
                 "source_workspace_id": record.source_workspace_id,
                 "mode": record.mode,
                 "session_state": record.session_state,
+                "active_branch_head_id": record.active_branch_head_id,
+                "active_runtime_profile_snapshot_id": (
+                    record.active_runtime_profile_snapshot_id
+                ),
                 "current_chapter_index": record.current_chapter_index,
                 "current_phase": record.current_phase,
                 "runtime_story_config": record.runtime_story_config_json,

@@ -80,7 +80,7 @@ class SetupWorkspaceService:
         "foundation": SetupStepId.FOUNDATION,
         "longform_blueprint": SetupStepId.LONGFORM_BLUEPRINT,
     }
-    _LEGACY_STEP_FOR_STAGE = {
+    _LEGACY_STEP_FOR_STAGE: dict[SetupStageId, SetupStepId] = {
         SetupStageId.WORLD_BACKGROUND: SetupStepId.FOUNDATION,
         SetupStageId.CHARACTER_DESIGN: SetupStepId.FOUNDATION,
         SetupStageId.PLOT_BLUEPRINT: SetupStepId.LONGFORM_BLUEPRINT,
@@ -101,6 +101,10 @@ class SetupWorkspaceService:
     def get_stage_plan(self, mode: StoryMode) -> SetupModeStagePlan:
         return get_mode_stage_plan(mode.value)
 
+    @classmethod
+    def legacy_step_for_stage(cls, stage_id: SetupStageId) -> SetupStepId:
+        return cls._LEGACY_STEP_FOR_STAGE[stage_id]
+
     def create_workspace(self, *, story_id: str, mode: StoryMode) -> SetupWorkspace:
         existing = self._session.exec(
             select(SetupWorkspaceRecord).where(
@@ -119,7 +123,7 @@ class SetupWorkspaceService:
             story_id=story_id,
             mode=mode.value,
             workspace_state=SetupWorkspaceState.DRAFTING.value,
-            current_step=SetupStepId.FOUNDATION.value,
+            current_step=self.legacy_step_for_stage(first_stage).value,
             current_stage=first_stage.value,
             readiness_json=self._default_readiness_json(mode),
             activated_story_session_id=None,
@@ -894,8 +898,10 @@ class SetupWorkspaceService:
             )
             if stage_record.state != SetupStepLifecycleState.FROZEN.value:
                 workspace.current_stage = stage.value
+                workspace.current_step = self.legacy_step_for_stage(stage).value
                 return
         workspace.current_stage = current_stage.value
+        workspace.current_step = self.legacy_step_for_stage(current_stage).value
 
     def _refresh_readiness_record(self, workspace: SetupWorkspaceRecord) -> None:
         blocks = {
@@ -1343,7 +1349,7 @@ class SetupWorkspaceService:
     def _legacy_step_for_lifecycle_id(cls, value: str) -> SetupStepId:
         stage_id = cls._coerce_stage_id(value)
         if stage_id is not None:
-            return cls._LEGACY_STEP_FOR_STAGE[stage_id]
+            return cls.legacy_step_for_stage(stage_id)
         return SetupStepId(value)
 
     @staticmethod

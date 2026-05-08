@@ -11,10 +11,15 @@ from sqlmodel import select
 from models.rp_story_store import RuntimeProfileSnapshotRecord
 from rp.models.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
+    CoreMutationEnvelope,
     DirectCoreEditRequest,
 )
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_contract_registry import MemorySourceRef
+from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.memory_contract_registry import (
+    MemoryChangeEvent,
+    MemoryDirtyTarget,
+    MemorySourceRef,
+)
 from rp.models.memory_crud import (
     MemoryBlockProposalSubmitRequest,
     ProposalSubmitInput,
@@ -29,9 +34,11 @@ from rp.models.runtime_workspace_material import (
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import (
     LongformChapterPhase,
+    LongformTurnCommandKind,
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from rp.models.runtime_identity import StoryTurnStatus
 from rp.services.builder_projection_context_service import (
     BuilderProjectionContextService,
 )
@@ -49,6 +56,7 @@ from rp.services.proposal_workflow_service import ProposalWorkflowService
 from rp.services.projection_read_service import ProjectionReadService
 from rp.services.provenance_read_service import ProvenanceReadService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
@@ -63,11 +71,14 @@ from rp.services.story_runtime_controller import (
     MemoryBlockHistoryUnsupportedError,
     StoryRuntimeController,
 )
+from rp.services.story_runtime_debug_query_service import StoryRuntimeDebugQueryService
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story_runtime_migration_service import StoryRuntimeMigrationService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.version_history_read_service import VersionHistoryReadService
+from rp.services.memory_trace_read_service import MemoryTraceReadService
 
 
 class _Dumpable(dict):
@@ -217,6 +228,15 @@ def _build_controller(
         proposal_apply_service=proposal_apply_service,
         proposal_workflow_service=proposal_workflow_service,
     )
+    debug_query_service = StoryRuntimeDebugQueryService(
+        session=retrieval_session,
+        story_session_service=story_session_service,
+        runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+            retrieval_session
+        ),
+        memory_trace_read_service=MemoryTraceReadService(session=retrieval_session),
+        runtime_workflow_job_service=RuntimeWorkflowJobService(retrieval_session),
+    )
     return StoryRuntimeController(
         story_session_service=story_session_service,
         story_activation_service=cast(Any, SimpleNamespace()),
@@ -228,6 +248,10 @@ def _build_controller(
         story_block_mutation_service=block_mutation_service,
         runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
             retrieval_session
+        ),
+        story_runtime_debug_query_service=debug_query_service,
+        story_runtime_migration_service=StoryRuntimeMigrationService(
+            debug_query_service=debug_query_service,
         ),
     )
 
@@ -1442,3 +1466,414 @@ def test_story_runtime_controller_patch_publishes_new_active_snapshot(
         ]
         == "provider-patched"
     )
+
+
+def test_story_runtime_controller_reads_runtime_inspection_bundle(
+    retrieval_session,
+):
+    session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    controller = _build_controller(retrieval_session, story_session_service, repository)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.runtime.inspect",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write_next_segment",
+        actor="runtime.inspect.test",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    material_service = RuntimeWorkspaceMaterialService(
+        session=retrieval_session,
+        memory_change_event_service=MemoryChangeEventService(session=retrieval_session),
+    )
+    card_receipt = material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="inspect-card-r1",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+            identity=identity,
+            domain=Domain.CHAPTER.value,
+            domain_path="chapter.runtime.retrieval.card",
+            short_id="R1",
+            payload={"summary": "Storm callback evidence", "query_id": "query-1"},
+            visibility=RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value,
+            created_by="runtime.inspect.test",
+        )
+    )
+    usage_receipt = material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="inspect-usage-u1",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
+            identity=identity,
+            domain=Domain.CHAPTER.value,
+            domain_path="chapter.runtime.retrieval.usage",
+            short_id="U1",
+            lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
+            payload={
+                "used_card_short_ids": ["R1"],
+                "expanded_card_short_ids": [],
+                "unused_card_short_ids": [],
+                "used_card_material_ids": [card_receipt.material.material_id],
+                "used_expanded_chunk_material_ids": [],
+                "unused_card_material_ids": [],
+                "missed_query_short_ids": [],
+                "missed_query_material_ids": [],
+                "knowledge_gaps": [],
+            },
+            source_refs=[
+                MemorySourceRef(
+                    source_type="retrieval_card_material",
+                    source_id=card_receipt.material.material_id,
+                    layer="runtime_workspace",
+                    entry_id=card_receipt.material.material_id,
+                    metadata={"source_of_truth": False},
+                )
+            ],
+            visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
+            created_by="runtime.inspect.test",
+        )
+    )
+    packet_ref = material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="inspect-packet-ref",
+            material_kind=RuntimeWorkspaceMaterialKind.PACKET_REF,
+            identity=identity,
+            domain=Domain.CHAPTER.value,
+            domain_path="chapter.runtime.packet",
+            payload={
+                "packet_id": "packet-inspect-1",
+                "runtime_read_manifest_id": "manifest-inspect-1",
+                "packet_summary_metadata": {"section_counts": {"core_view_sections": 1}},
+            },
+            visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
+            created_by="runtime.inspect.test",
+        )
+    )
+    worker_evidence = material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="inspect-worker-evidence",
+            material_kind=RuntimeWorkspaceMaterialKind.WORKER_EVIDENCE_BUNDLE,
+            identity=identity,
+            domain=Domain.CHAPTER.value,
+            domain_path="chapter.runtime.worker.LongformMemoryWorker.evidence",
+            payload={
+                "worker_id": "LongformMemoryWorker",
+                "trace_summary": {
+                    "adapter_role": "legacy_executor_bridge",
+                    "canonical_contract_owner": "WorkerExecutionPlan",
+                },
+            },
+            visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
+            created_by="runtime.inspect.test",
+        )
+    )
+    event_service = MemoryChangeEventService(session=retrieval_session)
+    proposal = repository.create_proposal(
+        input_model=ProposalSubmitInput(
+            story_id=session.story_id,
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Inspection Chapter"},
+                }
+            ],
+            base_refs=[
+                ObjectRef(
+                    object_id="chapter.current",
+                    layer=Layer.CORE_STATE_AUTHORITATIVE,
+                    domain=Domain.CHAPTER,
+                    domain_path="chapter.current",
+                    scope="story",
+                    revision=1,
+                )
+            ],
+            reason="runtime inspect proposal",
+        ),
+        status="applied",
+        policy_decision="silent",
+        submit_source="test.runtime.inspect",
+        core_mutation_envelope=CoreMutationEnvelope(
+            identity=identity,
+            origin_kind=CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
+            actor="user.editor",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Inspection Chapter"},
+                }
+            ],
+            base_refs=[
+                ObjectRef(
+                    object_id="chapter.current",
+                    layer=Layer.CORE_STATE_AUTHORITATIVE,
+                    domain=Domain.CHAPTER,
+                    domain_path="chapter.current",
+                    scope="story",
+                    revision=1,
+                )
+            ],
+            source_refs=[
+                MemorySourceRef(
+                    source_type="runtime_workspace_material",
+                    source_id=usage_receipt.material.material_id,
+                    layer="runtime_workspace",
+                    domain=Domain.CHAPTER.value,
+                    entry_id=usage_receipt.material.material_id,
+                    metadata={"source_of_truth": False},
+                )
+            ],
+            trace_refs=["trace:runtime-inspect"],
+            reason="runtime inspect proposal",
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+    )
+    apply_receipt = repository.create_apply_receipt(
+        proposal_id=proposal.proposal_id,
+        story_id=session.story_id,
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        target_refs=[
+            ObjectRef(
+                object_id="chapter.current",
+                layer=Layer.CORE_STATE_AUTHORITATIVE,
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                scope="story",
+                revision=1,
+            )
+        ],
+        revision_after={"chapter.current": 2},
+        before_snapshot={"chapter_digest": {"title": "Before"}},
+        after_snapshot={"chapter_digest": {"title": "Inspection Chapter"}},
+        warnings=[],
+        apply_backend="runtime_inspect_test",
+    )
+    event_service.record_event(
+        MemoryChangeEvent(
+            event_id="runtime-inspect-event",
+            identity=identity,
+            actor="runtime.inspect.test",
+            event_kind="core_authoritative_mutation_applied",
+            layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+            domain=Domain.CHAPTER.value,
+            block_id="chapter.current",
+            entry_id=apply_receipt.apply_id,
+            operation_kind="core_mutation.apply",
+            source_refs=[
+                MemorySourceRef(
+                    source_type="memory_proposal",
+                    source_id=proposal.proposal_id,
+                    layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+                    domain=Domain.CHAPTER.value,
+                    block_id="chapter.current",
+                )
+            ],
+            dirty_targets=[
+                MemoryDirtyTarget(
+                    target_kind="projection_refresh_pending",
+                    target_id="chapter.current",
+                    layer=Layer.CORE_STATE_PROJECTION.value,
+                    domain=Domain.CHAPTER.value,
+                    block_id="projection:chapter.current",
+                    reason="authoritative_core_changed",
+                )
+            ],
+            visibility_effect="current_truth_updated",
+            metadata={
+                "proposal_id": proposal.proposal_id,
+                "apply_id": apply_receipt.apply_id,
+            },
+        )
+    )
+    job_service = RuntimeWorkflowJobService(retrieval_session)
+    job_service.ensure_creation_time_obligations(
+        identity=identity,
+        source_ref_ids=[packet_ref.material.material_id],
+        trace_refs=["worker_plan:worker-plan-inspect"],
+        metadata={"worker_plan_id": "worker-plan-inspect"},
+    )
+    identity_service.update_turn_status(
+        turn_id=identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref="artifact:inspect",
+        selected_output_ref="artifact:inspect",
+        settlement_reason="runtime_inspect_seeded",
+    )
+    branch_receipt = identity_service.rollback_to_turn(
+        session_id=session.session_id,
+        target_turn_id=identity.turn_id,
+        actor="runtime.inspect.test",
+    )
+    retrieval_session.commit()
+
+    payload = controller.read_runtime_inspection(
+        session_id=session.session_id,
+        turn_id=identity.turn_id,
+    )
+
+    assert payload["read_only"] is True
+    assert payload["selection"]["selected_turn_id"] == identity.turn_id
+    assert payload["selection"]["selected_branch_head_id"] == identity.branch_head_id
+    assert payload["runtime_profile_snapshot"]["runtime_profile_snapshot_id"] == (
+        identity.runtime_profile_snapshot_id
+    )
+    assert payload["branch_read_scope"]["active_branch_head_id"] == identity.branch_head_id
+    assert payload["writer_packet"]["runtime_read_manifest_ids"]
+    assert {
+        item["material_kind"] for item in payload["runtime_workspace"]["materials"]
+    } >= {
+        RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD.value,
+        RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD.value,
+        RuntimeWorkspaceMaterialKind.PACKET_REF.value,
+    }
+    assert payload["retrieval"]["usage_refs"][0]["material_id"] == (
+        usage_receipt.material.material_id
+    )
+    assert payload["worker_execution"]["prewrite_worker_results"][0]["material_id"] == (
+        worker_evidence.material.material_id
+    )
+    assert payload["proposal_governance"]["proposal_receipts"][0]["proposal"]["proposal_id"] == (
+        proposal.proposal_id
+    )
+    assert any(
+        item["event_id"] == "runtime-inspect-event"
+        for item in payload["memory_events"]["events"]
+    )
+    assert payload["job_ledger"]["items"]
+    assert any(
+        item["control_kind"] == branch_receipt.control_kind.value
+        for item in payload["branch_control_receipts"]
+    )
+    assert "read_only_debug_surface" in payload["boundaries"]
+
+
+def test_story_runtime_controller_reads_runtime_migration_summary(
+    retrieval_session,
+):
+    session, _, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    controller = _build_controller(retrieval_session, story_session_service, repository)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.runtime.migration",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+        actor="runtime.migration.test",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    material_service = RuntimeWorkspaceMaterialService(session=retrieval_session)
+    material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="migration-worker-evidence",
+            material_kind=RuntimeWorkspaceMaterialKind.WORKER_EVIDENCE_BUNDLE,
+            identity=identity,
+            domain=Domain.CHAPTER.value,
+            domain_path="chapter.runtime.worker.LongformMemoryWorker.evidence",
+            payload={
+                "worker_id": "LongformMemoryWorker",
+                "trace_summary": {
+                    "adapter_role": "legacy_executor_bridge",
+                    "canonical_contract_owner": "WorkerExecutionPlan",
+                },
+            },
+            visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
+            created_by="runtime.migration.test",
+        )
+    )
+    RuntimeWorkflowJobService(retrieval_session).ensure_creation_time_obligations(
+        identity=identity,
+        trace_refs=["worker_plan:worker-plan-migration"],
+        metadata={"worker_plan_id": "worker-plan-migration"},
+    )
+    retrieval_session.commit()
+
+    payload = controller.read_runtime_migration_summary(
+        session_id=session.session_id,
+        turn_id=identity.turn_id,
+    )
+
+    assert payload["read_only"] is True
+    assert payload["migration_flags"]["session_branch_anchor_pinned"] is True
+    assert payload["migration_flags"]["session_snapshot_anchor_pinned"] is True
+    assert payload["migration_flags"]["turn_trace_available"] is True
+    assert payload["migration_flags"]["worker_result_visible"] is True
+    assert payload["migration_flags"]["worker_plan_refs_visible"] is True
+    assert payload["migration_flags"]["legacy_fixed_chain_backslide_detected"] is False
+    assert payload["legacy_fixed_chain_backslide"] == {
+        "detected": False,
+        "reason_codes": [],
+    }
+    assert payload["compatibility_surfaces"]
+    assert any(
+        item["marker_id"] == "legacy_command_surface"
+        and item["value"] == LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value
+        for item in payload["observed_adapter_markers"]
+    )
+    assert any(
+        item["marker_id"] == "worker_result_adapter_role"
+        and item["value"] == "legacy_executor_bridge"
+        for item in payload["observed_adapter_markers"]
+    )
+    assert "migration_surface_is_read_only" in payload["boundaries"]
+
+
+def test_story_runtime_migration_summary_detects_fixed_chain_backslide():
+    detection = StoryRuntimeMigrationService._detect_legacy_fixed_chain_backslide(
+        inspection={
+            "worker_execution": {
+                "prewrite_worker_results": [
+                    {
+                        "material_id": "worker-evidence-without-plan",
+                        "payload": {
+                            "worker_id": "LongformMemoryWorker",
+                            "trace_summary": {
+                                "adapter_role": "legacy_executor_bridge",
+                                "canonical_contract_owner": "OrchestratorPlan",
+                            },
+                        },
+                    }
+                ],
+                "worker_plan_refs": [],
+            }
+        },
+        observed_markers=[],
+    )
+
+    assert detection == {
+        "detected": True,
+        "reason_codes": [
+            "legacy_adapter_without_worker_execution_plan_owner",
+            "worker_result_without_worker_plan_ref",
+        ],
+    }

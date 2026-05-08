@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import desc
@@ -13,10 +13,17 @@ from sqlmodel import Session, select
 
 from models.rp_story_store import RuntimeProfileSnapshotRecord, StorySessionRecord
 from rp.models.memory_contract_registry import MemoryLifecycleState
+from rp.models.post_write_policy import (
+    PostWriteMaintenancePolicy,
+    build_balanced_policy,
+    build_conservative_policy,
+)
 from rp.models.runtime_identity import (
+    RuntimeProfileBudgetLatencyPolicy,
     RuntimeProfileModeProfile,
     RuntimeProfileSnapshotCompiledProfile,
     RuntimeProfileSnapshotStatus,
+    RuntimeProfileWriterPolicy,
     RuntimeWorkerActivation,
 )
 from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
@@ -100,6 +107,10 @@ class RuntimeProfileSnapshotService:
     def publish_snapshot(self, snapshot_id: str) -> RuntimeProfileSnapshotRecord:
         record = self.require_snapshot(snapshot_id)
         if record.status == RuntimeProfileSnapshotStatus.ACTIVE.value:
+            self._pin_session_active_snapshot(
+                session_id=record.session_id,
+                snapshot_id=record.runtime_profile_snapshot_id,
+            )
             return record
 
         now = _utcnow()
@@ -122,6 +133,11 @@ class RuntimeProfileSnapshotService:
         record.activated_at = now
         record.superseded_at = None
         self._session.add(record)
+        self._pin_session_active_snapshot(
+            session_id=record.session_id,
+            snapshot_id=record.runtime_profile_snapshot_id,
+            updated_at=now,
+        )
         self._session.flush()
         return record
 
@@ -139,22 +155,44 @@ class RuntimeProfileSnapshotService:
         *,
         session_id: str,
     ) -> RuntimeProfileSnapshotRecord:
-        record = self._session.exec(
+        session_record = self._require_session_record(session_id)
+        pinned_snapshot_id = str(
+            session_record.active_runtime_profile_snapshot_id or ""
+        ).strip()
+        if pinned_snapshot_id:
+            record = self.require_snapshot(pinned_snapshot_id)
+            if record.session_id != session_id:
+                raise RuntimeProfileSnapshotServiceError(
+                    "runtime_profile_snapshot_activation_conflict",
+                    f"session_snapshot_mismatch:{session_id}",
+                )
+            if record.status != RuntimeProfileSnapshotStatus.ACTIVE.value:
+                raise RuntimeProfileSnapshotServiceError(
+                    "runtime_profile_snapshot_activation_conflict",
+                    f"session_snapshot_not_active:{pinned_snapshot_id}",
+                )
+            return record
+
+        active_record = self._session.exec(
             select(RuntimeProfileSnapshotRecord)
             .where(RuntimeProfileSnapshotRecord.session_id == session_id)
             .where(
                 RuntimeProfileSnapshotRecord.status
                 == RuntimeProfileSnapshotStatus.ACTIVE.value
             )
-            .order_by(desc(RuntimeProfileSnapshotRecord.activated_at))
-            .order_by(desc(RuntimeProfileSnapshotRecord.created_at))
+            .order_by(desc(cast(Any, RuntimeProfileSnapshotRecord.activated_at)))
+            .order_by(desc(cast(Any, RuntimeProfileSnapshotRecord.created_at)))
         ).first()
-        if record is None:
+        if active_record is None:
             raise RuntimeProfileSnapshotServiceError(
                 "runtime_profile_snapshot_no_active_snapshot",
                 session_id,
             )
-        return record
+        self._pin_session_active_snapshot(
+            session_id=session_id,
+            snapshot_id=active_record.runtime_profile_snapshot_id,
+        )
+        return active_record
 
     def ensure_active_snapshot(
         self,
@@ -199,6 +237,7 @@ class RuntimeProfileSnapshotService:
     ) -> RuntimeProfileSnapshotCompiledProfile:
         normalized_mode = str(session_record.mode or "").strip().lower()
         runtime_story_config = dict(session_record.runtime_story_config_json or {})
+        writer_contract = dict(session_record.writer_contract_json or {})
         retrieval_policy = (
             self._retrieval_runtime_config_service.resolve_session_config(
                 session_id=session_record.session_id
@@ -270,13 +309,15 @@ class RuntimeProfileSnapshotService:
         worker_permission_defaults: dict[str, dict[str, Any]] = {}
         worker_overrides = _dict_section(profile_config, "worker_overrides")
         for worker in registry_service.list_workers(include_hidden=True):
-            defaults = worker.mode_defaults.get(normalized_mode)
+            worker_defaults = worker.mode_defaults.get(normalized_mode)
             is_active = bool(
-                worker.lifecycle.value == "active" and defaults and defaults.active
+                worker.lifecycle.value == "active"
+                and worker_defaults
+                and worker_defaults.active
             )
             metadata = _merge_dict(
                 dict(worker.metadata or {}),
-                dict(defaults.metadata if defaults else {}),
+                dict(worker_defaults.metadata if worker_defaults else {}),
             )
             is_active = self._apply_worker_activation_policy(
                 is_active=is_active,
@@ -285,7 +326,9 @@ class RuntimeProfileSnapshotService:
             )
             worker_payload: dict[str, Any] = {
                 "active": is_active,
-                "profile_ref": defaults.profile_ref if defaults else None,
+                "profile_ref": (
+                    worker_defaults.profile_ref if worker_defaults else None
+                ),
                 "metadata": metadata,
             }
             worker_payload = _merge_dict(
@@ -299,7 +342,9 @@ class RuntimeProfileSnapshotService:
             )
             worker_permission_defaults[worker.worker_id] = _merge_dict(
                 dict(worker.permission_defaults or {}),
-                dict(defaults.permission_defaults if defaults else {}),
+                dict(
+                    worker_defaults.permission_defaults if worker_defaults else {}
+                ),
             )
 
         return RuntimeProfileSnapshotCompiledProfile(
@@ -352,6 +397,18 @@ class RuntimeProfileSnapshotService:
                     ],
                 },
                 _dict_section(profile_config, "packet_policy"),
+            ),
+            writer_policy=self._writer_policy(
+                normalized_mode=normalized_mode,
+                writer_contract=writer_contract,
+                profile_config=profile_config,
+            ),
+            post_write_policy=self._post_write_policy(
+                runtime_story_config=runtime_story_config,
+                profile_config=profile_config,
+            ),
+            budget_latency_policy=self._budget_latency_policy(
+                profile_config=profile_config
             ),
             writer_model_profile=_merge_dict(
                 {
@@ -429,6 +486,7 @@ class RuntimeProfileSnapshotService:
             "story_id": session_record.story_id,
             "mode": session_record.mode,
             "runtime_story_config": session_record.runtime_story_config_json or {},
+            "writer_contract": session_record.writer_contract_json or {},
             "profile_config": profile_config or {},
             "compiled_profile": compiled.model_dump(mode="json"),
         }
@@ -445,6 +503,21 @@ class RuntimeProfileSnapshotService:
                 f"story_session_not_found:{session_id}",
             )
         return record
+
+    def _pin_session_active_snapshot(
+        self,
+        *,
+        session_id: str,
+        snapshot_id: str,
+        updated_at: datetime | None = None,
+    ) -> None:
+        session_record = self._require_session_record(session_id)
+        if session_record.active_runtime_profile_snapshot_id == snapshot_id:
+            return
+        session_record.active_runtime_profile_snapshot_id = snapshot_id
+        session_record.updated_at = updated_at or _utcnow()
+        self._session.add(session_record)
+        self._session.flush()
 
     def _effective_registry_service(self) -> MemoryContractRegistryService:
         if self._registry_service is not None:
@@ -503,6 +576,69 @@ class RuntimeProfileSnapshotService:
                 profiles[worker_id] = {"worker_profile_ref": profile_ref}
         return profiles
 
+    @staticmethod
+    def _writer_policy(
+        *,
+        normalized_mode: str,
+        writer_contract: dict[str, Any],
+        profile_config: dict[str, Any],
+    ) -> RuntimeProfileWriterPolicy:
+        base = RuntimeProfileWriterPolicy(
+            supported_operation_modes=["writing", "rewrite", "discussion"],
+            retrieval_mode="bounded_tool_loop",
+            rewrite_requires_explicit_selection=(normalized_mode == "longform"),
+            discussion_summary_enabled=True,
+            pov_rules=_string_list(writer_contract.get("pov_rules")),
+            style_rules=_string_list(writer_contract.get("style_rules")),
+            writing_constraints=_string_list(
+                writer_contract.get("writing_constraints")
+            ),
+            task_writing_rules=_string_list(
+                writer_contract.get("task_writing_rules")
+            ),
+        )
+        override = _dict_section(profile_config, "writer_policy")
+        if not override:
+            return base
+        payload = _merge_dict(base.model_dump(mode="json"), override)
+        return RuntimeProfileWriterPolicy.model_validate(payload)
+
+    @staticmethod
+    def _post_write_policy(
+        *,
+        runtime_story_config: dict[str, Any],
+        profile_config: dict[str, Any],
+    ) -> PostWriteMaintenancePolicy:
+        preset = _optional_text(profile_config.get("post_write_policy_preset"))
+        if preset is None:
+            preset = _optional_text(runtime_story_config.get("post_write_policy_preset"))
+        if preset == "conservative":
+            base = build_conservative_policy()
+        else:
+            base = build_balanced_policy()
+        override = _dict_section(profile_config, "post_write_policy")
+        if not override:
+            return base
+        payload = _merge_dict(base.model_dump(mode="json"), override)
+        return PostWriteMaintenancePolicy.model_validate(payload)
+
+    @staticmethod
+    def _budget_latency_policy(
+        *,
+        profile_config: dict[str, Any],
+    ) -> RuntimeProfileBudgetLatencyPolicy:
+        base = RuntimeProfileBudgetLatencyPolicy(
+            max_blocking_analysis_workers=1,
+            max_writer_workers=1,
+            token_usage_source="provider_usage_metadata",
+            prewrite_estimation_enabled=True,
+        )
+        override = _dict_section(profile_config, "budget_latency_policy")
+        if not override:
+            return base
+        payload = _merge_dict(base.model_dump(mode="json"), override)
+        return RuntimeProfileBudgetLatencyPolicy.model_validate(payload)
+
 
 def _optional_text(value: object) -> str | None:
     normalized = str(value or "").strip()
@@ -530,6 +666,17 @@ def _optional_int(value: object) -> int | None:
 def _dict_section(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    for item in value:
+        text = _optional_text(item)
+        if text is not None:
+            normalized.append(text)
+    return normalized
 
 
 def _merge_dict(

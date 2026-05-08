@@ -12,7 +12,7 @@ from rp.models.setup_drafts import (
     SetupStageDraftBlock,
 )
 from rp.models.setup_stage import SetupStageId, get_stage_module
-from rp.models.setup_workspace import SetupStepLifecycleState, StoryMode
+from rp.models.setup_workspace import SetupStepId, SetupStepLifecycleState, StoryMode
 from rp.services.setup_workspace_service import SetupWorkspaceService
 
 
@@ -253,6 +253,67 @@ def test_stage_commit_freezes_only_current_stage_and_advances_stage_lifecycle(
         == SetupStepLifecycleState.DISCUSSING
     )
     assert workspace.current_step.value == "foundation"
+
+
+def test_stage_commit_updates_current_step_when_stage_crosses_legacy_bucket(
+    retrieval_session,
+):
+    service = SetupWorkspaceService(retrieval_session)
+    workspace = service.create_workspace(
+        story_id="story-stage-commit-2",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace = service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=_stage_block(
+            SetupStageId.WORLD_BACKGROUND,
+            "race_elf",
+            "world_background.race.elf",
+        ),
+    )
+    proposal = service.propose_stage_commit(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        target_draft_refs=["stage:world_background:race_elf"],
+    )
+    service.accept_commit(
+        workspace_id=workspace.workspace_id,
+        proposal_id=proposal.proposal_id,
+    )
+
+    workspace = service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.CHARACTER_DESIGN,
+        draft=_stage_block(
+            SetupStageId.CHARACTER_DESIGN,
+            "hero_lin",
+            "character_design.protagonist.lin",
+        ),
+    )
+    proposal = service.propose_stage_commit(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.CHARACTER_DESIGN,
+        target_draft_refs=["stage:character_design:hero_lin"],
+    )
+    service.accept_commit(
+        workspace_id=workspace.workspace_id,
+        proposal_id=proposal.proposal_id,
+    )
+    workspace = service.get_workspace(workspace.workspace_id)
+
+    assert workspace is not None
+    assert workspace.current_stage == SetupStageId.PLOT_BLUEPRINT
+    assert workspace.current_step == SetupStepId.LONGFORM_BLUEPRINT
+    state_by_stage = {state.stage_id: state for state in workspace.stage_states}
+    assert (
+        state_by_stage[SetupStageId.CHARACTER_DESIGN].state
+        == SetupStepLifecycleState.FROZEN
+    )
+    assert (
+        state_by_stage[SetupStageId.PLOT_BLUEPRINT].state
+        == SetupStepLifecycleState.DISCUSSING
+    )
 
 
 def test_stage_commit_rejects_structurally_invalid_stored_stage_payload(

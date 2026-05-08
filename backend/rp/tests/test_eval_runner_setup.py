@@ -605,6 +605,119 @@ async def test_eval_runner_can_seed_cognitive_state_and_expose_eval_artifacts(
     )
 
 
+@pytest.mark.asyncio
+async def test_eval_runner_scores_stage_aware_setup_expectations(
+    retrieval_session,
+    monkeypatch,
+):
+    get_provider_registry_service.cache_clear()
+    import services.model_registry as model_registry_module
+
+    model_registry_module._model_registry_service = None
+
+    provider_service = get_provider_registry_service()
+    model_service = get_model_registry_service()
+    provider_service.upsert_entry(
+        ProviderRegistryEntry(
+            id="provider-eval-stage",
+            name="Eval Provider Stage",
+            type="openai",
+            api_key="sk-test",
+            api_url="https://example.com/v1",
+            custom_headers={},
+            is_enabled=True,
+        )
+    )
+    model_service.upsert_entry(
+        ModelRegistryEntry(
+            id="model-eval-stage",
+            provider_id="provider-eval-stage",
+            model_name="gpt-4o-mini",
+            display_name="Eval Model Stage",
+            capabilities=["text", "tool"],
+            is_enabled=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _DiscussionOnlyLLMService(),
+    )
+
+    case = EvalCase.model_validate(
+        {
+            "case_id": "setup.stage_alignment.character_design.v1",
+            "title": "Stage-aware setup eval reuses existing metadata surfaces",
+            "scope": "setup",
+            "category": "stage_alignment",
+            "runtime_target": {
+                "mode": "in_process",
+                "entrypoint": "setup_graph_runner.run_turn",
+                "graph_id": "setup_v2",
+                "stream": False,
+            },
+            "input": {
+                "request": {
+                    "workspace_id": "workspace-case-stage-1",
+                    "model_id": "model-eval-stage",
+                    "provider_id": "provider-eval-stage",
+                    "target_step": "foundation",
+                    "target_stage": "character_design",
+                    "user_prompt": "继续讨论当前角色设定阶段。",
+                    "history": [],
+                },
+                "workspace_seed": {
+                    "story_id": "story-eval-stage-1",
+                    "mode": "longform",
+                    "current_step": "foundation",
+                },
+                "env_overrides": {},
+            },
+            "preconditions": {},
+            "expected": {
+                "deterministic_assertions": [],
+                "subjective_hooks": [],
+                "expected_target_stage": "character_design",
+                "expected_effective_stage": "character_design",
+            },
+            "trace_hooks": {
+                "capture_runtime_events": True,
+                "capture_graph_debug": True,
+                "capture_workspace_before_after": True,
+            },
+            "repeat": {"count": 1, "stop_on_first_hard_failure": False},
+            "baseline": {"compare_by": [], "baseline_tags": ["main"]},
+            "metadata": {},
+        }
+    )
+
+    runner = EvalRunner(retrieval_session)
+    result = await runner.run_case(case)
+
+    assert result.run.status == "completed"
+    assert result.run.metadata["target_stage"] == "character_design"
+    assert result.trace.spans[0].attributes["setup_stage"] == "character_design"
+    assert {
+        score.name: score.status
+        for score in result.scores
+        if score.name
+        in {
+            "diagnostic.target_stage_alignment",
+            "diagnostic.effective_stage_alignment",
+        }
+    } == {
+        "diagnostic.target_stage_alignment": "pass",
+        "diagnostic.effective_stage_alignment": "pass",
+    }
+    assert result.report["diagnostic_expectation_summary"] == {
+        "total": 2,
+        "pass": 2,
+        "fail": 0,
+        "warn": 0,
+        "skip": 0,
+    }
+
+
 def test_materialize_isolated_case_merges_retrieval_runtime_overrides(retrieval_session):
     runner = EvalRunner(retrieval_session)
     case = load_case(str(_case_path("retrieval", "search", "query_trace_and_provenance.v1.json")))

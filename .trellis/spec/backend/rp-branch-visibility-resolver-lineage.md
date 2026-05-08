@@ -76,6 +76,17 @@ hidden_after_turn_id (optional)
 selected_branch_head_ids_json (optional)
 ```
 
+For legacy longform artifact compatibility, `StoryArtifact.metadata` must also carry runtime ownership when the artifact is produced by the runtime:
+
+```text
+runtime_session_id
+runtime_branch_head_id
+runtime_turn_id
+runtime_profile_snapshot_id
+```
+
+These fields are required because draft/rewrite candidates may exist without being the `visible_output_ref` or `selected_output_ref` of a turn. Branch-aware artifact reads must consult artifact runtime ownership metadata before falling back to output-ref lookup.
+
 ### 3. Contracts
 
 #### Ownership contract
@@ -144,6 +155,8 @@ selected_branch_head_ids_json (optional)
 | Branch A writes post-fork Workspace/Recall material | Branch B runtime reads do not see it |
 | Runtime read/search omits explicit branch filter | Active branch visibility still applies |
 | Rollback to turn N occurs | Turn N+1 runtime materials become hidden from default runtime reads |
+| Rollback hides a later draft/rewrite candidate | The candidate artifact is absent from active branch snapshots |
+| `pending_segment_artifact_id` points to a hidden artifact | Snapshot returns no pending segment pointer |
 | Archival seed content exists | Visible as `story_global` unless later branch-local evolution explicitly changes visibility |
 | Active Story Evolution creates new archival content | Visible only to the current branch unless explicitly promoted wider |
 | Debug/admin path requests cross-branch read | Allowed only through explicit traceable path |
@@ -153,6 +166,8 @@ selected_branch_head_ids_json (optional)
 - Good: branch creation adds metadata and lineage, but does not clone all Core/Recall/Workspace rows.
 - Good: Runtime Workspace cards created on branch A stay invisible on branch B.
 - Good: Recall summaries created after a rollback point are hidden from default runtime retrieval for that branch.
+- Good: rewrite candidates produced after a rollback cutoff are hidden even if they were never selected/visible outputs.
+- Good: chapter pending pointers are cleared in the returned snapshot when they target hidden artifacts.
 - Base: physical purge remains later work; boot behavior relies on visibility-state filtering first.
 - Bad: copying all retrieval chunks and embeddings into a new branch at branch creation time.
 - Bad: treating LangGraph checkpoint replay as sufficient branch visibility enforcement.
@@ -167,6 +182,9 @@ selected_branch_head_ids_json (optional)
 - Integration tests cover:
   - Core / Projection / Runtime Workspace / Recall / RetrievalBroker runtime reads all respect active visibility;
   - optional `branch_ids` style filters do not bypass active visibility for runtime paths.
+- Snapshot tests cover:
+  - artifact visibility uses `runtime_turn_id` / `runtime_branch_head_id` metadata when output-ref lookup is insufficient;
+  - `pending_segment_artifact_id` is cleared from the returned snapshot when the target artifact is hidden.
 - Focused lint/type checks must include the resolver contract and tests.
 
 ### 7. Wrong vs Correct
@@ -193,3 +211,21 @@ visible = branch_visibility_resolver.is_visible(
 ```
 
 Runtime reads first resolve active branch lineage and then apply visibility as an application-layer contract.
+
+#### Wrong
+
+```python
+pending = chapter.pending_segment_artifact_id
+```
+
+This trusts a stored chapter pointer even when the target artifact belongs to a future turn hidden by rollback.
+
+#### Correct
+
+```python
+artifacts, hidden_artifact_ids = filter_artifacts_by_active_branch(snapshot_artifacts)
+if chapter.pending_segment_artifact_id in hidden_artifact_ids:
+    chapter = chapter.model_copy(update={"pending_segment_artifact_id": None})
+```
+
+Snapshot composition must filter both visible artifact lists and branch-sensitive pointers derived from those artifacts.

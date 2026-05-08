@@ -795,14 +795,32 @@ class MemoryTraceReadService:
                 {
                     "material_id": material["material_id"],
                     "short_id": material.get("short_id"),
+                    "used_card_short_ids": _list_of_text(
+                        payload.get("used_card_short_ids")
+                    ),
+                    "expanded_card_short_ids": _list_of_text(
+                        payload.get("expanded_card_short_ids")
+                    ),
+                    "unused_card_short_ids": _list_of_text(
+                        payload.get("unused_card_short_ids")
+                    ),
                     "used_card_material_ids": _list_of_text(
                         payload.get("used_card_material_ids")
                     ),
                     "used_expanded_chunk_material_ids": _list_of_text(
                         payload.get("used_expanded_chunk_material_ids")
                     ),
+                    "unused_card_material_ids": _list_of_text(
+                        payload.get("unused_card_material_ids")
+                    ),
+                    "missed_query_short_ids": _list_of_text(
+                        payload.get("missed_query_short_ids")
+                    ),
                     "missed_query_material_ids": _list_of_text(
                         payload.get("missed_query_material_ids")
+                    ),
+                    "knowledge_gaps": _list_of_dicts(
+                        payload.get("knowledge_gaps")
                     ),
                     "source_refs": clone_json_value(material.get("source_refs", [])),
                 }

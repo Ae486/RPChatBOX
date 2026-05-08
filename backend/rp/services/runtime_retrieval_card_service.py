@@ -15,6 +15,10 @@ from rp.models.memory_crud import (
     RetrievalHit,
     RetrievalSearchResult,
 )
+from rp.models.retrieval_runtime_contracts import (
+    RetrievalKnowledgeGapItem,
+    RetrievalUsageRecordPayload,
+)
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
@@ -56,6 +60,7 @@ class RuntimeRetrievalCardService:
         identity: MemoryRuntimeIdentity,
         input_model: MemorySearchRecallInput,
         actor: str,
+        attempt_index: int = 1,
     ) -> tuple[
         RetrievalSearchResult,
         list[RuntimeWorkspaceMaterial],
@@ -68,6 +73,7 @@ class RuntimeRetrievalCardService:
             actor=actor,
             query_text=input_model.query,
             search_kind="recall",
+            attempt_index=attempt_index,
         )
 
     async def search_archival_to_cards(
@@ -76,6 +82,7 @@ class RuntimeRetrievalCardService:
         identity: MemoryRuntimeIdentity,
         input_model: MemorySearchArchivalInput,
         actor: str,
+        attempt_index: int = 1,
     ) -> tuple[
         RetrievalSearchResult,
         list[RuntimeWorkspaceMaterial],
@@ -88,6 +95,7 @@ class RuntimeRetrievalCardService:
             actor=actor,
             query_text=input_model.query,
             search_kind="archival",
+            attempt_index=attempt_index,
         )
 
     def materialize_search_result(
@@ -98,6 +106,7 @@ class RuntimeRetrievalCardService:
         actor: str,
         query_text: str,
         search_kind: str,
+        attempt_index: int = 1,
     ) -> tuple[
         RetrievalSearchResult,
         list[RuntimeWorkspaceMaterial],
@@ -109,6 +118,7 @@ class RuntimeRetrievalCardService:
             actor=actor,
             query_text=query_text,
             search_kind=search_kind,
+            attempt_index=attempt_index,
         )
 
     def expand_cards(
@@ -153,6 +163,24 @@ class RuntimeRetrievalCardService:
             )
         return expanded
 
+    def expand_cards_by_refs(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        card_refs: list[str],
+        actor: str,
+    ) -> list[RuntimeWorkspaceMaterial]:
+        cards = self._resolve_existing_materials(
+            identity=identity,
+            material_refs=card_refs,
+            expected_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+        )
+        return self.expand_cards(
+            identity=identity,
+            card_material_ids=[card.material_id for card in cards],
+            actor=actor,
+        )
+
     def record_writer_usage(
         self,
         *,
@@ -161,35 +189,64 @@ class RuntimeRetrievalCardService:
         used_expanded_chunk_ids: list[str],
         missed_query_ids: list[str] | None = None,
         actor: str,
+        knowledge_gaps: list[RetrievalKnowledgeGapItem | dict[str, object]] | None = None,
     ) -> RuntimeWorkspaceMaterial:
-        card_material_ids = self._normalize_existing_material_ids(
+        used_cards = self._resolve_existing_materials(
             identity=identity,
-            material_ids=used_card_ids,
+            material_refs=used_card_ids,
             expected_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
         )
-        expanded_material_ids = self._normalize_existing_material_ids(
+        used_expanded_chunks = self._resolve_existing_materials(
             identity=identity,
-            material_ids=used_expanded_chunk_ids,
+            material_refs=used_expanded_chunk_ids,
             expected_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_EXPANDED_CHUNK,
         )
-        missed_material_ids = self._normalize_existing_material_ids(
+        missed_queries = self._resolve_existing_materials(
             identity=identity,
-            material_ids=missed_query_ids or [],
+            material_refs=missed_query_ids or [],
             expected_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_MISS,
         )
+        used_card_material_ids = [material.material_id for material in used_cards]
+        used_expanded_chunk_material_ids = [
+            material.material_id for material in used_expanded_chunks
+        ]
+        missed_query_material_ids = [material.material_id for material in missed_queries]
+        parent_cards_for_used_expanded_chunks = self._parent_cards_for_expanded_chunks(
+            identity=identity,
+            expanded_chunks=used_expanded_chunks,
+        )
+        unused_cards = self._derive_unused_cards(
+            identity=identity,
+            used_cards=used_cards,
+            parent_cards_for_used_expanded_chunks=parent_cards_for_used_expanded_chunks,
+        )
+        payload = RetrievalUsageRecordPayload(
+            used_card_short_ids=self._material_short_ids(used_cards),
+            expanded_card_short_ids=self._material_short_ids(
+                parent_cards_for_used_expanded_chunks
+            ),
+            unused_card_short_ids=self._material_short_ids(unused_cards),
+            used_card_material_ids=used_card_material_ids,
+            used_expanded_chunk_material_ids=used_expanded_chunk_material_ids,
+            unused_card_material_ids=[
+                material.material_id for material in unused_cards
+            ],
+            missed_query_short_ids=self._material_short_ids(missed_queries),
+            missed_query_material_ids=missed_query_material_ids,
+            knowledge_gaps=self._normalize_knowledge_gaps(knowledge_gaps),
+        )
         bundle = WorkerSourceRefBundle(
-            retrieval_card_material_ids=card_material_ids,
-            retrieval_expanded_chunk_material_ids=expanded_material_ids,
+            retrieval_card_material_ids=used_card_material_ids,
+            retrieval_expanded_chunk_material_ids=used_expanded_chunk_material_ids,
             retrieval_usage_material_ids=[],
         )
         existing = self._find_existing_usage_record(
             identity=identity,
-            card_material_ids=card_material_ids,
-            expanded_material_ids=expanded_material_ids,
-            missed_material_ids=missed_material_ids,
+            payload=payload,
         )
         if existing is not None:
             return existing
+        payload_dict = payload.model_dump(mode="json")
         material = RuntimeWorkspaceMaterial(
             material_id=f"retrieval_usage_{uuid4().hex}",
             material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
@@ -201,11 +258,7 @@ class RuntimeRetrievalCardService:
                 prefix="U",
                 material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
             ),
-            payload={
-                "used_card_material_ids": card_material_ids,
-                "used_expanded_chunk_material_ids": expanded_material_ids,
-                "missed_query_material_ids": missed_material_ids,
-            },
+            payload=payload_dict,
             lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
             visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
             created_by=actor,
@@ -217,11 +270,19 @@ class RuntimeRetrievalCardService:
                     layer="runtime_workspace",
                     metadata={"source_of_truth": False},
                 )
-                for material_id in missed_material_ids
+                for material_id in missed_query_material_ids
             ],
             metadata={
                 "usage_kind": "writer_explicit",
                 "governed_promotion_only": True,
+                "contract_version": "runtime_retrieval_usage_d2",
+                "expanded_card_short_ids_population": (
+                    "derived_from_used_expanded_chunk_refs_until_e2_writer_loop"
+                ),
+                "unused_card_derivation": (
+                    "writer_visible_cards_minus_used_cards_and_parent_cards_of_used_expanded_chunks"
+                ),
+                "knowledge_gap_support": "structured_optional",
             },
         )
         return self._workspace().record_material(material).material
@@ -309,6 +370,17 @@ class RuntimeRetrievalCardService:
             == RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value
         ]
 
+    def require_material(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        material_id: str,
+    ) -> RuntimeWorkspaceMaterial:
+        return self._workspace().require_material(
+            identity=identity,
+            material_id=material_id,
+        )
+
     def _materialize_search_result(
         self,
         *,
@@ -317,6 +389,7 @@ class RuntimeRetrievalCardService:
         actor: str,
         query_text: str,
         search_kind: str,
+        attempt_index: int,
     ) -> tuple[
         RetrievalSearchResult,
         list[RuntimeWorkspaceMaterial],
@@ -328,6 +401,8 @@ class RuntimeRetrievalCardService:
                 hit=hit,
                 actor=actor,
                 search_kind=search_kind,
+                query_text=query_text,
+                attempt_index=attempt_index,
             )
             for hit in list(getattr(result, "hits", []))
         ]
@@ -339,6 +414,7 @@ class RuntimeRetrievalCardService:
                 actor=actor,
                 search_kind=search_kind,
                 warnings=list(getattr(result, "warnings", [])),
+                attempt_index=attempt_index,
             )
         return result, cards, miss
 
@@ -349,6 +425,8 @@ class RuntimeRetrievalCardService:
         hit: RetrievalHit,
         actor: str,
         search_kind: str,
+        query_text: str,
+        attempt_index: int,
     ) -> RuntimeWorkspaceMaterial:
         material = RuntimeWorkspaceMaterial(
             material_id=f"retrieval_card_{uuid4().hex}",
@@ -364,6 +442,7 @@ class RuntimeRetrievalCardService:
             payload={
                 "hit_id": hit.hit_id,
                 "query_id": hit.query_id,
+                "query_text": query_text,
                 "search_kind": search_kind,
                 "excerpt": hit.excerpt_text,
                 "summary": hit.excerpt_text[:220],
@@ -397,6 +476,8 @@ class RuntimeRetrievalCardService:
             metadata={
                 "search_kind": search_kind,
                 "query_id": hit.query_id,
+                "query_text": query_text,
+                "attempt_index": attempt_index,
                 "retrieval_layer": hit.layer,
                 "raw_dump_passthrough": False,
             },
@@ -436,6 +517,7 @@ class RuntimeRetrievalCardService:
             ),
             payload={
                 "card_material_id": card.material_id,
+                "card_short_id": card.short_id,
                 "chunk_id": expanded_payload["chunk_id"],
                 "chunk_index": expanded_payload["chunk_index"],
                 "title": expanded_payload.get("title"),
@@ -476,6 +558,7 @@ class RuntimeRetrievalCardService:
             ],
             metadata={
                 "expanded_from_card_material_id": card.material_id,
+                "expanded_from_card_short_id": card.short_id,
                 "raw_dump_passthrough": False,
             },
         )
@@ -489,6 +572,7 @@ class RuntimeRetrievalCardService:
         actor: str,
         search_kind: str,
         warnings: list[str],
+        attempt_index: int,
     ) -> RuntimeWorkspaceMaterial:
         material = RuntimeWorkspaceMaterial(
             material_id=f"retrieval_miss_{uuid4().hex}",
@@ -503,12 +587,18 @@ class RuntimeRetrievalCardService:
             ),
             payload={
                 "query": query_text,
+                "query_text": query_text,
                 "search_kind": search_kind,
+                "attempt_index": attempt_index,
+                "miss_reason": "search_no_hit",
                 "warnings": list(warnings),
             },
             visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
             created_by=actor,
-            metadata={"miss_kind": "search_no_hit"},
+            metadata={
+                "miss_kind": "search_no_hit",
+                "attempt_index": attempt_index,
+            },
         )
         return self._workspace().record_material(material).material
 
@@ -534,31 +624,50 @@ class RuntimeRetrievalCardService:
                 return candidate
         raise AssertionError("unreachable")
 
-    def _normalize_existing_material_ids(
+    def _resolve_existing_materials(
         self,
         *,
         identity: MemoryRuntimeIdentity,
-        material_ids: list[str],
+        material_refs: list[str],
         expected_kind: RuntimeWorkspaceMaterialKind,
-    ) -> list[str]:
+    ) -> list[RuntimeWorkspaceMaterial]:
+        materials_by_short_id = {
+            str(material.short_id or "").strip().upper(): material
+            for material in self._workspace().list_materials(
+                identity=identity,
+                material_kind=expected_kind,
+            )
+            if material.short_id
+        }
         normalized: list[str] = []
+        resolved: list[RuntimeWorkspaceMaterial] = []
         seen: set[str] = set()
-        for material_id in material_ids:
-            value = str(material_id or "").strip()
+        for material_ref in material_refs:
+            value = str(material_ref or "").strip()
             if not value or value in seen:
                 continue
-            seen.add(value)
-            material = self._workspace().require_material(
+            material = self._workspace().get_material(
                 identity=identity,
                 material_id=value,
             )
-            if material.material_kind != expected_kind:
+            if material is None:
+                material = materials_by_short_id.get(value.upper())
+                if material is None:
+                    raise RuntimeRetrievalCardServiceError(
+                        "runtime_retrieval_material_reference_not_found",
+                        value,
+                    )
+            elif material.material_kind != expected_kind:
                 raise RuntimeRetrievalCardServiceError(
                     "runtime_retrieval_material_kind_mismatch",
                     value,
                 )
-            normalized.append(value)
-        return normalized
+            seen.add(value)
+            if material.material_id in normalized:
+                continue
+            normalized.append(material.material_id)
+            resolved.append(material)
+        return resolved
 
     def _workspace(self) -> RuntimeWorkspaceMaterialService:
         if self._runtime_workspace_material_service is not None:
@@ -569,23 +678,100 @@ class RuntimeRetrievalCardService:
         self,
         *,
         identity: MemoryRuntimeIdentity,
-        card_material_ids: list[str],
-        expanded_material_ids: list[str],
-        missed_material_ids: list[str],
+        payload: RetrievalUsageRecordPayload,
     ) -> RuntimeWorkspaceMaterial | None:
+        payload_dict = payload.model_dump(mode="json")
         for material in self._workspace().list_materials(
             identity=identity,
             material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
         ):
-            payload = dict(material.payload or {})
-            if payload.get("used_card_material_ids") != card_material_ids:
-                continue
-            if payload.get("used_expanded_chunk_material_ids") != expanded_material_ids:
-                continue
-            if payload.get("missed_query_material_ids") != missed_material_ids:
-                continue
-            return material
+            if dict(material.payload or {}) == payload_dict:
+                return material
         return None
+
+    def _derive_unused_cards(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        used_cards: list[RuntimeWorkspaceMaterial],
+        parent_cards_for_used_expanded_chunks: list[RuntimeWorkspaceMaterial],
+    ) -> list[RuntimeWorkspaceMaterial]:
+        consumed_card_ids = {
+            material.material_id for material in used_cards
+        } | {
+            material.material_id for material in parent_cards_for_used_expanded_chunks
+        }
+        return [
+            material
+            for material in self.list_writer_visible_materials(identity=identity)
+            if material.material_kind == RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD
+            and material.material_id not in consumed_card_ids
+        ]
+
+    def _parent_cards_for_expanded_chunks(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        expanded_chunks: list[RuntimeWorkspaceMaterial],
+    ) -> list[RuntimeWorkspaceMaterial]:
+        parents: list[RuntimeWorkspaceMaterial] = []
+        seen: set[str] = set()
+        for material in expanded_chunks:
+            card_material_id = str(material.payload.get("card_material_id") or "").strip()
+            if not card_material_id:
+                raise RuntimeRetrievalCardServiceError(
+                    "runtime_retrieval_expanded_chunk_card_missing",
+                    material.material_id,
+                )
+            if card_material_id in seen:
+                continue
+            seen.add(card_material_id)
+            parent = self._workspace().require_material(
+                identity=identity,
+                material_id=card_material_id,
+            )
+            if parent.material_kind != RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD:
+                raise RuntimeRetrievalCardServiceError(
+                    "runtime_retrieval_material_kind_mismatch",
+                    card_material_id,
+                )
+            parents.append(parent)
+        return parents
+
+    def _material_short_ids(
+        self,
+        materials: list[RuntimeWorkspaceMaterial],
+    ) -> list[str]:
+        short_ids: list[str] = []
+        seen: set[str] = set()
+        for material in materials:
+            short_id = str(material.short_id or "").strip()
+            if not short_id:
+                raise RuntimeRetrievalCardServiceError(
+                    "runtime_retrieval_material_short_id_missing",
+                    material.material_id,
+                )
+            if short_id in seen:
+                continue
+            seen.add(short_id)
+            short_ids.append(short_id)
+        return short_ids
+
+    @staticmethod
+    def _normalize_knowledge_gaps(
+        knowledge_gaps: list[RetrievalKnowledgeGapItem | dict[str, object]] | None,
+    ) -> list[RetrievalKnowledgeGapItem]:
+        normalized: list[RetrievalKnowledgeGapItem] = []
+        for index, item in enumerate(knowledge_gaps or [], start=1):
+            gap = (
+                item
+                if isinstance(item, RetrievalKnowledgeGapItem)
+                else RetrievalKnowledgeGapItem.model_validate(item)
+            )
+            if gap.gap_id is None:
+                gap = gap.model_copy(update={"gap_id": f"G{index}"})
+            normalized.append(gap)
+        return normalized
 
     def _broker(self, *, identity: MemoryRuntimeIdentity) -> RetrievalBroker:
         if self._retrieval_broker is not None:

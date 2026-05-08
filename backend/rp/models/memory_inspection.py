@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
@@ -95,6 +96,49 @@ class MemoryInspectionQuery(BaseModel):
             seen.add(key)
             normalized.append(item)
         return normalized
+
+
+class MemoryDisplayEntry(BaseModel):
+    """Canonical user-visible entry envelope shared by UI and governance trace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entry_id: str
+    entry_type: str
+    label: str | None = None
+    current_value: Any = None
+    editable_fields: list[str] = Field(default_factory=list)
+    field_validation_rules: dict[str, Any] = Field(default_factory=dict)
+    base_revision: int | None = None
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    user_edit_metadata: dict[str, Any] = Field(default_factory=dict)
+    conflict_state: str | None = None
+    last_modified_actor: str | None = None
+    last_modified_turn_or_event_id: str | None = None
+    validation_errors: list[str] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
+
+
+class MemoryDisplayBlock(BaseModel):
+    """Canonical user-visible block envelope for memory inspection surfaces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    block_id: str
+    domain: str
+    layer: str
+    scope: str | None = None
+    visibility: dict[str, Any]
+    revision: int | None = None
+    permission_level: dict[str, Any] = Field(default_factory=dict)
+    lifecycle_state: str | None = None
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    validation_summary: dict[str, Any] = Field(default_factory=dict)
+    editable_fields: list[str] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
+    entrypoints: dict[str, Any] = Field(default_factory=dict)
+    entries: list[MemoryDisplayEntry] = Field(default_factory=list)
 
 
 class MemoryInspectionActionReceipt(BaseModel):

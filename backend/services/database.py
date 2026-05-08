@@ -91,8 +91,10 @@ def create_db_and_tables() -> None:
         ensure_setup_store_compatible_schema,
     )
     from models.rp_story_store import (
+        BranchControlReceiptRecord,
         BranchHeadRecord,
         ChapterWorkspaceRecord,
+        RuntimeWorkflowJobRecord,
         RuntimeProfileSnapshotRecord,
         StoryArtifactRecord,
         StoryBlockConsumerStateRecord,
@@ -127,7 +129,9 @@ def create_db_and_tables() -> None:
         StoryBlockConsumerStateRecord,
         StoryDiscussionEntryRecord,
         BranchHeadRecord,
+        BranchControlReceiptRecord,
         RuntimeProfileSnapshotRecord,
+        RuntimeWorkflowJobRecord,
         StoryTurnRecord,
         MemoryProposalRecord,
         MemoryApplyReceiptRecord,

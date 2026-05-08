@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 
+from rp.agent_runtime.skill_packs import (
+    get_skill_pack_for_stage,
+    render_skill_pack,
+)
 from rp.models.setup_handoff import SetupContextPacket
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_stage import SETUP_STAGE_MODULES, SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
 
 
@@ -21,6 +25,12 @@ class SetupAgentPromptService:
         context_packet: SetupContextPacket,
     ) -> str:
         stage_overlay = self._stage_overlay(current_stage or current_step)
+        skill_pack = get_skill_pack_for_stage(current_stage)
+        specialist_preamble = (
+            self._specialist_preamble(current_stage)
+            if skill_pack is not None and current_stage is not None
+            else ""
+        )
         workspace_snapshot = json.dumps(
             context_packet.model_dump(mode="json", exclude_none=True),
             ensure_ascii=False,
@@ -31,6 +41,7 @@ class SetupAgentPromptService:
             "Your job is to help the user converge setup drafts and guide review/commit. "
             "You do not generate active-story prose, you do not activate the story, "
             "and you do not mutate Memory OS directly.\n\n"
+            f"{specialist_preamble}"
             "Core rules:\n"
             "1. Start each turn by following the runtime-provided turn goal and working plan.\n"
             "2. If the runtime provides a cognitive_state_summary, treat it as your current-step discussion map only.\n"
@@ -83,7 +94,22 @@ class SetupAgentPromptService:
         )
 
     @staticmethod
+    def _specialist_preamble(stage_id: SetupStageId) -> str:
+        module = SETUP_STAGE_MODULES[stage_id]
+        return (
+            f"For this turn, you operate in the {module.display_name} stage.\n"
+            "While in this stage, take on the perspective of the Specialist hat "
+            "described in the Stage Skill Pack section below.\n"
+            "Treat the Specialist hat as your guiding voice for this turn, "
+            "but never break the SetupAgent operating envelope above.\n\n"
+        )
+
+    @staticmethod
     def _stage_overlay(step_id: SetupStepId | SetupStageId) -> str:
+        if isinstance(step_id, SetupStageId):
+            skill_pack = get_skill_pack_for_stage(step_id)
+            if skill_pack is not None:
+                return render_skill_pack(skill_pack)
         if step_id == SetupStageId.WORLD_BACKGROUND:
             return (
                 "- Focus on stable world background, rules, locations, history, factions, races, and other world facts.\n"

@@ -6,6 +6,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from config import get_settings
@@ -28,10 +29,32 @@ from rp.services.story_runtime_controller import (
     MemoryBlockHistoryUnsupportedError,
     StoryRuntimeController,
 )
+from rp.services.story_runtime_debug_query_service import (
+    StoryRuntimeDebugQueryServiceError,
+)
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from services.database import get_session
 
 router = APIRouter()
+
+
+class RevisionDraftUpdateRequest(BaseModel):
+    content_text: str = Field(min_length=1)
+
+
+class RevisionCommentCreateRequest(BaseModel):
+    block_id: str = Field(min_length=1)
+    instruction_text: str = Field(min_length=1)
+    selected_excerpt: str | None = None
+    start_offset: int | None = Field(default=None, ge=0)
+    end_offset: int | None = Field(default=None, ge=0)
+    superdoc_anchor_id: str | None = None
+
+
+class RevisionTrackedChangeCreateRequest(BaseModel):
+    block_id: str = Field(min_length=1)
+    original_text: str | None = None
+    suggested_text: str | None = None
 
 
 def _story_controller(
@@ -189,6 +212,48 @@ def _memory_inspection_invalid(exc: Exception, *, code: str) -> HTTPException:
     )
 
 
+def _story_runtime_read_invalid(
+    exc: Exception,
+    *,
+    code: str,
+) -> HTTPException:
+    error_code = getattr(exc, "code", None) or code
+    status_code = (
+        404
+        if error_code == "story_runtime_debug_session_not_found"
+        else 400
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": error_code,
+            }
+        },
+    )
+
+
+def _revision_review_invalid(exc: Exception) -> HTTPException:
+    message = str(exc)
+    code = message.split(":", 1)[0] if ":" in message else message
+    status_code = (
+        404
+        if message.startswith("StorySession not found:")
+        or message.startswith("StoryArtifact not found:")
+        else 400
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "message": message,
+                "code": code or "revision_review_surface_invalid",
+            }
+        },
+    )
+
+
 @router.get("/api/rp/story-sessions")
 async def list_story_sessions(
     controller: StoryRuntimeController = Depends(_story_controller),
@@ -252,6 +317,126 @@ async def patch_story_runtime_config(
     return _snapshot_payload(snapshot)
 
 
+@router.get("/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}")
+async def get_revision_review_surface(
+    session_id: str,
+    artifact_id: str,
+    mode: str = Query(default="viewing"),
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.read_revision_review_surface(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            mode=mode,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+
+
+@router.patch(
+    "/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}/draft"
+)
+async def update_revision_review_draft(
+    session_id: str,
+    artifact_id: str,
+    payload: RevisionDraftUpdateRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        snapshot = controller.update_revision_draft_artifact(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            content_text=payload.content_text,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+    return _snapshot_payload(snapshot)
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}/comments"
+)
+async def create_revision_review_comment(
+    session_id: str,
+    artifact_id: str,
+    payload: RevisionCommentCreateRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.add_revision_comment(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            block_id=payload.block_id,
+            instruction_text=payload.instruction_text,
+            selected_excerpt=payload.selected_excerpt,
+            start_offset=payload.start_offset,
+            end_offset=payload.end_offset,
+            superdoc_anchor_id=payload.superdoc_anchor_id,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}/tracked-changes"
+)
+async def create_revision_review_tracked_change(
+    session_id: str,
+    artifact_id: str,
+    payload: RevisionTrackedChangeCreateRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.add_revision_tracked_change(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            block_id=payload.block_id,
+            original_text=payload.original_text,
+            suggested_text=payload.suggested_text,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}/comments/{comment_id}/resolve"
+)
+async def resolve_revision_review_comment(
+    session_id: str,
+    artifact_id: str,
+    comment_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.resolve_revision_comment(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            comment_id=comment_id,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+
+
+@router.delete(
+    "/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}/comments/{comment_id}"
+)
+async def delete_revision_review_comment(
+    session_id: str,
+    artifact_id: str,
+    comment_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.delete_revision_comment(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            comment_id=comment_id,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+
+
 @router.get("/api/rp/story-sessions/{session_id}/runtime/debug")
 async def get_story_runtime_debug(
     session_id: str,
@@ -266,6 +451,80 @@ async def get_story_runtime_debug(
             detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
         ) from exc
     return runner.get_runtime_debug(session_id=session_id)
+
+
+@router.get("/api/rp/story-sessions/{session_id}/runtime/inspect")
+async def get_story_runtime_inspection(
+    session_id: str,
+    branch_head_id: str | None = None,
+    turn_id: str | None = None,
+    limit: int = Query(default=25, ge=1, le=100),
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.read_runtime_inspection(
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            limit=limit,
+        )
+    except StoryRuntimeDebugQueryServiceError as exc:
+        raise _story_runtime_read_invalid(
+            exc,
+            code="story_runtime_inspection_invalid",
+        ) from exc
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _story_runtime_read_invalid(
+            exc,
+            code="story_runtime_inspection_invalid",
+        ) from exc
+
+
+@router.get("/api/rp/story-sessions/{session_id}/runtime/migration")
+async def get_story_runtime_migration_summary(
+    session_id: str,
+    branch_head_id: str | None = None,
+    turn_id: str | None = None,
+    limit: int = Query(default=25, ge=1, le=100),
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.read_runtime_migration_summary(
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            limit=limit,
+        )
+    except StoryRuntimeDebugQueryServiceError as exc:
+        raise _story_runtime_read_invalid(
+            exc,
+            code="story_runtime_migration_invalid",
+        ) from exc
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _story_runtime_read_invalid(
+            exc,
+            code="story_runtime_migration_invalid",
+        ) from exc
 
 
 @router.get("/api/rp/story-sessions/{session_id}/memory/authoritative")

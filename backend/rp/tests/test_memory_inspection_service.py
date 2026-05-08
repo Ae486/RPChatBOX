@@ -288,6 +288,15 @@ def _seed_asset(
         "visibility_state": visibility_state,
         "lifecycle_state": visibility_state,
         "source_version": 1,
+        "source_refs": [
+            {
+                "source_type": "story_turn" if origin_turn_id else "seed_asset",
+                "source_id": origin_turn_id or asset_id,
+                "layer": layer,
+                "domain": domain,
+                "entry_id": asset_id,
+            }
+        ],
     }
     if owning_branch_head_id is not None:
         metadata["owning_branch_head_id"] = owning_branch_head_id
@@ -411,6 +420,67 @@ def test_inspection_filters_visible_layers_and_keeps_hidden_audit_explicit(
         item["asset_id"]
         for item in audit["layers"][Layer.ARCHIVAL.value]["hidden_audit_items"]
     } == {"archival.sibling.hidden"}
+
+    assert visible["canonical_envelope"] == {
+        "schema_version": "rp.memory.display.v1",
+        "producer": "MemoryInspectionService",
+        "governance_bound": True,
+        "shared_by": [
+            "inspection_ui",
+            "governed_user_edit_ui",
+            "worker_proposal_trace",
+            "debug_eval_tools",
+        ],
+    }
+    blocks_by_layer = {block["layer"]: block for block in visible["blocks"]}
+    core_block = blocks_by_layer[Layer.CORE_STATE_AUTHORITATIVE.value]
+    assert core_block["block_id"] == "block.chapter.current"
+    assert core_block["permission_level"]["governance"] == (
+        "shared_core_mutation_kernel"
+    )
+    assert core_block["editable_fields"] == ["title"]
+    assert core_block["allowed_actions"] == ["inspect", "direct_core_edit"]
+    assert core_block["entrypoints"]["direct_core_edit"]["path_template"].endswith(
+        "/memory/core/direct-edit"
+    )
+    assert core_block["entries"][0]["entry_id"] == "block.chapter.current:current"
+    assert core_block["entries"][0]["base_revision"] == 3
+    assert core_block["entries"][0]["conflict_state"] == "none"
+
+    workspace_block = blocks_by_layer[Layer.RUNTIME_WORKSPACE.value]
+    assert workspace_block["block_id"] == (
+        "runtime_workspace:material:workspace.main.visible"
+    )
+    assert workspace_block["permission_level"]["durable_edit"] is False
+    assert workspace_block["allowed_actions"] == ["inspect"]
+    assert workspace_block["entries"][0]["entry_id"] == "workspace.main.visible"
+
+    recall_block = blocks_by_layer[Layer.RECALL.value]
+    assert recall_block["block_id"] == "recall:asset:recall.main.visible"
+    assert "review_recall:invalidate" in recall_block["allowed_actions"]
+    assert "direct_core_edit" not in recall_block["allowed_actions"]
+    assert recall_block["entrypoints"]["review_recall"]["governed_by"] == (
+        "RecallLifecycleService"
+    )
+    assert recall_block["entries"][0]["entry_id"] == "recall.main.visible"
+    assert {
+        source_ref["source_type"] for source_ref in recall_block["source_refs"]
+    } >= {"story_turn", "retrieval_asset"}
+
+    archival_block = blocks_by_layer[Layer.ARCHIVAL.value]
+    assert archival_block["block_id"] == ("archival:asset:archival.global.visible")
+    assert archival_block["editable_fields"] == ["replacement_sections"]
+    assert archival_block["permission_level"]["raw_source_overwrite"] is False
+    assert archival_block["entrypoints"]["evolve_archival"]["governed_by"] == (
+        "ArchivalEvolutionService.evolve_source"
+    )
+    assert archival_block["entries"][0]["base_revision"] == 1
+
+    hidden_block_ids = {block["block_id"] for block in audit["hidden_audit_blocks"]}
+    assert hidden_block_ids == {
+        "recall:asset:recall.sibling.hidden",
+        "archival:asset:archival.sibling.hidden",
+    }
 
 
 @pytest.mark.asyncio

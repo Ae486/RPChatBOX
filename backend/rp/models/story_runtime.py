@@ -13,6 +13,7 @@ from pydantic import (
     ValidationError,
     field_validator,
 )
+from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
 
 
 class StorySessionState(StrEnum):
@@ -63,6 +64,8 @@ class StorySession(BaseModel):
     source_workspace_id: str
     mode: str
     session_state: StorySessionState
+    active_branch_head_id: str | None = None
+    active_runtime_profile_snapshot_id: str | None = None
     current_chapter_index: int
     current_phase: LongformChapterPhase
     runtime_story_config: dict[str, Any] = Field(default_factory=dict)
@@ -164,6 +167,7 @@ class LongformTurnResponse(BaseModel):
     assistant_text: str | None = None
     artifact_id: str | None = None
     artifact_kind: StoryArtifactKind | None = None
+    writing_result: WritingWorkerExecutionResult | None = None
     warnings: list[str] = Field(default_factory=list)
 
 

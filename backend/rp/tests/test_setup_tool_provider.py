@@ -405,6 +405,74 @@ async def test_setup_tool_provider_truth_write_writes_stage_draft_entry(
 
 
 @pytest.mark.asyncio
+async def test_setup_tool_provider_truth_write_uses_workspace_stage_step_authority(
+    retrieval_session,
+    monkeypatch,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-truth-write-bridge-1",
+        mode=StoryMode.LONGFORM,
+    )
+    original = SetupWorkspaceService.__dict__["legacy_step_for_stage"].__func__
+    calls: list[SetupStageId] = []
+
+    def _tracking_legacy_step_for_stage(cls, stage_id: SetupStageId) -> SetupStepId:
+        calls.append(stage_id)
+        return original(cls, stage_id)
+
+    monkeypatch.setattr(
+        SetupWorkspaceService,
+        "legacy_step_for_stage",
+        classmethod(_tracking_legacy_step_for_stage),
+    )
+
+    result = await provider.call_tool(
+        tool_name="setup.truth.write",
+        arguments={
+            "workspace_id": workspace.workspace_id,
+            "step_id": "foundation",
+            "truth_write": {
+                "write_id": "write-race-elf-bridge",
+                "current_step": "world_background",
+                "block_type": "stage_draft",
+                "stage_id": "world_background",
+                "operation": "create",
+                "payload": {
+                    "entry_id": "race_elf",
+                    "entry_type": "race",
+                    "semantic_path": "world_background.race.elf",
+                    "title": "Elf",
+                    "summary": "Moonlit forest cities.",
+                    "sections": [
+                        {
+                            "section_id": "summary",
+                            "title": "Summary",
+                            "kind": "text",
+                            "content": {"text": "Moonlit forest cities."},
+                            "retrieval_role": "summary",
+                        }
+                    ],
+                },
+                "ready_for_review": True,
+            },
+        },
+    )
+
+    payload = json.loads(result["content"])
+    assert result["success"] is True
+    assert payload["updated_refs"] == ["stage:world_background:race_elf"]
+    assert calls == [SetupStageId.WORLD_BACKGROUND]
+
+
+@pytest.mark.asyncio
 async def test_setup_tool_provider_truth_write_writes_full_stage_draft_block(
     retrieval_session,
 ):

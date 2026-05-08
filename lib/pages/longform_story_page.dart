@@ -22,9 +22,22 @@ class LongformStoryPage extends StatefulWidget {
   State<LongformStoryPage> createState() => _LongformStoryPageState();
 }
 
+enum _RevisionReviewMode {
+  viewing('viewing'),
+  editing('editing'),
+  suggesting('suggesting');
+
+  final String wireName;
+
+  const _RevisionReviewMode(this.wireName);
+}
+
 class _LongformStoryPageState extends State<LongformStoryPage> {
   final _service = BackendStoryService();
   final _messageController = TextEditingController();
+  final _reviewDraftController = TextEditingController();
+  final _reviewCommentController = TextEditingController();
+  final _reviewTrackedChangeController = TextEditingController();
 
   RpChapterSnapshot? _snapshot;
   List<RpStorySession> _sessions = const [];
@@ -42,6 +55,12 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   String _streamingText = '';
   String _streamingThinking = '';
   String? _streamingCommandKind;
+  String? _selectedPendingArtifactId;
+  String? _selectedReviewBlockId;
+  RpRevisionReviewSurface? _reviewSurface;
+  _RevisionReviewMode _reviewMode = _RevisionReviewMode.viewing;
+  bool _isReviewLoading = false;
+  bool _isReviewSaving = false;
 
   @override
   void initState() {
@@ -56,6 +75,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   @override
   void dispose() {
     _messageController.dispose();
+    _reviewDraftController.dispose();
+    _reviewCommentController.dispose();
+    _reviewTrackedChangeController.dispose();
     super.dispose();
   }
 
@@ -72,9 +94,18 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         _sessions = sessions;
         _currentSessionId = resolvedSessionId;
         _snapshot = snapshot;
+        _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
+          snapshot,
+          previousSelected: _selectedPendingArtifactId,
+        );
+        if (_reviewSurface?.artifactId != _selectedPendingArtifactId) {
+          _reviewSurface = null;
+          _selectedReviewBlockId = null;
+        }
         _isLoading = false;
       });
       _syncModelSelections();
+      await _loadReviewSurfaceForSelection();
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -93,8 +124,17 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       _sessions = sessions;
       _currentSessionId = resolvedSessionId;
       _snapshot = snapshot;
+      _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
+        snapshot,
+        previousSelected: _selectedPendingArtifactId,
+      );
+      if (_reviewSurface?.artifactId != _selectedPendingArtifactId) {
+        _reviewSurface = null;
+        _selectedReviewBlockId = null;
+      }
     });
     _syncModelSelections();
+    await _loadReviewSurfaceForSelection();
   }
 
   String? _resolveSessionId(List<RpStorySession> sessions) {
@@ -112,6 +152,99 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     return widget.sessionId;
   }
 
+  String? _resolveSelectedPendingArtifactId(
+    RpChapterSnapshot? snapshot, {
+    required String? previousSelected,
+  }) {
+    if (snapshot == null) return null;
+    final candidates = snapshot.pendingSegmentCandidates;
+    if (candidates.isEmpty) return null;
+    if (previousSelected != null &&
+        candidates.any((item) => item.artifactId == previousSelected)) {
+      return previousSelected;
+    }
+    return snapshot.pendingSegment?.artifactId ?? candidates.last.artifactId;
+  }
+
+  RpStoryArtifact? _selectedPendingSegment(RpChapterSnapshot snapshot) {
+    final selectedId = _selectedPendingArtifactId;
+    if (selectedId != null) {
+      for (final item in snapshot.pendingSegmentCandidates) {
+        if (item.artifactId == selectedId) return item;
+      }
+    }
+    return snapshot.pendingSegment;
+  }
+
+  Future<void> _selectPendingArtifact(String artifactId) async {
+    if (_isSending || _selectedPendingArtifactId == artifactId) return;
+    setState(() {
+      _selectedPendingArtifactId = artifactId;
+      _selectedReviewBlockId = null;
+      _reviewSurface = null;
+    });
+    await _loadReviewSurfaceForSelection();
+  }
+
+  Future<void> _loadReviewSurfaceForSelection() async {
+    final sessionId = _currentSessionId;
+    final artifactId = _selectedPendingArtifactId;
+    if (sessionId == null || artifactId == null) {
+      if (!mounted) return;
+      setState(() {
+        _reviewSurface = null;
+        _selectedReviewBlockId = null;
+      });
+      return;
+    }
+    await _loadReviewSurface(sessionId: sessionId, artifactId: artifactId);
+  }
+
+  Future<void> _loadReviewSurface({
+    required String sessionId,
+    required String artifactId,
+  }) async {
+    if (!mounted) return;
+    setState(() => _isReviewLoading = true);
+    try {
+      final surface = await _service.getRevisionReviewSurface(
+        sessionId: sessionId,
+        artifactId: artifactId,
+        mode: _reviewMode.wireName,
+      );
+      if (!mounted) return;
+      setState(() {
+        _reviewSurface = surface;
+        _reviewDraftController.text = surface.draftText;
+        _selectedReviewBlockId = _resolveReviewBlockId(surface);
+        _isReviewLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isReviewLoading = false);
+      OwuiSnackBars.warning(context, message: '加载修订视图失败: $e');
+    }
+  }
+
+  String? _resolveReviewBlockId(RpRevisionReviewSurface surface) {
+    final current = _selectedReviewBlockId;
+    if (current != null &&
+        surface.draftDocument.blocks.any((item) => item.blockId == current)) {
+      return current;
+    }
+    final blocks = surface.draftDocument.blocks;
+    return blocks.isEmpty ? null : blocks.first.blockId;
+  }
+
+  RpDraftDocumentBlock? _reviewBlockById(String blockId) {
+    final surface = _reviewSurface;
+    if (surface == null) return null;
+    for (final block in surface.draftDocument.blocks) {
+      if (block.blockId == blockId) return block;
+    }
+    return null;
+  }
+
   Future<void> _selectSession(String sessionId) async {
     setState(() {
       _currentSessionId = sessionId;
@@ -119,6 +252,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       _streamingText = '';
       _streamingThinking = '';
       _streamingCommandKind = null;
+      _reviewSurface = null;
+      _selectedReviewBlockId = null;
     });
     try {
       final snapshot = await _service.getSession(sessionId);
@@ -128,9 +263,16 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         _sessions = sessions;
         _snapshot = snapshot;
         _currentSessionId = sessionId;
+        _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
+          snapshot,
+          previousSelected: null,
+        );
+        _reviewSurface = null;
+        _selectedReviewBlockId = null;
         _isLoading = false;
       });
       _syncModelSelections();
+      await _loadReviewSurfaceForSelection();
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -398,6 +540,158 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       graphExtractionProviderId: null,
       graphExtractionModelId: null,
     );
+  }
+
+  Future<void> _setReviewMode(_RevisionReviewMode mode) async {
+    if (_reviewMode == mode || _isReviewSaving) return;
+    setState(() => _reviewMode = mode);
+    await _loadReviewSurfaceForSelection();
+  }
+
+  Future<void> _saveReviewDraft() async {
+    final sessionId = _currentSessionId;
+    final artifactId = _selectedPendingArtifactId;
+    if (sessionId == null || artifactId == null || _isReviewSaving) return;
+    setState(() => _isReviewSaving = true);
+    try {
+      final snapshot = await _service.updateRevisionDraft(
+        sessionId: sessionId,
+        artifactId: artifactId,
+        contentText: _reviewDraftController.text,
+      );
+      List<RpStorySession>? sessions;
+      try {
+        sessions = await _service.listSessions();
+      } catch (_) {
+        sessions = null;
+      }
+      if (!mounted) return;
+      setState(() {
+        _snapshot = snapshot;
+        if (sessions != null) _sessions = sessions;
+        _isReviewSaving = false;
+      });
+      await _loadReviewSurfaceForSelection();
+      if (!mounted) return;
+      OwuiSnackBars.success(context, message: '已保存 draft candidate 编辑');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isReviewSaving = false);
+      OwuiSnackBars.error(context, message: '保存修订草稿失败: $e');
+    }
+  }
+
+  Future<void> _addReviewComment() async {
+    final sessionId = _currentSessionId;
+    final artifactId = _selectedPendingArtifactId;
+    final blockId = _selectedReviewBlockId;
+    final text = _reviewCommentController.text.trim();
+    if (sessionId == null ||
+        artifactId == null ||
+        blockId == null ||
+        text.isEmpty ||
+        _isReviewSaving) {
+      return;
+    }
+    setState(() => _isReviewSaving = true);
+    try {
+      final block = _reviewBlockById(blockId);
+      final surface = await _service.addRevisionComment(
+        sessionId: sessionId,
+        artifactId: artifactId,
+        blockId: blockId,
+        instructionText: text,
+        selectedExcerpt: block?.selectedExcerpt ?? block?.text,
+      );
+      if (!mounted) return;
+      setState(() {
+        _reviewSurface = surface;
+        _reviewCommentController.clear();
+        _selectedReviewBlockId = _resolveReviewBlockId(surface);
+        _isReviewSaving = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isReviewSaving = false);
+      OwuiSnackBars.error(context, message: '添加批注失败: $e');
+    }
+  }
+
+  Future<void> _addReviewTrackedChange() async {
+    final sessionId = _currentSessionId;
+    final artifactId = _selectedPendingArtifactId;
+    final blockId = _selectedReviewBlockId;
+    final suggestedText = _reviewTrackedChangeController.text.trim();
+    if (sessionId == null ||
+        artifactId == null ||
+        blockId == null ||
+        suggestedText.isEmpty ||
+        _isReviewSaving) {
+      return;
+    }
+    setState(() => _isReviewSaving = true);
+    try {
+      final block = _reviewBlockById(blockId);
+      final surface = await _service.addRevisionTrackedChange(
+        sessionId: sessionId,
+        artifactId: artifactId,
+        blockId: blockId,
+        originalText: block?.text,
+        suggestedText: suggestedText,
+      );
+      if (!mounted) return;
+      setState(() {
+        _reviewSurface = surface;
+        _reviewTrackedChangeController.clear();
+        _selectedReviewBlockId = _resolveReviewBlockId(surface);
+        _isReviewSaving = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isReviewSaving = false);
+      OwuiSnackBars.error(context, message: '添加修订建议失败: $e');
+    }
+  }
+
+  Future<void> _resolveReviewComment(String commentId) async {
+    await _updateReviewCommentLifecycle(commentId: commentId, resolve: true);
+  }
+
+  Future<void> _deleteReviewComment(String commentId) async {
+    await _updateReviewCommentLifecycle(commentId: commentId, resolve: false);
+  }
+
+  Future<void> _updateReviewCommentLifecycle({
+    required String commentId,
+    required bool resolve,
+  }) async {
+    final sessionId = _currentSessionId;
+    final artifactId = _selectedPendingArtifactId;
+    if (sessionId == null || artifactId == null || _isReviewSaving) return;
+    setState(() => _isReviewSaving = true);
+    try {
+      final surface = resolve
+          ? await _service.resolveRevisionComment(
+              sessionId: sessionId,
+              artifactId: artifactId,
+              commentId: commentId,
+            )
+          : await _service.deleteRevisionComment(
+              sessionId: sessionId,
+              artifactId: artifactId,
+              commentId: commentId,
+            );
+      if (!mounted) return;
+      setState(() {
+        _reviewSurface = surface;
+        _selectedReviewBlockId = _resolveReviewBlockId(surface);
+        _isReviewSaving = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isReviewSaving = false);
+      OwuiSnackBars.error(context, message: '更新批注状态失败: $e');
+    }
   }
 
   Future<void> _openModelConfigPage() async {
@@ -761,7 +1055,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         ? snapshot.acceptedOutlineArtifacts.last
         : null;
     final acceptedSegments = snapshot.acceptedSegmentArtifacts;
-    final pendingSegment = snapshot.pendingSegment;
+    final pendingCandidates = snapshot.pendingSegmentCandidates;
+    final pendingSegment = _selectedPendingSegment(snapshot);
 
     return OwuiCard(
       padding: EdgeInsets.all(spacing.lg),
@@ -791,19 +1086,18 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
               ),
             ),
           ],
-          if (pendingSegment != null || _isStreamingLeftPane) ...[
+          if (pendingCandidates.isNotEmpty || _isStreamingLeftPane) ...[
             SizedBox(height: spacing.lg),
-            Text(
-              'Pending Candidate',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            SizedBox(height: spacing.md),
-            if (pendingSegment != null)
-              _buildArtifactCard(pendingSegment, isPending: true),
+            if (pendingCandidates.isNotEmpty)
+              _buildReviewSurfaceSection(
+                snapshot: snapshot,
+                pendingCandidates: pendingCandidates,
+                pendingSegment: pendingSegment,
+              ),
             if (_isStreamingLeftPane)
               Padding(
                 padding: EdgeInsets.only(
-                  top: pendingSegment != null ? spacing.md : 0,
+                  top: pendingCandidates.isNotEmpty ? spacing.md : 0,
                 ),
                 child: _buildStreamingCard(),
               ),
@@ -811,6 +1105,505 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         ],
       ),
     );
+  }
+
+  Widget _buildReviewSurfaceSection({
+    required RpChapterSnapshot snapshot,
+    required List<RpStoryArtifact> pendingCandidates,
+    required RpStoryArtifact? pendingSegment,
+  }) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final selectedId = pendingSegment?.artifactId;
+    final multipleCandidates = pendingCandidates.length > 1;
+
+    return Container(
+      padding: EdgeInsets.all(spacing.lg),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rXl),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Review Surface',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '刷新修订视图',
+                onPressed: _isReviewLoading || _isSending
+                    ? null
+                    : _loadReviewSurfaceForSelection,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          SizedBox(height: spacing.md),
+          _buildCandidateSelector(
+            candidates: pendingCandidates,
+            selectedArtifactId: selectedId,
+          ),
+          SizedBox(height: spacing.md),
+          _buildReviewToolbar(
+            multipleCandidates: multipleCandidates,
+            selectedArtifactId: selectedId,
+          ),
+          SizedBox(height: spacing.md),
+          if (_isReviewLoading)
+            const LinearProgressIndicator(minHeight: 2)
+          else if (_reviewSurface == null)
+            _emptyPaneNote('当前候选还没有可用修订视图。')
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final sidePanel = _buildReviewSidePanel(_reviewSurface!);
+                if (constraints.maxWidth >= 900) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 7,
+                        child: _buildDocumentSurface(_reviewSurface!),
+                      ),
+                      SizedBox(width: spacing.lg),
+                      Expanded(flex: 4, child: sidePanel),
+                    ],
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildDocumentSurface(_reviewSurface!),
+                    SizedBox(height: spacing.lg),
+                    sidePanel,
+                  ],
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCandidateSelector({
+    required List<RpStoryArtifact> candidates,
+    required String? selectedArtifactId,
+  }) {
+    final spacing = context.owuiSpacing;
+    return Wrap(
+      spacing: spacing.sm,
+      runSpacing: spacing.sm,
+      children: [
+        for (var index = 0; index < candidates.length; index++)
+          ChoiceChip(
+            label: Text('Candidate ${index + 1}'),
+            selected: candidates[index].artifactId == selectedArtifactId,
+            onSelected: _isSending || _isReviewSaving
+                ? null
+                : (_) => _selectPendingArtifact(candidates[index].artifactId),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildReviewToolbar({
+    required bool multipleCandidates,
+    required String? selectedArtifactId,
+  }) {
+    final spacing = context.owuiSpacing;
+    final modes = [
+      (_RevisionReviewMode.viewing, Icons.visibility_outlined, 'Viewing'),
+      (_RevisionReviewMode.editing, Icons.edit_note_outlined, 'Editing'),
+      (
+        _RevisionReviewMode.suggesting,
+        Icons.rate_review_outlined,
+        'Suggesting',
+      ),
+    ];
+    return Wrap(
+      spacing: spacing.sm,
+      runSpacing: spacing.sm,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final item in modes)
+          ChoiceChip(
+            avatar: Icon(item.$2, size: 18),
+            label: Text(item.$3),
+            selected: _reviewMode == item.$1,
+            onSelected: _isReviewSaving ? null : (_) => _setReviewMode(item.$1),
+          ),
+        SizedBox(width: spacing.sm),
+        OutlinedButton.icon(
+          onPressed: _isSending || selectedArtifactId == null
+              ? null
+              : () => _runStreamingCommand(
+                  'rewrite_pending_segment',
+                  targetArtifactId: selectedArtifactId,
+                ),
+          icon: const Icon(Icons.auto_fix_high_outlined),
+          label: const Text('Rewrite'),
+        ),
+        FilledButton.tonalIcon(
+          onPressed: _isSending || selectedArtifactId == null
+              ? null
+              : () => _runImmediateCommand(
+                  'accept_pending_segment',
+                  targetArtifactId: selectedArtifactId,
+                ),
+          icon: Icon(
+            multipleCandidates
+                ? Icons.check_circle_outline
+                : Icons.done_outline,
+          ),
+          label: const Text('Accept & Continue'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDocumentSurface(RpRevisionReviewSurface surface) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    if (_reviewMode == _RevisionReviewMode.editing) {
+      return Container(
+        padding: EdgeInsets.all(spacing.lg),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+          border: Border.all(color: colors.borderSubtle),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            TextField(
+              controller: _reviewDraftController,
+              minLines: 14,
+              maxLines: 28,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                height: 1.65,
+                color: Colors.black87,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                hintText: 'Draft candidate',
+              ),
+            ),
+            SizedBox(height: spacing.md),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: _isReviewSaving ? null : _saveReviewDraft,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Save Draft'),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: spacing.xl,
+        vertical: spacing.lg,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final block in surface.draftDocument.blocks)
+            _buildReviewBlock(block, surface: surface),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewBlock(
+    RpDraftDocumentBlock block, {
+    required RpRevisionReviewSurface surface,
+  }) {
+    final spacing = context.owuiSpacing;
+    final isSelected = block.blockId == _selectedReviewBlockId;
+    final hasComment = surface.comments.any(
+      (item) =>
+          item.isActive && item.anchorRef.blockIds.contains(block.blockId),
+    );
+    final hasTrackedChange = surface.trackedChanges.any(
+      (item) =>
+          item.isActive && item.anchorRef.blockIds.contains(block.blockId),
+    );
+    final baseStyle = Theme.of(
+      context,
+    ).textTheme.bodyLarge?.copyWith(color: Colors.black87, height: 1.68);
+    final style = block.blockKind == 'heading'
+        ? Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: Colors.black87,
+            fontWeight: FontWeight.w700,
+          )
+        : baseStyle;
+
+    return InkWell(
+      onTap: _reviewMode == _RevisionReviewMode.viewing
+          ? null
+          : () => setState(() => _selectedReviewBlockId = block.blockId),
+      child: Container(
+        margin: EdgeInsets.only(bottom: spacing.md),
+        padding: EdgeInsets.all(spacing.md),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
+              : Colors.transparent,
+          border: Border(
+            left: BorderSide(
+              color: hasTrackedChange
+                  ? Colors.green.shade600
+                  : (hasComment ? Colors.amber.shade700 : Colors.transparent),
+              width: 3,
+            ),
+          ),
+        ),
+        child: Text(_blockDisplayText(block), style: style),
+      ),
+    );
+  }
+
+  String _blockDisplayText(RpDraftDocumentBlock block) {
+    if (block.blockKind == 'list_item') return '• ${block.text}';
+    if (block.blockKind == 'blockquote') return '> ${block.text}';
+    return block.text;
+  }
+
+  Widget _buildReviewSidePanel(RpRevisionReviewSurface surface) {
+    final spacing = context.owuiSpacing;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_reviewMode == _RevisionReviewMode.suggesting)
+          _buildReviewInputPanel(surface),
+        if (_reviewMode == _RevisionReviewMode.suggesting)
+          SizedBox(height: spacing.md),
+        _buildCommentsList(surface),
+        SizedBox(height: spacing.md),
+        _buildTrackedChangesList(surface),
+      ],
+    );
+  }
+
+  Widget _buildReviewInputPanel(RpRevisionReviewSurface surface) {
+    final spacing = context.owuiSpacing;
+    final selectedBlockId = _selectedReviewBlockId;
+    final selectedBlock = selectedBlockId == null
+        ? null
+        : _reviewBlockById(selectedBlockId);
+    return Container(
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: context.owuiColors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: context.owuiColors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            selectedBlock == null
+                ? 'No block selected'
+                : _blockLabel(selectedBlock),
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          SizedBox(height: spacing.md),
+          TextField(
+            controller: _reviewCommentController,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(labelText: 'Comment'),
+          ),
+          SizedBox(height: spacing.sm),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: selectedBlockId == null || _isReviewSaving
+                  ? null
+                  : _addReviewComment,
+              icon: const Icon(Icons.add_comment_outlined),
+              label: const Text('Add Comment'),
+            ),
+          ),
+          SizedBox(height: spacing.md),
+          TextField(
+            controller: _reviewTrackedChangeController,
+            minLines: 2,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              labelText: 'Suggested replacement',
+            ),
+          ),
+          SizedBox(height: spacing.sm),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: selectedBlockId == null || _isReviewSaving
+                  ? null
+                  : _addReviewTrackedChange,
+              icon: const Icon(Icons.change_circle_outlined),
+              label: const Text('Track Change'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _blockLabel(RpDraftDocumentBlock block) {
+    return '${block.blockKind} #${block.order + 1}';
+  }
+
+  Widget _buildCommentsList(RpRevisionReviewSurface surface) {
+    final spacing = context.owuiSpacing;
+    final active = surface.comments.where((item) => item.isActive).toList();
+    final historyCount = surface.comments.length - active.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Comments', style: Theme.of(context).textTheme.titleSmall),
+        SizedBox(height: spacing.sm),
+        if (active.isEmpty) _emptyPaneNote('No active comments.'),
+        for (final comment in active)
+          Container(
+            margin: EdgeInsets.only(bottom: spacing.sm),
+            padding: EdgeInsets.all(spacing.md),
+            decoration: BoxDecoration(
+              color: context.owuiColors.surface2,
+              borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+              border: Border.all(color: context.owuiColors.borderSubtle),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_anchorLabel(comment.anchorRef.blockIds)),
+                SizedBox(height: spacing.xs),
+                Text(comment.instructionText),
+                SizedBox(height: spacing.sm),
+                Wrap(
+                  spacing: spacing.sm,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _isReviewSaving
+                          ? null
+                          : () => _resolveReviewComment(comment.commentId),
+                      icon: const Icon(Icons.task_alt_outlined),
+                      label: const Text('Resolve'),
+                    ),
+                    TextButton.icon(
+                      onPressed: _isReviewSaving
+                          ? null
+                          : () => _deleteReviewComment(comment.commentId),
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        if (historyCount > 0)
+          Text(
+            '$historyCount resolved/deleted comments in history',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.owuiColors.textSecondary,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTrackedChangesList(RpRevisionReviewSurface surface) {
+    final spacing = context.owuiSpacing;
+    final active = surface.trackedChanges
+        .where((item) => item.isActive)
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Tracked Changes', style: Theme.of(context).textTheme.titleSmall),
+        SizedBox(height: spacing.sm),
+        if (active.isEmpty) _emptyPaneNote('No active tracked changes.'),
+        for (final change in active)
+          Container(
+            margin: EdgeInsets.only(bottom: spacing.sm),
+            padding: EdgeInsets.all(spacing.md),
+            decoration: BoxDecoration(
+              color: Colors.green.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+              border: Border.all(color: Colors.green.withValues(alpha: 0.22)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_anchorLabel(change.anchorRef.blockIds)),
+                if ((change.originalText ?? '').isNotEmpty) ...[
+                  SizedBox(height: spacing.xs),
+                  Text(
+                    change.originalText!,
+                    style: const TextStyle(
+                      decoration: TextDecoration.lineThrough,
+                    ),
+                  ),
+                ],
+                if ((change.suggestedText ?? '').isNotEmpty) ...[
+                  SizedBox(height: spacing.xs),
+                  Text(
+                    change.suggestedText!,
+                    style: TextStyle(color: Colors.green.shade700),
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _anchorLabel(List<String> blockIds) {
+    if (blockIds.isEmpty) return 'whole draft';
+    final blocks = _reviewSurface?.draftDocument.blocks ?? const [];
+    final labels = <String>[];
+    for (final blockId in blockIds) {
+      RpDraftDocumentBlock? block;
+      for (final candidate in blocks) {
+        if (candidate.blockId == blockId) {
+          block = candidate;
+          break;
+        }
+      }
+      labels.add(block == null ? blockId : _blockLabel(block));
+    }
+    return labels.join(', ');
   }
 
   Widget _buildDiscussionPane(RpChapterSnapshot snapshot) {
@@ -983,7 +1776,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
 
   List<Widget> _buildCommandButtons(RpChapterSnapshot snapshot) {
     final phase = snapshot.chapter.phase;
-    final pendingSegment = snapshot.pendingSegment;
+    final pendingSegment = _selectedPendingSegment(snapshot);
     final outlineDraft = snapshot.latestOutlineDraft;
     final buttons = <Widget>[];
 

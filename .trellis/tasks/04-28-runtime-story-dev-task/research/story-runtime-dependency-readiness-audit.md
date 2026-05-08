@@ -15,7 +15,7 @@
 - `retrieval` 主骨架是可用的，不应该推翻
 - `proposal/apply`、`projection refresh`、`LLM gateway`、`debug endpoint` 都已有可借能力
 - `memory` 已经有正式方向，但还处在 `compatibility bridge + strengthening in progress`
-- `Runtime Workspace` 已经有 typed contract，但仍是**进程内临时存储**
+- `Runtime Workspace` 已经有 typed contract，并且默认走**持久化 repository-backed store**；当前问题不再是“只有进程内临时存储”，而是新 runtime 主链还没有全面切到它
 - `story graph` 已经有 LangGraph shell，但仍是 `longform fixed chain`
 
 因此，story runtime 可以继续设计和拆模块，但真正进入实现时，必须把几个前置缺口补到位，否则会把新 runtime 写回旧 MVP 的缝缝补补状态。
@@ -29,7 +29,7 @@
 | Memory OS / Core State | 有真实 read/proposal/projection 体系，但仍有 legacy mirror | 否 | 需要补强后再深度依赖 |
 | Retrieval Layer | 主骨架成熟，测试较多 | 部分可以 | 保留主骨架，补 runtime identity / usage / promotion |
 | Proposal / Apply Governance | 可用 | 可以 | 直接复用 |
-| Runtime Workspace | 有类型合同和服务，但只在进程内 | 否 | 必须持久化 |
+| Runtime Workspace | 有类型合同、服务和持久化 repository，仍缺主链接线 | 部分可以 | 不必重做存储，重点补 turn 主链接线 |
 | Story Session / Chapter Persistence | 可用，但明显 longform-first | 部分可以 | 可借用，但需要扩 turn/branch/profile snapshot |
 | LangGraph Runtime Shell | 可用 | 部分可以 | 可作为外壳，但要重构内部流程 |
 | LLM / Provider Gateway | 可用 | 可以 | 直接复用，并补 usage / worker 配置化 |
@@ -192,26 +192,24 @@ proposal/apply **可以直接复用**，不需要新造一套 mutation 系统。
 
 ### 明确漏洞 / 缺口
 
-1. **当前是 in-process store**
-   - `RuntimeWorkspaceMaterialStore` 使用 `dict/list`
-   - 只在当前 Python 进程里有效
-   - 重启就丢
-   - 多实例不共享
+1. **当前默认已是持久化 repository-backed store，但仍保留 in-process fallback seam**
+   - `RuntimeWorkspaceMaterialService` 当前默认通过 `RuntimeWorkspaceMaterialRepository` 落到持久层
+   - 只有显式 fallback / test seam 才会退回 in-process store
+   - 因此当前真正问题不是“不能持久化”，而是新 runtime 主链还没有把 turn materials、writer retrieval、post-write maintenance 全面接到这条正式材料链上
 
 2. **还没有和真实 story runtime 主链集成**
    - writer 当前不会写 retrieval cards
    - post-write 当前不会读 Runtime Workspace 做 worker maintenance
    - debug endpoint 也还没把它作为一等材料面暴露
 
-3. **没有 branch/turn 级持久审计价值**
-   - 模型里虽然已有 `identity`
-   - 但因为没落持久层，回退、分支、跨请求 pending、补调度都靠不住
+3. **branch/turn 级持久审计能力还没被主链充分利用**
+   - 模型和服务里已有 `identity`
+   - 持久化材料链也已经存在
+   - 但回退、分支、跨请求 pending、补调度、writer retrieval usage 等还没有全面以它为第一材料面
 
 ### 结论
 
-这是当前最明确的**前置漏洞**之一。
-
-story runtime 真正实现前，`Runtime Workspace` 必须从“进程内缓存”升级为“正式持久化的 turn material store”。
+这仍然是 story runtime 的关键模块，但缺口已经从“先做持久化”变成了“把它提升成主链上的正式 turn material store”。
 
 ### 风险等级
 
@@ -343,7 +341,7 @@ LangGraph 外壳可以继续用，而且应该继续用；但里面的 node/edge
 
 ## P0：不补就会卡住 story runtime
 
-1. `Runtime Workspace` 还是 in-process store，必须持久化
+1. `Runtime Workspace` 已有持久化基础，但还没有被提升为 story runtime 主链的正式 turn material store
 2. `session -> branch -> turn -> profile snapshot` identity 还没贯穿 memory/retrieval/proposal/runtime
 3. `StoryGraphRunner` 仍是固定 longform chain，没有 scheduler / worker registry / context packet
 4. `Core State / Projection` 仍有 legacy mirror 负担，新 runtime 如果直接深绑会继续污染实现
@@ -370,7 +368,7 @@ LangGraph 外壳可以继续用，而且应该继续用；但里面的 node/edge
 推荐顺序：
 
 1. 先完成 memory strengthening 的关键前置项
-2. 同步准备 Runtime Workspace 持久化
+2. 同步把 Runtime Workspace 接成正式主链材料面
 3. 再进入 story runtime 的 identity/scheduler/context/worker 骨架实现
 
 ---

@@ -1,4 +1,4 @@
-"""Single-generalist specialist for longform MVP."""
+"""Legacy longform specialist executor used behind the LongformMemoryWorker adapter."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from rp.models.story_runtime import (
     StoryArtifact,
     StorySession,
 )
+from rp.models.worker_runtime_contracts import WorkerContextPacket
 from .authoritative_state_view_service import AuthoritativeStateViewService
 from .memory_os_service import MemoryOsService
 from .projection_state_service import ProjectionStateService
@@ -87,6 +88,7 @@ class LongformSpecialistService:
         accepted_segments: list[StoryArtifact],
         pending_artifact: StoryArtifact | None,
         runtime_identity: MemoryRuntimeIdentity | None = None,
+        context_packet: WorkerContextPacket | None = None,
     ) -> SpecialistResultBundle:
         memory_os = self._build_memory_os(
             story_id=session.story_id,

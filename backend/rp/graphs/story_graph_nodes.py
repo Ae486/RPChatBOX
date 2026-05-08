@@ -12,6 +12,7 @@ from rp.models.story_runtime import (
     OrchestratorPlan,
     SpecialistResultBundle,
 )
+from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.models.writing_runtime import WritingPacket
 from rp.services.story_command_policy import validate_story_command
 from rp.services.story_turn_domain_service import StoryTurnDomainService
@@ -31,6 +32,11 @@ class StoryGraphNodes:
     def __init__(self, *, domain_service: StoryTurnDomainService) -> None:
         self._domain_service = domain_service
 
+    def resolve_graph_thread_binding(self, *, session_id: str) -> dict[str, str]:
+        return self._domain_service.resolve_graph_thread_binding(
+            session_id=session_id
+        )
+
     def pin_runtime_identity(self, state: StoryGraphState) -> StoryGraphState:
         if state.get("error"):
             return {}
@@ -38,6 +44,9 @@ class StoryGraphNodes:
             identity = self._domain_service.resolve_runtime_entry_identity(
                 session_id=state["session_id"],
                 command_kind=LongformTurnCommandKind(state["command_kind"]),
+                requested_branch_head_id=(
+                    str(state.get("branch_head_id") or "").strip() or None
+                ),
             )
         except ValueError as exc:
             return {
@@ -196,6 +205,7 @@ class StoryGraphNodes:
             specialist_bundle=SpecialistResultBundle.model_validate(
                 state.get("specialist_bundle") or {}
             ),
+            command_kind=LongformTurnCommandKind(state["command_kind"]),
             runtime_identity=self._runtime_identity_from_state(state),
         )
         return {
@@ -209,12 +219,16 @@ class StoryGraphNodes:
         command_kind = LongformTurnCommandKind(state["command_kind"])
         if command_kind in self._SPECIAL_COMMANDS:
             return {}
-        text = await self._domain_service.writer_run(
+        result = await self._domain_service.writer_run(
             packet=WritingPacket.model_validate(state.get("writing_packet") or {}),
             model_id=state["model_id"],
             provider_id=state.get("provider_id"),
         )
-        return {"assistant_text": text, "status": "writer_completed"}
+        return {
+            "assistant_text": result.output_text,
+            "writing_result": result.model_dump(mode="json", exclude_none=True),
+            "status": "writer_completed",
+        }
 
     async def writer_run_stream(self, state: StoryGraphState) -> AsyncIterator[str]:
         packet = WritingPacket.model_validate(state.get("writing_packet") or {})
@@ -224,6 +238,32 @@ class StoryGraphNodes:
             provider_id=state.get("provider_id"),
         ):
             yield line
+
+    def writer_stream_requires_buffered_execution(
+        self,
+        state: StoryGraphState,
+    ) -> bool:
+        packet = WritingPacket.model_validate(state.get("writing_packet") or {})
+        return self._domain_service.writer_stream_requires_buffered_execution(
+            packet=packet,
+            model_id=state["model_id"],
+            provider_id=state.get("provider_id"),
+        )
+
+    def build_stream_writing_result(
+        self,
+        state: StoryGraphState,
+        *,
+        assistant_text: str,
+        usage_metadata: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        packet = WritingPacket.model_validate(state.get("writing_packet") or {})
+        result = self._domain_service.build_stream_writing_result(
+            packet=packet,
+            text=assistant_text,
+            usage_metadata=usage_metadata,
+        )
+        return result.model_dump(mode="json", exclude_none=True)
 
     def persist_generated_artifact(self, state: StoryGraphState) -> StoryGraphState:
         if state.get("error"):
@@ -236,6 +276,14 @@ class StoryGraphNodes:
             packet=WritingPacket.model_validate(state.get("writing_packet") or {}),
             plan=OrchestratorPlan.model_validate(state.get("plan") or {}),
             text=str(state.get("assistant_text") or ""),
+            writing_result=(
+                None
+                if not isinstance(state.get("writing_result"), dict)
+                or not state.get("writing_result")
+                else WritingWorkerExecutionResult.model_validate(
+                    state.get("writing_result") or {}
+                )
+            ),
             specialist_bundle=SpecialistResultBundle.model_validate(
                 state.get("specialist_bundle") or {}
             ),
@@ -249,6 +297,11 @@ class StoryGraphNodes:
             "chapter_workspace_id": response.chapter_workspace_id,
             "chapter_phase": response.current_phase.value,
             "current_chapter_index": response.current_chapter_index,
+            "writing_result": (
+                response.writing_result.model_dump(mode="json", exclude_none=True)
+                if response.writing_result is not None
+                else {}
+            ),
             "response_payload": response.model_dump(mode="json", exclude_none=True),
             "status": "artifact_persisted",
         }
@@ -259,7 +312,17 @@ class StoryGraphNodes:
         command_kind = LongformTurnCommandKind(state["command_kind"])
         if command_kind in self._SPECIAL_COMMANDS:
             return {}
-        return {"status": "post_write_regression_skipped"}
+        trigger_result = await self._domain_service.trigger_post_write(
+            runtime_identity=self._runtime_identity_from_state(state),
+            model_id=state.get("model_id"),
+            provider_id=state.get("provider_id"),
+            user_prompt=state.get("user_prompt"),
+            orchestrator_plan=OrchestratorPlan.model_validate(state.get("plan") or {}),
+        )
+        return {
+            "post_write_trigger": trigger_result,
+            "status": "post_write_triggered",
+        }
 
     def accept_outline(self, state: StoryGraphState) -> StoryGraphState:
         if state.get("error"):

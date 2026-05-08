@@ -27,6 +27,7 @@ class RuntimeBranchReadScope(BaseModel):
     active_turn_id: str | None = None
     visible_branch_head_ids: list[str] = Field(default_factory=list)
     turn_cutoff_by_branch: dict[str, str | None] = Field(default_factory=dict)
+    hidden_turn_ids_by_branch: dict[str, list[str]] = Field(default_factory=dict)
     include_story_global: bool = True
 
     @field_validator("story_id", "session_id", "active_branch_head_id")
@@ -67,6 +68,24 @@ class RuntimeBranchReadScope(BaseModel):
                 else _require_non_blank(turn_id, field_name="turn_cutoff_by_branch")
             )
             normalized[normalized_branch_id] = normalized_turn_id
+        return normalized
+
+    @field_validator("hidden_turn_ids_by_branch")
+    @classmethod
+    def _normalize_hidden_turn_ids(
+        cls,
+        value: dict[str, list[str]],
+    ) -> dict[str, list[str]]:
+        normalized: dict[str, list[str]] = {}
+        for branch_head_id, turn_ids in value.items():
+            normalized_branch_id = _require_non_blank(
+                branch_head_id,
+                field_name="hidden_turn_ids_by_branch",
+            )
+            normalized[normalized_branch_id] = [
+                _require_non_blank(turn_id, field_name="hidden_turn_ids_by_branch")
+                for turn_id in turn_ids
+            ]
         return normalized
 
 

@@ -77,6 +77,109 @@ class BackendStoryService {
     );
   }
 
+  Future<RpRevisionReviewSurface> getRevisionReviewSurface({
+    required String sessionId,
+    required String artifactId,
+    required String mode,
+  }) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/revision-review/$artifactId',
+      queryParameters: {'mode': mode},
+    );
+    _ensureSuccess(response, action: 'get revision review surface');
+    return RpRevisionReviewSurface.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpChapterSnapshot> updateRevisionDraft({
+    required String sessionId,
+    required String artifactId,
+    required String contentText,
+  }) async {
+    final response = await _controlDio.patch(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/revision-review/$artifactId/draft',
+      data: {'content_text': contentText},
+    );
+    _ensureSuccess(response, action: 'update revision draft');
+    return RpChapterSnapshot.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpRevisionReviewSurface> addRevisionComment({
+    required String sessionId,
+    required String artifactId,
+    required String blockId,
+    required String instructionText,
+    String? selectedExcerpt,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/revision-review/$artifactId/comments',
+      data: {
+        'block_id': blockId,
+        'instruction_text': instructionText,
+        if (selectedExcerpt != null && selectedExcerpt.isNotEmpty)
+          'selected_excerpt': selectedExcerpt,
+      },
+    );
+    _ensureSuccess(response, action: 'add revision comment');
+    return RpRevisionReviewSurface.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpRevisionReviewSurface> addRevisionTrackedChange({
+    required String sessionId,
+    required String artifactId,
+    required String blockId,
+    String? originalText,
+    String? suggestedText,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/revision-review/$artifactId/tracked-changes',
+      data: {
+        'block_id': blockId,
+        if (originalText != null && originalText.isNotEmpty)
+          'original_text': originalText,
+        if (suggestedText != null && suggestedText.isNotEmpty)
+          'suggested_text': suggestedText,
+      },
+    );
+    _ensureSuccess(response, action: 'add revision tracked change');
+    return RpRevisionReviewSurface.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpRevisionReviewSurface> resolveRevisionComment({
+    required String sessionId,
+    required String artifactId,
+    required String commentId,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/revision-review/$artifactId/comments/$commentId/resolve',
+    );
+    _ensureSuccess(response, action: 'resolve revision comment');
+    return RpRevisionReviewSurface.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpRevisionReviewSurface> deleteRevisionComment({
+    required String sessionId,
+    required String artifactId,
+    required String commentId,
+  }) async {
+    final response = await _controlDio.delete(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/revision-review/$artifactId/comments/$commentId',
+    );
+    _ensureSuccess(response, action: 'delete revision comment');
+    return RpRevisionReviewSurface.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
   Future<RpStoryTurnResponse> runTurn({
     required String sessionId,
     required String commandKind,

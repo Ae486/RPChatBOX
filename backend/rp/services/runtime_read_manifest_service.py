@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 from uuid import uuid5, NAMESPACE_URL
 
+from sqlalchemy import asc
 from sqlmodel import Session, select
 
 from models.rp_story_store import BranchHeadRecord, StoryTurnRecord
@@ -15,6 +16,7 @@ from rp.models.runtime_read_contract import RuntimeBranchReadScope, RuntimeReadM
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
+    RuntimeWorkspaceMaterialVisibility,
 )
 
 from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService
@@ -57,8 +59,12 @@ class BranchVisibilityResolver:
         self._require_turn(identity=identity)
         visible_branch_head_ids: list[str] = []
         turn_cutoff_by_branch: dict[str, str | None] = {}
+        hidden_turn_ids_by_branch: dict[str, list[str]] = {}
         current: BranchHeadRecord | None = branch
-        current_cutoff_turn_id: str | None = identity.turn_id
+        current_cutoff_turn_id: str | None = self._active_branch_cutoff_turn_id(
+            branch=branch,
+            identity_turn_id=identity.turn_id,
+        )
         seen: set[str] = set()
         while current is not None and current.branch_head_id not in seen:
             seen.add(current.branch_head_id)
@@ -69,6 +75,9 @@ class BranchVisibilityResolver:
                     session_id=current.session_id,
                     branch_head_id=current.branch_head_id,
                 )
+            )
+            hidden_turn_ids_by_branch[current.branch_head_id] = (
+                self._hidden_turn_ids_for_branch(current)
             )
             parent_branch_id = str(current.parent_branch_head_id or "").strip()
             current_cutoff_turn_id = current.forked_from_turn_id
@@ -84,6 +93,7 @@ class BranchVisibilityResolver:
             active_turn_id=identity.turn_id,
             visible_branch_head_ids=visible_branch_head_ids,
             turn_cutoff_by_branch=turn_cutoff_by_branch,
+            hidden_turn_ids_by_branch=hidden_turn_ids_by_branch,
             include_story_global=True,
         )
 
@@ -117,6 +127,13 @@ class BranchVisibilityResolver:
             return False
         normalized_owner = str(owning_branch_head_id or "").strip() or None
         normalized_origin_turn = str(origin_turn_id or "").strip() or None
+        if (
+            normalized_owner is not None
+            and normalized_origin_turn is not None
+            and normalized_origin_turn
+            in set(scope.hidden_turn_ids_by_branch.get(normalized_owner, []))
+        ):
+            return False
         if normalized_visibility_scope == "story_global":
             return True
         if normalized_visibility_scope in {
@@ -136,6 +153,15 @@ class BranchVisibilityResolver:
         if normalized_owner is None:
             return False
         if normalized_owner not in scope.visible_branch_head_ids:
+            return False
+        if (
+            normalized_origin_turn is not None
+            and self._is_turn_hidden_by_rollback(
+                session_id=scope.session_id,
+                branch_head_id=normalized_owner,
+                turn_id=normalized_origin_turn,
+            )
+        ):
             return False
         cutoff_turn_id = scope.turn_cutoff_by_branch.get(normalized_owner)
         if cutoff_turn_id is None or normalized_origin_turn is None:
@@ -197,11 +223,49 @@ class BranchVisibilityResolver:
             select(StoryTurnRecord)
             .where(StoryTurnRecord.session_id == session_id)
             .where(StoryTurnRecord.branch_head_id == branch_head_id)
-            .order_by(StoryTurnRecord.created_at.asc())
-            .order_by(StoryTurnRecord.turn_id.asc())
+            .order_by(asc(StoryTurnRecord.created_at))
+            .order_by(asc(StoryTurnRecord.turn_id))
         )
         records = list(self._session.exec(stmt).all())
         return {record.turn_id: index for index, record in enumerate(records)}
+
+    @staticmethod
+    def _active_branch_cutoff_turn_id(
+        *,
+        branch: BranchHeadRecord,
+        identity_turn_id: str,
+    ) -> str:
+        rollback_cutoff_turn_id = str(
+            (branch.metadata_json or {}).get("rollback_cutoff_turn_id") or ""
+        ).strip()
+        branch_head_turn_id = str(branch.head_turn_id or "").strip()
+        if branch_head_turn_id and branch_head_turn_id != rollback_cutoff_turn_id:
+            return branch_head_turn_id
+        if branch_head_turn_id:
+            return branch_head_turn_id
+        return identity_turn_id
+
+    @staticmethod
+    def _hidden_turn_ids_for_branch(branch: BranchHeadRecord) -> list[str]:
+        metadata = dict(branch.metadata_json or {})
+        hidden_turn_ids = metadata.get("rollback_hidden_turn_ids")
+        if not isinstance(hidden_turn_ids, list):
+            return []
+        return [str(item).strip() for item in hidden_turn_ids if str(item).strip()]
+
+    def _is_turn_hidden_by_rollback(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str,
+        turn_id: str,
+    ) -> bool:
+        turn = self._session.get(StoryTurnRecord, turn_id)
+        if turn is None:
+            return False
+        if turn.session_id != session_id or turn.branch_head_id != branch_head_id:
+            return False
+        return str(turn.visibility_state or "").strip() == "hidden_by_rollback"
 
     def _is_hidden_after_cutoff(
         self,
@@ -265,10 +329,16 @@ class RuntimeReadManifestService:
         material_records = self._runtime_workspace_material_service.list_materials(
             identity=identity,
         )
+        packet_visible_material_records = [
+            material
+            for material in material_records
+            if material.visibility
+            == RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value
+        ]
         visible_refs = self._build_visible_refs(
             identity=identity,
             packet_sections=packet_sections or [],
-            material_records=material_records,
+            material_records=packet_visible_material_records,
         )
         selected = self._select_refs(
             visible_refs=visible_refs,
@@ -290,15 +360,15 @@ class RuntimeReadManifestService:
             ),
         ).hex
         retrieval_card_refs = self._material_refs(
-            material_records=material_records,
+            material_records=packet_visible_material_records,
             material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
         )
         expanded_chunk_refs = self._material_refs(
-            material_records=material_records,
+            material_records=packet_visible_material_records,
             material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_EXPANDED_CHUNK,
         )
         retrieval_miss_refs = self._material_refs(
-            material_records=material_records,
+            material_records=packet_visible_material_records,
             material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_MISS,
         )
         writer_usage_refs = self._material_refs(
@@ -306,7 +376,7 @@ class RuntimeReadManifestService:
             material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
         )
         token_usage_metadata = self._token_usage_metadata(
-            material_records=material_records
+            material_records=packet_visible_material_records
         )
         return RuntimeReadManifest(
             manifest_id=manifest_id,
@@ -335,16 +405,27 @@ class RuntimeReadManifestService:
         visible_refs: list[dict[str, Any]] = []
         for order, section in enumerate(packet_sections):
             label = str(section.get("label") or "").strip()
+            section_id = str(section.get("section_id") or "").strip()
+            source_kind = str(section.get("source_kind") or "").strip()
+            source_ref_ids = [
+                str(item).strip()
+                for item in (section.get("source_ref_ids") or [])
+                if str(item).strip()
+            ]
             section_items = section.get("items")
             items = list(section_items) if isinstance(section_items, list) else []
             visible_refs.append(
                 {
-                    "ref_id": f"projection:{label or order}",
-                    "ref_kind": "projection_section",
-                    "domain_path": f"projection.{label}" if label else None,
+                    "ref_id": section_id or f"packet_section:{label or order}",
+                    "ref_kind": "packet_section",
+                    "domain_path": f"packet.{label}" if label else None,
                     "selection_group": label or f"section_{order}",
-                    "source_route": "core_state.derived_projection",
+                    "source_route": self._packet_section_source_route(
+                        source_kind=source_kind
+                    ),
                     "packet_section_label": label or None,
+                    "packet_section_source_kind": source_kind or None,
+                    "source_ref_ids": source_ref_ids,
                     "revision": None,
                     "content_hash": self._stable_hash(items),
                     "item_count": len(items),
@@ -383,7 +464,7 @@ class RuntimeReadManifestService:
             return [
                 deepcopy(item)
                 for item in visible_refs
-                if item.get("ref_kind") == "projection_section"
+                if item.get("ref_kind") == "packet_section"
             ]
         allowed = {
             str(item).strip() for item in selected_section_labels if str(item).strip()
@@ -407,12 +488,27 @@ class RuntimeReadManifestService:
             if ref_id in selected_ids:
                 continue
             omitted_item = deepcopy(item)
-            if item.get("ref_kind") == "projection_section":
+            if item.get("ref_kind") == "packet_section":
                 omitted_item["reason"] = "packet_section_not_selected"
             else:
                 omitted_item["reason"] = "packet_visible_runtime_workspace_only"
             omitted.append(omitted_item)
         return omitted
+
+    @staticmethod
+    def _packet_section_source_route(*, source_kind: str) -> str:
+        normalized = str(source_kind or "").strip()
+        if normalized == "core_projection_view":
+            return "core_state.derived_projection"
+        if normalized == "story_discussion_entry_window":
+            return "story_discussion"
+        if normalized == "runtime_retrieval_card_summary":
+            return "runtime_workspace"
+        if normalized == "worker_hint_digest":
+            return "worker_result"
+        if normalized in {"mode_sidecar", "review_overlay"}:
+            return "mode_sidecar"
+        return "packet_section"
 
     @staticmethod
     def _material_refs(

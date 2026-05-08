@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator
 
 from models.chat import ChatCompletionRequest, ChatMessage
 from services.litellm_service import LiteLLMService, get_litellm_service
+from services.model_capability_service import supports_function_calling
 from services.model_registry import get_model_registry_service
 from services.provider_registry import get_provider_registry_service
 
@@ -27,24 +28,15 @@ class StoryLlmGateway:
         max_tokens: int | None = None,
         include_reasoning: bool | None = None,
     ) -> str:
-        request = self.build_request(
+        message, _usage = await self.complete_message_with_usage(
             model_id=model_id,
             provider_id=provider_id,
             messages=messages,
-            stream=False,
             temperature=temperature,
             max_tokens=max_tokens,
             include_reasoning=include_reasoning,
         )
-        response = await self._llm_service.chat_completion(request)
-        choices = response.get("choices") or []
-        message = choices[0].get("message") if choices else {}
-        content = (message or {}).get("content")
-        if isinstance(content, list):
-            return "".join(
-                part.get("text", "") for part in content if isinstance(part, dict)
-            )
-        return str(content or "")
+        return self._message_text(message)
 
     async def complete_text_with_usage(
         self,
@@ -56,6 +48,30 @@ class StoryLlmGateway:
         max_tokens: int | None = None,
         include_reasoning: bool | None = None,
     ) -> tuple[str, dict[str, Any]]:
+        message, usage = await self.complete_message_with_usage(
+            model_id=model_id,
+            provider_id=provider_id,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            include_reasoning=include_reasoning,
+        )
+        return self._message_text(message), usage
+
+    async def complete_message_with_usage(
+        self,
+        *,
+        model_id: str,
+        provider_id: str | None,
+        messages: list[ChatMessage],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        include_reasoning: bool | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        enable_tools: bool | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         request = self.build_request(
             model_id=model_id,
             provider_id=provider_id,
@@ -64,19 +80,49 @@ class StoryLlmGateway:
             temperature=temperature,
             max_tokens=max_tokens,
             include_reasoning=include_reasoning,
+            tools=tools,
+            tool_choice=tool_choice,
+            extra_body=extra_body,
+            enable_tools=enable_tools,
         )
         response = await self._llm_service.chat_completion(request)
-        choices = response.get("choices") or []
+        response_dict = self._coerce_response_dict(response)
+        choices = response_dict.get("choices") or []
         message = choices[0].get("message") if choices else {}
-        content = (message or {}).get("content")
-        if isinstance(content, list):
-            text = "".join(
-                part.get("text", "") for part in content if isinstance(part, dict)
-            )
-        else:
-            text = str(content or "")
-        usage = response.get("usage")
-        return text, dict(usage or {}) if isinstance(usage, dict) else {}
+        usage = response_dict.get("usage")
+        return (
+            dict(message or {}) if isinstance(message, dict) else {},
+            dict(usage or {}) if isinstance(usage, dict) else {},
+        )
+
+    async def complete_with_tools(
+        self,
+        *,
+        model_id: str,
+        provider_id: str | None,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]],
+        tool_choice: str | dict[str, Any] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        include_reasoning: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request = self.build_request(
+            model_id=model_id,
+            provider_id=provider_id,
+            messages=messages,
+            stream=False,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            include_reasoning=include_reasoning,
+            tools=tools,
+            tool_choice=tool_choice,
+            extra_body=extra_body,
+            enable_tools=True,
+        )
+        response = await self._llm_service.chat_completion(request)
+        return self._coerce_response_dict(response)
 
     def stream_text(
         self,
@@ -109,6 +155,10 @@ class StoryLlmGateway:
         temperature: float | None = None,
         max_tokens: int | None = None,
         include_reasoning: bool | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        enable_tools: bool | None = None,
     ) -> ChatCompletionRequest:
         provider, model_name = self._resolve_provider_and_model(
             model_id=model_id,
@@ -125,8 +175,44 @@ class StoryLlmGateway:
             temperature=temperature,
             max_tokens=max_tokens,
             include_reasoning=include_reasoning,
-            enable_tools=False,
+            tools=tools,
+            tool_choice=tool_choice,
+            extra_body=extra_body,
+            enable_tools=enable_tools if enable_tools is not None else False,
         )
+
+    def supports_tools(self, *, model_id: str, provider_id: str | None) -> bool:
+        model_entry = get_model_registry_service().get_entry(model_id)
+        if model_entry is not None:
+            capability_profile = model_entry.capability_profile
+            if (
+                capability_profile is not None
+                and capability_profile.supports_function_calling is not None
+            ):
+                return bool(capability_profile.supports_function_calling)
+            return "tool" in model_entry.capabilities
+        provider, model_name = self._resolve_provider_and_model(
+            model_id=model_id,
+            provider_id=provider_id,
+        )
+        return supports_function_calling(provider.type, model_name)
+
+    @staticmethod
+    def _message_text(message: dict[str, Any]) -> str:
+        content = message.get("content")
+        if isinstance(content, list):
+            return "".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+        return str(content or "")
+
+    @staticmethod
+    def _coerce_response_dict(response: Any) -> dict[str, Any]:
+        if hasattr(response, "model_dump"):
+            return response.model_dump(exclude_none=True)
+        if isinstance(response, dict):
+            return response
+        raise TypeError(f"Unsupported chat completion response type: {type(response)!r}")
 
     @staticmethod
     def extract_json_object(text: str) -> dict[str, Any]:

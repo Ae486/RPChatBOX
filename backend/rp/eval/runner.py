@@ -903,11 +903,14 @@ class EvalRunner:
 
     def _finalize_report(self, result: EvalRunResult) -> None:
         result.report = build_report(result)
+        root_span = result.trace.spans[0] if result.trace.spans else None
         diagnostic_scores = evaluate_diagnostic_expectation_scores(
             case=result.case,
             run_id=result.run.run_id,
-            root_span_id=result.trace.spans[0].span_id if result.trace.spans else None,
+            root_span_id=root_span.span_id if root_span is not None else None,
             report=result.report,
+            run_metadata=result.run.metadata,
+            trace_root_attributes=root_span.attributes if root_span is not None else None,
         )
         if diagnostic_scores:
             result.scores.extend(diagnostic_scores)

@@ -5,17 +5,26 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from sqlalchemy import asc
+from sqlmodel import select
+
+from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 from models.rp_story_store import (
+    BranchControlReceiptRecord,
     BranchHeadRecord,
     StorySessionRecord,
     StoryTurnRecord,
 )
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_identity import (
+    BranchControlKind,
+    BranchControlReceipt,
     BranchHeadStatus,
+    BranchVisibilityState,
     RuntimeProfileSnapshotStatus,
     StoryTurnStatus,
 )
+from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialLifecycle
 from rp.services.runtime_profile_snapshot_service import (
     RuntimeProfileSnapshotService,
     RuntimeProfileSnapshotServiceError,
@@ -39,6 +48,7 @@ class StoryRuntimeIdentityService:
 
     _DEFAULT_BRANCH_NAME = "main"
     _DEFAULT_VISIBILITY_SCOPE = "active_lineage"
+    _DEFAULT_BRANCH_VISIBILITY_STATE = BranchVisibilityState.VISIBLE.value
 
     def __init__(
         self,
@@ -57,6 +67,12 @@ class StoryRuntimeIdentityService:
         session_id: str,
         story_id: str,
     ) -> BranchHeadRecord:
+        session_record = self._require_session_record(session_id)
+        if session_record.story_id != story_id:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_identity_resolution_failed",
+                f"story_session_mismatch:{session_id}",
+            )
         branch_head_id = self._default_branch_id(session_id)
         existing = self._session.get(BranchHeadRecord, branch_head_id)
         if existing is not None:
@@ -65,6 +81,10 @@ class StoryRuntimeIdentityService:
                     "runtime_branch_head_conflict",
                     branch_head_id,
                 )
+            self._pin_session_active_branch_if_unset(
+                session_record=session_record,
+                branch_head_id=existing.branch_head_id,
+            )
             return existing
 
         now = _utcnow()
@@ -75,14 +95,23 @@ class StoryRuntimeIdentityService:
             branch_name=self._DEFAULT_BRANCH_NAME,
             parent_branch_head_id=None,
             forked_from_turn_id=None,
+            fork_origin_turn_id=None,
+            fork_base_turn_id=None,
             head_turn_id=None,
+            last_settled_turn_id=None,
             status=BranchHeadStatus.ACTIVE.value,
             visibility_scope=self._DEFAULT_VISIBILITY_SCOPE,
+            visibility_state=self._DEFAULT_BRANCH_VISIBILITY_STATE,
             created_at=now,
             updated_at=now,
         )
         self._session.add(record)
         self._session.flush()
+        self._pin_session_active_branch_if_unset(
+            session_record=session_record,
+            branch_head_id=record.branch_head_id,
+            updated_at=now,
+        )
         return record
 
     def require_branch_head(self, branch_head_id: str) -> BranchHeadRecord:
@@ -93,6 +122,274 @@ class StoryRuntimeIdentityService:
                 branch_head_id,
             )
         return record
+
+    def create_branch_from_turn(
+        self,
+        *,
+        session_id: str,
+        origin_turn_id: str,
+        actor: str,
+        branch_name: str | None = None,
+        metadata: dict | None = None,
+    ) -> BranchControlReceipt:
+        """Create a branch from a settled turn and immediately make it active."""
+
+        session_record = self._require_session_record(session_id)
+        origin_turn = self._require_turn_record(origin_turn_id)
+        self._validate_turn_belongs_to_session(
+            session_record=session_record,
+            turn=origin_turn,
+        )
+        if origin_turn.status != StoryTurnStatus.SETTLED.value:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_control_invalid_turn",
+                f"origin_not_settled:{origin_turn_id}",
+            )
+        if self._turn_hidden_by_rollback(
+            branch=self.require_branch_head(origin_turn.branch_head_id),
+            turn=origin_turn,
+        ):
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_control_invalid_turn",
+                f"origin_hidden_by_rollback:{origin_turn_id}",
+            )
+        origin_branch = self.require_branch_head(origin_turn.branch_head_id)
+        self._validate_branch_belongs_to_session(
+            session_record=session_record,
+            branch=origin_branch,
+        )
+        base_turn = self._previous_settled_turn(origin_turn)
+        base_turn_id = base_turn.turn_id if base_turn is not None else None
+        now = _utcnow()
+        normalized_branch_name = (
+            str(branch_name or "").strip()
+            or f"branch-{self._branch_count(session_id=session_id) + 1}"
+        )
+        branch = BranchHeadRecord(
+            branch_head_id=f"branch:{session_id}:{uuid4().hex}",
+            story_id=session_record.story_id,
+            session_id=session_record.session_id,
+            branch_name=normalized_branch_name,
+            parent_branch_head_id=origin_branch.branch_head_id,
+            # Existing read-scope resolver historically treats this column as the
+            # parent-lineage cutoff. Keep it aligned with the actual fork base.
+            forked_from_turn_id=base_turn_id,
+            fork_origin_turn_id=origin_turn.turn_id,
+            fork_base_turn_id=base_turn_id,
+            head_turn_id=base_turn_id,
+            last_settled_turn_id=base_turn_id,
+            status=BranchHeadStatus.ACTIVE.value,
+            visibility_scope=self._DEFAULT_VISIBILITY_SCOPE,
+            visibility_state=BranchVisibilityState.VISIBLE.value,
+            metadata_json=dict(metadata or {}),
+            created_at=now,
+            updated_at=now,
+        )
+        self._session.add(branch)
+        self._session.flush()
+        receipt = self._write_branch_control_receipt(
+            session_record=session_record,
+            branch_head_id=branch.branch_head_id,
+            control_kind=BranchControlKind.BRANCH_CREATED,
+            actor=actor,
+            fork_origin_turn_id=origin_turn.turn_id,
+            fork_base_turn_id=base_turn_id,
+            from_branch_head_id=origin_branch.branch_head_id,
+            to_branch_head_id=branch.branch_head_id,
+            source_ref_ids=[f"turn:{origin_turn.turn_id}"],
+            result_ref_ids=[f"branch_head:{branch.branch_head_id}"],
+            metadata=metadata,
+            created_at=now,
+        )
+        branch.created_by_control_receipt_id = receipt.receipt_id
+        branch.updated_at = now
+        session_record.active_branch_head_id = branch.branch_head_id
+        session_record.updated_at = now
+        self._session.add(branch)
+        self._session.add(session_record)
+        self._session.flush()
+        return self._record_to_branch_control_receipt(receipt)
+
+    def switch_branch(
+        self,
+        *,
+        session_id: str,
+        target_branch_head_id: str,
+        actor: str,
+        metadata: dict | None = None,
+    ) -> BranchControlReceipt:
+        """Switch the active branch pointer without creating a story turn."""
+
+        session_record = self._require_session_record(session_id)
+        target_branch = self.require_branch_head(target_branch_head_id)
+        self._validate_branch_belongs_to_session(
+            session_record=session_record,
+            branch=target_branch,
+        )
+        self._require_branch_switchable(target_branch)
+        now = _utcnow()
+        from_branch_head_id = str(session_record.active_branch_head_id or "").strip()
+        session_record.active_branch_head_id = target_branch.branch_head_id
+        session_record.updated_at = now
+        self._session.add(session_record)
+        receipt = self._write_branch_control_receipt(
+            session_record=session_record,
+            branch_head_id=target_branch.branch_head_id,
+            control_kind=BranchControlKind.BRANCH_SWITCHED,
+            actor=actor,
+            from_branch_head_id=from_branch_head_id or None,
+            to_branch_head_id=target_branch.branch_head_id,
+            result_ref_ids=[f"branch_head:{target_branch.branch_head_id}"],
+            metadata=metadata,
+            created_at=now,
+        )
+        self._session.flush()
+        return self._record_to_branch_control_receipt(receipt)
+
+    def delete_branch(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str,
+        actor: str,
+        metadata: dict | None = None,
+    ) -> BranchControlReceipt:
+        """Hide/delete a branch at the control layer without purging branch data."""
+
+        session_record = self._require_session_record(session_id)
+        branch = self.require_branch_head(branch_head_id)
+        self._validate_branch_belongs_to_session(
+            session_record=session_record,
+            branch=branch,
+        )
+        if branch.branch_head_id == self._default_branch_id(session_id):
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_control_default_delete_not_supported",
+                branch.branch_head_id,
+            )
+        now = _utcnow()
+        branch.status = BranchHeadStatus.SUPERSEDED.value
+        branch.visibility_state = BranchVisibilityState.DELETED.value
+        branch.updated_at = now
+        self._session.add(branch)
+        fallback_branch_id: str | None = None
+        if session_record.active_branch_head_id == branch.branch_head_id:
+            fallback_branch_id = self._fallback_active_branch_after_delete(
+                session_record=session_record,
+                deleted_branch=branch,
+            )
+            session_record.active_branch_head_id = fallback_branch_id
+            session_record.updated_at = now
+            self._session.add(session_record)
+        receipt = self._write_branch_control_receipt(
+            session_record=session_record,
+            branch_head_id=branch.branch_head_id,
+            control_kind=BranchControlKind.BRANCH_DELETED,
+            actor=actor,
+            from_branch_head_id=branch.branch_head_id,
+            to_branch_head_id=fallback_branch_id,
+            result_ref_ids=[f"branch_head:{branch.branch_head_id}"],
+            metadata=metadata,
+            created_at=now,
+        )
+        self._session.flush()
+        return self._record_to_branch_control_receipt(receipt)
+
+    def rollback_to_turn(
+        self,
+        *,
+        session_id: str,
+        target_turn_id: str,
+        actor: str,
+        metadata: dict | None = None,
+    ) -> BranchControlReceipt:
+        """Rollback the active branch to a settled turn without creating a turn."""
+
+        session_record = self._require_session_record(session_id)
+        active_branch_id = str(session_record.active_branch_head_id or "").strip()
+        if not active_branch_id:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_head_not_found",
+                f"active_branch_missing:{session_id}",
+            )
+        branch = self.require_branch_head(active_branch_id)
+        self._validate_branch_belongs_to_session(
+            session_record=session_record,
+            branch=branch,
+        )
+        self._require_branch_switchable(branch)
+        target_turn = self._require_turn_record(target_turn_id)
+        self._validate_turn_belongs_to_session(
+            session_record=session_record,
+            turn=target_turn,
+        )
+        if target_turn.branch_head_id != branch.branch_head_id:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_control_invalid_turn",
+                f"target_branch_mismatch:{target_turn_id}",
+            )
+        if target_turn.status != StoryTurnStatus.SETTLED.value:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_control_invalid_turn",
+                f"target_not_settled:{target_turn_id}",
+            )
+        if self._turn_hidden_by_rollback(branch=branch, turn=target_turn):
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_branch_control_invalid_turn",
+                f"target_hidden_by_rollback:{target_turn_id}",
+            )
+
+        later_turns = self._later_turns_on_branch(target_turn)
+        now = _utcnow()
+        metadata_json = self._rollback_metadata(
+            branch=branch,
+            target_turn=target_turn,
+            later_turns=later_turns,
+            metadata=metadata,
+            applied_at=now,
+        )
+        receipt = self._write_branch_control_receipt(
+            session_record=session_record,
+            branch_head_id=branch.branch_head_id,
+            control_kind=BranchControlKind.ROLLBACK_APPLIED,
+            actor=actor,
+            target_turn_id=target_turn.turn_id,
+            source_ref_ids=[f"turn:{target_turn.turn_id}"],
+            result_ref_ids=[f"branch_head:{branch.branch_head_id}"],
+            trace_refs=[f"turn:{turn.turn_id}" for turn in later_turns],
+            metadata=metadata_json,
+            created_at=now,
+        )
+        self._hide_later_turns_after_rollback(
+            later_turns=later_turns,
+            target_turn_id=target_turn.turn_id,
+            receipt_id=receipt.receipt_id,
+            updated_at=now,
+        )
+        invalidated_material_ids = self._invalidate_workspace_materials_for_turns(
+            later_turns=later_turns,
+            receipt_id=receipt.receipt_id,
+            target_turn_id=target_turn.turn_id,
+            updated_at=now,
+        )
+        metadata_json["visibility_transition"]["invalidated_workspace_material_ids"] = (
+            invalidated_material_ids
+        )
+        receipt.metadata_json = metadata_json
+        branch.head_turn_id = target_turn.turn_id
+        branch.last_settled_turn_id = target_turn.turn_id
+        branch.metadata_json = self._merge_branch_rollback_metadata(
+            branch=branch,
+            target_turn=target_turn,
+            receipt=receipt,
+            invalidated_material_ids=invalidated_material_ids,
+            updated_at=now,
+        )
+        branch.updated_at = now
+        self._session.add(receipt)
+        self._session.add(branch)
+        self._session.flush()
+        return self._record_to_branch_control_receipt(receipt)
 
     def create_turn(
         self,
@@ -118,6 +415,7 @@ class StoryRuntimeIdentityService:
                 "runtime_identity_resolution_failed",
                 f"branch_mismatch:{branch_head_id}",
             )
+        self._require_branch_switchable(branch)
 
         try:
             snapshot = self._runtime_profile_snapshot_service.require_snapshot(
@@ -147,6 +445,7 @@ class StoryRuntimeIdentityService:
             command_kind=str(command_kind or "").strip() or "runtime_command",
             actor=str(actor or "").strip() or "story_runtime",
             status=StoryTurnStatus.STARTED.value,
+            visibility_state="active",
             created_at=now,
             started_at=now,
             completed_at=None,
@@ -227,13 +526,9 @@ class StoryRuntimeIdentityService:
         requested_runtime_profile_snapshot_id: str | None = None,
     ) -> MemoryRuntimeIdentity:
         session_record = self._require_session_record(session_id)
-        branch = (
-            self.require_branch_head(requested_branch_head_id)
-            if requested_branch_head_id
-            else self.ensure_default_branch(
-                session_id=session_record.session_id,
-                story_id=session_record.story_id,
-            )
+        branch = self._resolve_runtime_entry_branch(
+            session_record=session_record,
+            requested_branch_head_id=requested_branch_head_id,
         )
         if branch.session_id != session_record.session_id:
             raise StoryRuntimeIdentityServiceError(
@@ -241,17 +536,11 @@ class StoryRuntimeIdentityService:
                 f"branch_session_mismatch:{branch.branch_head_id}",
             )
 
-        snapshot_id = str(requested_runtime_profile_snapshot_id or "").strip()
-        if snapshot_id:
-            snapshot = self._runtime_profile_snapshot_service.require_snapshot(
-                snapshot_id
-            )
-        else:
-            snapshot = self._runtime_profile_snapshot_service.ensure_active_snapshot(
-                session_id=session_record.session_id,
-                created_from="story_runtime.turn_start",
-            )
-            snapshot_id = snapshot.runtime_profile_snapshot_id
+        snapshot = self._resolve_runtime_entry_snapshot(
+            session_record=session_record,
+            requested_runtime_profile_snapshot_id=requested_runtime_profile_snapshot_id,
+        )
+        snapshot_id = snapshot.runtime_profile_snapshot_id
         if snapshot.session_id != session_record.session_id:
             raise StoryRuntimeIdentityServiceError(
                 "runtime_identity_resolution_failed",
@@ -280,6 +569,10 @@ class StoryRuntimeIdentityService:
         *,
         turn_id: str,
         status: StoryTurnStatus,
+        visible_output_ref: str | None = None,
+        selected_output_ref: str | None = None,
+        settlement_reason: str | None = None,
+        failure_reason: str | None = None,
     ) -> StoryTurnRecord:
         record = self._session.get(StoryTurnRecord, turn_id)
         if record is None:
@@ -287,16 +580,52 @@ class StoryRuntimeIdentityService:
                 "runtime_turn_not_found",
                 turn_id,
             )
+        now = _utcnow()
         record.status = status.value
-        if status in {StoryTurnStatus.COMPLETED, StoryTurnStatus.FAILED}:
-            record.completed_at = _utcnow()
+        record.updated_at = now
+        if visible_output_ref is not None:
+            record.visible_output_ref = visible_output_ref
+        if selected_output_ref is not None:
+            record.selected_output_ref = selected_output_ref
+        if settlement_reason is not None:
+            record.settlement_reason = settlement_reason
+        if failure_reason is not None:
+            record.failure_reason = failure_reason
+        if status == StoryTurnStatus.WRITER_COMPLETED:
+            record.writer_completed_at = now
+        elif status == StoryTurnStatus.POST_WRITE_PENDING:
+            record.writer_completed_at = record.writer_completed_at or now
+        elif status == StoryTurnStatus.POST_WRITE_RUNNING:
+            record.post_write_started_at = now
+        elif status == StoryTurnStatus.SETTLED:
+            record.visibility_state = "active"
+            record.settled_at = now
+            record.completed_at = now
+            branch = self._session.get(BranchHeadRecord, record.branch_head_id)
+            if branch is not None:
+                branch.last_settled_turn_id = record.turn_id
+                branch.head_turn_id = record.turn_id
+                branch.updated_at = now
+                self._session.add(branch)
+        elif status == StoryTurnStatus.FAILED:
+            record.failed_at = now
+            record.completed_at = now
+        elif status == StoryTurnStatus.COMPLETED:
+            record.completed_at = now
         self._session.add(record)
         self._session.flush()
         return record
 
+    def get_turn(self, turn_id: str) -> StoryTurnRecord | None:
+        return self._session.get(StoryTurnRecord, turn_id)
+
     @staticmethod
     def _default_branch_id(session_id: str) -> str:
         return f"branch:{session_id}:main"
+
+    @staticmethod
+    def build_graph_thread_id(*, session_id: str, branch_head_id: str) -> str:
+        return f"story_session:{session_id}:branch_head:{branch_head_id}"
 
     @staticmethod
     def _turn_kind(command_kind: str) -> str:
@@ -326,3 +655,432 @@ class StoryRuntimeIdentityService:
                 turn_id,
             )
         return record
+
+    @staticmethod
+    def _validate_turn_belongs_to_session(
+        *,
+        session_record: StorySessionRecord,
+        turn: StoryTurnRecord,
+    ) -> None:
+        if (
+            turn.session_id == session_record.session_id
+            and turn.story_id == session_record.story_id
+        ):
+            return
+        raise StoryRuntimeIdentityServiceError(
+            "runtime_identity_resolution_failed",
+            f"turn_session_mismatch:{turn.turn_id}",
+        )
+
+    @staticmethod
+    def _validate_branch_belongs_to_session(
+        *,
+        session_record: StorySessionRecord,
+        branch: BranchHeadRecord,
+    ) -> None:
+        if (
+            branch.session_id == session_record.session_id
+            and branch.story_id == session_record.story_id
+        ):
+            return
+        raise StoryRuntimeIdentityServiceError(
+            "runtime_identity_resolution_failed",
+            f"branch_session_mismatch:{branch.branch_head_id}",
+        )
+
+    def _previous_settled_turn(
+        self,
+        origin_turn: StoryTurnRecord,
+    ) -> StoryTurnRecord | None:
+        stmt = (
+            select(StoryTurnRecord)
+            .where(StoryTurnRecord.session_id == origin_turn.session_id)
+            .where(StoryTurnRecord.branch_head_id == origin_turn.branch_head_id)
+            .order_by(asc(StoryTurnRecord.created_at))
+            .order_by(asc(StoryTurnRecord.turn_id))
+        )
+        ordered_turns = list(self._session.exec(stmt).all())
+        previous: StoryTurnRecord | None = None
+        for turn in ordered_turns:
+            if turn.turn_id == origin_turn.turn_id:
+                return previous
+            if turn.status == StoryTurnStatus.SETTLED.value and not (
+                self._turn_hidden_by_rollback(
+                    branch=self.require_branch_head(turn.branch_head_id),
+                    turn=turn,
+                )
+            ):
+                previous = turn
+        return previous
+
+    def _later_turns_on_branch(
+        self,
+        target_turn: StoryTurnRecord,
+    ) -> list[StoryTurnRecord]:
+        stmt = (
+            select(StoryTurnRecord)
+            .where(StoryTurnRecord.session_id == target_turn.session_id)
+            .where(StoryTurnRecord.branch_head_id == target_turn.branch_head_id)
+            .order_by(asc(StoryTurnRecord.created_at))
+            .order_by(asc(StoryTurnRecord.turn_id))
+        )
+        ordered_turns = list(self._session.exec(stmt).all())
+        later_turns: list[StoryTurnRecord] = []
+        target_seen = False
+        for turn in ordered_turns:
+            if target_seen:
+                later_turns.append(turn)
+                continue
+            if turn.turn_id == target_turn.turn_id:
+                target_seen = True
+        if not target_seen:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_turn_not_found",
+                target_turn.turn_id,
+            )
+        return later_turns
+
+    @staticmethod
+    def _turn_hidden_by_rollback(
+        *,
+        branch: BranchHeadRecord,
+        turn: StoryTurnRecord,
+    ) -> bool:
+        visibility_state = str(turn.visibility_state or "").strip()
+        if visibility_state in {"hidden", "invalidated", "hidden_by_rollback"}:
+            return True
+        hidden_turn_ids = branch.metadata_json.get("rollback_hidden_turn_ids", [])
+        if not isinstance(hidden_turn_ids, list):
+            return False
+        return turn.turn_id in {str(item).strip() for item in hidden_turn_ids}
+
+    @staticmethod
+    def _rollback_metadata(
+        *,
+        branch: BranchHeadRecord,
+        target_turn: StoryTurnRecord,
+        later_turns: list[StoryTurnRecord],
+        metadata: dict | None,
+        applied_at: datetime,
+    ) -> dict:
+        incoming = dict(metadata or {})
+        graph_thread_id = incoming.get("graph_thread_id") or (
+            StoryRuntimeIdentityService.build_graph_thread_id(
+                session_id=target_turn.session_id,
+                branch_head_id=branch.branch_head_id,
+            )
+        )
+        previous_head_turn_id = branch.head_turn_id
+        previous_last_settled_turn_id = branch.last_settled_turn_id
+        previous = {
+            key: incoming.pop(key)
+            for key in (
+                "previous_head_turn_id",
+                "previous_last_settled_turn_id",
+                "hidden_turn_ids",
+                "visibility_transition",
+                "checkpoint_binding",
+            )
+            if key in incoming
+        }
+        return {
+            **incoming,
+            "previous": previous,
+            "previous_head_turn_id": previous_head_turn_id,
+            "previous_last_settled_turn_id": previous_last_settled_turn_id,
+            "visibility_transition": {
+                "hidden_after_turn_id": target_turn.turn_id,
+                "hidden_turn_ids": [turn.turn_id for turn in later_turns],
+                "invalidated_workspace_material_ids": [],
+            },
+            "checkpoint_binding": {
+                "binding_kind": "branch_scoped_thread",
+                "graph_thread_id": graph_thread_id,
+                "branch_head_id": branch.branch_head_id,
+                "target_turn_id": target_turn.turn_id,
+                "target_checkpoint_id": incoming.get("target_checkpoint_id"),
+                "source": "application_visibility_contract",
+            },
+            "rollback_applied_at": applied_at.isoformat(),
+        }
+
+    def _hide_later_turns_after_rollback(
+        self,
+        *,
+        later_turns: list[StoryTurnRecord],
+        target_turn_id: str,
+        receipt_id: str,
+        updated_at: datetime,
+    ) -> None:
+        for turn in later_turns:
+            turn.visibility_state = "hidden_by_rollback"
+            turn.hidden_by_control_receipt_id = receipt_id
+            turn.hidden_after_turn_id = target_turn_id
+            turn.updated_at = updated_at
+            self._session.add(turn)
+
+    def _invalidate_workspace_materials_for_turns(
+        self,
+        *,
+        later_turns: list[StoryTurnRecord],
+        receipt_id: str,
+        target_turn_id: str,
+        updated_at: datetime,
+    ) -> list[str]:
+        if not later_turns:
+            return []
+        invalidated_ids: list[str] = []
+        for turn in later_turns:
+            stmt = (
+                select(RuntimeWorkspaceMaterialRecord)
+                .where(RuntimeWorkspaceMaterialRecord.story_id == turn.story_id)
+                .where(RuntimeWorkspaceMaterialRecord.session_id == turn.session_id)
+                .where(
+                    RuntimeWorkspaceMaterialRecord.branch_head_id
+                    == turn.branch_head_id
+                )
+                .where(RuntimeWorkspaceMaterialRecord.turn_id == turn.turn_id)
+            )
+            records = list(self._session.exec(stmt).all())
+            for record in records:
+                if record.lifecycle == RuntimeWorkspaceMaterialLifecycle.INVALIDATED.value:
+                    continue
+                metadata_json = dict(record.metadata_json or {})
+                rollback_visibility = dict(
+                    metadata_json.get("rollback_visibility") or {}
+                )
+                rollback_visibility.update(
+                    {
+                        "hidden_by_control_receipt_id": receipt_id,
+                        "hidden_after_turn_id": target_turn_id,
+                    }
+                )
+                metadata_json["rollback_visibility"] = rollback_visibility
+                metadata_json["visibility_state"] = "hidden_by_rollback"
+                metadata_json["hidden_after_turn_id"] = target_turn_id
+                record.lifecycle = RuntimeWorkspaceMaterialLifecycle.INVALIDATED.value
+                record.metadata_json = metadata_json
+                record.updated_at = updated_at
+                record.invalidated_at = updated_at
+                self._session.add(record)
+                invalidated_ids.append(record.material_id)
+        return invalidated_ids
+
+    @staticmethod
+    def _merge_branch_rollback_metadata(
+        *,
+        branch: BranchHeadRecord,
+        target_turn: StoryTurnRecord,
+        receipt: BranchControlReceiptRecord,
+        invalidated_material_ids: list[str],
+        updated_at: datetime,
+    ) -> dict:
+        metadata_json = dict(branch.metadata_json or {})
+        rollback_history = list(metadata_json.get("rollback_history") or [])
+        rollback_history.append(
+            {
+                "receipt_id": receipt.receipt_id,
+                "target_turn_id": target_turn.turn_id,
+                "hidden_turn_ids": list(
+                    receipt.metadata_json.get("visibility_transition", {}).get(
+                        "hidden_turn_ids",
+                        [],
+                    )
+                ),
+                "invalidated_workspace_material_ids": list(invalidated_material_ids),
+                "applied_at": updated_at.isoformat(),
+            }
+        )
+        metadata_json["rollback_history"] = rollback_history
+        metadata_json["rollback_cutoff_turn_id"] = target_turn.turn_id
+        metadata_json["rollback_receipt_id"] = receipt.receipt_id
+        metadata_json["rollback_applied_at"] = updated_at.isoformat()
+        existing_hidden_turn_ids = [
+            str(item).strip()
+            for item in metadata_json.get("rollback_hidden_turn_ids", [])
+            if str(item).strip()
+        ]
+        receipt_hidden_turn_ids = [
+            str(item).strip()
+            for item in receipt.metadata_json.get("visibility_transition", {}).get(
+                "hidden_turn_ids",
+                [],
+            )
+            if str(item).strip()
+        ]
+        metadata_json["rollback_hidden_turn_ids"] = list(
+            dict.fromkeys([*existing_hidden_turn_ids, *receipt_hidden_turn_ids])
+        )
+        checkpoint_binding = receipt.metadata_json.get("checkpoint_binding")
+        if isinstance(checkpoint_binding, dict):
+            metadata_json["checkpoint_binding"] = dict(checkpoint_binding)
+        return metadata_json
+
+    def _branch_count(self, *, session_id: str) -> int:
+        stmt = select(BranchHeadRecord).where(
+            BranchHeadRecord.session_id == session_id
+        )
+        return len(list(self._session.exec(stmt).all()))
+
+    def _require_branch_switchable(self, branch: BranchHeadRecord) -> None:
+        visibility_state = str(branch.visibility_state or "").strip()
+        if (
+            branch.status == BranchHeadStatus.ACTIVE.value
+            and visibility_state == BranchVisibilityState.VISIBLE.value
+        ):
+            return
+        raise StoryRuntimeIdentityServiceError(
+            "runtime_branch_head_not_active",
+            branch.branch_head_id,
+        )
+
+    def _fallback_active_branch_after_delete(
+        self,
+        *,
+        session_record: StorySessionRecord,
+        deleted_branch: BranchHeadRecord,
+    ) -> str:
+        parent_branch_id = str(deleted_branch.parent_branch_head_id or "").strip()
+        if parent_branch_id:
+            parent_branch = self.require_branch_head(parent_branch_id)
+            self._validate_branch_belongs_to_session(
+                session_record=session_record,
+                branch=parent_branch,
+            )
+            self._require_branch_switchable(parent_branch)
+            return parent_branch.branch_head_id
+        default_branch = self.ensure_default_branch(
+            session_id=session_record.session_id,
+            story_id=session_record.story_id,
+        )
+        self._require_branch_switchable(default_branch)
+        return default_branch.branch_head_id
+
+    def _write_branch_control_receipt(
+        self,
+        *,
+        session_record: StorySessionRecord,
+        branch_head_id: str,
+        control_kind: BranchControlKind,
+        actor: str,
+        fork_origin_turn_id: str | None = None,
+        fork_base_turn_id: str | None = None,
+        from_branch_head_id: str | None = None,
+        to_branch_head_id: str | None = None,
+        target_turn_id: str | None = None,
+        source_ref_ids: list[str] | None = None,
+        result_ref_ids: list[str] | None = None,
+        trace_refs: list[str] | None = None,
+        metadata: dict | None = None,
+        created_at: datetime | None = None,
+    ) -> BranchControlReceiptRecord:
+        record = BranchControlReceiptRecord(
+            receipt_id=f"branch-control:{uuid4().hex}",
+            story_id=session_record.story_id,
+            session_id=session_record.session_id,
+            branch_head_id=branch_head_id,
+            control_kind=control_kind.value,
+            actor=str(actor or "").strip() or "story_runtime",
+            fork_origin_turn_id=fork_origin_turn_id,
+            fork_base_turn_id=fork_base_turn_id,
+            from_branch_head_id=from_branch_head_id,
+            to_branch_head_id=to_branch_head_id,
+            target_turn_id=target_turn_id,
+            source_ref_ids_json=list(source_ref_ids or []),
+            result_ref_ids_json=list(result_ref_ids or []),
+            trace_refs_json=list(trace_refs or []),
+            metadata_json=dict(metadata or {}),
+            created_at=created_at or _utcnow(),
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    @staticmethod
+    def _record_to_branch_control_receipt(
+        record: BranchControlReceiptRecord,
+    ) -> BranchControlReceipt:
+        return BranchControlReceipt(
+            receipt_id=record.receipt_id,
+            session_id=record.session_id,
+            story_id=record.story_id,
+            branch_head_id=record.branch_head_id,
+            control_kind=BranchControlKind(record.control_kind),
+            actor=record.actor,
+            fork_origin_turn_id=record.fork_origin_turn_id,
+            fork_base_turn_id=record.fork_base_turn_id,
+            from_branch_head_id=record.from_branch_head_id,
+            to_branch_head_id=record.to_branch_head_id,
+            target_turn_id=record.target_turn_id,
+            source_ref_ids=list(record.source_ref_ids_json or []),
+            result_ref_ids=list(record.result_ref_ids_json or []),
+            trace_refs=list(record.trace_refs_json or []),
+            metadata=dict(record.metadata_json or {}),
+            created_at=record.created_at,
+        )
+
+    def _resolve_runtime_entry_branch(
+        self,
+        *,
+        session_record: StorySessionRecord,
+        requested_branch_head_id: str | None,
+    ) -> BranchHeadRecord:
+        requested_branch_id = str(requested_branch_head_id or "").strip()
+        if requested_branch_id:
+            branch = self.require_branch_head(requested_branch_id)
+            self._require_branch_switchable(branch)
+            return branch
+
+        pinned_branch_id = str(session_record.active_branch_head_id or "").strip()
+        if not pinned_branch_id:
+            return self.ensure_default_branch(
+                session_id=session_record.session_id,
+                story_id=session_record.story_id,
+            )
+        if pinned_branch_id == self._default_branch_id(session_record.session_id):
+            return self.ensure_default_branch(
+                session_id=session_record.session_id,
+                story_id=session_record.story_id,
+            )
+        branch = self.require_branch_head(pinned_branch_id)
+        self._require_branch_switchable(branch)
+        return branch
+
+    def _resolve_runtime_entry_snapshot(
+        self,
+        *,
+        session_record: StorySessionRecord,
+        requested_runtime_profile_snapshot_id: str | None,
+    ):
+        requested_snapshot_id = str(requested_runtime_profile_snapshot_id or "").strip()
+        if requested_snapshot_id:
+            return self._runtime_profile_snapshot_service.require_snapshot(
+                requested_snapshot_id
+            )
+
+        pinned_snapshot_id = str(
+            session_record.active_runtime_profile_snapshot_id or ""
+        ).strip()
+        if pinned_snapshot_id:
+            return self._runtime_profile_snapshot_service.require_snapshot(
+                pinned_snapshot_id
+            )
+        return self._runtime_profile_snapshot_service.ensure_active_snapshot(
+            session_id=session_record.session_id,
+            created_from="story_runtime.turn_start",
+        )
+
+    def _pin_session_active_branch_if_unset(
+        self,
+        *,
+        session_record: StorySessionRecord,
+        branch_head_id: str,
+        updated_at: datetime | None = None,
+    ) -> None:
+        current_branch_id = str(session_record.active_branch_head_id or "").strip()
+        if current_branch_id:
+            return
+        session_record.active_branch_head_id = branch_head_id
+        session_record.updated_at = updated_at or _utcnow()
+        self._session.add(session_record)
+        self._session.flush()

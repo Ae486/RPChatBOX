@@ -2,11 +2,13 @@
 
 ## Goal
 
-为 SetupAgent 引入 **Stage SkillPack** 概念，让 agent 在 setup 各 stage 装载专业能力包（persona + 引导风格 + 工具白名单），用完即卸。本任务交付：
+为 SetupAgent 引入 **Stage SkillPack** 概念，让 agent 在 setup 各 stage 装载 stage-local 专业能力包（persona + 引导风格 + 收敛策略），用完即卸。本任务交付：
 
 1. SkillPack 文件格式（Anthropic Skill 风格 markdown + frontmatter，stage 级一一对应）。
-2. SkillPack 装载机制（按 `SetupStageId` 查表 + system prompt 装入 + tool_scope 联动）。
+2. SkillPack 装载机制（按 `SetupStageId` 查表，命中即在 system prompt 替换 `_stage_overlay` 输出 + 插入 specialist-hat 引导句）。
 3. 一个完整 Pilot：**`character_design`** stage 的 SkillPack。
+
+> **不接管 tool_scope**：stage 工具语义由现有 `setup.truth.write strict pilot` spec 处理（runtime 注入 `stage_id` + `block_type=stage_draft`）。SkillPack 不携工具白名单字段、不改造 `build_setup_agent_tool_scope`。
 
 ## Current Code Baseline
 
@@ -80,21 +82,19 @@ class SetupStageDraftBlock(BaseModel):
 
 - `SETUP_READ_ONLY_MEMORY_TOOLS`（6 个 memory.* 只读工具）
 - `SETUP_SHARED_PRIVATE_TOOLS`（11 个 setup.* 共享工具：discussion / chunk / truth / question / asset / proposal.commit / read.* / truth_index.*）
-- `SETUP_STEP_PATCH_TOOLS`（4-stage 旧表，仍是 patch 工具的唯一来源）
-- `SETUP_STAGE_PATCH_TOOLS`（新表，**所有 9 个 stage 当前都是空 tuple**，等 SkillPack 填）
-- `build_setup_agent_tool_scope(current_step)` 优先查旧表、回退查新表，最终 fallback 到全集
+- `SETUP_STEP_PATCH_TOOLS`（4-stage 旧表，legacy 兼容用）
+- `SETUP_STAGE_PATCH_TOOLS`（**有意保持空 tuple**，per spec `rp-setup-agent-strict-truth-write-tool-pilot.md` —— stage 写入由 `setup.truth.write` 接管，不拆独立 patch tool）
+- `build_setup_agent_tool_scope(stage_or_step_value)` 已就位，由 adapter 用 `selected_stage.value` 调用
 
-### 6. 旧字段共存（过渡期）
+**SkillPack 不接管该层**。stage 隔离的工具语义已由 `setup.truth.write strict pilot` 处理（runtime 注入 `stage_id` + `block_type=stage_draft`）。
 
-下面这些字段尚未迁移到 SetupStageId：
+### 6. 旧字段共存（过渡期，对 SkillPack 影响极小）
 
-- `SetupAgentTurnRequest.target_step: SetupStepId | None`（**没有** `target_stage` 字段）
-- `SetupWorkspace.current_step: SetupStepId`（必填）/ `current_stage: SetupStageId | None`（nullable 副本）
-- 4 个旧 draft 模型（`StoryConfigDraft / WritingContractDraft / FoundationDraft / LongformBlueprintDraft`）仍存在并被 `SetupWorkspace` 引用
-- 4 个旧 patch 工具（`setup.patch.story_config / writing_contract / foundation_entry / longform_blueprint`）仍是底层唯一可用 patch
-- `_legacy_step_for_stage` 桥接 SetupStageId → SetupStepId
+- 4 个旧 draft 模型（`StoryConfigDraft / WritingContractDraft / FoundationDraft / LongformBlueprintDraft`）仍存在并被 `SetupWorkspace` 引用（粒度统一收尾任务负责迁移到 `SetupStageDraftBlock`）
+- 4 个旧 patch 工具（`setup.patch.story_config / writing_contract / foundation_entry / longform_blueprint`）仍是 legacy fallback；新 stage 写入走 `setup.truth.write + block_type=stage_draft`
+- `_legacy_step_for_stage` 桥接 SetupStageId → SetupStepId（用于 legacy 字段读写）
 
-**直接后果**：SkillPack 想做 "stage 用完即扔工具" 必须解决 "如何向 LLM 暴露专属于 character_design 的 patch 工具"。当前**没有** `setup.patch.character_design.entry` 这种工具，只有 `setup.patch.foundation_entry`。Pilot 期 SkillPack 复用 `setup.patch.foundation_entry`，通过 forbidden / facilitation prose 软性约束 agent 写 character entry。
+**SkillPack 与这些过渡现状解耦**：SkillPack 只管 system prompt 中 stage-local prose；不引用 4 个旧 draft 模型、不引用 patch 工具名。SkillPack body 引用 entry shape 时按新容器 `SetupStageDraftBlock` 与 `SetupDraftEntry` 写。
 
 ## 设计原则
 
@@ -115,7 +115,7 @@ class SetupStageDraftBlock(BaseModel):
 | 维度 | Anthropic Skill | 我们 SkillPack | 一致吗？ |
 |---|---|---|---|
 | 文件形态 | `skill-name/SKILL.md` 目录格式 | 同样 | 一致 |
-| Frontmatter | `name`, `description` | `name`, `description`, `stage_id`, `required_tools_stage_specific` | 一致（多 2 个路由字段）|
+| Frontmatter | `name`, `description` | `name`, `stage_id`, `description` | 一致（多 1 个路由字段 stage_id）|
 | Body 结构 | 自由 markdown | 自由 markdown（约定 sections）| 一致 |
 | 装载到哪 | system prompt | system prompt（替代原 `_stage_overlay` 槽位）| 一致 |
 | 用完即卸 | 是 | 是（硬卸载）| 一致 |
@@ -128,23 +128,26 @@ class SetupStageDraftBlock(BaseModel):
 1. **不当裁判**：SkillPack **不**给 agent 自动判定 ready / commit 的硬阈值。
 2. **引导优先**：SkillPack 让 agent 引导用户、追问盲区、发散思路，不做"卡流程"的检查表。
 3. **骨架推荐而非强制**：content skeleton 提建议而不强制 schema；题材敏感字段走 `extras` 自由扩展槽。
-4. **硬卸载**：stage 切换后旧 SkillPack 字符级不出现在新 system prompt；tool_scope 同步切换。
+4. **硬卸载**：stage 切换后旧 SkillPack 字符级不出现在新 system prompt 中。
 5. **语言分层**：persona / objectives / forbidden / facilitation 用英文；clarification_templates 用中文。
-6. **替代 `_stage_overlay`**：命中 SkillPack 时跳过 `_stage_overlay`，避免双套 stage prose 互冲。
-7. **persona swap 而非 You-are 互冲**：base prompt 开头加 "specialist-hat 槽位"，SkillPack body 不写 "You are X"。
-8. **工具用完即扔**：SkillPack 在 frontmatter 声明 `required_tools_stage_specific`；tool_scope 优先读 SkillPack。
-9. **与 `SetupStageModule` 互补**：Module 是数据层（display_name / draft_block_type / default_entry_types / section_templates），SkillPack 是能力层（persona / 收敛策略 / 工具白名单）。两者一一对应同一个 SetupStageId。
+6. **替代 `_stage_overlay` 输出（方案 A）**：命中 SkillPack 时，`_stage_overlay` 内部直接返回 SkillPack body，不再返回原 9-stage prose 分支。未命中时（其他 8 个 stage 暂无 SkillPack）回退到现行 `_stage_overlay` prose。  
+   - **不动 `_stage_overlay` 函数的 9-stage 分支表**，仅在命中 SkillPack 时短路它的输出 —— 防御性容错优于美观重构。
+7. **persona swap 而非 You-are 互冲**：base prompt 开头插入 specialist-hat 引导句（仅命中 SkillPack 时），SkillPack body 不写 "You are X"。
+8. **不接管 tool_scope**：SkillPack 不携工具白名单字段、不改 `build_setup_agent_tool_scope`。stage 隔离工具语义由现有 `setup.truth.write strict pilot` spec 处理。
+9. **与 `SetupStageModule` 互补**：Module 是数据层（display_name / draft_block_type / default_entry_types / section_templates），SkillPack 是能力层（persona / 收敛策略）。两者一一对应同一个 SetupStageId。
 
 ## 文件形态与目录结构
 
 ```
-backend/rp/services/setup_stage_skill_packs/
+backend/rp/agent_runtime/skill_packs/
   __init__.py                                  # 启动扫描目录、构 REGISTRY
-  registry.py                                  # SkillPackRecord + load_registry()
+  registry.py                                  # SkillPackRecord + load_registry() + render_skill_pack() + get_for_stage()
   character_design/
     SKILL.md                                   # Pilot 唯一交付的内容文件
   # 未来：world_background/SKILL.md / plot_blueprint/SKILL.md / ...
 ```
+
+放在 `backend/rp/agent_runtime/` 下（与 profiles.py / adapters.py / tools.py 同层），因为 SkillPack 本质是"运行时 prompt 定制"，归属于 agent_runtime 概念。
 
 每个 SkillPack 是一个目录（与 Anthropic Skill 文件格式一致），目录名 = `SetupStageId.value`（snake_case）。`SKILL.md` 是 frontmatter + markdown body。
 
@@ -164,11 +167,10 @@ description: |
   tension, and stays scoped to character entries.
   WHEN: SetupStageId.CHARACTER_DESIGN. Loaded automatically by
   SetupAgentPromptService whenever the resolved stage is character_design.
-required_tools_stage_specific:
-  - setup.patch.foundation_entry           # 过渡期使用（带 prose 约束 domain=character）
-                                           # 粒度统一收尾任务把它替换为 stage 级新 patch 工具
 ---
 ```
+
+仅 3 个字段：`name` / `stage_id` / `description`。无工具白名单字段。
 
 > `description` 仅作内部文档与日志，**不渲染入 prompt**。与 Anthropic 的 description 用于 LLM 自选不同，我们走确定性查表，description 退化为人看的文档。
 
@@ -198,7 +200,7 @@ required_tools_stage_specific:
 ## 数据结构（运行时 contract）
 
 ```python
-# backend/rp/services/setup_stage_skill_packs/registry.py
+# backend/rp/agent_runtime/skill_packs/registry.py
 
 class SkillPackRecord(BaseModel):
     """In-memory representation of a parsed SKILL.md."""
@@ -208,32 +210,30 @@ class SkillPackRecord(BaseModel):
     stage_id: SetupStageId                                 # 来自 frontmatter
     description: str = ""                                  # 来自 frontmatter；仅文档/日志，不渲染
     body: str                                              # markdown 主体（去掉 frontmatter）
-    required_tools_stage_specific: tuple[str, ...] = ()    # 来自 frontmatter
 
 STAGE_SKILL_PACKS: dict[SetupStageId, SkillPackRecord]     # 启动时由 load_registry() 填充
 ```
 
-唯一 pydantic 类。无 `FieldHint` / `ClarificationTemplate` 等子结构 —— 这些都是 markdown body 里的列表项，按需阅读，不需要程序化访问。
+唯一 pydantic 类。无 `FieldHint` / `ClarificationTemplate` 等子结构 —— 这些都是 markdown body 里的列表项，按需阅读，不需要程序化访问。无 `required_tools_stage_specific` 字段 —— SkillPack 不接管 tool_scope。
 
 ## 装载 / 卸载语义
 
-### 装载（命中）
+### 装载（命中 SkillPack）
 
-当当前 turn 的 stage 命中 `STAGE_SKILL_PACKS[stage_id]` 时：
+当当前 turn 的 stage 命中 `STAGE_SKILL_PACKS[stage_id]` 时，**只改 system prompt**：
 
-1. **system prompt** 改造（详见下文 Base Prompt Refactor）：
-   - base prompt 开头追加 specialist-hat 引导句
-   - 在原 `_stage_overlay` 槽位插入 SkillPack body 的渲染段（不再渲染原 `_stage_overlay`）
-2. **tool_scope** 改造：
-   - `build_setup_agent_tool_scope` 优先读 SkillPack 的 `required_tools_stage_specific`
-   - 与 `SETUP_READ_ONLY_MEMORY_TOOLS` + `SETUP_SHARED_PRIVATE_TOOLS` 合并为最终 visible 列表
+1. base prompt 开头追加 specialist-hat 引导句（详见下文 Base Prompt Refactor）
+2. `_stage_overlay` 内部短路返回 SkillPack body（方案 A）—— 原 9-stage prose 分支跳过
+3. tool_scope 不变（仍由 `build_setup_agent_tool_scope(selected_stage.value)` 处理，按现行逻辑）
+4. adapter metadata（可选）加 `skill_pack_name` 供 trace 关联（见 Backend Contract Changes）
 
 ### 硬卸载（未命中或切换）
 
 下一 turn 若 stage_id 变更或为 None / 不在注册表：
 
 - system prompt 中**字符级不出现**旧 SkillPack 任何内容、specialist-hat 引导句、`[Stage Skill Pack` 标记段
-- tool_scope 回退到现行行为：`SETUP_STEP_PATCH_TOOLS` → `SETUP_STAGE_PATCH_TOOLS` → 全集 fallback 链
+- `_stage_overlay` 退回正常路径，返回该 stage 的现行 9-stage prose
+- tool_scope 不变（一致）
 
 无 "former skill summary" 软过渡。前 stage 真相通过现有 `prior_stage_handoffs` 合同传递。
 
@@ -282,40 +282,34 @@ The workspace/context packet is below as JSON. ...
 
 ### Backend（本任务范围内）
 
-1. **新增** `backend/rp/services/setup_stage_skill_packs/` 目录与 `character_design/SKILL.md` 文件。
-2. **新增** `backend/rp/services/setup_stage_skill_packs/registry.py`：定义 `SkillPackRecord`、`load_registry()`、`STAGE_SKILL_PACKS` 常量、`render_skill_pack(record) -> str`、`get_skill_pack_for_stage(stage_id) -> SkillPackRecord | None`。
-3. **改造** `SetupAgentPromptService.build_system_prompt(...)`：
-   - 新增 `stage_id: SetupStageId | None = None` 形参
-   - 命中 SkillPack 时：开头插入 specialist-hat 引导句；`_stage_overlay` 槽位插入 SkillPack body 渲染段
-   - 未命中时：行为与现行字节级一致（保留原 `_stage_overlay`）
-4. **改造** `build_setup_agent_tool_scope(...)`（在 `backend/rp/agent_runtime/profiles.py`）：
-   - 新增 `stage_id: SetupStageId | None = None` 形参
-   - 命中 SkillPack 时：返回 `SETUP_READ_ONLY_MEMORY_TOOLS + SETUP_SHARED_PRIVATE_TOOLS + pack.required_tools_stage_specific`
-   - 未命中时：保留现有行为
+1. **新增** `backend/rp/agent_runtime/skill_packs/` 目录与 `character_design/SKILL.md` 文件。
+2. **新增** `backend/rp/agent_runtime/skill_packs/registry.py`：定义 `SkillPackRecord`、`load_registry()`、`STAGE_SKILL_PACKS` 常量、`render_skill_pack(record) -> str`、`get_skill_pack_for_stage(stage_id) -> SkillPackRecord | None`。
+3. **改造** `SetupAgentPromptService._stage_overlay(...)`（per 方案 A）：
+   - 命中 SkillPack 时：短路返回 `render_skill_pack(record)` 输出（含 `[Stage Skill Pack: ...]` 标记段与 markdown body）
+   - 未命中时：保留现行 9-stage prose 分支不动
+4. **改造** `SetupAgentPromptService.build_system_prompt(...)`：
+   - 命中 SkillPack 时：在 base prompt 开头追加 specialist-hat 引导句（紧跟 "You are SetupAgent..." 那段，在 Core rules 之前）
+   - 未命中时：行为与现行字节级一致
 
-### Backend 桥接（依赖粒度统一收尾任务）
+### Backend 链路（已由粒度统一任务完成，本任务不动）
 
-下面字段是 SkillPack 路由的入口，**当前后端未提供**，需协调 / 后续任务补：
+- ✅ `SetupAgentTurnRequest.target_stage: SetupStageId | None`
+- ✅ `SetupGraphState.target_stage` + runner / nodes 透传
+- ✅ API langfuse metadata 含 `target_stage`
+- ✅ `SetupRuntimeAdapter` 选 `selected_stage` 并传给 `build_system_prompt`
 
-5. `SetupAgentTurnRequest.target_stage: SetupStageId | None`（新字段）
-6. `SetupGraphState.target_stage: str | None`（state TypedDict 加字段）
-7. `SetupGraphRunner._initial_state` 复制 target_stage
-8. `SetupGraphNodes._request_from_state` 反序列化 target_stage
-9. `SetupRuntimeAdapter.build_turn_input` 把 stage_id 透传给 `build_system_prompt` 与 `build_setup_agent_tool_scope`，并在 `RpAgentTurnInput.metadata` 写 `stage_id` / `skill_pack_name` 供 trace
-10. API 路由 `backend/api/rp_setup.py` 的 langfuse `metadata` 加 `stage_id`
+### Backend 可选小改（trace 可观测性）
 
-详见 `docs/research/rp-redesign/agent/cooperation/claude-skill-pack-pipeline-integration-proposal.md`（已基于现状更新）。
+5. **可选**：`SetupRuntimeAdapter.build_turn_input` 在 `RpAgentTurnInput.metadata` 加一行 `"skill_pack_name": pack.name if pack else None`，便于 langfuse / eval 关联。1 行改动，不阻塞 Pilot；建议一并做。
 
-### Frontend（本任务范围内最小改动）
+### Frontend（**已由粒度统一任务完成，本任务不动**）
 
-1. `lib/pages/prestory_setup_page.dart` 在 turn 调用入口处补传 `targetStage`：
-   - 来源 = `_selectedStage` 转换到 SetupStageId snake_case 字符串值（`worldBackground` → `"world_background"`）
-   - 字段名 = `target_stage`（与后端 `SetupAgentTurnRequest.target_stage` 一致）
-2. AI 客户端 / dio 调用层：`RpSetupAgentTurnRequest` 序列化新增 `target_stage` 字段。
+- ✅ `prestory_setup_page.dart` 已在 turn 调用处传 `targetStage = _targetStageForSelectedStage(workspace)`
+- ✅ 客户端层已序列化 `target_stage` 字段
 
 ## Pilot Scope: character_design SkillPack 内容
 
-### 以 markdown 写在 `backend/rp/services/setup_stage_skill_packs/character_design/SKILL.md`
+### 以 markdown 写在 `backend/rp/agent_runtime/skill_packs/character_design/SKILL.md`
 
 ```markdown
 ---
@@ -327,8 +321,6 @@ description: |
   tension, and stays scoped to character entries.
   WHEN: SetupStageId.CHARACTER_DESIGN. Loaded automatically by
   SetupAgentPromptService whenever the resolved stage is character_design.
-required_tools_stage_specific:
-  - setup.patch.foundation_entry
 ---
 
 ## Specialist hat
@@ -409,55 +401,44 @@ Use the Chinese template verbatim or adapt; do not translate.
 2. SkillPack 自动 / 启发式选择机制（Pilot 完全由 stage_id 字段驱动）。
 3. SkillPack persona library 多 persona / fusion 机制（Pilot 不预留数据结构槽位；未来可在 SKILL.md sections 表达）。
 4. SkillPack preset 库（萧谴 character preset 设计的实装拆为后续任务；可作为 `references/` 子目录的 markdown 文件）。
-5. `SetupStepId` 枚举弃用（不本任务做）。
-6. 4 个旧 draft 模型（StoryConfigDraft 等）迁移到 SetupStageDraftBlock 统一容器（粒度统一收尾任务负责）。
-7. 4 个旧 patch 工具拆分为 stage 级新 patch 工具（如 `setup.patch.character_design.entry`）—— 粒度统一收尾任务负责；本任务期 character_design SkillPack 复用 `setup.patch.foundation_entry`。
+5. **SkillPack 接管 tool_scope**（明确不做，per spec `rp-setup-agent-strict-truth-write-tool-pilot.md`：stage 写入由 `setup.truth.write + runtime 注入 stage_id + block_type=stage_draft` 处理，不拆独立 patch tool；SkillPack 不携工具白名单字段）。
+6. `SetupStepId` 枚举弃用（不本任务做）。
+7. 4 个旧 draft 模型迁移到 SetupStageDraftBlock 统一容器（粒度统一收尾任务负责）。
 8. SkillPack 行为层 eval cases（`backend/rp/eval/cases/setup/skill_pack/<stage_id>/*.json` 路径预定，case JSON 与 ragas 评测拆后续任务）。
 9. SkillPack 卸载时的 "former skill summary" 软过渡（明确不做，硬卸载）。
 10. Agent 自动 ready 判定 / 自动 `setup.proposal.commit`（明确不做；用户主动权）。
-11. `_stage_overlay` 整体弃用（Pilot 仅在命中 SkillPack 时跳过；9 个 stage 全部落地 SkillPack 后再做整体弃用）。
+11. `_stage_overlay` 整体弃用（Pilot 仅在命中 SkillPack 时短路；9 个 stage 全部落地 SkillPack 后再整体弃用）。
 12. mode × stage 注册表（Pilot 简单单键 SetupStageId；未来若 SkillPack 需 mode 维度差异可升级）。
 
 ## Deliverables
 
-1. **新增 spec**：`.trellis/spec/backend/rp-setup-agent-stage-skill-pack.md`（运行时契约：SkillPack 文件格式 / 装载机制 / 工具白名单 / 与 `SetupStageModule` 的关系 / 与 `_stage_overlay` 的替代关系 / Eval 模块对接预留）。
-2. **更新 spec**：`.trellis/spec/backend/rp-setup-agent-stage-aware-tool-scope.md` 加一节 "SkillPack-driven Tool Scope"，说明 SkillPack 命中时优先读其 `required_tools_stage_specific`。
-3. **后端代码**：
-   - 新建 `backend/rp/services/setup_stage_skill_packs/{registry.py, character_design/SKILL.md}`
-   - 改造 `SetupAgentPromptService.build_system_prompt(...)`
-   - 改造 `build_setup_agent_tool_scope(...)`
-4. **协调依赖**（不在本任务交付，但 `claude-skill-pack-pipeline-integration-proposal.md` 列出，需粒度统一收尾任务承接）：
-   - `SetupAgentTurnRequest.target_stage` 字段
-   - `SetupGraphState.target_stage` + 透传链
-   - API langfuse metadata 加 stage_id
-   - adapter metadata 加 skill_pack_name
-5. **前端代码**：
-   - `prestory_setup_page.dart` 在 turn 调用处补传 `targetStage`（snake_case stage_id）
-   - 客户端层 `RpSetupAgentTurnRequest` 序列化新字段
-6. **测试**：
-   - `backend/rp/tests/test_setup_stage_skill_packs.py`（新文件）：
-     - `STAGE_SKILL_PACKS[SetupStageId.CHARACTER_DESIGN]` 存在；name / stage_id / description / body / required_tools_stage_specific 全部非空且符合 PRD 内容。
-     - `render_skill_pack(record)` 输出**不出现**字面量 "You are"；包含 "Specialist hat" 段；包含 forbidden 中"不自动 commit / 不自动判 ready"两条；包含 `motivation.real`、`world_fit` 等关键关键词；包含中文 clarification 模板原文。
+1. **新增 spec**：`.trellis/spec/backend/rp-setup-agent-stage-skill-pack.md`（运行时契约：SkillPack 文件格式 / 装载机制 / 与 `SetupStageModule` 的关系 / 与 `_stage_overlay` 的方案 A 替代关系 / 与 `setup.truth.write strict pilot` 的解耦说明 / Eval 模块对接预留）。
+2. **后端代码**：
+   - 新建 `backend/rp/agent_runtime/skill_packs/{__init__.py, registry.py, character_design/SKILL.md}`
+   - 改造 `SetupAgentPromptService._stage_overlay(...)` —— 命中 SkillPack 时短路返回 `render_skill_pack(record)` 输出
+   - 改造 `SetupAgentPromptService.build_system_prompt(...)` —— 命中 SkillPack 时在 base prompt 开头插入 specialist-hat 引导句
+   - **可选**：`SetupRuntimeAdapter.build_turn_input` 在 metadata 加 `skill_pack_name`（trace 用）
+3. **测试**：
+   - `backend/rp/tests/test_skill_packs_registry.py`（新文件）：
+     - `STAGE_SKILL_PACKS[SetupStageId.CHARACTER_DESIGN]` 存在；name / stage_id / description / body 全部非空且符合 PRD 内容
+     - `render_skill_pack(record)` 输出**不出现**字面量 "You are"；包含 `[Stage Skill Pack: character-design.v1]` 标记段；包含 "## Specialist hat" / "## Objectives" / "## Forbidden" / "## Facilitation principles" / "## Recommended content skeleton" / "## Clarification templates" 6 个 section header；包含 forbidden 中"不自动 commit / 不自动判 ready"两条；包含 `motivation.real`、`world_fit` 等关键关键词；包含中文 clarification 模板原文（如 "角色 X 表面上想要 Y..."）
    - `backend/rp/tests/test_setup_agent_prompt_service.py`：
-     - `stage_id=SetupStageId.CHARACTER_DESIGN` 时 system prompt 中：
-       - 出现 `[Stage Skill Pack: character-design.v1]` 标记段；
-       - 出现 specialist-hat 引导句；
-       - **不出现** foundation 的 `_stage_overlay` 原文；
-       - 仅出现一个 "You are SetupAgent" 身份声明。
-     - `stage_id=None` 或未注册值时 system prompt 与现行**字节级一致**。
-   - `backend/rp/tests/test_setup_agent_tool_scope.py`：
-     - `stage_id=SetupStageId.CHARACTER_DESIGN` 时 `build_setup_agent_tool_scope(...)` 返回的列表包含 `setup.patch.foundation_entry` 与共享 tools。
-     - 不命中 SkillPack 时回退到现行行为。
-7. **更新 `.trellis/spec/backend/index.md`**：追加新 spec 条目与 pre-development checkbox。
+     - `current_stage=SetupStageId.CHARACTER_DESIGN` 时 system prompt 中：
+       - 出现 `[Stage Skill Pack: character-design.v1]` 标记段
+       - 出现 specialist-hat 引导句（如 "While in this stage, take on the perspective of the Specialist hat..."）
+       - **不出现** character_design 的现行 `_stage_overlay` 原文（如 "Focus on stable character, relationship..."）
+       - 仅出现一个 "You are SetupAgent" 身份声明
+     - `current_stage=None` 或非注册 stage 时 system prompt 与现行**字节级一致**（保留原 `_stage_overlay` prose；无 specialist-hat 引导句；无 `[Stage Skill Pack` 字串）
+4. **更新 `.trellis/spec/backend/index.md`**：追加新 spec 条目与 pre-development checkbox。
 
 ## Acceptance
 
-1. 当 turn 携带 `stage_id = SetupStageId.CHARACTER_DESIGN` 时，后端 system prompt 中出现 `[Stage Skill Pack: character-design.v1]` 渲染段。
-2. 命中 SkillPack 时**不**出现现行 foundation `_stage_overlay` 原文。
+1. 当 turn 携带 `current_stage = SetupStageId.CHARACTER_DESIGN` 时，后端 system prompt 中出现 `[Stage Skill Pack: character-design.v1]` 渲染段。
+2. 命中 SkillPack 时**不**出现 character_design 的现行 `_stage_overlay` 原文（方案 A 短路验证）。
 3. system prompt 中只出现一个 "You are SetupAgent" 身份声明；SkillPack body 不写 "You are X"。
-4. tool_scope 命中 SkillPack 时包含 `setup.patch.foundation_entry` 与共享 tools；未命中时回退到现行行为。
-5. 用户切到任一非 character_design stage（或 stage_id 为 None）后，下一 turn 的 system prompt 中**完全不出现** SkillPack 任何内容（硬卸载）；同时**恢复**原 `_stage_overlay`。
-6. 未升级前端（不传 stage_id）的 turn 行为与现行**字节级**一致，无回归。
-7. `character_design` SkillPack 文件位于 `backend/rp/services/setup_stage_skill_packs/character_design/SKILL.md`，frontmatter 含 `name / stage_id / description / required_tools_stage_specific`，body 含本 PRD 列出的全部 sections。
-8. SkillPack 不引入任何让 agent 自动判 ready / 自动 commit / 自动声明阶段完成的语句。
+4. 用户切到任一非 character_design stage（或 stage_id 为 None）后，下一 turn 的 system prompt 中**完全不出现** SkillPack 任何内容（硬卸载）；同时**恢复**该 stage 的现行 `_stage_overlay` prose。
+5. 未升级前端 / `current_stage=None` 的 turn 行为与现行**字节级**一致，无回归。
+6. `character_design` SkillPack 文件位于 `backend/rp/agent_runtime/skill_packs/character_design/SKILL.md`，frontmatter 含 `name / stage_id / description`（无 `required_tools_stage_specific`）；body 含本 PRD 列出的 6 个 section。
+7. SkillPack 不引入任何让 agent 自动判 ready / 自动 commit / 自动声明阶段完成的语句。
+8. SkillPack 不携工具白名单字段、不影响 `build_setup_agent_tool_scope` 行为。
 9. 新增 spec 与 index 检查项就位，单元测试通过。

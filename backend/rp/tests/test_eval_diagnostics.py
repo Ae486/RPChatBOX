@@ -350,6 +350,78 @@ def test_diagnostic_expectation_scores_fail_with_expected_vs_actual_detail():
     }
 
 
+def test_diagnostic_expectation_scores_include_stage_alignment():
+    case = EvalCase.model_validate(
+        {
+            "case_id": "setup.diag.stage_alignment.v1",
+            "title": "stage alignment",
+            "scope": "setup",
+            "category": "diagnostics",
+            "runtime_target": {
+                "mode": "in_process",
+                "entrypoint": "setup_graph_runner.run_turn",
+                "graph_id": "setup_v2",
+                "stream": False,
+            },
+            "expected": {
+                "deterministic_assertions": [],
+                "subjective_hooks": [],
+                "expected_target_stage": "character_design",
+                "expected_effective_stage": "character_design",
+            },
+        }
+    )
+    report = {
+        "assertion_summary": {"pass": 0, "fail": 0, "warn": 0, "skip": 0},
+        "hard_failures": [],
+        "diagnostics": {},
+    }
+
+    scores = evaluate_diagnostic_expectation_scores(
+        case=case,
+        run_id="run-diag-stage",
+        root_span_id="run-diag-stage:root",
+        report=report,
+        run_metadata={"target_stage": "character_design"},
+        trace_root_attributes={"setup_stage": "character_design"},
+    )
+    attach_diagnostic_expectation_results(report, scores)
+
+    assert {score.name: score.status for score in scores} == {
+        "diagnostic.target_stage_alignment": "pass",
+        "diagnostic.effective_stage_alignment": "pass",
+    }
+    assert report["diagnostic_expectation_summary"] == {
+        "total": 2,
+        "pass": 2,
+        "fail": 0,
+        "warn": 0,
+        "skip": 0,
+    }
+    assert report["diagnostic_expectation_results"] == [
+        {
+            "score_name": "diagnostic.target_stage_alignment",
+            "status": "pass",
+            "expected": "character_design",
+            "actual": "character_design",
+            "missing": None,
+            "mismatches": None,
+            "source": "run.metadata.target_stage",
+            "explanation": "expected='character_design' actual='character_design'",
+        },
+        {
+            "score_name": "diagnostic.effective_stage_alignment",
+            "status": "pass",
+            "expected": "character_design",
+            "actual": "character_design",
+            "missing": None,
+            "mismatches": None,
+            "source": "trace.root.attributes.setup_stage",
+            "explanation": "expected='character_design' actual='character_design'",
+        },
+    ]
+
+
 def test_render_text_summary_includes_diagnostic_context():
     case = EvalCase.model_validate(
         {

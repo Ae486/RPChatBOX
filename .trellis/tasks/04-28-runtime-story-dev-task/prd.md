@@ -398,9 +398,9 @@ usage record 的最小合同：
 
 ```json
 {
-  "used_cards": ["R1", "R3"],
-  "expanded_cards": ["R3"],
-  "unused_cards": ["R2"],
+  "used_card_short_ids": ["R1", "R3"],
+  "expanded_card_short_ids": ["R3"],
+  "unused_card_short_ids": ["R2"],
   "knowledge_gaps": [
     {
       "query": "Taki 打工地点",
@@ -411,7 +411,9 @@ usage record 的最小合同：
 }
 ```
 
-如果本轮发生 retrieval 但 usage record 缺失，runtime 不应直接接受 writer final output，应要求 writer 补交 usage record 或走一次受控 repair。post-write scheduler 只把 `used_cards`、必要的 `expanded_cards` 和 `knowledge_gaps` 交给对应 block-owner worker；未使用卡片只保留 turn trace，不沉淀进 Core State。因为“卡片”是稳定结构体，post-write scheduler 应直接读取这些字段，不再通过自然语言二次判断 writer 实际使用了哪些召回内容。
+上面是 writer-facing 的短编号示例。持久化后的 `RetrievalUsageRecord` 还必须包含 backend-resolved 的 `used_card_material_ids`、`used_expanded_chunk_material_ids`、`unused_card_material_ids` 和 `missed_query_material_ids`，供 post-write 直接消费，而不是从自然语言或短编号重新猜测。
+
+如果本轮发生 retrieval 但 usage record 缺失，runtime 不应直接接受 writer final output，应要求 writer 补交 usage record 或走一次受控 repair。post-write scheduler 只读取 usage record 中 backend-resolved 的 `used_card_material_ids`、必要的 `used_expanded_chunk_material_ids` 和 `knowledge_gaps`；未使用卡片只保留 turn trace，不沉淀进 Core State。因为“卡片”是稳定结构体，post-write scheduler 应直接读取这些结构化字段，不再通过自然语言二次判断 writer 实际使用了哪些召回内容。
 
 writer 工具阶段默认不对用户展示，也不对用户流式输出。retrieval、expand、usage record、tool result 和相关 trace 必须进入 Runtime Workspace / 当前轮日志层，供 scheduler、worker、回放、eval 和后期调试使用；用户默认只看到最终正文阶段的流式输出。后续如果需要调试面板或 eval 面板，可以从日志层取出这些工具过程，但它们不污染 writer packet，也不作为普通用户界面的一部分。
 
@@ -454,6 +456,7 @@ turn N writer output shown to user
 - 回退后不应该还能在同一条主线里“前进回 turn 15”。如果用户确实要保留原来的 turn 13-15，那不是回退，而是分支能力。
 - 分支能力暂不作为第一阶段完整目标，但底层不能把未来扩展堵死。后续如果做分支，需要能把旧路径作为另一条故事线保存并继续。
 - chat 侧的多版本 / 重试只能视为当前消息或当前 turn 内的候选，不等同于完整 story branch。只有当某个候选被用户继续输入确认后，它才进入主线维护。
+- `fork created`、`branch switched`、`branch deleted` 这类分支控制动作不应创建新的 story turn。它们只写 branch/control receipts 与必要 trace，不进入正文时间线，也不成为正文回退锚点。
 
 架构含义：版本回溯不能只保存 graph checkpoint，也不能只保存文本消息。story runtime 需要把 turn checkpoint、artifact / discussion 文本层、Core State revision、projection block views、Recall / Archival materialization 结果、packet/window metadata 放在同一个可回溯边界下。第一阶段可以先把回退合同和 trace 打通，不要求完整 branch UI，但不能把 memory 写入设计成无法让 turn 13-15 在回退后对当前主线失效的单向覆盖。
 
@@ -510,7 +513,17 @@ turn N writer output shown to user
 
 这套分层的目标是：语义归业务模块，存储与查询归统一基础设施，消费者统一读取，而不是每个模块各写各查，或反过来全部耦合到 eval。
 
+为了让这套基础设施真正可查、可恢复、可审计，还应冻结一套轻量统一引用规范。成熟工程通常不会让各模块只靠 `metadata_json` 里散落的字符串来关联记录，也不需要一开始就上重型 tracing 平台。更合理的做法是：
+
+- 每类主记录保留自己的主键，例如 `turn_id`、`job_id`、`material_id`、`event_id`、`proposal_id`、`apply_id`、`summary_item_id`。
+- 再统一约定少量标准关联字段，例如 `turn_id`、`job_id`、`parent_job_id`、`source_ref_ids`、`result_ref_ids`、`trace_refs`。
+- `trace_refs` 采用稳定前缀式 ref，例如 `turn:<id>`、`job:<id>`、`material:<id>`、`event:<id>`、`proposal:<id>`、`apply:<id>`、`summary_item:<id>`。
+
+原则上：业务主关系优先使用显式字段，不依赖 `metadata_json` 猜；`metadata_json` 只放补充细节。这样 debug、eval、repair、retry、rollback 查询都能沿着统一 ref 稳定追溯，而不会因为各模块各自留痕风格不同而越做越乱。
+
 分支能力属于比回退更强的版本能力。分支不是“回退后还能前进回旧未来”，而是从某一 turn 开始保留多条互相隔离的故事线。分支可以随时切换或删除；两条分支的 memory 层、上下文窗口、Runtime Workspace、Recall materialization 和 writer-facing packet 必须互相隔离。后续进入分支能力时，应采用类似 Git / Dolt / lakeFS 的 copy-on-write 思路：创建分支不复制整套 memory，只创建新的分支头；分支之间共享 fork 之前的历史，fork 之后只为新增或修改的文本、Core State revision、projection block views、Recall / Archival materialization、packet/window metadata 写入分支专属记录。
+
+第一版产品展示不要求把主聊天流直接画成复杂树状图。当前口径是：主聊天流始终展示当前 active branch 的线性 `Turn` 列表；分支能力先只提供“从这里分支”的入口和一个最小 branch 面板，用来查看 / 切换分支以及看到 fork 起点。点击“从这里分支”后，系统立即切换到新 branch，主聊天区按新 branch 线性重建；fork 点之后旧分支的后续消息从主视图消失，避免把“旧未来”误显示成“新分支后续”。为避免用户误以为消息丢失，第一版前端应至少提供三种轻量提示：顶部常驻当前 branch 标识、fork 点处的轻量提示条，以及 branch 面板中的 origin/fork 起点信息。更重的消息树可视化、树杈布局和对比分支体验后续再单独设计和优化。
 
 分支切换时，原分支尚未完成的 Runtime Workspace 材料、worker candidate、pending 标记和后台调度结果不跟随切到新分支。这些材料继续挂在原 `BranchHead` 下，作为原分支自己的临时材料、候选更新和 trace。新分支只读取 fork 前共享的 settled memory、自己分支上的 memory / context / workspace，以及自己后续产生的 pending / worker candidate。这样可以避免两个未来互相污染，也让分支切换、删除、回退和补调度的边界保持清楚。
 
@@ -583,7 +596,29 @@ Turn = 当前故事线上的一次推进
 
 Longform 与 roleplay / trpg 的主要差异是 writer output 默认是 draft artifact，并允许用户对产出文本做留痕式修订和批注。该能力参考 Word 的修订/批注语义：用户不是直接覆盖正文，而是生成 review overlay，供后续 discussion / rewrite turn 使用。
 
-longform 的 rewrite 旧版本不删除，用户可以随时回看和比较。底层必须存在一个显式“确定版本”概念，用于说明当前哪一版 draft / rewrite 结果才是后续 `续写`、post-write 维护、next-turn packet 和可见输出的单一真相。产品层可以简化操作：如果用户显式指定采用某一版，则该版成为确定版本；如果用户直接点击 `续写`，则当前页面正在看的那一版自动晋升为确定版本。换句话说，UI 可以弱化操作，但底层不能没有 `selected / canonical draft revision`。
+第一阶段 longform 修订前端沿用 Word / SuperDoc 风格的三态：
+
+- `viewing`：只读查看当前 draft，不直接修改。
+- `editing`：用户直接修改当前 draft candidate，本次修改本身不默认转成给 LLM 的 rewrite 指令，更接近“用户自己改稿”。
+- `suggesting`：用户修改以 tracked change / comment 的形式进入 review overlay，供后续 rewrite turn 消费，更接近“给模型看明确修订意图”。
+
+这里的设计原则进一步冻结为：story runtime 借用 SuperDoc/Word 在文档修订、批注、tracked changes、selection 与 block/range 锚点上的成熟能力，把“用户修订内容传递给 writer”作为核心目标；SuperDoc 不是 runtime 真相 owner，而是修订交互 substrate。凡是 SuperDoc 的现成做法与当前 task 需求不冲突，都可以直接参考；一旦冲突，以当前 task 的需求讨论、PRD、spec 和开发规格书为准。
+
+longform 的 rewrite 旧版本不删除，用户可以随时回看和比较。底层必须存在一个显式“确定版本”概念，用于说明当前哪一版 draft / rewrite 结果才是后续 `续写`、post-write 维护、next-turn packet 和可见输出的单一真相。对 longform 来说，存在 rewrite 候选版本时，用户必须显式指定该轮采用哪一版；不能在未明确选择的前提下自动把当前页面版本晋升为确定版本。换句话说，底层必须有 `selected / canonical draft revision`，产品层也必须提供显式采用动作。
+
+需要进一步冻结 longform 的 adoption 语义：当前轮候选版本只有在用户点击 `续写 / accept_and_continue` 时，才会成为后续正文的 canonical truth。明确能确定为正文的只有两种情况：
+
+1. 当前轮只有唯一一版候选，用户点击 `续写 / accept_and_continue`。
+2. 当前轮存在多个候选，用户显式选择其中一版，再点击 `续写 / accept_and_continue`。
+
+在点击 `续写 / accept_and_continue` 之前，当前“选中的正文版本”只是可变的暂定选择，不等于已经 adopted 的 canonical truth。用户可以解除选择、重新选择其他版本，或继续对候选版本执行 edit / review 操作。真正进入下一轮写作、post-write 治理和 next-turn packet 的，是**点击续写时**被选中的 draft 内容。
+
+为了便于回看、比较、debug 和 rollback 追溯，系统至少需要保留两类轻量记录：
+
+- `selection receipt`：记录用户当前暂定选择了哪一版，可逆、可清除。
+- `adoption receipt`：记录在点击 `续写 / accept_and_continue` 时，最终哪一版被采用为 canonical continuation base。
+
+这些记录不需要发展成重型版本树系统，只需回答：这一轮有哪些 rewrite 候选、当前暂定选中哪一版、最终在什么时候用哪一版进入继续写作。
 
 Review overlay 属于 turn material，不是 active truth，不直接进入 `Core State.authoritative_state`。它应至少表达：
 
@@ -591,6 +626,8 @@ Review overlay 属于 turn material，不是 active truth，不直接进入 `Cor
 - 用户建议的插入 / 删除 / 替换。
 - 批注或重写意图。
 - 与 draft artifact / revision / packet 的 provenance 关系。
+
+review / comment 生命周期第一阶段也冻结为接近 Word / SuperDoc 语义：rewrite 生成新 candidate 后，原 comment 默认继续保留，不自动删除，也不自动 resolve。是否“这条批注已经被满足”由用户决定；用户可显式 `resolve`、保留继续修改，或删除。resolved comment 默认从主修订工作视图收起，但仍保留留痕、锚点和 provenance，便于回看、导出、debug 和 rollback 审计。
 
 Longform runtime 需要同时支持：
 
@@ -600,9 +637,15 @@ Longform runtime 需要同时支持：
 
 这些 turn 不需要拆成独立大 agent。它们应共用 `WritingWorker`，由 `command_kind` / `output_kind` / packet policy / review overlay 决定 writer 行为。
 
+这里还需要冻结一个结构约束：`review overlay`、`brainstorm change summary`、brainstorm apply receipt、rewrite 候选版本与确定版本选择结果、retrieval cards / usage、worker trace 等，都不应各自长成新的平行主记录系统。它们统一作为当前 `Turn` 的子材料或关联记录存在。也就是说，`Turn` 继续是唯一主锚点；其他这些对象只是在语义上服务于该轮的讨论、修订、写作、治理和追溯，而不是再各自争夺一套产品级主时间线。
+
+需要明确一点：longform 的 `rewrite` 版本管理语义更接近 chat 侧的“重试 / 重新生成”，只是进入 rewrite 前可能经过 review overlay 或 brainstorm 触发的 memory 调整。也就是说，多版 rewrite 本质上是同一轮或同一写作目标下的候选输出集合；区别在于 longform 要求用户显式选定采用版本，而不是默认把最新版本直接视为确定版本。roleplay / TRPG 不采用“同一 Turn 下保留多个可切换候选”的设计：对用户来说，单个 `Turn` 只有当前一版正式可见结果；若用户不满意，应通过显式分支从历史 turn 改写未来，而不是在同一 turn 内保留候选树。
+
+不过 RP/TRPG 侧真正更重要的，是**带 memory / branch / rollback 语义的可回溯消息树**。普通 chat 的消息树大多只管理消息候选和分叉显示；RP/TRPG 的消息树必须更重，能够与 `Turn`、`BranchHead`、`Core State`、`Runtime Workspace`、Recall / Archival materialization 和 post-write 状态对齐。换句话说，RP 功能侧需要的是更强的 story-runtime branch/rollback tree，而不是 chat 风格候选树。
+
 Longform 的 `WritingWorker` 在同一 worker 合同下应支持两种操作模式，而不是拆成两个 worker：`brainstorm/discussion` 和 `writing/rewrite`。前者负责头脑风暴、章节大纲协商、设定讨论、伏笔 / 章节意图修订；后者负责按确认后的大纲和 draft 产出正文或重写正文。这里不是要求用户显式切换 writer 模式：讨论区输入天然触发 `brainstorm/discussion`；产出区的明确动作触发 `writing/rewrite`。当前冻结的产品动作口径是：`重写`、`接受并继续`、`完成本章`。其中重写可携带用户修订内容；接受并继续表示认可当前段并进入下一段写作；完成本章表示结束本章并进入下一章准备。UI 入口不同，但底层仍是同一个 worker、同一基础上下文与治理合同。
 
-头脑风暴的有效结果，目标应是修改对应的 `Core State` block，而不是沉淀成一层游离的 discussion 记忆。也就是说，discussion / brainstorm 通常是围绕大纲、设定、章节目标、伏笔等内容形成 change intent；但 brainstorm writer 不直接提出 block proposal，也不直接改 memory。它只负责把讨论结果总结成条目，产出一份面向调度器的 change summary；不负责 block 路由，也不负责 worker 路由。该 summary 在提交前要给用户审阅和编辑；用户确认后，才触发一次专门的调度，由调度器根据 summary 派发对应 worker 去修改 block。若只是对当前段落产出不满意，则优先走 `review overlay / 修订 -> rewrite`，而不是把段落级不满混入 core block 修改流。
+头脑风暴的有效结果，目标应是修改对应的 `Core State` block，而不是沉淀成一层游离的 discussion 记忆。也就是说，discussion / brainstorm 通常是围绕大纲、设定、章节目标、伏笔等内容形成 change intent；但 brainstorm writer 不直接提出 block proposal，也不直接改 memory。它只负责把讨论结果总结成条目，产出一份面向调度器的 change summary；不负责 block 路由，也不负责 worker 路由。该 summary 在提交前要给用户审阅和编辑；用户确认后，才触发一次专门的调度，由调度器根据 summary 派发对应 worker 去修改 block。若只是对当前段落产出不满意，则优先走 `review overlay / 修订 -> rewrite`，而不是把段落级不满混入 core block 修改流。章节内如果 brainstorm transcript 过长，可以生成一份仅供 brainstorm 自身继续对话和回顾使用的压缩 summary；它不是真相层，也不直接进入 writer 上下文。进入下一章节后，上一章的 brainstorm 原始上下文从活跃讨论上下文中切掉，只保留必要留痕、apply 记录与可选压缩摘要供回顾。
 
 discussion summary 一旦被用户确认，这次“应用到 block”的调度必须在下一次写作前完成。longform 允许“时间换质量”：既然用户已经确认要改大纲 / 设定，下一次正文就应基于更新后的 core。反过来，discussion 生成但未确认的 summary / proposal，如果用户已经进入下一段、下一章或继续写作，则按当前第一版口径一刀切自动 stale，避免遗留过期候选。
 
@@ -680,7 +723,7 @@ StoryGraphRunner
 - 当前 `ModeProfile` 尚未作为 setup-before-runtime 的产品级 profile 驱动 setup、memory schema 和 story runtime。session 有 mode，但 prompt 和 policy 多处仍写死 longform。
 - 当前缺少独立 `Context Orchestration Layer`：worker 需要的上下文仍散落在 service prompt payload、projection read、retrieval hits 和 builder inputs 之间，尚未形成 refs/budget/provenance/workspace 统一合同。
 - 当前缺少统一 `Runtime Workspace` turn lifecycle：longform draft / review、roleplay continuous turn、trpg rule card 尚未有共同的 turn material / post-write processing / next-turn view 合同。
-- 当前 longform 只有基础 draft artifact 和 discussion entry，尚未定义 review overlay / tracked change / comment 如何进入 rewrite packet。
+- 当前 longform 的旧实现只有基础 draft artifact 和 discussion entry；但新规格已经冻结：review overlay / tracked change / comment 作为 turn sidecar 进入 rewrite packet，并与 discussion / rewrite / draft adoption 走统一治理链。后续实现重点不再是“定义语义”，而是按已冻结合同替换旧 MVP 数据流。
 - 当前 roleplay / trpg 还没有利用 writer 输出后的用户阅读和输入间隙进行后台整理、block refresh 和 next-turn view prebuild 的策略。
 
 ## Requirements
@@ -725,7 +768,7 @@ StoryGraphRunner
 36. Recall / Archival 检索命中默认只是引用材料。只有当 block-owner worker 判断它应成为当前剧情必须遵守的事实，并经过 permission / proposal / apply / user review 链路后，才允许写入 Core State 当前事实并刷新当前视图。
 37. writer 检索知识的主路径是 writer 自行判断当前上下文是否缺信息，并通过受控 retrieval 工具发起查询；不新增一个主路径的写前缺口预检层，也不让 Context Orchestration Layer 替 writer 决定是否检索。
 38. writer-side retrieval 的召回材料先进入 Runtime Workspace，表现为本轮检索卡片、短编号映射、摘要、refs、展开内容、missed query、attempt trace 和 usage record；Recall Memory 不作为本轮 raw hit 暂存区，Context Orchestration Layer 不承担存储语义。
-39. writer 可以在受控 attempt limit 内重试检索，也可以请求展开已返回卡片；但每轮发生 retrieval 后，最终输出前必须有结构化 retrieval usage record。post-write scheduler 只处理 `used_cards`、必要 `expanded_cards` 和 `knowledge_gaps`。
+39. writer 可以在受控 attempt limit 内重试检索，也可以请求展开已返回卡片；但每轮发生 retrieval 后，最终输出前必须有结构化 retrieval usage record。post-write scheduler 只处理 backend-resolved 的 `used_card_material_ids`、必要的 `used_expanded_chunk_material_ids` 和 `knowledge_gaps`。
 40. 检索卡片 / 摘要 / 展开 chunk 都是证据，不是事实。写后必须由 block-owner worker 追溯 provenance、抽取事实候选，并通过 permission / proposal / apply / user review 链路后才进入 Core State 当前事实和当前视图。
 41. Recall Memory 的职责冻结为历史回忆层，保存过去已经发生的材料，例如已接受正文、历史摘要、transcript、scene / chapter summary。它不承担当前事实缓存，也不是当前视图；当前事实属于 Core State 当前事实，当前视图属于 Core State 当前视图，本轮临时检索和工具结果属于 Runtime Workspace。
 42. ModeProfile 是区分 longform / roleplay / trpg 等功能的重要关键，但它不应被理解成一个大 prompt。它主要决定 setup 阶段流程、Core Memory / Memory OS 默认展示和激活哪些 block、story runtime 的调度器 + worker 层怎么走。
@@ -738,44 +781,48 @@ StoryGraphRunner
 
 ## Acceptance Criteria
 
-- [ ] `prd.md` 明确记录 worker 层定位、当前实现地图、差距和第一阶段边界。
+> 当前状态说明：
+> - `[x]` 表示现有 `prd/spec` 已明确覆盖该合同或边界。
+> - `[ ]` 表示这项需要等后续实现或测试完成后才能勾选。
+
+- [x] `prd.md` 明确记录 worker 层定位、当前实现地图、差距和第一阶段边界。
 - [ ] 第一阶段实现后，新 runtime 的 longform writing turn 最小闭环可运行。
-- [ ] Orchestrator 输出能表达至少一个 selected worker execution，而不只是 writer 指令。
-- [ ] Memory worker 分析能通过显式 worker/context 合同接收本轮上下文；旧 single specialist 可作为参考或 adapter，但不作为硬约束。
-- [ ] PRD / spec 能表达 Core Store block ownership 到 worker catalog 的映射原则。
-- [ ] PRD / spec 能表达 `ModeProfile` 作为 setup-before-runtime 产品级 profile 的三层结构。
-- [ ] PRD / spec 能表达 worker 配置 stage 的 per-worker + per-domain/block permission level 粒度。
-- [ ] PRD / spec 能表达 runtime profile snapshot 与 turn-start pinning 策略。
-- [ ] PRD / spec 能表达统一 `Runtime Workspace` turn lifecycle，并覆盖 longform / roleplay / trpg 的材料差异。
-- [ ] PRD / spec 能表达 longform review overlay 和 TRPG rule card / state card 作为 turn material sidecars 的位置。
-- [ ] PRD / spec 能表达 post-write processing 负责准备下一轮 writer-facing view。
-- [ ] PRD / spec 能表达 Context Orchestration Layer 的职责和“不可全量派发上下文”的约束。
-- [ ] PRD / spec 能表达不新增独立能力层的抽象边界，以及小能力应优先归属 macro worker / helper / context orchestration policy。
-- [ ] PRD / spec 能表达 mode 差异主要通过 `ModeProfile -> runtime_profile -> worker policy / packet policy / writer policy` 落地，同时仍共享同一套 story runtime 骨架。
-- [ ] PRD / spec 能表达 writer packet 不能只依赖 Core State 当前视图，还必须保留近几轮 user input / writer output 原文窗口，并且默认剪裁 Runtime Workspace 日志、工具过程、trace、usage metadata 和 worker 中间态。
-- [ ] PRD / spec 能表达 token 实际消费量来自上游 LLM usage metadata，本地预算/预估只用于组包前裁剪辅助。
-- [ ] PRD / spec 能表达 roleplay / trpg 的用户下一条消息作为 acceptance signal，并区分暂定可见材料与稳定维护材料。
-- [ ] PRD / spec 能清楚区分 rollback 与 branch：rollback 是当前主线单向回到旧 turn，并让目标 turn 之后内容失效；branch 是保留多条未来。memory/text/packet/window 状态必须在同一回溯边界下恢复。
-- [ ] PRD / spec 能表达 branch 之间 memory/context 隔离、可切换、可删除，以及 copy-on-write / branch visibility 优先于整套 memory 复制的架构方向。
-- [ ] PRD / spec 能表达 Story Evolution 默认 branch-scoped，只有显式 promote-to-global / apply-to-all-branches 才影响全局底座或其他分支。
-- [ ] PRD / spec 能表达 `StorySession / BranchHead / Turn` 三层身份模型，并要求 runtime 执行和 memory/retrieval 读取绑定 active branch head。
-- [ ] PRD / spec 能表达 worker 按 block/domain ownership 划分，同一 worker 通过 phase 区分 pre-write context 与 post-write maintenance。
-- [ ] PRD / spec 能表达 Story Evolution 复用现有 Memory OS / proposal / ingestion / block worker 能力，不先新增平行 worker 系统；Recall Memory 不是默认设定 CRUD 层。
-- [ ] PRD / spec 能表达 memory 可见 / 可改是正式产品能力，前端通过项目 DSL / canonical JSON block format 渲染 block / entry，Core / Recall / Archival 的可改方式不同。
-- [ ] PRD / spec 能表达轻量 memory change event 作为统一 trace / invalidation 脊柱，但避免过重 event sourcing。
-- [ ] PRD / spec 能表达用户显式 Core State 编辑优先于后台 worker 候选，worker 候选必须带 base revision 并在 apply / projection update 前做冲突检查。
-- [ ] PRD / spec 能表达轻量本轮简报 + block-owner worker 共同决定当前视图事实，Context Orchestration Layer 负责最终 writer packet 取舍。
-- [ ] PRD / spec 能表达完整调度频率可配置，不要求每轮调度，并支持事件触发调度。
-- [ ] PRD / spec 能表达 Letta 参考的真实边界：agent / worker 通过工具管理 memory，Git memory 可参考正文版本和缓存同步，但不能替代本项目的 story branch 隔离。
-- [ ] PRD / spec 能表达检索索引是由正文派生的搜索加速结构，不是 story truth；rollback / branch 管理正文状态和可见性，检索层按 active branch / turn 可见性过滤并按需 reindex。
-- [ ] PRD / spec 能表达 Recall / Archival 检索命中到 Core State 当前事实的换入条件：必须由 block-owner worker 整理，并经过权限、proposal/apply 或用户审查。
-- [ ] PRD / spec 能表达 writer-side bounded retrieval：writer 判断知识不足并通过受控工具检索；Context Orchestration Layer 不作为新增写前预检层。
-- [ ] PRD / spec 能表达 retrieval cards / short ids / expand tool / Runtime Workspace 映射合同，避免 writer 直接记忆随机 hit_id / chunk_id。
-- [ ] PRD / spec 能表达 retrieval usage hook：发生 retrieval 后，writer final output 前必须记录 used cards、expanded cards、unused cards 和 knowledge gaps。
-- [ ] PRD / spec 能表达检索 miss 的受控重试与 gap 记录策略，以及 retrieval-triggered turn 必须走 post-write 调度。
-- [ ] Builder 仍只消费 worker 消化后的结构化结果，不消费 raw retrieval hits。
+- [x] Orchestrator 输出能表达至少一个 selected worker execution，而不只是 writer 指令。
+- [x] Memory worker 分析能通过显式 worker/context 合同接收本轮上下文；旧 single specialist 可作为参考或 adapter，但不作为硬约束。
+- [x] PRD / spec 能表达 Core Store block ownership 到 worker catalog 的映射原则。
+- [x] PRD / spec 能表达 `ModeProfile` 作为 setup-before-runtime 产品级 profile 的三层结构。
+- [x] PRD / spec 能表达 worker 配置 stage 的 per-worker + per-domain/block permission level 粒度。
+- [x] PRD / spec 能表达 runtime profile snapshot 与 turn-start pinning 策略。
+- [x] PRD / spec 能表达统一 `Runtime Workspace` turn lifecycle，并覆盖 longform / roleplay / trpg 的材料差异。
+- [x] PRD / spec 能表达 longform review overlay 和 TRPG rule card / state card 作为 turn material sidecars 的位置。
+- [x] PRD / spec 能表达 post-write processing 负责准备下一轮 writer-facing view。
+- [x] PRD / spec 能表达 Context Orchestration Layer 的职责和“不可全量派发上下文”的约束。
+- [x] PRD / spec 能表达不新增独立能力层的抽象边界，以及小能力应优先归属 macro worker / helper / context orchestration policy。
+- [x] PRD / spec 能表达 mode 差异主要通过 `ModeProfile -> runtime_profile -> worker policy / packet policy / writer policy` 落地，同时仍共享同一套 story runtime 骨架。
+- [x] PRD / spec 能表达 writer packet 不能只依赖 Core State 当前视图，还必须保留近几轮 user input / writer output 原文窗口，并且默认剪裁 Runtime Workspace 日志、工具过程、trace、usage metadata 和 worker 中间态。
+- [x] PRD / spec 能表达 token 实际消费量来自上游 LLM usage metadata，本地预算/预估只用于组包前裁剪辅助。
+- [x] PRD / spec 能表达 roleplay / trpg 的用户下一条消息作为 acceptance signal，并区分暂定可见材料与稳定维护材料。
+- [x] PRD / spec 能清楚区分 rollback 与 branch：rollback 是当前主线单向回到旧 turn，并让目标 turn 之后内容失效；branch 是保留多条未来。memory/text/packet/window 状态必须在同一回溯边界下恢复。
+- [x] PRD / spec 能表达 branch 之间 memory/context 隔离、可切换、可删除，以及 copy-on-write / branch visibility 优先于整套 memory 复制的架构方向。
+- [x] PRD / spec 能表达 Story Evolution 默认 branch-scoped，只有显式 promote-to-global / apply-to-all-branches 才影响全局底座或其他分支。
+- [x] PRD / spec 能表达 `StorySession / BranchHead / Turn` 三层身份模型，并要求 runtime 执行和 memory/retrieval 读取绑定 active branch head。
+- [x] PRD / spec 能表达 worker 按 block/domain ownership 划分，同一 worker 通过 phase 区分 pre-write context 与 post-write maintenance。
+- [x] PRD / spec 能表达 Story Evolution 复用现有 Memory OS / proposal / ingestion / block worker 能力，不先新增平行 worker 系统；Recall Memory 不是默认设定 CRUD 层。
+- [x] PRD / spec 能表达 memory 可见 / 可改是正式产品能力，前端通过项目 DSL / canonical JSON block format 渲染 block / entry，Core / Recall / Archival 的可改方式不同。
+- [x] PRD / spec 能表达轻量 memory change event 作为统一 trace / invalidation 脊柱，但避免过重 event sourcing。
+- [x] PRD / spec 能表达用户显式 Core State 编辑优先于后台 worker 候选，worker 候选必须带 base revision 并在 apply / projection update 前做冲突检查。
+- [x] PRD / spec 能表达轻量本轮简报 + block-owner worker 共同决定当前视图事实，Context Orchestration Layer 负责最终 writer packet 取舍。
+- [x] PRD / spec 能表达完整调度频率可配置，不要求每轮调度，并支持事件触发调度。
+- [x] PRD / spec 能表达 Letta 参考的真实边界：agent / worker 通过工具管理 memory，Git memory 可参考正文版本和缓存同步，但不能替代本项目的 story branch 隔离。
+- [x] PRD / spec 能表达检索索引是由正文派生的搜索加速结构，不是 story truth；rollback / branch 管理正文状态和可见性，检索层按 active branch / turn 可见性过滤并按需 reindex。
+- [x] PRD / spec 能表达 Recall / Archival 检索命中到 Core State 当前事实的换入条件：必须由 block-owner worker 整理，并经过权限、proposal/apply 或用户审查。
+- [x] PRD / spec 能表达 writer-side bounded retrieval：writer 判断知识不足并通过受控工具检索；Context Orchestration Layer 不作为新增写前预检层。
+- [x] PRD / spec 能表达 retrieval cards / short ids / expand tool / Runtime Workspace 映射合同，避免 writer 直接记忆随机 hit_id / chunk_id。
+- [x] PRD / spec 能表达 retrieval usage hook：发生 retrieval 后，writer final output 前必须记录 used cards、expanded cards、unused cards 和 knowledge gaps。
+- [x] PRD / spec 能表达检索 miss 的受控重试与 gap 记录策略，以及 retrieval-triggered turn 必须走 post-write 调度。
+- [x] Builder 仍只消费 worker 消化后的结构化结果，不消费 raw retrieval hits。
 - [ ] 新增或调整的 runtime contract 有单元测试或现有 story runtime 测试覆盖。
-- [ ] 不修改 eval 模块主流程。
+- [x] 不修改 eval 模块主流程。
 
 ## Technical Approach
 

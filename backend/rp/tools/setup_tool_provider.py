@@ -1198,7 +1198,7 @@ class SetupToolProvider:
                     required_fields=["truth_write.stage_id"],
                 ),
             )
-        expected_step = self._legacy_step_for_stage(stage_id)
+        expected_step = self._workspace_service.legacy_step_for_stage(stage_id)
         if expected_step != step_id:
             raise SetupToolContractError(
                 code="setup_truth_write_step_mismatch",
@@ -1760,17 +1760,3 @@ class SetupToolProvider:
             raise ValueError(f"Unsupported truth write block_type: {block_type}")
         return mapping[block_type]
 
-    @staticmethod
-    def _legacy_step_for_stage(stage_id: SetupStageId) -> SetupStepId:
-        mapping = {
-            SetupStageId.WORLD_BACKGROUND: SetupStepId.FOUNDATION,
-            SetupStageId.CHARACTER_DESIGN: SetupStepId.FOUNDATION,
-            SetupStageId.PLOT_BLUEPRINT: SetupStepId.LONGFORM_BLUEPRINT,
-            SetupStageId.WRITER_CONFIG: SetupStepId.WRITING_CONTRACT,
-            SetupStageId.WORKER_CONFIG: SetupStepId.STORY_CONFIG,
-            SetupStageId.OVERVIEW: SetupStepId.STORY_CONFIG,
-            SetupStageId.ACTIVATE: SetupStepId.STORY_CONFIG,
-            SetupStageId.RP_INTERACTION_CONTRACT: SetupStepId.FOUNDATION,
-            SetupStageId.TRPG_RULES: SetupStepId.FOUNDATION,
-        }
-        return mapping[stage_id]

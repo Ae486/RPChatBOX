@@ -684,6 +684,46 @@ def test_context_builder_drops_chunk_descriptions_when_token_budget_is_compact(
     assert context_packet.committed_summaries == ["Committed 1 foundation entries"]
 
 
+def test_context_builder_resolves_legacy_step_via_workspace_stage_authority(
+    retrieval_session,
+    monkeypatch,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    workspace = workspace_service.create_workspace(
+        story_id="story-stage-context-step-bridge-1",
+        mode=StoryMode.LONGFORM,
+    )
+    original = SetupWorkspaceService.__dict__["legacy_step_for_stage"].__func__
+    calls: list[SetupStageId] = []
+
+    def _tracking_legacy_step_for_stage(cls, stage_id: SetupStageId) -> SetupStepId:
+        calls.append(stage_id)
+        return original(cls, stage_id)
+
+    monkeypatch.setattr(
+        SetupWorkspaceService,
+        "legacy_step_for_stage",
+        classmethod(_tracking_legacy_step_for_stage),
+    )
+
+    context_packet = context_builder.build(
+        SetupContextBuilderInput(
+            mode=StoryMode.LONGFORM.value,
+            workspace_id=workspace.workspace_id,
+            current_step=SetupStageId.WORLD_BACKGROUND.value,
+            current_stage=SetupStageId.WORLD_BACKGROUND.value,
+            user_prompt="Continue setup.",
+            user_edit_delta_ids=[],
+            token_budget=None,
+        )
+    )
+
+    assert context_packet.current_stage == SetupStageId.WORLD_BACKGROUND
+    assert context_packet.current_step == SetupStepId.FOUNDATION.value
+    assert calls == [SetupStageId.WORLD_BACKGROUND]
+
+
 def test_context_builder_uses_stage_plan_for_canonical_stage_handoff(
     retrieval_session,
 ):

@@ -20,6 +20,7 @@ from rp.agent_runtime.profiles import (
     build_setup_agent_tool_scope,
     build_setup_agent_profile,
 )
+from rp.agent_runtime.skill_packs import get_skill_pack_for_stage
 from rp.models.setup_agent import (
     SetupAgentDialogueMessage,
     SetupAgentTurnRequest,
@@ -111,6 +112,7 @@ class SetupRuntimeAdapter:
         tool_scope_key = (
             selected_stage.value if selected_stage is not None else current_step.value
         )
+        skill_pack = get_skill_pack_for_stage(selected_stage)
         return RpAgentTurnInput(
             profile_id="setup_agent",
             run_kind="interactive_agent_turn",
@@ -228,6 +230,9 @@ class SetupRuntimeAdapter:
             metadata={
                 "model_name": model_name,
                 "provider": provider.model_dump(mode="json", exclude_none=True),
+                "skill_pack_name": (
+                    skill_pack.name if skill_pack is not None else None
+                ),
             },
         )
 

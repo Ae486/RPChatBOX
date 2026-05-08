@@ -84,6 +84,20 @@ class EvalExpected(BaseModel):
 
     deterministic_assertions: list[EvalAssertionSpec] = Field(default_factory=list)
     subjective_hooks: list[EvalSubjectiveHook] = Field(default_factory=list)
+    expected_target_stage: str | None = Field(
+        default=None,
+        description=(
+            "Expected canonical target stage captured at setup eval ingress via "
+            "run metadata."
+        ),
+    )
+    expected_effective_stage: str | None = Field(
+        default=None,
+        description=(
+            "Expected effective setup stage used by the turn, captured via the "
+            "setup trace root span."
+        ),
+    )
     expected_reason_codes: list[str] = Field(
         default_factory=list,
         description=(

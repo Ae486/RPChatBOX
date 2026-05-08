@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .\\.trellis\\scripts\\get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/05-06-rp-memory-proposal-coverage-audit/prd.md", "reason": "Audit conclusion and follow-up slice scope for canonical JSON governance"}
+{"file": ".trellis/tasks/05-06-rp-memory-proposal-coverage-audit/research/canonical-json-governance-gap-audit.md", "reason": "Evidence that A-K are complete and canonical JSON governance remains uncovered"}
+{"file": ".trellis/spec/backend/rp-user-visible-memory-canonical-json-governance.md", "reason": "Executable contract for canonical block and entry envelope shared by UI and backend governance"}
+{"file": ".trellis/tasks/archive/2026-05/04-25-rp-memory-block-planning-dev/prd.md", "reason": "Archived completion record proving A-K and P0/P1 are already covered so only canonical JSON governance remains"}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/memory-layer-strengthening-proposal.md", "reason": "Related-doc requirement source for UI canonical JSON governance and shared UI-worker memory envelope"}

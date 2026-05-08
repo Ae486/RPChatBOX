@@ -46,6 +46,8 @@ def evaluate_diagnostic_expectation_scores(
     run_id: str,
     root_span_id: str | None,
     report: dict[str, Any],
+    run_metadata: dict[str, Any] | None = None,
+    trace_root_attributes: dict[str, Any] | None = None,
 ) -> list[EvalScore]:
     diagnostics = report.get("diagnostics")
     if not isinstance(diagnostics, dict):
@@ -53,6 +55,10 @@ def evaluate_diagnostic_expectation_scores(
     attribution = diagnostics.get("attribution")
     if not isinstance(attribution, dict):
         attribution = {}
+    if not isinstance(run_metadata, dict):
+        run_metadata = {}
+    if not isinstance(trace_root_attributes, dict):
+        trace_root_attributes = {}
 
     scores: list[EvalScore] = []
     if case.expected.expected_reason_codes:
@@ -99,6 +105,28 @@ def evaluate_diagnostic_expectation_scores(
                 or attribution.get("recommended_next_action")
                 or report.get("recommended_next_action"),
                 source="diagnostics.recommended_next_action",
+            )
+        )
+    if case.expected.expected_target_stage is not None:
+        scores.append(
+            _evaluate_expected_value(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.target_stage_alignment",
+                expected=case.expected.expected_target_stage,
+                actual=run_metadata.get("target_stage"),
+                source="run.metadata.target_stage",
+            )
+        )
+    if case.expected.expected_effective_stage is not None:
+        scores.append(
+            _evaluate_expected_value(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.effective_stage_alignment",
+                expected=case.expected.expected_effective_stage,
+                actual=trace_root_attributes.get("setup_stage"),
+                source="trace.root.attributes.setup_stage",
             )
         )
     return scores

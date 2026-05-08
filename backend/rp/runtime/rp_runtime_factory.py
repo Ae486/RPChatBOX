@@ -30,17 +30,22 @@ from rp.services.chapter_workspace_projection_adapter import (
 )
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.context_orchestration_service import ContextOrchestrationService
+from rp.services.draft_materialization_service import DraftMaterializationService
 from rp.services.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.memory_inspection_service import MemoryInspectionService
+from rp.services.memory_trace_read_service import MemoryTraceReadService
 from rp.services.memory_os_service import MemoryOsService
 from rp.services.minimal_retrieval_ingestion_service import (
     MinimalRetrievalIngestionService,
 )
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.post_write_governance_service import PostWriteGovernanceService
+from rp.services.post_write_scheduler_service import PostWriteSchedulerService
 from rp.services.projection_compatibility_mirror_service import (
     ProjectionCompatibilityMirrorService,
 )
@@ -65,10 +70,16 @@ from rp.services.recall_lifecycle_service import RecallLifecycleService
 from rp.services.recall_scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
+from rp.services.revision_overlay_service import RevisionOverlayService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
-from rp.services.runtime_read_manifest_service import BranchVisibilityResolver
+from rp.services.runtime_read_manifest_service import (
+    BranchVisibilityResolver,
+    RuntimeReadManifestService,
+)
+from rp.services.runtime_retrieval_card_service import RuntimeRetrievalCardService
+from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
@@ -93,13 +104,23 @@ from rp.services.story_block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
 from rp.services.story_runtime_controller import StoryRuntimeController
+from rp.services.story_runtime_debug_query_service import (
+    StoryRuntimeDebugQueryService,
+)
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story_runtime_migration_service import StoryRuntimeMigrationService
+from rp.services.story_runtime_workspace_facade import (
+    StoryRuntimeWorkspaceFacade,
+)
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.version_history_read_service import VersionHistoryReadService
+from rp.services.worker_execution_service import WorkerExecutionService
+from rp.services.worker_registry_service import WorkerRegistryService
+from rp.services.worker_scheduler_service import WorkerSchedulerService
 from rp.services.writing_packet_builder import WritingPacketBuilder
 from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
@@ -417,7 +438,55 @@ class RpRuntimeFactory:
             ),
         )
         writing_packet_builder = WritingPacketBuilder()
-        writing_worker_execution_service = WritingWorkerExecutionService()
+        runtime_profile_snapshot_service = RuntimeProfileSnapshotService(self._session)
+        runtime_workspace_material_service = RuntimeWorkspaceMaterialService(
+            session=self._session,
+        )
+        runtime_retrieval_card_service = RuntimeRetrievalCardService(
+            runtime_workspace_material_service=runtime_workspace_material_service,
+            session=self._session,
+        )
+        writing_worker_execution_service = WritingWorkerExecutionService(
+            runtime_retrieval_card_service=runtime_retrieval_card_service,
+        )
+        runtime_workspace_facade = StoryRuntimeWorkspaceFacade(
+            runtime_workspace_material_service=runtime_workspace_material_service,
+        )
+        worker_registry_service = WorkerRegistryService(
+            self._session,
+            runtime_profile_snapshot_service=runtime_profile_snapshot_service,
+        )
+        worker_scheduler_service = WorkerSchedulerService(
+            worker_registry_service=worker_registry_service
+        )
+        runtime_workflow_job_service = RuntimeWorkflowJobService(self._session)
+        runtime_read_manifest_service = RuntimeReadManifestService(
+            session=self._session,
+            runtime_workspace_material_service=runtime_workspace_material_service,
+        )
+        context_orchestration_service = ContextOrchestrationService(
+            story_session_service=story_session_service,
+            builder_projection_context_service=builder_projection_context_service,
+            writing_packet_builder=writing_packet_builder,
+            runtime_workspace_material_service=runtime_workspace_material_service,
+            runtime_read_manifest_service=runtime_read_manifest_service,
+        )
+        worker_execution_service = WorkerExecutionService(
+            worker_registry_service=worker_registry_service,
+            longform_specialist_service=specialist_service,
+            context_orchestration_service=context_orchestration_service,
+            runtime_workspace_facade=runtime_workspace_facade,
+        )
+        post_write_scheduler_service = PostWriteSchedulerService(
+            worker_scheduler_service=worker_scheduler_service,
+            runtime_workspace_material_service=runtime_workspace_material_service,
+        )
+        post_write_governance_service = PostWriteGovernanceService(
+            runtime_workflow_job_service=runtime_workflow_job_service,
+            projection_refresh_service=projection_refresh_service,
+            proposal_workflow_service=proposal_workflow_service,
+            legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
+        )
         turn_domain_service = StoryTurnDomainService(
             story_session_service=story_session_service,
             orchestrator_service=orchestrator_service,
@@ -433,10 +502,17 @@ class RpRuntimeFactory:
             ),
             runtime_identity_service=StoryRuntimeIdentityService(
                 self._session,
-                runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
-                    self._session
-                ),
+                runtime_profile_snapshot_service=runtime_profile_snapshot_service,
             ),
+            runtime_read_manifest_service=runtime_read_manifest_service,
+            runtime_workspace_material_service=runtime_workspace_material_service,
+            worker_scheduler_service=worker_scheduler_service,
+            worker_execution_service=worker_execution_service,
+            context_orchestration_service=context_orchestration_service,
+            runtime_workspace_facade=runtime_workspace_facade,
+            runtime_workflow_job_service=runtime_workflow_job_service,
+            post_write_scheduler_service=post_write_scheduler_service,
+            post_write_governance_service=post_write_governance_service,
         )
         return turn_domain_service
 
@@ -559,6 +635,30 @@ class RpRuntimeFactory:
             recall_lifecycle_service=RecallLifecycleService(self._session),
             archival_evolution_service=ArchivalEvolutionService(self._session),
         )
+        runtime_workspace_material_service = RuntimeWorkspaceMaterialService(
+            session=self._session,
+        )
+        runtime_read_manifest_service = RuntimeReadManifestService(
+            session=self._session,
+            runtime_workspace_material_service=runtime_workspace_material_service,
+        )
+        memory_trace_read_service = MemoryTraceReadService(
+            session=self._session,
+            runtime_read_manifest_service=runtime_read_manifest_service,
+        )
+        story_runtime_debug_query_service = StoryRuntimeDebugQueryService(
+            session=self._session,
+            story_session_service=story_session_service,
+            runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+                self._session
+            ),
+            memory_trace_read_service=memory_trace_read_service,
+            runtime_workflow_job_service=RuntimeWorkflowJobService(self._session),
+            branch_visibility_resolver=BranchVisibilityResolver(self._session),
+        )
+        story_runtime_migration_service = StoryRuntimeMigrationService(
+            debug_query_service=story_runtime_debug_query_service,
+        )
         return StoryRuntimeController(
             story_session_service=story_session_service,
             story_activation_service=story_activation_service,
@@ -575,6 +675,13 @@ class RpRuntimeFactory:
             ),
             runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
                 self._session
+            ),
+            story_runtime_debug_query_service=story_runtime_debug_query_service,
+            story_runtime_migration_service=story_runtime_migration_service,
+            draft_materialization_service=DraftMaterializationService(),
+            revision_overlay_service=RevisionOverlayService(
+                workspace_material_service=runtime_workspace_material_service,
+                session=self._session,
             ),
         )
 

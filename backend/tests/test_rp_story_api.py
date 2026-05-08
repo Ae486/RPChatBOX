@@ -3,32 +3,52 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from sqlmodel import Session as SqlSession
 
 from config import get_settings
-from rp.models.dsl import Domain, Layer
+from rp.models.core_mutation import (
+    CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
+    CoreMutationEnvelope,
+)
+from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.memory_contract_registry import (
+    MemoryChangeEvent,
+    MemoryDirtyTarget,
+    MemoryRuntimeIdentity,
+    MemorySourceRef,
+)
 from rp.models.memory_crud import ProposalSubmitInput
+from rp.models.runtime_identity import StoryTurnStatus
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
+    RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
 from rp.models.story_runtime import (
     LongformChapterPhase,
+    LongformTurnCommandKind,
+    SpecialistResultBundle,
     StoryArtifactKind,
     StoryArtifactStatus,
 )
 from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.context_orchestration_service import ContextOrchestrationService
+from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime_retrieval_card_service import RuntimeRetrievalCardService
+from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.worker_execution_service import WorkerExecutionOutcome
 from services.database import get_engine
 
 
@@ -353,6 +373,155 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
         return result
 
 
+def _seed_revision_review_session() -> dict[str, str]:
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.create_session(
+            story_id="story-api-revision-review",
+            source_workspace_id="workspace-api-revision-review",
+            mode="longform",
+            runtime_story_config={},
+            writer_contract={},
+            current_state_json={
+                "chapter_digest": {"title": "Revision Review API Chapter"},
+                "narrative_progress": {
+                    "current_phase": "segment_review",
+                    "accepted_segments": 0,
+                },
+                "timeline_spine": [],
+                "active_threads": [],
+                "foreshadow_registry": [],
+                "character_state_digest": {},
+            },
+            initial_phase=LongformChapterPhase.SEGMENT_REVIEW,
+        )
+        chapter = story_session_service.create_chapter_workspace(
+            session_id=story_session.session_id,
+            chapter_index=1,
+            phase=LongformChapterPhase.SEGMENT_REVIEW,
+            builder_snapshot_json={},
+        )
+        snapshot = RuntimeProfileSnapshotService(db_session).ensure_active_snapshot(
+            session_id=story_session.session_id,
+            created_from="test.api.revision_review",
+        )
+        refreshed_session = story_session_service.get_session(story_session.session_id)
+        if refreshed_session is None:
+            raise AssertionError("Seeded story session was not persisted")
+        identity = MemoryRuntimeIdentity(
+            story_id=refreshed_session.story_id,
+            session_id=refreshed_session.session_id,
+            branch_head_id=refreshed_session.active_branch_head_id,
+            turn_id="turn-api-revision-review",
+            runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        )
+        artifact = story_session_service.create_artifact(
+            session_id=refreshed_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+            status=StoryArtifactStatus.DRAFT,
+            content_text="The storm arrived at dusk.\n\nMira kept walking.",
+            metadata={
+                "command_kind": LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+                "runtime_story_id": identity.story_id,
+                "runtime_session_id": identity.session_id,
+                "runtime_branch_head_id": identity.branch_head_id,
+                "runtime_turn_id": identity.turn_id,
+                "runtime_profile_snapshot_id": (
+                    identity.runtime_profile_snapshot_id
+                ),
+            },
+            revision=1,
+        )
+        db_session.commit()
+        return {
+            "session_id": identity.session_id,
+            "artifact_id": artifact.artifact_id,
+            "story_id": identity.story_id,
+            "branch_head_id": identity.branch_head_id,
+            "turn_id": identity.turn_id,
+            "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+        }
+
+
+def test_revision_review_api_anchors_controls_to_draft_blocks_and_sidecars(client):
+    seeded = _seed_revision_review_session()
+    session_id = seeded["session_id"]
+    artifact_id = seeded["artifact_id"]
+    route = f"/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}"
+
+    surface = client.get(route, params={"mode": "suggesting"})
+    assert surface.status_code == 200
+    surface_payload = surface.json()
+    assert surface_payload["canonical_truth"] is False
+    assert surface_payload["runtime_truth_owner"] == "rp_runtime"
+    block_id = surface_payload["draft_document"]["blocks"][0]["block_id"]
+
+    commented = client.post(
+        f"{route}/comments",
+        json={
+            "block_id": block_id,
+            "instruction_text": "Make this opening less abrupt.",
+            "selected_excerpt": "The storm arrived at dusk.",
+        },
+    )
+    assert commented.status_code == 200
+    comment_payload = commented.json()
+    comment = comment_payload["comments"][0]
+    assert comment["anchor_ref"]["block_ids"] == [block_id]
+    assert comment["status"] == "active"
+    assert comment_payload["active_comment_refs"] == [comment["comment_id"]]
+
+    tracked = client.post(
+        f"{route}/tracked-changes",
+        json={
+            "block_id": block_id,
+            "original_text": "The storm arrived at dusk.",
+            "suggested_text": "The storm reached the valley at dusk.",
+        },
+    )
+    assert tracked.status_code == 200
+    tracked_payload = tracked.json()
+    tracked_change = tracked_payload["tracked_changes"][0]
+    assert tracked_change["anchor_ref"]["block_ids"] == [block_id]
+    assert tracked_change["status"] == "active"
+
+    resolved = client.post(f"{route}/comments/{comment['comment_id']}/resolve")
+    assert resolved.status_code == 200
+    assert resolved.json()["comments"][0]["status"] == "resolved"
+
+    deleted = client.delete(f"{route}/comments/{comment['comment_id']}")
+    assert deleted.status_code == 200
+    deleted_payload = deleted.json()
+    assert deleted_payload["comments"][0]["status"] == "deleted"
+    assert deleted_payload["active_comment_refs"] == []
+
+    identity = MemoryRuntimeIdentity(
+        story_id=seeded["story_id"],
+        session_id=session_id,
+        branch_head_id=seeded["branch_head_id"],
+        turn_id=seeded["turn_id"],
+        runtime_profile_snapshot_id=seeded["runtime_profile_snapshot_id"],
+    )
+    with SqlSession(get_engine()) as db_session:
+        materials = RuntimeWorkspaceMaterialService(
+            session=db_session
+        ).list_materials(
+            identity=identity,
+            material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
+            domain=Domain.CHAPTER.value,
+        )
+    payload_kinds = {material.payload.get("payload_kind") for material in materials}
+    assert {
+        "draft_document",
+        "review_overlay",
+        "revision_comment",
+        "tracked_change",
+    } <= payload_kinds
+    assert "draft_adoption_receipt" not in payload_kinds
+    assert "rewrite_candidate" not in payload_kinds
+
+
 def _authoritative_block_patch_payload(*, title: str, domain: str = "chapter") -> dict:
     return {
         "operations": [
@@ -411,6 +580,250 @@ def _seed_memory_inspection_identity(session_id: str) -> dict[str, str]:
             "branch_head_id": identity.branch_head_id,
             "turn_id": identity.turn_id,
             "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+        }
+
+
+def _seed_runtime_debug_read_surface(session_id: str) -> dict[str, str]:
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.get_session(session_id)
+        if story_session is None:
+            raise AssertionError(f"Story session not found: {session_id}")
+        chapter = story_session_service.get_current_chapter(session_id)
+        if chapter is None:
+            raise AssertionError(f"Chapter not found for session: {session_id}")
+        snapshot_service = RuntimeProfileSnapshotService(db_session)
+        snapshot = snapshot_service.ensure_active_snapshot(
+            session_id=session_id,
+            created_from="test.api.runtime.inspect",
+        )
+        identity_service = StoryRuntimeIdentityService(
+            db_session,
+            runtime_profile_snapshot_service=snapshot_service,
+        )
+        identity = identity_service.resolve_runtime_entry_identity(
+            session_id=session_id,
+            command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+            actor="api.runtime.inspect_test",
+            requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        )
+        material_service = RuntimeWorkspaceMaterialService(
+            session=db_session,
+            memory_change_event_service=MemoryChangeEventService(session=db_session),
+        )
+        card = material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.runtime.inspect.card",
+                material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+                identity=identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.runtime.retrieval.card",
+                short_id="R1",
+                payload={"summary": "API runtime inspect retrieval card"},
+                visibility=RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value,
+                created_by="api.runtime.inspect_test",
+            )
+        )
+        usage = material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.runtime.inspect.usage",
+                material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
+                identity=identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.runtime.retrieval.usage",
+                short_id="U1",
+                lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
+                payload={
+                    "used_card_short_ids": ["R1"],
+                    "expanded_card_short_ids": [],
+                    "unused_card_short_ids": [],
+                    "used_card_material_ids": [card.material.material_id],
+                    "used_expanded_chunk_material_ids": [],
+                    "unused_card_material_ids": [],
+                    "missed_query_short_ids": [],
+                    "missed_query_material_ids": [],
+                    "knowledge_gaps": [],
+                },
+                source_refs=[
+                    MemorySourceRef(
+                        source_type="retrieval_card_material",
+                        source_id=card.material.material_id,
+                        layer="runtime_workspace",
+                        entry_id=card.material.material_id,
+                        metadata={"source_of_truth": False},
+                    )
+                ],
+                visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
+                created_by="api.runtime.inspect_test",
+            )
+        )
+        material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.runtime.inspect.packet",
+                material_kind=RuntimeWorkspaceMaterialKind.PACKET_REF,
+                identity=identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.runtime.packet",
+                payload={
+                    "packet_id": "api-runtime-packet",
+                    "runtime_read_manifest_id": "api-runtime-manifest",
+                    "packet_summary_metadata": {"section_counts": {"core_view_sections": 1}},
+                },
+                visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
+                created_by="api.runtime.inspect_test",
+            )
+        )
+        material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.runtime.inspect.worker",
+                material_kind=RuntimeWorkspaceMaterialKind.WORKER_EVIDENCE_BUNDLE,
+                identity=identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.runtime.worker.LongformMemoryWorker.evidence",
+                payload={
+                    "worker_id": "LongformMemoryWorker",
+                    "trace_summary": {
+                        "adapter_role": "legacy_executor_bridge",
+                        "canonical_contract_owner": "WorkerExecutionPlan",
+                    },
+                },
+                visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
+                created_by="api.runtime.inspect_test",
+            )
+        )
+        proposal_repository = ProposalRepository(db_session)
+        target_ref = ObjectRef(
+            object_id="chapter.current",
+            layer=Layer.CORE_STATE_AUTHORITATIVE,
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            scope="story",
+            revision=1,
+        )
+        proposal = proposal_repository.create_proposal(
+            input_model=ProposalSubmitInput(
+                story_id=story_session.story_id,
+                mode="longform",
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                operations=[
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": target_ref.model_dump(mode="json"),
+                        "field_patch": {"title": "API Runtime Inspect Chapter"},
+                    }
+                ],
+                base_refs=[target_ref],
+                reason="api runtime inspect",
+            ),
+            status="applied",
+            policy_decision="silent",
+            submit_source="api.runtime.inspect",
+            core_mutation_envelope=CoreMutationEnvelope(
+                identity=identity,
+                origin_kind=CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
+                actor="user.editor",
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                operations=[
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": target_ref.model_dump(mode="json"),
+                        "field_patch": {"title": "API Runtime Inspect Chapter"},
+                    }
+                ],
+                base_refs=[target_ref],
+                source_refs=[
+                    MemorySourceRef(
+                        source_type="runtime_workspace_material",
+                        source_id=usage.material.material_id,
+                        layer="runtime_workspace",
+                        domain=Domain.CHAPTER.value,
+                        entry_id=usage.material.material_id,
+                        metadata={"source_of_truth": False},
+                    )
+                ],
+                trace_refs=["trace:api-runtime-inspect"],
+                reason="api runtime inspect",
+            ),
+            session_id=story_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+        )
+        apply_receipt = proposal_repository.create_apply_receipt(
+            proposal_id=proposal.proposal_id,
+            story_id=story_session.story_id,
+            session_id=story_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            target_refs=[target_ref],
+            revision_after={"chapter.current": 2},
+            before_snapshot={"chapter_digest": {"title": "Before"}},
+            after_snapshot={"chapter_digest": {"title": "API Runtime Inspect Chapter"}},
+            warnings=[],
+            apply_backend="api_runtime_inspect",
+        )
+        MemoryChangeEventService(session=db_session).record_event(
+            MemoryChangeEvent(
+                event_id="api-runtime-inspect-event",
+                identity=identity,
+                actor="api.runtime.inspect_test",
+                event_kind="core_authoritative_mutation_applied",
+                layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+                domain=Domain.CHAPTER.value,
+                block_id="chapter.current",
+                entry_id=apply_receipt.apply_id,
+                operation_kind="core_mutation.apply",
+                source_refs=[
+                    MemorySourceRef(
+                        source_type="memory_proposal",
+                        source_id=proposal.proposal_id,
+                        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+                        domain=Domain.CHAPTER.value,
+                        block_id="chapter.current",
+                    )
+                ],
+                dirty_targets=[
+                    MemoryDirtyTarget(
+                        target_kind="projection_refresh_pending",
+                        target_id="chapter.current",
+                        layer=Layer.CORE_STATE_PROJECTION.value,
+                        domain=Domain.CHAPTER.value,
+                        block_id="projection:chapter.current",
+                        reason="authoritative_core_changed",
+                    )
+                ],
+                visibility_effect="current_truth_updated",
+                metadata={
+                    "proposal_id": proposal.proposal_id,
+                    "apply_id": apply_receipt.apply_id,
+                },
+            )
+        )
+        RuntimeWorkflowJobService(db_session).ensure_creation_time_obligations(
+            identity=identity,
+            trace_refs=["worker_plan:api-runtime-plan"],
+            metadata={"worker_plan_id": "api-runtime-plan"},
+        )
+        identity_service.update_turn_status(
+            turn_id=identity.turn_id,
+            status=StoryTurnStatus.SETTLED,
+            visible_output_ref="artifact:api-runtime-inspect",
+            selected_output_ref="artifact:api-runtime-inspect",
+            settlement_reason="api_runtime_inspect_seeded",
+        )
+        rollback_receipt = identity_service.rollback_to_turn(
+            session_id=story_session.session_id,
+            target_turn_id=identity.turn_id,
+            actor="api.runtime.inspect_test",
+        )
+        db_session.commit()
+        return {
+            "session_id": story_session.session_id,
+            "branch_head_id": identity.branch_head_id,
+            "turn_id": identity.turn_id,
+            "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+            "proposal_id": proposal.proposal_id,
+            "usage_material_id": usage.material.material_id,
+            "branch_control_receipt_id": rollback_receipt.receipt_id,
         }
 
 
@@ -580,6 +993,86 @@ class _RecoverableStoryLLMService(_MockStoryLLMService):
             return
         async for chunk in super().chat_completion_stream(request):
             yield chunk
+
+
+class _ToolLoopStoryLLMService(_MockStoryLLMService):
+    def __init__(self):
+        super().__init__()
+        self._tool_responses = [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_search",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "retrieval.search",
+                                        "arguments": json.dumps(
+                                            {
+                                                "query": "storm",
+                                                "search_kind": "recall",
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_usage",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "retrieval.usage",
+                                        "arguments": json.dumps(
+                                            {
+                                                "used_card_short_ids": ["R1"],
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Tool-loop grounded segment.",
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 6, "completion_tokens": 3, "total_tokens": 9},
+            },
+        ]
+
+    async def chat_completion(self, request):
+        system_prompt = request.messages[0].content or ""
+        if (
+            "longform_orchestrator" in system_prompt
+            or "longform_specialist" in system_prompt
+        ):
+            return await super().chat_completion(request)
+        if self._tool_responses:
+            return self._tool_responses.pop(0)
+        return await super().chat_completion(request)
+
+    async def chat_completion_stream(self, request):
+        raise AssertionError("tool-loop stream path should be buffered, not raw-streamed")
 
 
 def _create_story_session_with_pending_segment(client, monkeypatch) -> tuple[str, dict]:
@@ -1343,6 +1836,110 @@ def test_story_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
     assert payload["history"]
 
 
+def test_story_runtime_inspection_route_returns_runtime_native_read_bundle(
+    client, monkeypatch
+):
+    monkeypatch.setenv(
+        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+        "true",
+    )
+    get_settings.cache_clear()
+    seeded = _seed_formal_memory_block_session()
+    runtime_seed = _seed_runtime_debug_read_surface(seeded["session_id"])
+
+    response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/runtime/inspect",
+        params={"turn_id": runtime_seed["turn_id"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_only"] is True
+    assert payload["selection"]["selected_turn_id"] == runtime_seed["turn_id"]
+    assert payload["selection"]["selected_branch_head_id"] == (
+        runtime_seed["branch_head_id"]
+    )
+    assert payload["runtime_profile_snapshot"]["runtime_profile_snapshot_id"] == (
+        runtime_seed["runtime_profile_snapshot_id"]
+    )
+    assert payload["writer_packet"]["runtime_read_manifest_ids"]
+    assert {
+        item["material_kind"] for item in payload["runtime_workspace"]["materials"]
+    } >= {"retrieval_card", "retrieval_usage_record", "packet_ref"}
+    assert payload["retrieval"]["usage_refs"][0]["material_id"] == (
+        runtime_seed["usage_material_id"]
+    )
+    assert payload["proposal_governance"]["proposal_receipts"][0]["proposal"][
+        "proposal_id"
+    ] == runtime_seed["proposal_id"]
+    assert any(
+        item["receipt_id"] == runtime_seed["branch_control_receipt_id"]
+        for item in payload["branch_control_receipts"]
+    )
+    assert "read_only_debug_surface" in payload["boundaries"]
+
+
+def test_story_runtime_migration_route_returns_read_only_summary(client, monkeypatch):
+    monkeypatch.setenv(
+        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+        "true",
+    )
+    get_settings.cache_clear()
+    seeded = _seed_formal_memory_block_session()
+    runtime_seed = _seed_runtime_debug_read_surface(seeded["session_id"])
+
+    response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/runtime/migration",
+        params={"turn_id": runtime_seed["turn_id"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_only"] is True
+    assert payload["migration_flags"]["session_branch_anchor_pinned"] is True
+    assert payload["migration_flags"]["session_snapshot_anchor_pinned"] is True
+    assert payload["migration_flags"]["turn_trace_available"] is True
+    assert payload["migration_flags"]["worker_result_visible"] is True
+    assert payload["migration_flags"]["worker_plan_refs_visible"] is True
+    assert payload["migration_flags"]["legacy_fixed_chain_backslide_detected"] is False
+    assert payload["compatibility_surfaces"]
+    assert any(
+        item["marker_id"] == "legacy_command_surface"
+        and item["value"] == "write_next_segment"
+        for item in payload["observed_adapter_markers"]
+    )
+    assert any(
+        item["marker_id"] == "worker_result_adapter_role"
+        and item["value"] == "legacy_executor_bridge"
+        for item in payload["observed_adapter_markers"]
+    )
+    assert "migration_surface_is_read_only" in payload["boundaries"]
+
+
+def test_story_runtime_inspection_route_rejects_turn_branch_mismatch(
+    client, monkeypatch
+):
+    monkeypatch.setenv(
+        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+        "true",
+    )
+    get_settings.cache_clear()
+    seeded = _seed_formal_memory_block_session()
+    runtime_seed = _seed_runtime_debug_read_surface(seeded["session_id"])
+
+    response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/runtime/inspect",
+        params={
+            "branch_head_id": f"{runtime_seed['branch_head_id']}:wrong",
+            "turn_id": runtime_seed["turn_id"],
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["detail"]["error"]["code"] == "story_runtime_debug_branch_not_found"
+
+
 def test_story_turn_rejects_command_not_allowed_for_phase(client):
     workspace_id = _create_ready_workspace(client)
     activation = client.post(f"/api/rp/setup/workspaces/{workspace_id}/activate")
@@ -1440,6 +2037,160 @@ def test_story_turn_recovers_after_failed_stream_on_same_thread(client, monkeypa
     assert payload["current_phase"] == "outline_review"
     assert payload["artifact_kind"] == "chapter_outline"
     assert payload["assistant_text"]
+
+
+def test_story_turn_stream_buffers_writer_retrieval_loop_and_persists_usage_refs(
+    client,
+    monkeypatch,
+):
+    original_build_writing_packet = ContextOrchestrationService.build_writing_packet
+
+    def _build_retrieval_enabled_packet(self, *args, **kwargs):
+        packet = original_build_writing_packet(self, *args, **kwargs)
+        return packet.model_copy(
+            update={
+                "metadata": {
+                    **dict(packet.metadata),
+                    "writer_retrieval_allowed": True,
+                    "writer_max_retrieval_attempts": 2,
+                }
+            }
+        )
+
+    client.put("/api/providers/provider-story", json=_provider_payload())
+    client.put(
+        "/api/providers/provider-story/models/model-story",
+        json=_model_payload(),
+    )
+    workspace_id = _create_ready_workspace(client)
+    monkeypatch.setattr(
+        "rp.services.story_llm_gateway.get_litellm_service",
+        lambda: _MockStoryLLMService(),
+    )
+    session_id = client.post(
+        f"/api/rp/setup/workspaces/{workspace_id}/activate"
+    ).json()["session_id"]
+
+    with client.stream(
+        "POST",
+        f"/api/rp/story-sessions/{session_id}/turn/stream",
+        json={
+            "session_id": session_id,
+            "command_kind": "generate_outline",
+            "model_id": "model-story",
+        },
+    ) as response:
+        assert response.status_code == 200
+        _ = "".join(response.iter_text())
+
+    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    outline_artifact = next(
+        item
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "chapter_outline"
+    )
+    accepted_outline = client.post(
+        f"/api/rp/story-sessions/{session_id}/turn",
+        json={
+            "session_id": session_id,
+            "command_kind": "accept_outline",
+            "model_id": "model-story",
+            "target_artifact_id": outline_artifact["artifact_id"],
+        },
+    )
+    assert accepted_outline.status_code == 200
+
+    async def _fake_execute_plan(self, **kwargs):
+        return WorkerExecutionOutcome(
+            plan=kwargs["plan"],
+            worker_results=[],
+            specialist_bundle=SpecialistResultBundle(
+                foundation_digest=["Found A"],
+                blueprint_digest=["Blueprint A"],
+                current_outline_digest=["Outline A"],
+                recent_segment_digest=["Segment A"],
+                current_state_digest=["State A"],
+                writer_hints=["Hint A"],
+            ),
+        )
+
+    async def _fake_search_recall_to_cards(
+        self,
+        *,
+        identity,
+        input_model,
+        actor,
+        attempt_index,
+    ):
+        workspace = self._workspace()
+        material = workspace.get_material(
+            identity=identity,
+            material_id="api-tool-loop-card",
+        )
+        if material is None:
+            material = workspace.record_material(
+                RuntimeWorkspaceMaterial(
+                    material_id="api-tool-loop-card",
+                    material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD,
+                    identity=identity,
+                    domain="chapter",
+                    domain_path="chapter.runtime.retrieval.card",
+                    short_id="R1",
+                    payload={
+                        "title": "Archive Escape",
+                        "summary": "Retrieved evidence for the API writer loop.",
+                        "query_text": getattr(input_model, "query", None),
+                        "search_kind": "recall",
+                    },
+                    visibility="writer_visible",
+                    created_by=actor,
+                )
+            ).material
+        return SimpleNamespace(hits=[], warnings=[]), [material], None
+
+    monkeypatch.setattr(
+        "rp.services.worker_execution_service.WorkerExecutionService.execute_plan",
+        _fake_execute_plan,
+    )
+    monkeypatch.setattr(
+        ContextOrchestrationService,
+        "build_writing_packet",
+        _build_retrieval_enabled_packet,
+    )
+    monkeypatch.setattr(
+        RuntimeRetrievalCardService,
+        "search_recall_to_cards",
+        _fake_search_recall_to_cards,
+    )
+
+    monkeypatch.setattr(
+        "rp.services.story_llm_gateway.get_litellm_service",
+        lambda: _ToolLoopStoryLLMService(),
+    )
+    with client.stream(
+        "POST",
+        f"/api/rp/story-sessions/{session_id}/turn/stream",
+        json={
+            "session_id": session_id,
+            "command_kind": "write_next_segment",
+            "model_id": "model-story",
+            "user_prompt": "Write the first escape segment.",
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Tool-loop grounded segment." in body
+    assert '"type": "usage"' in body
+
+    updated_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
+    pending_segment = next(
+        item
+        for item in updated_snapshot["artifacts"]
+        if item["artifact_kind"] == "story_segment" and item["status"] == "draft"
+    )
+    bundle = pending_segment["metadata"]["worker_source_ref_bundle"]
+    assert bundle["retrieval_usage_material_ids"]
 
 
 def test_story_memory_read_only_routes_expose_session_scoped_views(client, monkeypatch):
@@ -2029,6 +2780,29 @@ def test_story_memory_inspection_route_uses_memory_family_and_identity_scope(
         item["material_id"]
         for item in payload["layers"][Layer.RUNTIME_WORKSPACE.value]["items"]
     } == {"api.memory.inspection.overlay"}
+    assert payload["canonical_envelope"]["schema_version"] == "rp.memory.display.v1"
+    assert payload["canonical_envelope"]["governance_bound"] is True
+    block_layers = {block["layer"] for block in payload["blocks"]}
+    assert Layer.CORE_STATE_AUTHORITATIVE.value in block_layers
+    assert Layer.RUNTIME_WORKSPACE.value in block_layers
+    core_block = next(
+        block
+        for block in payload["blocks"]
+        if block["layer"] == Layer.CORE_STATE_AUTHORITATIVE.value
+    )
+    assert core_block["entrypoints"]["direct_core_edit"]["governed_by"] == (
+        "StoryBlockMutationService.direct_edit_block"
+    )
+    assert core_block["entries"][0]["base_revision"] == 5
+    workspace_block = next(
+        block
+        for block in payload["blocks"]
+        if block["layer"] == Layer.RUNTIME_WORKSPACE.value
+    )
+    assert workspace_block["permission_level"]["durable_edit"] is False
+    assert workspace_block["entries"][0]["entry_id"] == (
+        "api.memory.inspection.overlay"
+    )
 
 
 def test_story_memory_block_proposal_submission_is_governed(client, monkeypatch):

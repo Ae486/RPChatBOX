@@ -655,6 +655,37 @@ Design the next-stage optimization direction for `SetupAgent` so it follows the 
 - Research artifact:
   - [`research/setup-stage-followup-convergence-slice-plan.md`](research/setup-stage-followup-convergence-slice-plan.md)
 
+### Setup Legacy Step Mirror Cleanup (2026-05-06)
+
+- Scope decision:
+  - `F3` is the next coherent cleanup slice after `target_stage` ingress convergence
+  - it is derived from the real parts of the earlier review list (`B1/B2/B3`), not from new product requirements
+- Planned behavior:
+  - keep `current_stage` authoritative
+  - synchronize `current_step` as the compatibility mirror of the effective canonical stage
+  - centralize stage-to-step bridge logic onto one backend authority instead of duplicated local maps
+- Explicit exclusions:
+  - no stage-specific patch tools
+  - no handoff redesign
+  - no broad dual-track field deletion
+- Research artifact:
+  - [`research/setup-legacy-step-mirror-cleanup-slice-plan.md`](research/setup-legacy-step-mirror-cleanup-slice-plan.md)
+
+### Setup F4 Eval Enrichment (2026-05-06)
+
+- Scope decision:
+  - `F4` belongs inside the existing `backend/rp/eval` module
+  - it is not a new SkillPack-specific eval framework
+- Research conclusion:
+  - stage-aware setup eval can be implemented now because canonical `target_stage` / `setup_stage` truth already exists in request handling, runtime metadata, and setup traces
+  - SkillPack-aware setup eval must wait until runtime exposes real SkillPack truth such as `skill_pack_name` and stable pack-driven metadata
+- Planned order:
+  - `F4A`: additive stage-aware setup eval enrichment on current eval architecture
+  - `F4B`: SkillPack-aware setup eval only after runtime-owned SkillPack metadata exists
+- Research artifacts:
+  - [`research/setup-f4-eval-stage-skillpack-integration.md`](research/setup-f4-eval-stage-skillpack-integration.md)
+  - [`research/setup-f4-eval-enrichment-slice-plan.md`](research/setup-f4-eval-enrichment-slice-plan.md)
+
 ### Output Artifacts
 
 - [`docs/research/rp-redesign/agent/development-spec/setup-agent-loop-react-lifecycle-development-spec.md`](../../../docs/research/rp-redesign/agent/development-spec/setup-agent-loop-react-lifecycle-development-spec.md) — development spec for the next SetupAgent loop / ReAct / context lifecycle slice.

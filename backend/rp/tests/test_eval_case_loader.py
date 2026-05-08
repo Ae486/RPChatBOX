@@ -38,6 +38,8 @@ def test_load_case_from_json(tmp_path):
                 "expected": {
                     "deterministic_assertions": [],
                     "subjective_hooks": [],
+                    "expected_target_stage": "character_design",
+                    "expected_effective_stage": "character_design",
                 },
                 "trace_hooks": {
                     "capture_runtime_events": True,
@@ -57,6 +59,8 @@ def test_load_case_from_json(tmp_path):
 
     assert case.case_id == "setup.commit_proposal.writing_contract.ready.v1"
     assert case.runtime_target.graph_id == "setup_v2"
+    assert case.expected.expected_target_stage == "character_design"
+    assert case.expected.expected_effective_stage == "character_design"
 
 
 def test_eval_diagnostics_import_does_not_eagerly_load_ragas():

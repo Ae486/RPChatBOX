@@ -120,7 +120,7 @@ class SetupContextBuilder:
         except ValueError:
             if current_stage is None:
                 raise
-            return SetupWorkspaceService._LEGACY_STEP_FOR_STAGE[current_stage]
+            return SetupWorkspaceService.legacy_step_for_stage(current_stage)
 
     @staticmethod
     def _context_profile(
@@ -200,7 +200,7 @@ class SetupContextBuilder:
             commit = latest_commit_by_lifecycle.get(
                 stage_id.value
             ) or latest_commit_by_lifecycle.get(
-                cls._legacy_step_for_stage(stage_id).value
+                SetupWorkspaceService.legacy_step_for_stage(stage_id).value
             )
             if commit is None:
                 continue
@@ -229,10 +229,6 @@ class SetupContextBuilder:
             latest[cls._lifecycle_value(commit.step_id)] = commit
         return latest
 
-    @staticmethod
-    def _legacy_step_for_stage(stage_id: SetupStageId) -> SetupStepId:
-        return SetupWorkspaceService._LEGACY_STEP_FOR_STAGE[stage_id]
-
     @classmethod
     def _build_stage_handoff(
         cls,
@@ -246,7 +242,7 @@ class SetupContextBuilder:
         compact = context_profile == "compact"
         from_stage = cls._coerce_stage_id(cls._lifecycle_value(commit.step_id))
         from_step = (
-            cls._legacy_step_for_stage(from_stage)
+            SetupWorkspaceService.legacy_step_for_stage(from_stage)
             if from_stage is not None
             else SetupStepId(cls._lifecycle_value(commit.step_id))
         )

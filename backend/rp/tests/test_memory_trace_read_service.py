@@ -92,9 +92,15 @@ def test_turn_trace_joins_exact_identity_evidence(retrieval_session):
         {
             "material_id": seeded.usage_id,
             "short_id": "U1",
+            "used_card_short_ids": ["R1"],
+            "expanded_card_short_ids": [],
+            "unused_card_short_ids": [],
             "used_card_material_ids": [seeded.card_id],
             "used_expanded_chunk_material_ids": [],
+            "unused_card_material_ids": [],
+            "missed_query_short_ids": [],
             "missed_query_material_ids": [],
+            "knowledge_gaps": [],
             "source_refs": [
                 {
                     "source_type": "retrieval_card_material",
@@ -348,9 +354,15 @@ def _seed_trace_evidence(retrieval_session) -> _SeededTraceEvidence:
             lifecycle=RuntimeWorkspaceMaterialLifecycle.USED,
             visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
             payload={
+                "used_card_short_ids": ["R1"],
+                "expanded_card_short_ids": [],
+                "unused_card_short_ids": [],
                 "used_card_material_ids": [card_receipt.material.material_id],
                 "used_expanded_chunk_material_ids": [],
+                "unused_card_material_ids": [],
+                "missed_query_short_ids": [],
                 "missed_query_material_ids": [],
+                "knowledge_gaps": [],
             },
             source_refs=[
                 MemorySourceRef(
