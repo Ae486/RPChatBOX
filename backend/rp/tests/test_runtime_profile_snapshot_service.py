@@ -282,6 +282,73 @@ def test_ensure_active_snapshot_compiles_once_and_reuses_existing_active(
     )
 
 
+def test_require_active_snapshot_repairs_stale_session_pointer_from_existing_active_row(
+    retrieval_session,
+):
+    story_session = _seed_story_session(
+        retrieval_session,
+        story_id="snapshot-repair-stale-session-pointer",
+    )
+    service = RuntimeProfileSnapshotService(retrieval_session)
+    story_session_service = StorySessionService(retrieval_session)
+    active = service.ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.require_active.initial",
+    )
+
+    session_record = retrieval_session.get(StorySessionRecord, story_session.session_id)
+    assert session_record is not None
+    session_record.active_runtime_profile_snapshot_id = "missing-runtime-snapshot"
+    retrieval_session.add(session_record)
+    retrieval_session.flush()
+
+    repaired = service.require_active_snapshot(session_id=story_session.session_id)
+    refreshed_session = story_session_service.get_session(story_session.session_id)
+
+    assert repaired.runtime_profile_snapshot_id == active.runtime_profile_snapshot_id
+    assert refreshed_session is not None
+    assert refreshed_session.active_runtime_profile_snapshot_id == (
+        active.runtime_profile_snapshot_id
+    )
+
+
+def test_ensure_active_snapshot_rebuilds_when_session_pointer_is_stale(
+    retrieval_session,
+):
+    story_session = _seed_story_session(
+        retrieval_session,
+        story_id="snapshot-stale-session-anchor-backfill",
+    )
+    service = RuntimeProfileSnapshotService(retrieval_session)
+    first = service.ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.ensure_active.initial",
+    )
+
+    session_record = retrieval_session.get(StorySessionRecord, story_session.session_id)
+    assert session_record is not None
+    session_record.active_runtime_profile_snapshot_id = "missing-runtime-snapshot"
+    retrieval_session.add(session_record)
+    retrieval_session.flush()
+
+    rebuilt = service.ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.ensure_active.backfill",
+    )
+    refreshed_first = service.require_snapshot(first.runtime_profile_snapshot_id)
+    refreshed_session = retrieval_session.get(StorySessionRecord, story_session.session_id)
+
+    assert rebuilt.runtime_profile_snapshot_id != first.runtime_profile_snapshot_id
+    assert rebuilt.status == "active"
+    assert rebuilt.compiled_profile_json == first.compiled_profile_json
+    assert rebuilt.source_config_revision == first.source_config_revision
+    assert refreshed_first.status == "superseded"
+    assert refreshed_session is not None
+    assert refreshed_session.active_runtime_profile_snapshot_id == (
+        rebuilt.runtime_profile_snapshot_id
+    )
+
+
 def test_ensure_active_snapshot_republishes_when_writer_contract_changes(
     retrieval_session,
 ):

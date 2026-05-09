@@ -1236,17 +1236,15 @@ class StoryRuntimeIdentityService:
     ):
         requested_snapshot_id = str(requested_runtime_profile_snapshot_id or "").strip()
         if requested_snapshot_id:
-            return self._runtime_profile_snapshot_service.require_snapshot(
-                requested_snapshot_id
-            )
-
-        pinned_snapshot_id = str(
-            session_record.active_runtime_profile_snapshot_id or ""
-        ).strip()
-        if pinned_snapshot_id:
-            return self._runtime_profile_snapshot_service.require_snapshot(
-                pinned_snapshot_id
-            )
+            try:
+                return self._runtime_profile_snapshot_service.require_snapshot(
+                    requested_snapshot_id
+                )
+            except RuntimeProfileSnapshotServiceError as exc:
+                raise StoryRuntimeIdentityServiceError(
+                    exc.code,
+                    requested_snapshot_id,
+                ) from exc
         return self._runtime_profile_snapshot_service.ensure_active_snapshot(
             session_id=session_record.session_id,
             created_from="story_runtime.turn_start",

@@ -9,7 +9,8 @@ from types import SimpleNamespace
 from sqlmodel import Session as SqlSession
 
 from config import get_settings
-from models.rp_story_store import BranchHeadRecord
+from models.rp_story_store import BranchHeadRecord, StorySessionRecord
+from rp.graphs.story_graph_runner import StoryGraphRunner
 from rp.models.archival_evolution import ArchivalEvolutionRequest
 from rp.models.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
@@ -2279,6 +2280,33 @@ def test_story_runtime_inspection_route_rejects_turn_branch_mismatch(
     assert payload["detail"]["error"]["code"] == "story_runtime_debug_branch_not_found"
 
 
+def test_story_runtime_inspection_route_warns_when_active_snapshot_anchor_is_stale(
+    client, monkeypatch
+):
+    monkeypatch.setenv(
+        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+        "true",
+    )
+    get_settings.cache_clear()
+    seeded = _seed_formal_memory_block_session()
+    with SqlSession(get_engine()) as db_session:
+        session_record = db_session.get(StorySessionRecord, seeded["session_id"])
+        assert session_record is not None
+        session_record.active_runtime_profile_snapshot_id = "missing-runtime-snapshot"
+        db_session.add(session_record)
+        db_session.commit()
+
+    response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/runtime/inspect",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runtime_profile_snapshot"] is None
+    assert "runtime_profile_snapshot_stale_session_anchor" in payload["warnings"]
+    assert "runtime_profile_snapshot_unavailable" in payload["warnings"]
+
+
 def test_story_turn_rejects_command_not_allowed_for_phase(client):
     workspace_id = _create_ready_workspace(client)
     activation = client.post(f"/api/rp/setup/workspaces/{workspace_id}/activate")
@@ -2300,6 +2328,86 @@ def test_story_turn_rejects_command_not_allowed_for_phase(client):
         "not allowed during phase outline_drafting"
         in payload["detail"]["error"]["message"]
     )
+
+
+def test_story_turn_stream_returns_structured_error_for_unhandled_exception(
+    client, monkeypatch
+):
+    async def _boom(self, request):
+        if False:
+            yield ""
+        raise RuntimeError("stream exploded")
+
+    monkeypatch.setattr(StoryGraphRunner, "run_turn_stream", _boom)
+
+    with client.stream(
+        "POST",
+        "/api/rp/story-sessions/session-error/turn/stream",
+        json={
+            "session_id": "session-error",
+            "command_kind": "write_next_segment",
+            "model_id": "model-story",
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert '"type": "error"' in body
+    assert '"code": "story_turn_failed"' in body
+    assert "stream exploded" in body
+    assert '"type": "done"' in body
+
+
+def test_story_turn_stream_backfills_stale_active_snapshot_and_completes(
+    client, monkeypatch
+):
+    client.put("/api/providers/provider-story", json=_provider_payload())
+    client.put(
+        "/api/providers/provider-story/models/model-story",
+        json=_model_payload(),
+    )
+    workspace_id = _create_ready_workspace(client)
+    monkeypatch.setattr(
+        "rp.services.story_llm_gateway.get_litellm_service",
+        lambda: _MockStoryLLMService(),
+    )
+    activation = client.post(f"/api/rp/setup/workspaces/{workspace_id}/activate")
+    assert activation.status_code == 200
+    session_id = activation.json()["session_id"]
+
+    with SqlSession(get_engine()) as db_session:
+        RuntimeProfileSnapshotService(db_session).ensure_active_snapshot(
+            session_id=session_id,
+            created_from="test.api.stale_snapshot.seed",
+        )
+        session_record = db_session.get(StorySessionRecord, session_id)
+        assert session_record is not None
+        stale_snapshot_id = session_record.active_runtime_profile_snapshot_id
+        assert stale_snapshot_id is not None
+        session_record.active_runtime_profile_snapshot_id = "missing-runtime-snapshot"
+        db_session.add(session_record)
+        db_session.commit()
+
+    with client.stream(
+        "POST",
+        f"/api/rp/story-sessions/{session_id}/turn/stream",
+        json={
+            "session_id": session_id,
+            "command_kind": "generate_outline",
+            "model_id": "model-story",
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    with SqlSession(get_engine()) as db_session:
+        refreshed_session = db_session.get(StorySessionRecord, session_id)
+
+    assert '"type": "done"' in body
+    assert '"type": "error"' not in body
+    assert refreshed_session is not None
+    assert refreshed_session.active_runtime_profile_snapshot_id != "missing-runtime-snapshot"
+    assert refreshed_session.active_runtime_profile_snapshot_id != stale_snapshot_id
 
 
 def test_story_turn_rejects_story_segment_metadata_patch_on_non_accept_command(client):

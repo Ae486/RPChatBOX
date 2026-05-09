@@ -218,33 +218,26 @@ class RuntimeProfileSnapshotService:
         session_id: str,
     ) -> RuntimeProfileSnapshotRecord:
         session_record = self._require_session_record(session_id)
-        pinned_snapshot_id = str(
-            session_record.active_runtime_profile_snapshot_id or ""
-        ).strip()
-        if pinned_snapshot_id:
-            record = self.require_snapshot(pinned_snapshot_id)
-            if record.session_id != session_id:
-                raise RuntimeProfileSnapshotServiceError(
-                    "runtime_profile_snapshot_activation_conflict",
-                    f"session_snapshot_mismatch:{session_id}",
-                )
-            if record.status != RuntimeProfileSnapshotStatus.ACTIVE.value:
-                raise RuntimeProfileSnapshotServiceError(
-                    "runtime_profile_snapshot_activation_conflict",
-                    f"session_snapshot_not_active:{pinned_snapshot_id}",
-                )
-            return record
-
-        active_record = self._session.exec(
-            select(RuntimeProfileSnapshotRecord)
-            .where(RuntimeProfileSnapshotRecord.session_id == session_id)
-            .where(
-                RuntimeProfileSnapshotRecord.status
-                == RuntimeProfileSnapshotStatus.ACTIVE.value
+        try:
+            pinned_record = self._require_session_pinned_active_snapshot(
+                session_record=session_record
             )
-            .order_by(desc(cast(Any, RuntimeProfileSnapshotRecord.activated_at)))
-            .order_by(desc(cast(Any, RuntimeProfileSnapshotRecord.created_at)))
-        ).first()
+        except RuntimeProfileSnapshotServiceError as exc:
+            active_record = self._latest_active_snapshot(session_id=session_id)
+            if active_record is None:
+                raise RuntimeProfileSnapshotServiceError(
+                    "runtime_profile_snapshot_no_active_snapshot",
+                    session_id,
+                ) from exc
+            self._pin_session_active_snapshot(
+                session_id=session_id,
+                snapshot_id=active_record.runtime_profile_snapshot_id,
+            )
+            return active_record
+        if pinned_record is not None:
+            return pinned_record
+
+        active_record = self._latest_active_snapshot(session_id=session_id)
         if active_record is None:
             raise RuntimeProfileSnapshotServiceError(
                 "runtime_profile_snapshot_no_active_snapshot",
@@ -274,12 +267,16 @@ class RuntimeProfileSnapshotService:
             profile_config=profile_config,
         )
         try:
-            active = self.require_active_snapshot(session_id=session_id)
-        except RuntimeProfileSnapshotServiceError as exc:
-            if exc.code != "runtime_profile_snapshot_no_active_snapshot":
-                raise
+            active = self._require_session_pinned_active_snapshot(
+                session_record=session_record
+            )
+        except RuntimeProfileSnapshotServiceError:
+            active = None
         else:
-            if active.source_config_revision == source_config_revision:
+            if (
+                active is not None
+                and active.source_config_revision == source_config_revision
+            ):
                 return active
 
         record = self._create_snapshot_record(
@@ -597,6 +594,45 @@ class RuntimeProfileSnapshotService:
                 f"story_session_not_found:{session_id}",
             )
         return record
+
+    def _require_session_pinned_active_snapshot(
+        self,
+        *,
+        session_record: StorySessionRecord,
+    ) -> RuntimeProfileSnapshotRecord | None:
+        pinned_snapshot_id = str(
+            session_record.active_runtime_profile_snapshot_id or ""
+        ).strip()
+        if not pinned_snapshot_id:
+            return None
+        record = self.require_snapshot(pinned_snapshot_id)
+        if record.session_id != session_record.session_id:
+            raise RuntimeProfileSnapshotServiceError(
+                "runtime_profile_snapshot_activation_conflict",
+                f"session_snapshot_mismatch:{session_record.session_id}",
+            )
+        if record.status != RuntimeProfileSnapshotStatus.ACTIVE.value:
+            raise RuntimeProfileSnapshotServiceError(
+                "runtime_profile_snapshot_activation_conflict",
+                f"session_snapshot_not_active:{pinned_snapshot_id}",
+            )
+        return record
+
+    def _latest_active_snapshot(
+        self,
+        *,
+        session_id: str,
+    ) -> RuntimeProfileSnapshotRecord | None:
+        return self._session.exec(
+            select(RuntimeProfileSnapshotRecord)
+            .where(RuntimeProfileSnapshotRecord.session_id == session_id)
+            .where(
+                RuntimeProfileSnapshotRecord.status
+                == RuntimeProfileSnapshotStatus.ACTIVE.value
+            )
+            .order_by(desc(cast(Any, RuntimeProfileSnapshotRecord.activated_at)))
+            .order_by(desc(cast(Any, RuntimeProfileSnapshotRecord.created_at)))
+        ).first()
 
     def _pin_session_active_snapshot(
         self,

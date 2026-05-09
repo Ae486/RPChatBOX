@@ -10,6 +10,7 @@ from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 from models.rp_story_store import (
     BranchControlReceiptRecord,
     BranchHeadRecord,
+    RuntimeProfileSnapshotRecord,
     StorySessionRecord,
     StoryTurnRecord,
 )
@@ -219,6 +220,70 @@ def test_resolve_runtime_entry_identity_defaults_to_session_active_anchors(
     assert identity.runtime_profile_snapshot_id == (
         active_snapshot.runtime_profile_snapshot_id
     )
+
+
+def test_resolve_runtime_entry_identity_backfills_new_snapshot_when_session_anchor_is_stale(
+    retrieval_session,
+):
+    story_session = _seed_story_session(
+        retrieval_session,
+        story_id="identity-stale-session-snapshot-backfill",
+    )
+    session_record = retrieval_session.get(StorySessionRecord, story_session.session_id)
+    assert session_record is not None
+    session_record.active_runtime_profile_snapshot_id = "missing-runtime-snapshot"
+    retrieval_session.add(session_record)
+    retrieval_session.flush()
+
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+
+    identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="continue",
+        actor="story_runtime",
+    )
+
+    turn = retrieval_session.get(StoryTurnRecord, identity.turn_id)
+    refreshed_session = retrieval_session.get(StorySessionRecord, story_session.session_id)
+    snapshots = retrieval_session.exec(
+        select(RuntimeProfileSnapshotRecord).where(
+            RuntimeProfileSnapshotRecord.session_id == story_session.session_id
+        )
+    ).all()
+
+    assert turn is not None
+    assert turn.runtime_profile_snapshot_id == identity.runtime_profile_snapshot_id
+    assert len(snapshots) == 1
+    assert snapshots[0].runtime_profile_snapshot_id == identity.runtime_profile_snapshot_id
+    assert snapshots[0].status == "active"
+    assert refreshed_session is not None
+    assert refreshed_session.active_runtime_profile_snapshot_id == (
+        identity.runtime_profile_snapshot_id
+    )
+
+
+def test_resolve_runtime_entry_identity_explicit_missing_snapshot_fails_closed(
+    retrieval_session,
+):
+    story_session = _seed_story_session(
+        retrieval_session,
+        story_id="identity-explicit-missing-snapshot",
+    )
+    service = StoryRuntimeIdentityService(retrieval_session)
+
+    with pytest.raises(StoryRuntimeIdentityServiceError) as exc_info:
+        service.resolve_runtime_entry_identity(
+            session_id=story_session.session_id,
+            command_kind="continue",
+            actor="story_runtime",
+            requested_runtime_profile_snapshot_id="missing-runtime-snapshot",
+        )
+
+    assert exc_info.value.code == "runtime_profile_snapshot_not_found"
 
 
 def test_create_turn_rejects_non_active_snapshot(retrieval_session):

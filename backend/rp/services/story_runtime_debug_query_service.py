@@ -23,7 +23,10 @@ from rp.models.runtime_workspace_material import (
 )
 
 from .memory_trace_read_service import MemoryTraceReadService
-from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from .runtime_profile_snapshot_service import (
+    RuntimeProfileSnapshotService,
+    RuntimeProfileSnapshotServiceError,
+)
 from .runtime_read_manifest_service import BranchVisibilityResolver
 from .runtime_workflow_job_service import RuntimeWorkflowJobService
 from .story_runtime_identity_service import StoryRuntimeIdentityService
@@ -190,12 +193,15 @@ class StoryRuntimeDebugQueryService:
             turn_trace=turn_trace,
             limit=normalized_limit,
         )
+        active_snapshot_id = _optional_text(session.active_runtime_profile_snapshot_id)
         warnings: list[str] = []
         if selected_branch is None:
             warnings.append("runtime_branch_unavailable_for_session")
         if selected_turn is None:
             warnings.append("no_exact_turn_selected_for_branch")
         if snapshot is None:
+            if selected_turn is None and active_snapshot_id is not None:
+                warnings.append("runtime_profile_snapshot_stale_session_anchor")
             warnings.append("runtime_profile_snapshot_unavailable")
         return {
             "surface_role": "story_runtime_debug_inspect_read_surface",
@@ -433,8 +439,15 @@ class StoryRuntimeDebugQueryService:
         )
         if snapshot_id is None:
             return None
-        snapshot = self._runtime_profile_snapshot_service.require_snapshot(snapshot_id)
+        try:
+            snapshot = self._runtime_profile_snapshot_service.require_snapshot(snapshot_id)
+        except RuntimeProfileSnapshotServiceError:
+            if selected_turn is None:
+                return None
+            raise
         if snapshot.session_id != session_id:
+            if selected_turn is None:
+                return None
             raise StoryRuntimeDebugQueryServiceError(
                 "story_runtime_debug_snapshot_session_mismatch",
                 snapshot_id,

@@ -238,6 +238,24 @@ def _story_runtime_read_invalid(
     )
 
 
+def _story_stream_error_sse(*, message: str, code: str) -> str:
+    return (
+        "data: "
+        + json.dumps(
+            {
+                "type": "error",
+                "error": {
+                    "message": message,
+                    "type": code,
+                    "code": code,
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n\n"
+    )
+
+
 def _runtime_config_invalid(exc: Exception) -> HTTPException:
     error_code = getattr(exc, "code", None) or "runtime_config_invalid"
     status_code = 409 if error_code == "runtime_config_snapshot_conflict" else 400
@@ -1160,18 +1178,15 @@ async def run_story_turn_stream(
                 if chunk:
                     yield chunk
         except ValueError as exc:
-            yield (
-                "data: "
-                + json.dumps(
-                    {
-                        "type": "error",
-                        "error": {
-                            "message": str(exc),
-                            "type": "story_turn_failed",
-                        },
-                    }
-                )
-                + "\n\n"
+            yield _story_stream_error_sse(
+                message=str(exc),
+                code=getattr(exc, "code", None) or "story_turn_failed",
+            )
+            yield "data: " + json.dumps({"type": "done"}) + "\n\n"
+        except Exception as exc:
+            yield _story_stream_error_sse(
+                message=str(exc),
+                code=getattr(exc, "code", None) or "story_turn_failed",
             )
             yield "data: " + json.dumps({"type": "done"}) + "\n\n"
 
