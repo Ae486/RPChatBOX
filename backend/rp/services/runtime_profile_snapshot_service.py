@@ -13,6 +13,12 @@ from sqlmodel import Session, select
 
 from models.rp_story_store import RuntimeProfileSnapshotRecord, StorySessionRecord
 from rp.models.memory_contract_registry import MemoryLifecycleState
+from rp.models.mode_extension_contracts import (
+    build_mode_extension_profile,
+    packet_sidecar_slot_ids_for_profile,
+    worker_slot_ids_for_profile,
+    workspace_material_slot_ids_for_profile,
+)
 from rp.models.post_write_policy import (
     PostWriteMaintenancePolicy,
     build_balanced_policy,
@@ -89,8 +95,8 @@ class RuntimeProfileSnapshotService:
                 f"mode_mismatch:{mode}",
             )
 
-        effective_profile_config = profile_config or self._profile_config_for_mode(
-            session_record.mode
+        effective_profile_config = profile_config or self._profile_config_for_session(
+            session_record
         )
         compiled = self._compile_profile(
             session_record,
@@ -103,6 +109,62 @@ class RuntimeProfileSnapshotService:
             profile_config=effective_profile_config,
         )
         return record
+
+    def compile_snapshot_from_runtime_config_patch(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        mode: str,
+        base_snapshot_id: str,
+        runtime_story_config: dict[str, Any],
+        created_from: str,
+    ) -> RuntimeProfileSnapshotRecord:
+        """Create a future-turn snapshot from the currently active snapshot.
+
+        Runtime config publishes are control-plane hot updates. They must not
+        silently rebase an existing story onto a newer active ModeProfile or
+        registry default while applying a small panel patch.
+        """
+
+        session_record = self._require_session_record(session_id)
+        if session_record.story_id != story_id:
+            raise RuntimeProfileSnapshotServiceError(
+                "runtime_profile_snapshot_compile_failed",
+                f"story_id_mismatch:{story_id}",
+            )
+        if session_record.mode != mode:
+            raise RuntimeProfileSnapshotServiceError(
+                "runtime_profile_snapshot_compile_failed",
+                f"mode_mismatch:{mode}",
+            )
+        base_snapshot = self.require_snapshot(base_snapshot_id)
+        if (
+            base_snapshot.story_id != story_id
+            or base_snapshot.session_id != session_id
+            or base_snapshot.mode != mode
+        ):
+            raise RuntimeProfileSnapshotServiceError(
+                "runtime_profile_snapshot_compile_failed",
+                f"base_snapshot_mismatch:{base_snapshot_id}",
+            )
+
+        base_compiled = RuntimeProfileSnapshotCompiledProfile.model_validate(
+            base_snapshot.compiled_profile_json or {}
+        )
+        compiled = self._apply_runtime_config_patch_to_compiled_profile(
+            base_compiled,
+            runtime_story_config=dict(runtime_story_config or {}),
+        )
+        return self._create_snapshot_record(
+            session_record=session_record,
+            compiled=compiled,
+            created_from=str(created_from or "runtime_profile_snapshot.compile"),
+            profile_config={
+                "base_runtime_profile_snapshot_id": base_snapshot_id,
+                "runtime_story_config": dict(runtime_story_config or {}),
+            },
+        )
 
     def publish_snapshot(self, snapshot_id: str) -> RuntimeProfileSnapshotRecord:
         record = self.require_snapshot(snapshot_id)
@@ -201,7 +263,7 @@ class RuntimeProfileSnapshotService:
         created_from: str,
     ) -> RuntimeProfileSnapshotRecord:
         session_record = self._require_session_record(session_id)
-        profile_config = self._profile_config_for_mode(session_record.mode)
+        profile_config = self._profile_config_for_session(session_record)
         compiled = self._compile_profile(
             session_record,
             profile_config=profile_config,
@@ -346,6 +408,27 @@ class RuntimeProfileSnapshotService:
                     worker_defaults.permission_defaults if worker_defaults else {}
                 ),
             )
+        extension_profile = build_mode_extension_profile(normalized_mode)
+        if extension_profile is not None:
+            for runtime_worker_id in worker_slot_ids_for_profile(extension_profile):
+                worker_activation[runtime_worker_id] = RuntimeWorkerActivation(
+                    active=True,
+                    profile_ref=_optional_text(
+                        runtime_story_config.get("worker_profile_ref")
+                    ),
+                    metadata={
+                        "extension_mode": normalized_mode,
+                        "runtime_extension_worker": True,
+                    },
+                )
+                worker_permission_defaults.setdefault(
+                    runtime_worker_id,
+                    {
+                        "read": True,
+                        "propose": True,
+                        "refresh_projection": True,
+                    },
+                )
 
         return RuntimeProfileSnapshotCompiledProfile(
             mode_profile=RuntimeProfileModeProfile(
@@ -395,6 +478,9 @@ class RuntimeProfileSnapshotService:
                         "turn_id",
                         "runtime_profile_snapshot_id",
                     ],
+                    "mode_sidecar_slots": packet_sidecar_slot_ids_for_profile(
+                        extension_profile
+                    ),
                 },
                 _dict_section(profile_config, "packet_policy"),
             ),
@@ -437,6 +523,14 @@ class RuntimeProfileSnapshotService:
                     ),
                     "mode_profile_version": _optional_int(
                         profile_config.get("mode_profile_version")
+                    ),
+                    "mode_extension_profile": (
+                        extension_profile.model_dump(mode="json")
+                        if extension_profile is not None
+                        else None
+                    ),
+                    "workspace_material_slots": workspace_material_slot_ids_for_profile(
+                        extension_profile
                     ),
                 },
                 _dict_section(profile_config, "mode_specific_settings"),
@@ -524,12 +618,25 @@ class RuntimeProfileSnapshotService:
             return self._registry_service
         return self._registry_management_service.registry_service()
 
-    def _profile_config_for_mode(self, mode: str) -> dict[str, Any] | None:
-        if self._registry_service is not None:
-            return None
-        return self._registry_management_service.get_active_mode_profile_config(
-            mode=mode
-        )
+    def _profile_config_for_session(
+        self,
+        session_record: StorySessionRecord,
+    ) -> dict[str, Any] | None:
+        profile_config: dict[str, Any] = {}
+        if self._registry_service is None:
+            active_profile = (
+                self._registry_management_service.get_active_mode_profile_config(
+                    mode=session_record.mode
+                )
+            )
+            if active_profile is not None:
+                profile_config = dict(active_profile)
+
+        runtime_config = dict(session_record.runtime_story_config_json or {})
+        runtime_profile_config = _runtime_config_profile_sections(runtime_config)
+        if runtime_profile_config:
+            profile_config = _merge_dict(profile_config, runtime_profile_config)
+        return profile_config or None
 
     @staticmethod
     def _profile_retrieval_policy(
@@ -542,6 +649,79 @@ class RuntimeProfileSnapshotService:
             return retrieval_policy
         override = RetrievalRuntimeConfig.model_validate(payload)
         return retrieval_policy.overlay(override=override)
+
+    @staticmethod
+    def _apply_runtime_config_patch_to_compiled_profile(
+        base_compiled: RuntimeProfileSnapshotCompiledProfile,
+        *,
+        runtime_story_config: dict[str, Any],
+    ) -> RuntimeProfileSnapshotCompiledProfile:
+        payload = base_compiled.model_dump(mode="json")
+        profile_config = _runtime_config_profile_sections(runtime_story_config)
+
+        _merge_payload_section(
+            payload,
+            target_key="worker_activation",
+            override=_dict_section(profile_config, "worker_overrides"),
+        )
+        _merge_payload_section(
+            payload,
+            target_key="permission_profile",
+            override=_dict_section(profile_config, "permission_profile"),
+        )
+        _merge_payload_section(
+            payload,
+            target_key="context_policy",
+            override=_dict_section(profile_config, "context_policy"),
+        )
+        _merge_payload_section(
+            payload,
+            target_key="packet_policy",
+            override=_dict_section(profile_config, "packet_policy"),
+        )
+        _merge_payload_section(
+            payload,
+            target_key="writer_model_profile",
+            override=_dict_section(profile_config, "writer_model_profile"),
+        )
+        _merge_payload_section(
+            payload,
+            target_key="worker_model_profiles",
+            override=_dict_section(profile_config, "worker_model_profiles"),
+        )
+        _merge_payload_section(
+            payload,
+            target_key="mode_specific_settings",
+            override=_dict_section(profile_config, "mode_specific_settings"),
+        )
+        _merge_payload_section(
+            payload,
+            target_key="budget_latency_policy",
+            override=_dict_section(profile_config, "budget_latency_policy"),
+        )
+
+        retrieval_override = _runtime_config_retrieval_policy(runtime_story_config)
+        if retrieval_override is not None:
+            base_retrieval = RetrievalRuntimeConfig.model_validate(
+                payload.get("retrieval_policy") or {}
+            )
+            payload["retrieval_policy"] = base_retrieval.overlay(
+                override=retrieval_override
+            ).model_dump(mode="json")
+
+        preset = _optional_text(runtime_story_config.get("post_write_policy_preset"))
+        if preset is not None:
+            policy = (
+                build_conservative_policy()
+                if preset == "conservative"
+                else build_balanced_policy()
+            )
+            payload["post_write_policy"] = policy.model_dump(mode="json")
+            mode_settings = dict(payload.get("mode_specific_settings") or {})
+            mode_settings["post_write_policy_preset"] = preset
+            payload["mode_specific_settings"] = mode_settings
+
+        return RuntimeProfileSnapshotCompiledProfile.model_validate(payload)
 
     @staticmethod
     def _apply_worker_activation_policy(
@@ -570,9 +750,18 @@ class RuntimeProfileSnapshotService:
             runtime_story_config.get("worker_profile_ref")
         )
         profiles: dict[str, dict[str, Any]] = {}
+        extension_workers = {
+            worker_id
+            for worker_id, activation in worker_activation.items()
+            if bool(activation.metadata.get("runtime_extension_worker"))
+        }
         for worker_id, activation in worker_activation.items():
             profile_ref = activation.profile_ref or session_worker_profile_ref
-            if profile_ref is not None or worker_id in {"orchestrator", "specialist"}:
+            if (
+                profile_ref is not None
+                or worker_id in {"orchestrator", "specialist"}
+                or worker_id in extension_workers
+            ):
                 profiles[worker_id] = {"worker_profile_ref": profile_ref}
         return profiles
 
@@ -666,6 +855,120 @@ def _optional_int(value: object) -> int | None:
 def _dict_section(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _runtime_config_profile_sections(
+    runtime_config: dict[str, Any],
+) -> dict[str, Any]:
+    profile_config: dict[str, Any] = {}
+    for source_key, target_key in (
+        ("worker_overrides", "worker_overrides"),
+        ("retrieval_policy_patch", "retrieval_policy"),
+        ("context_policy_patch", "context_policy"),
+        ("packet_policy_patch", "packet_policy"),
+        ("budget_latency_policy_patch", "budget_latency_policy"),
+    ):
+        section = _dict_section(runtime_config, source_key)
+        if section:
+            profile_config[target_key] = section
+
+    permission_overrides = _dict_section(runtime_config, "permission_overrides")
+    if permission_overrides:
+        profile_config["permission_profile"] = {
+            "runtime_config_overrides": permission_overrides
+        }
+
+    model_profile_patch = _dict_section(runtime_config, "model_profile_patch")
+    if model_profile_patch:
+        writer_profile = _dict_section(model_profile_patch, "writer_model_profile")
+        if not writer_profile:
+            writer_profile = _dict_section(model_profile_patch, "writer")
+        if writer_profile:
+            profile_config["writer_model_profile"] = writer_profile
+
+        worker_profiles = _dict_section(model_profile_patch, "worker_model_profiles")
+        if not worker_profiles:
+            worker_profiles = _dict_section(model_profile_patch, "workers")
+        if worker_profiles:
+            profile_config["worker_model_profiles"] = worker_profiles
+
+        remaining_model_patch = {
+            key: value
+            for key, value in model_profile_patch.items()
+            if key
+            not in {
+                "writer",
+                "writer_model_profile",
+                "workers",
+                "worker_model_profiles",
+            }
+        }
+        if remaining_model_patch:
+            profile_config["mode_specific_settings"] = _merge_dict(
+                _dict_section(profile_config, "mode_specific_settings"),
+                {"runtime_config_model_profile_patch": remaining_model_patch},
+            )
+
+    scheduling_policy = _dict_section(runtime_config, "scheduling_policy_patch")
+    if scheduling_policy:
+        profile_config["mode_specific_settings"] = _merge_dict(
+            _dict_section(profile_config, "mode_specific_settings"),
+            {"scheduling_policy": scheduling_policy},
+        )
+    return profile_config
+
+
+def _runtime_config_retrieval_policy(
+    runtime_config: dict[str, Any],
+) -> RetrievalRuntimeConfig | None:
+    values: dict[str, Any] = {}
+    for target_key, source_key in (
+        ("embedding_model_id", "retrieval_embedding_model_id"),
+        ("embedding_provider_id", "retrieval_embedding_provider_id"),
+        ("rerank_model_id", "retrieval_rerank_model_id"),
+        ("rerank_provider_id", "retrieval_rerank_provider_id"),
+        ("graph_extraction_provider_id", "graph_extraction_provider_id"),
+        ("graph_extraction_model_id", "graph_extraction_model_id"),
+        (
+            "graph_extraction_structured_output_mode",
+            "graph_extraction_structured_output_mode",
+        ),
+        ("graph_extraction_temperature", "graph_extraction_temperature"),
+        (
+            "graph_extraction_max_output_tokens",
+            "graph_extraction_max_output_tokens",
+        ),
+        ("graph_extraction_timeout_ms", "graph_extraction_timeout_ms"),
+        (
+            "graph_extraction_fallback_model_ref",
+            "graph_extraction_fallback_model_ref",
+        ),
+        ("graph_extraction_enabled", "graph_extraction_enabled"),
+    ):
+        if source_key in runtime_config and runtime_config[source_key] is not None:
+            values[target_key] = runtime_config[source_key]
+    if "graph_extraction_retry_policy" in runtime_config:
+        raw_retry_policy = runtime_config["graph_extraction_retry_policy"]
+        if raw_retry_policy is not None:
+            values["graph_extraction_retry_policy"] = raw_retry_policy
+
+    retrieval_policy_patch = _dict_section(runtime_config, "retrieval_policy_patch")
+    if retrieval_policy_patch:
+        values = _merge_dict(values, retrieval_policy_patch)
+    if not values:
+        return None
+    return RetrievalRuntimeConfig.model_validate(values)
+
+
+def _merge_payload_section(
+    payload: dict[str, Any],
+    *,
+    target_key: str,
+    override: dict[str, Any],
+) -> None:
+    if not override:
+        return
+    payload[target_key] = _merge_dict(dict(payload.get(target_key) or {}), override)
 
 
 def _string_list(value: object) -> list[str]:

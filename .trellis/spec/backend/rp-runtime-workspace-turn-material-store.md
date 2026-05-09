@@ -117,6 +117,14 @@ class RuntimeWorkspaceMaterialService:
 - Lifecycle changes do not mutate Core State, Recall, or Archival.
 - This slice does not enforce the future writer final-output usage gate; it only provides the typed material and lifecycle surface that the gate will consume.
 
+#### Packet sidecar selection contract
+
+- `rule_card` and `rule_state_card` are typed Runtime Workspace materials, not generic workspace refs and not story truth.
+- Worker/context packets may expose these materials only through an explicit sidecar request such as `context_requirements.sidecar_slot_ids`.
+- If a packet has no explicit sidecar slot request, `sidecar_refs` must be empty even when matching `rule_card` or `rule_state_card` records exist in Runtime Workspace.
+- `rule_card` / `rule_state_card` must not leak through generic `workspace_refs`; callers that need mode sidecars must opt into the sidecar path.
+- Packet/debug/provenance reads must use formal material `source_refs` and stable section classifiers, not provenance embedded only inside `payload`.
+
 ### 4. Validation & Error Matrix
 
 | Condition | Expected behavior |
@@ -129,15 +137,21 @@ class RuntimeWorkspaceMaterialService:
 | Lifecycle update targets missing material | Reject with `runtime_workspace_material_not_found` |
 | Lifecycle update succeeds | Returns updated material plus `MemoryChangeEvent` with full identity, layer `runtime_workspace`, material source ref, and visibility effect |
 | Retrieval card is recorded | Stays Runtime Workspace material; no Core State / Recall / Archival mutation occurs |
+| Rule card exists but no sidecar slot is requested | Packet `sidecar_refs` stays empty and generic `workspace_refs` does not include the rule card |
+| Rule card sidecar slot is requested | Packet includes only matching visible rule sidecars with formal source refs |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: writer retrieval stores cards as `retrieval_card` materials with `short_id` values like `R1`, then records a later `retrieval_usage_record` material in the same identity.
 - Good: a TRPG rule helper stores `rule_card` / `rule_state_card` material for the current turn without writing `Core State.authoritative_state`.
+- Good: a TRPG rule helper stores `rule_card` / `rule_state_card` with formal Runtime Workspace `source_refs`, so packet/debug/provenance reads do not have to parse payload-local provenance.
+- Good: a worker packet with `context_requirements.sidecar_slot_ids=["rule_card"]` receives the requested visible rule sidecar; a normal writer packet without that request receives no rule sidecar refs.
+- Good: a longform chapter bridge stores branch-scoped `chapter_bridge_material` and the next chapter packet reads only the active branch's matching target chapter bridge.
 - Good: a worker candidate is represented as `worker_candidate` material until proposal/apply or review accepts it.
 - Base: current draft artifacts and discussion entries still appear through existing Runtime Workspace Block views while the typed turn-material service exists beside them.
 - Bad: treating retrieval cards as current truth because they are stored in Runtime Workspace.
 - Bad: looking up material by `session_id` only and leaking a previous branch or turn into the active turn.
+- Bad: mounting every visible Runtime Workspace material into `workspace_refs` and relying on workers to ignore rule sidecars they did not request.
 - Bad: adding a new public `memory.runtime_workspace.write` tool in this slice.
 
 ### 6. Tests Required
@@ -150,6 +164,11 @@ class RuntimeWorkspaceMaterialService:
   - short-id uniqueness within one identity and reuse across different branch / turn / profile identities;
   - lifecycle update receipts and emitted `MemoryChangeEvent`;
   - retrieval cards / worker candidates remaining Runtime Workspace material only.
+- Packet/context tests cover:
+  - sidecar refs are empty when no sidecar slot is requested;
+  - requested rule sidecars appear only through the sidecar path;
+  - generic workspace refs do not leak `rule_card` / `rule_state_card`;
+  - debug/provenance reads can resolve formal source refs without parsing payload-local provenance.
 - Focused lint/type checks must include the new models, service, and tests.
 
 ### 7. Wrong vs Correct

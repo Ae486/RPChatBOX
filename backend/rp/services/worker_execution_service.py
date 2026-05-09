@@ -20,6 +20,7 @@ from rp.models.worker_runtime_contracts import (
     WorkerExecutionPlan,
     WorkerExecutionRequest,
     WorkerResult,
+    WorkerResultStatus,
 )
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.longform_specialist_service import LongformSpecialistService
@@ -197,6 +198,14 @@ class WorkerExecutionService:
                 accepted_segments=accepted_segments,
                 pending_artifact=pending_artifact,
             )
+        if registration.execution_policy.allow_degrade:
+            return _WorkerAdapterOutcome(
+                worker_result=self._build_missing_executor_result(
+                    request=request,
+                    registration=registration,
+                ),
+                specialist_bundle=None,
+            )
         raise WorkerExecutionServiceError(
             "runtime_worker_executor_not_supported",
             request.worker_id,
@@ -243,6 +252,43 @@ class WorkerExecutionService:
         return _WorkerAdapterOutcome(
             worker_result=result,
             specialist_bundle=bundle,
+        )
+
+    @staticmethod
+    def _build_missing_executor_result(
+        *,
+        request: WorkerExecutionRequest,
+        registration: RuntimeWorkerRegistration,
+    ) -> WorkerResult:
+        return WorkerResult(
+            worker_id=request.worker_id,
+            phase=request.phase,
+            result_status=WorkerResultStatus.DEGRADED,
+            writer_hints=[],
+            validation_findings=[
+                {
+                    "reason_code": "runtime_worker_executor_missing",
+                    "worker_id": request.worker_id,
+                    "source_worker_id": registration.source_worker_id,
+                }
+            ],
+            evidence_refs=[],
+            trace_summary={
+                "degrade_reason": "runtime_worker_executor_missing",
+                "worker_id": request.worker_id,
+                "phase": request.phase,
+                "context_packet_ref": request.context_packet_ref,
+                "runtime_extension": bool(
+                    registration.execution_policy.metadata.get("runtime_extension")
+                ),
+            },
+            metadata={
+                "runtime_truth": "worker_runtime_contract",
+                "degraded": True,
+                "degrade_reason": "runtime_worker_executor_missing",
+                "context_packet_ref": request.context_packet_ref,
+                "source_worker_id": registration.source_worker_id,
+            },
         )
 
     @staticmethod

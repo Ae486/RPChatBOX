@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
 
 from sqlmodel import Session as SqlSession
 
 from config import get_settings
+from models.rp_story_store import BranchHeadRecord
+from rp.models.archival_evolution import ArchivalEvolutionRequest
 from rp.models.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
     CoreMutationEnvelope,
 )
+from rp.models.longform_chapter_contracts import ChapterBridgeMaterial
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_contract_registry import (
     MemoryChangeEvent,
@@ -19,7 +23,15 @@ from rp.models.memory_contract_registry import (
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
+from rp.models.memory_materialization import (
+    FOUNDATION_ENTRY_SOURCE_TYPE,
+    SETUP_COMMIT_IMPORT_EVENT,
+    build_archival_seed_section,
+    build_archival_source_metadata,
+)
 from rp.models.memory_crud import ProposalSubmitInput
+from rp.models.mode_extension_contracts import RuleCardMaterial, RuleStateCardMaterial
+from rp.models.retrieval_records import SourceAsset
 from rp.models.runtime_identity import StoryTurnStatus
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
@@ -34,18 +46,24 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from rp.models.setup_workspace import StoryMode
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
+from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime_retrieval_card_service import RuntimeRetrievalCardService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
+from rp.services.retrieval_collection_service import RetrievalCollectionService
+from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval_ingestion_service import RetrievalIngestionService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.worker_execution_service import WorkerExecutionOutcome
@@ -827,6 +845,242 @@ def _seed_runtime_debug_read_surface(session_id: str) -> dict[str, str]:
         }
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _seed_runtime_surface_second_stage_data(runtime_seed: dict[str, str]) -> dict[str, str]:
+    with SqlSession(get_engine()) as db_session:
+        session_id = runtime_seed["session_id"]
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.get_session(session_id)
+        if story_session is None:
+            raise AssertionError(f"Story session not found: {session_id}")
+        identity = MemoryRuntimeIdentity(
+            story_id=story_session.story_id,
+            session_id=session_id,
+            branch_head_id=runtime_seed["branch_head_id"],
+            turn_id=runtime_seed["turn_id"],
+            runtime_profile_snapshot_id=runtime_seed["runtime_profile_snapshot_id"],
+        )
+        sibling_branch_id = f"{identity.branch_head_id}:sibling"
+        sibling_branch = BranchHeadRecord(
+            branch_head_id=sibling_branch_id,
+            story_id=identity.story_id,
+            session_id=identity.session_id,
+            branch_name="sibling",
+            parent_branch_head_id=identity.branch_head_id,
+            forked_from_turn_id=identity.turn_id,
+            head_turn_id=None,
+            status="active",
+            visibility_scope="active_lineage",
+        )
+        db_session.add(sibling_branch)
+        db_session.flush()
+        sibling_turn = StoryRuntimeIdentityService(
+            db_session,
+            runtime_profile_snapshot_service=RuntimeProfileSnapshotService(db_session),
+        ).create_turn(
+            session_id=identity.session_id,
+            story_id=identity.story_id,
+            branch_head_id=sibling_branch.branch_head_id,
+            runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+            turn_kind="generation",
+            command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+            actor="api.runtime.inspect.sibling",
+        )
+        sibling_identity = MemoryRuntimeIdentity(
+            story_id=identity.story_id,
+            session_id=identity.session_id,
+            branch_head_id=sibling_branch.branch_head_id,
+            turn_id=sibling_turn.turn_id,
+            runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+        )
+        material_service = RuntimeWorkspaceMaterialService(session=db_session)
+        main_bridge = ChapterBridgeMaterial(
+            bridge_id="api-bridge-main",
+            session_id=identity.session_id,
+            branch_head_id=identity.branch_head_id,
+            source_chapter_index=1,
+            target_chapter_index=2,
+            adopted_output_ref=f"artifact:{identity.turn_id}:accepted",
+            accepted_outline_ref="outline-accepted",
+            chapter_goal_ref="chapter-goal:2",
+            continuity_refs=[f"continuity:{identity.turn_id}"],
+            summary_text="API main bridge summary.",
+            source_refs=[f"artifact:{identity.turn_id}:accepted"],
+            metadata_json={"bridge_source": "api_test"},
+        )
+        material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.runtime.bridge.main",
+                material_kind=RuntimeWorkspaceMaterialKind.POST_WRITE_TRACE,
+                identity=identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.longform_chapter.bridge_material",
+                source_refs=[
+                    MemorySourceRef(
+                        source_type="story_artifact",
+                        source_id=main_bridge.adopted_output_ref or "api.runtime.bridge.main",
+                        layer="runtime_workspace",
+                        domain=Domain.CHAPTER.value,
+                        entry_id="api.runtime.bridge.main",
+                        metadata={"source_of_truth": False},
+                    )
+                ],
+                payload={
+                    "payload_kind": "chapter_bridge_material",
+                    "record_id": main_bridge.bridge_id,
+                    "record": main_bridge.model_dump(mode="json"),
+                    "runtime_truth_owner": "rp_runtime",
+                    "canonical_truth": False,
+                },
+                visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
+                created_by="api.runtime.inspect_test",
+            )
+        )
+        sibling_bridge = main_bridge.model_copy(
+            update={
+                "bridge_id": "api-bridge-sibling",
+                "branch_head_id": sibling_identity.branch_head_id,
+                "summary_text": "API sibling bridge summary.",
+            }
+        )
+        material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.runtime.bridge.sibling",
+                material_kind=RuntimeWorkspaceMaterialKind.POST_WRITE_TRACE,
+                identity=sibling_identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.longform_chapter.bridge_material",
+                payload={
+                    "payload_kind": "chapter_bridge_material",
+                    "record_id": sibling_bridge.bridge_id,
+                    "record": sibling_bridge.model_dump(mode="json"),
+                },
+                visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
+                created_by="api.runtime.inspect_test",
+            )
+        )
+        facade = StoryRuntimeWorkspaceFacade(
+            runtime_workspace_material_service=material_service
+        )
+        main_rule_card_id = facade.record_rule_card_material(
+            material=RuleCardMaterial(
+                material_id=f"rule-card:{identity.turn_id}",
+                identity=identity,
+                rule_refs=["rule:archive-silence"],
+                adjudication_summary="Archive silence still holds.",
+                source_refs=["retrieval_card:archive-silence"],
+            )
+        )
+        main_rule_state_id = facade.record_rule_state_card_material(
+            material=RuleStateCardMaterial(
+                material_id=f"rule-state:{identity.turn_id}",
+                identity=identity,
+                mechanics_state_patch={"stress": 1},
+                status_effects=[{"name": "watchful", "severity": 1}],
+                source_refs=["worker_evidence:archive-silence"],
+            )
+        )
+        facade.record_rule_card_material(
+            material=RuleCardMaterial(
+                material_id=f"rule-card:{sibling_identity.turn_id}",
+                identity=sibling_identity,
+                rule_refs=["rule:sibling-only"],
+                adjudication_summary="Sibling branch only.",
+                source_refs=["retrieval_card:sibling-only"],
+            )
+        )
+        collection = RetrievalCollectionService(db_session).ensure_story_collection(
+            story_id=identity.story_id,
+            scope="story",
+            collection_kind="archival",
+        )
+        metadata = build_archival_source_metadata(
+            source_type=FOUNDATION_ENTRY_SOURCE_TYPE,
+            import_event=SETUP_COMMIT_IMPORT_EVENT,
+            workspace_id="workspace-api-runtime-surface",
+            commit_id="commit-api-runtime-surface",
+            step_id="foundation",
+            source_ref="setup_commit:runtime-surface:main",
+            domain=Domain.WORLD_RULE.value,
+            domain_path="foundation.world.api_runtime_surface",
+            extra={"title": "API Runtime Surface Archival"},
+        )
+        metadata["seed_sections"] = [
+            build_archival_seed_section(
+                section_id="foundation:api_runtime_surface",
+                title="API Runtime Surface Archival",
+                path="foundation.world.api_runtime_surface",
+                text="api runtime surface original archival text.",
+                metadata=metadata,
+                tags=["archival", "world_rule"],
+            )
+        ]
+        asset = SourceAsset(
+            asset_id="api-runtime-surface-archival",
+            story_id=identity.story_id,
+            mode=StoryMode.LONGFORM,
+            collection_id=collection.collection_id,
+            workspace_id="workspace-api-runtime-surface",
+            step_id="foundation",
+            commit_id="commit-api-runtime-surface",
+            asset_kind=FOUNDATION_ENTRY_SOURCE_TYPE,
+            source_ref="memory://api-runtime-surface-archival",
+            title="API Runtime Surface Archival",
+            parse_status="queued",
+            ingestion_status="queued",
+            mapped_targets=["foundation"],
+            metadata=metadata,
+            created_at=_utcnow(),
+            updated_at=_utcnow(),
+        )
+        RetrievalDocumentService(db_session).upsert_source_asset(asset)
+        db_session.flush()
+        RetrievalIngestionService(db_session).ingest_asset(
+            story_id=identity.story_id,
+            asset_id=asset.asset_id,
+            collection_id=collection.collection_id,
+        )
+        db_session.flush()
+        evolution_receipt = ArchivalEvolutionService(db_session).evolve_source(
+            ArchivalEvolutionRequest(
+                identity=identity,
+                actor="api.runtime.inspect_test",
+                source_asset_id=asset.asset_id,
+                expected_source_version=1,
+                replacement_sections=[
+                    {
+                        "text": "api runtime surface evolved archival text.",
+                        "metadata": {
+                            "domain": Domain.WORLD_RULE.value,
+                            "domain_path": "foundation.world.api_runtime_surface",
+                        },
+                    }
+                ],
+                source_refs=[
+                    MemorySourceRef(
+                        source_type="story_turn",
+                        source_id=identity.turn_id,
+                        layer="runtime_identity",
+                    )
+                ],
+                reason="api runtime surface evolution seed",
+            )
+        )
+        db_session.commit()
+        return {
+            "control_history_expected": "runtime_config_receipt_present",
+            "main_bridge_material_id": "api.runtime.bridge.main",
+            "main_rule_card_id": main_rule_card_id or "",
+            "main_rule_state_id": main_rule_state_id or "",
+            "evolution_id": evolution_receipt.evolution_id,
+            "evolved_asset_id": evolution_receipt.source_asset_id,
+            "sibling_turn_id": sibling_identity.turn_id,
+        }
+
+
 class _MockStoryLLMService:
     async def chat_completion(self, request):
         system_prompt = request.messages[0].content or ""
@@ -1460,6 +1714,14 @@ def test_story_runtime_config_patch_updates_session_snapshot(client, monkeypatch
         "/api/providers/provider-story/models/model-story",
         json=_model_payload(),
     )
+    client.put(
+        "/api/providers/provider-story/models/embedding-model-session",
+        json=_model_payload(model_id="embedding-model-session"),
+    )
+    client.put(
+        "/api/providers/provider-story/models/rerank-model-session",
+        json=_model_payload(model_id="rerank-model-session"),
+    )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
         "rp.services.story_llm_gateway.get_litellm_service",
@@ -1492,6 +1754,13 @@ def test_story_runtime_config_patch_updates_session_snapshot(client, monkeypatch
         snapshot["session"]["runtime_story_config"]["retrieval_rerank_model_id"]
         == "rerank-model-session"
     )
+    receipt = snapshot["runtime_config_receipt"]
+    assert receipt["previous_snapshot_id"]
+    assert (
+        receipt["published_snapshot_id"]
+        == snapshot["session"]["active_runtime_profile_snapshot_id"]
+    )
+    assert "retrieval_embedding_model_id" in receipt["changed_fields"]
 
     refreshed = client.get(f"/api/rp/story-sessions/{session_id}")
     assert refreshed.status_code == 200
@@ -1514,6 +1783,11 @@ def test_story_runtime_config_patch_updates_session_snapshot(client, monkeypatch
         ]
         == "compatibility_mirror"
     )
+    history = client.get(
+        f"/api/rp/story-sessions/{session_id}/runtime-config/history"
+    )
+    assert history.status_code == 200
+    assert history.json()["data"][0]["receipt_id"] == receipt["receipt_id"]
 
 
 def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch):
@@ -1846,10 +2120,19 @@ def test_story_runtime_inspection_route_returns_runtime_native_read_bundle(
     get_settings.cache_clear()
     seeded = _seed_formal_memory_block_session()
     runtime_seed = _seed_runtime_debug_read_surface(seeded["session_id"])
+    second_stage_seed = _seed_runtime_surface_second_stage_data(runtime_seed)
+    config_response = client.patch(
+        f"/api/rp/story-sessions/{seeded['session_id']}/runtime-config",
+        json={
+            "packet_policy_patch": {"max_context_tokens": 1024},
+            "reason": "api runtime inspect control history",
+        },
+    )
+    assert config_response.status_code == 200
 
     response = client.get(
         f"/api/rp/story-sessions/{seeded['session_id']}/runtime/inspect",
-        params={"turn_id": runtime_seed["turn_id"]},
+        params={"turn_id": runtime_seed["turn_id"], "target_chapter_index": 2},
     )
 
     assert response.status_code == 200
@@ -1862,12 +2145,33 @@ def test_story_runtime_inspection_route_returns_runtime_native_read_bundle(
     assert payload["runtime_profile_snapshot"]["runtime_profile_snapshot_id"] == (
         runtime_seed["runtime_profile_snapshot_id"]
     )
+    assert payload["runtime_config"]["control_history"][0]["reason"] == (
+        "api runtime inspect control history"
+    )
     assert payload["writer_packet"]["runtime_read_manifest_ids"]
     assert {
         item["material_kind"] for item in payload["runtime_workspace"]["materials"]
     } >= {"retrieval_card", "retrieval_usage_record", "packet_ref"}
     assert payload["retrieval"]["usage_refs"][0]["material_id"] == (
         runtime_seed["usage_material_id"]
+    )
+    assert payload["chapter_bridge"]["latest_for_target_chapter"]["material_id"] == (
+        second_stage_seed["main_bridge_material_id"]
+    )
+    sidecar_material_ids = {
+        item["material_id"] for item in payload["mode_sidecars"]["materials"]
+    }
+    assert second_stage_seed["main_rule_card_id"] in sidecar_material_ids
+    assert second_stage_seed["main_rule_state_id"] in sidecar_material_ids
+    assert not any(
+        item["material_id"].startswith(f"rule-card:{second_stage_seed['sibling_turn_id']}")
+        for item in payload["mode_sidecars"]["materials"]
+    )
+    assert payload["story_evolution"]["items"][0]["evolution_id"] == (
+        second_stage_seed["evolution_id"]
+    )
+    assert payload["story_evolution"]["items"][0]["source_asset_id"] == (
+        second_stage_seed["evolved_asset_id"]
     )
     assert payload["proposal_governance"]["proposal_receipts"][0]["proposal"][
         "proposal_id"
@@ -1877,6 +2181,41 @@ def test_story_runtime_inspection_route_returns_runtime_native_read_bundle(
         for item in payload["branch_control_receipts"]
     )
     assert "read_only_debug_surface" in payload["boundaries"]
+
+
+def test_story_archival_evolution_history_route_returns_branch_scoped_receipts(
+    client, monkeypatch
+):
+    monkeypatch.setenv(
+        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
+        "true",
+    )
+    get_settings.cache_clear()
+    seeded = _seed_formal_memory_block_session()
+    runtime_seed = _seed_runtime_debug_read_surface(seeded["session_id"])
+    second_stage_seed = _seed_runtime_surface_second_stage_data(runtime_seed)
+
+    response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/memory/archival/evolution/history",
+        params={
+            "branch_head_id": runtime_seed["branch_head_id"],
+            "turn_id": runtime_seed["turn_id"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_only"] is True
+    assert payload["selected_branch_head_id"] == runtime_seed["branch_head_id"]
+    assert payload["selected_turn_id"] == runtime_seed["turn_id"]
+    assert payload["items"][0]["evolution_id"] == second_stage_seed["evolution_id"]
+    assert payload["items"][0]["source_asset_id"] == second_stage_seed["evolved_asset_id"]
+    assert payload["items"][0]["source_refs"]
+    assert all(
+        item["source_asset_id"] != "api-runtime-surface-archival__v2"
+        or item["evolution_id"] == second_stage_seed["evolution_id"]
+        for item in payload["items"]
+    )
 
 
 def test_story_runtime_migration_route_returns_read_only_summary(client, monkeypatch):
@@ -1893,7 +2232,7 @@ def test_story_runtime_migration_route_returns_read_only_summary(client, monkeyp
         params={"turn_id": runtime_seed["turn_id"]},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["read_only"] is True
     assert payload["migration_flags"]["session_branch_anchor_pinned"] is True

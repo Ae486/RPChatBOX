@@ -6,19 +6,28 @@ from collections.abc import Mapping
 from uuid import uuid4
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+from rp.models.mode_extension_contracts import (
+    packet_sidecar_material_kinds_for_slot,
+)
 from rp.models.story_runtime import (
     ChapterWorkspace,
     OrchestratorPlan,
     SpecialistResultBundle,
     StorySession,
 )
+from rp.models.runtime_workspace_material import (
+    RuntimeWorkspaceMaterial,
+    RuntimeWorkspaceMaterialKind,
+)
 from rp.models.worker_memory import WorkerSourceRefBundle
 from rp.models.worker_runtime_contracts import WorkerContextPacket
 from rp.models.writing_runtime import WritingPacket
 
 from .builder_projection_context_service import BuilderProjectionContextService
+from .longform_chapter_runtime_service import LongformChapterRuntimeService
 from .runtime_read_manifest_service import RuntimeReadManifestService
 from .runtime_retrieval_card_service import RuntimeRetrievalCardService
+from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 from .story_session_service import StorySessionService
 from .writing_packet_builder import WritingPacketBuilder
@@ -42,12 +51,16 @@ class ContextOrchestrationService:
         runtime_workspace_material_service: RuntimeWorkspaceMaterialService
         | None = None,
         runtime_read_manifest_service: RuntimeReadManifestService | None = None,
+        runtime_profile_snapshot_service: RuntimeProfileSnapshotService | None = None,
+        longform_chapter_runtime_service: LongformChapterRuntimeService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._builder_projection_context_service = builder_projection_context_service
         self._writing_packet_builder = writing_packet_builder
         self._runtime_workspace_material_service = runtime_workspace_material_service
         self._runtime_read_manifest_service = runtime_read_manifest_service
+        self._runtime_profile_snapshot_service = runtime_profile_snapshot_service
+        self._longform_chapter_runtime_service = longform_chapter_runtime_service
 
     def build_writing_packet(
         self,
@@ -83,6 +96,21 @@ class ContextOrchestrationService:
                 packet_metadata["worker_source_ref_bundle"] = (
                     source_ref_bundle.model_dump(mode="json")
                 )
+            mode_sidecar_sections = self._build_mode_sidecar_sections(
+                identity=runtime_identity,
+                session_mode=str(session.mode or "").strip().lower(),
+                packet_metadata=packet_metadata,
+            )
+            mode_sidecar_sections.extend(
+                self._build_longform_chapter_bridge_sections(
+                    session=session,
+                    chapter=chapter,
+                    identity=runtime_identity,
+                    packet_metadata=packet_metadata,
+                )
+            )
+        else:
+            mode_sidecar_sections = []
         packet = self._writing_packet_builder.build(
             session=session,
             chapter=chapter,
@@ -91,6 +119,7 @@ class ContextOrchestrationService:
             operation_mode=operation_mode,
             projection_context_sections=projection_context_sections,
             recent_raw_turn_sections=recent_raw_turn_sections,
+            mode_sidecar_sections=mode_sidecar_sections,
             runtime_retrieval_sections=runtime_retrieval_sections,
             runtime_writer_hints=list(specialist_bundle.writer_hints),
             user_instruction=plan.writer_instruction,
@@ -149,6 +178,10 @@ class ContextOrchestrationService:
         )
         source_ref_bundle = self._build_worker_source_ref_bundle(identity=identity)
         workspace_refs = self._list_workspace_refs(identity=identity)
+        mode_sidecar_refs = self._list_mode_sidecar_ref_ids(
+            identity=identity,
+            slot_ids=self._requested_sidecar_slot_ids(context_requirements),
+        )
         recent_turn_ref_count = sum(
             len(self._section_source_ref_ids(section))
             for section in recent_raw_turn_sections
@@ -168,6 +201,7 @@ class ContextOrchestrationService:
                         *source_ref_bundle.retrieval_usage_material_ids,
                     ]
                 ),
+                "sidecar_refs": len(mode_sidecar_refs),
                 "workspace_refs": len(workspace_refs),
             },
         }
@@ -195,6 +229,7 @@ class ContextOrchestrationService:
                 *source_ref_bundle.retrieval_expanded_chunk_material_ids,
                 *source_ref_bundle.retrieval_usage_material_ids,
             ],
+            sidecar_refs=mode_sidecar_refs,
             workspace_refs=workspace_refs,
             forbidden_context=list(self._DEFAULT_FORBIDDEN_CONTEXT),
             token_budget={
@@ -317,7 +352,262 @@ class ContextOrchestrationService:
             for material in self._runtime_workspace_material_service.list_materials(
                 identity=identity,
             )
+            if material.material_kind
+            not in {
+                RuntimeWorkspaceMaterialKind.RULE_CARD,
+                RuntimeWorkspaceMaterialKind.RULE_STATE_CARD,
+            }
         ]
+
+    def _build_mode_sidecar_sections(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        session_mode: str,
+        packet_metadata: dict[str, object],
+    ) -> list[dict[str, object]]:
+        if self._runtime_workspace_material_service is None:
+            return []
+        mode_extension_profile = self._mode_extension_profile_from_identity(identity)
+        if not mode_extension_profile:
+            return []
+        raw_slots = mode_extension_profile.get("slots")
+        if not isinstance(raw_slots, list):
+            return []
+        sections: list[dict[str, object]] = []
+        section_slot_ids: list[str] = []
+        for raw_slot in raw_slots:
+            if not isinstance(raw_slot, dict):
+                continue
+            if str(raw_slot.get("slot_kind") or "").strip() != "packet_sidecar":
+                continue
+            if not bool(raw_slot.get("enabled_by_default", False)):
+                continue
+            slot_id = str(raw_slot.get("slot_id") or "").strip()
+            if not slot_id:
+                continue
+            materials = self._list_materials_for_sidecar_slot(
+                identity=identity,
+                slot_id=slot_id,
+            )
+            if not materials:
+                continue
+            section_slot_ids.append(slot_id)
+            sections.append(
+                {
+                    "section_id": f"mode_sidecar.{session_mode}.{slot_id}",
+                    "label": slot_id,
+                    "source_kind": "runtime_mode_sidecar",
+                    "source_ref_ids": [
+                        material.material_id for material in materials
+                    ],
+                    "items": [
+                        self._mode_sidecar_item_text(material.payload)
+                        for material in materials
+                    ],
+                    "metadata_json": {
+                        "section_family": "mode_sidecar",
+                        "slot_id": slot_id,
+                        "material_kinds": [
+                            material.material_kind.value for material in materials
+                        ],
+                    },
+                }
+            )
+        if section_slot_ids:
+            packet_metadata["mode_sidecar_slot_ids"] = section_slot_ids
+        return sections
+
+    def _list_materials_for_sidecar_slot(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        slot_id: str,
+    ) -> list[RuntimeWorkspaceMaterial]:
+        if self._runtime_workspace_material_service is None:
+            return []
+        materials: list[RuntimeWorkspaceMaterial] = []
+        for material_kind in packet_sidecar_material_kinds_for_slot(slot_id):
+            materials.extend(
+                self._runtime_workspace_material_service.list_materials(
+                    identity=identity,
+                    material_kind=material_kind,
+                )
+            )
+        return materials
+
+    def _list_mode_sidecar_ref_ids(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        slot_ids: list[str] | None = None,
+    ) -> list[str]:
+        if not slot_ids:
+            return []
+        mode_extension_profile = self._mode_extension_profile_from_identity(identity)
+        if not mode_extension_profile:
+            return []
+        normalized_slot_ids = {
+            normalized
+            for slot_id in (slot_ids or [])
+            if (normalized := str(slot_id or "").strip())
+        }
+        raw_slots = mode_extension_profile.get("slots")
+        if not isinstance(raw_slots, list):
+            return []
+        ref_ids: list[str] = []
+        for raw_slot in raw_slots:
+            if not isinstance(raw_slot, dict):
+                continue
+            if str(raw_slot.get("slot_kind") or "").strip() != "packet_sidecar":
+                continue
+            if not bool(raw_slot.get("enabled_by_default", False)):
+                continue
+            slot_id = str(raw_slot.get("slot_id") or "").strip()
+            if not slot_id:
+                continue
+            if slot_id not in normalized_slot_ids:
+                continue
+            ref_ids.extend(
+                material.material_id
+                for material in self._list_materials_for_sidecar_slot(
+                    identity=identity,
+                    slot_id=slot_id,
+                )
+            )
+        return ref_ids
+
+    @staticmethod
+    def _requested_sidecar_slot_ids(
+        context_requirements: dict[str, object] | None,
+    ) -> list[str] | None:
+        if not isinstance(context_requirements, dict):
+            return None
+        raw_slot_ids = context_requirements.get("sidecar_slot_ids")
+        if not isinstance(raw_slot_ids, list):
+            return None
+        normalized_slot_ids = [
+            normalized
+            for slot_id in raw_slot_ids
+            if (normalized := str(slot_id or "").strip())
+        ]
+        return normalized_slot_ids or None
+
+    def _mode_extension_profile_from_identity(
+        self,
+        identity: MemoryRuntimeIdentity,
+    ) -> dict[str, object] | None:
+        if self._runtime_profile_snapshot_service is None:
+            return None
+        snapshot = self._runtime_profile_snapshot_service.require_snapshot(
+            identity.runtime_profile_snapshot_id
+        )
+        compiled_profile = dict(snapshot.compiled_profile_json or {})
+        mode_specific_settings = compiled_profile.get("mode_specific_settings")
+        if not isinstance(mode_specific_settings, dict):
+            return None
+        payload = mode_specific_settings.get("mode_extension_profile")
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def _build_longform_chapter_bridge_sections(
+        self,
+        *,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        identity: MemoryRuntimeIdentity,
+        packet_metadata: dict[str, object],
+    ) -> list[dict[str, object]]:
+        if self._longform_chapter_runtime_service is None:
+            return []
+        if str(session.mode or "").strip().lower() != "longform":
+            return []
+        resolved = (
+            self._longform_chapter_runtime_service.get_latest_bridge_material_for_target_chapter(
+                story_id=identity.story_id,
+                session_id=identity.session_id,
+                branch_head_id=identity.branch_head_id,
+                target_chapter_index=chapter.chapter_index,
+            )
+        )
+        if resolved is None:
+            return []
+        material_id, bridge = resolved
+        items = [
+            normalized
+            for normalized in (
+                self._chapter_bridge_summary_text(bridge),
+                self._chapter_bridge_goal_text(bridge),
+                self._chapter_bridge_outline_text(bridge),
+            )
+            if normalized is not None
+        ]
+        if not items:
+            return []
+        packet_metadata["chapter_bridge_material_ref"] = material_id
+        return [
+            {
+                "section_id": "mode_sidecar.longform.chapter_bridge_material",
+                "label": "chapter_bridge_material",
+                "source_kind": "mode_sidecar",
+                "source_ref_ids": [
+                    material_id,
+                    *list(bridge.source_refs),
+                    *list(bridge.continuity_refs),
+                ],
+                "items": items,
+                "metadata_json": {
+                    "section_family": "mode_sidecar",
+                    "bridge_id": bridge.bridge_id,
+                    "source_chapter_index": bridge.source_chapter_index,
+                    "target_chapter_index": bridge.target_chapter_index,
+                    "runtime_truth_owner": "rp_runtime",
+                    "canonical_truth": False,
+                },
+            }
+        ]
+
+    @staticmethod
+    def _chapter_bridge_summary_text(bridge: object) -> str | None:
+        summary_text = str(getattr(bridge, "summary_text", "") or "").strip()
+        if not summary_text:
+            return None
+        return f"Prior chapter bridge summary: {summary_text}"
+
+    @staticmethod
+    def _chapter_bridge_goal_text(bridge: object) -> str | None:
+        goal_ref = str(getattr(bridge, "chapter_goal_ref", "") or "").strip()
+        if not goal_ref:
+            return None
+        metadata_json = getattr(bridge, "metadata_json", {}) or {}
+        if not isinstance(metadata_json, dict):
+            metadata_json = {}
+        chapter_goal = str(metadata_json.get("chapter_goal") or "").strip()
+        if chapter_goal:
+            return f"Current chapter goal: {chapter_goal}"
+        return f"Current chapter goal ref: {goal_ref}"
+
+    @staticmethod
+    def _chapter_bridge_outline_text(bridge: object) -> str | None:
+        outline_ref = str(getattr(bridge, "accepted_outline_ref", "") or "").strip()
+        if not outline_ref:
+            return None
+        return f"Accepted outline ref: {outline_ref}"
+
+    @staticmethod
+    def _mode_sidecar_item_text(payload: Mapping[str, object]) -> str:
+        adjudication_summary = str(payload.get("adjudication_summary") or "").strip()
+        if adjudication_summary:
+            return adjudication_summary
+        if "mechanics_state_patch" in payload:
+            return (
+                "mechanics_state_patch: "
+                + str(payload.get("mechanics_state_patch") or {})
+            )
+        if "rule_refs" in payload:
+            rule_refs = payload.get("rule_refs")
+            if isinstance(rule_refs, list) and rule_refs:
+                return "rule_refs: " + ", ".join(str(item).strip() for item in rule_refs)
+        return str(payload).strip()
 
     @staticmethod
     def _projection_ref_id(*, section: dict[str, object], index: int) -> str:

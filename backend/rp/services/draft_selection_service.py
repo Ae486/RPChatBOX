@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlmodel import Session
+from sqlmodel import select
+
+from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.revision_overlay_contracts import (
@@ -46,6 +49,7 @@ class DraftSelectionService:
         workspace_material_service: RuntimeWorkspaceMaterialService | None = None,
         session: Session | None = None,
     ) -> None:
+        self._session = session
         self._workspace_material_service = (
             workspace_material_service
             if workspace_material_service is not None
@@ -273,6 +277,48 @@ class DraftSelectionService:
         draft_ref: str | None = None,
     ) -> LongformDraftAdoptionReceipt | None:
         receipts = self.list_adoption_receipts(identity=identity, draft_ref=draft_ref)
+        if not receipts:
+            return None
+        return max(receipts, key=lambda receipt: receipt.adopted_at)
+
+    def get_latest_adoption_receipt_for_branch(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        branch_head_id: str,
+        draft_ref: str | None = None,
+    ) -> LongformDraftAdoptionReceipt | None:
+        if self._session is None:
+            return None
+        normalized_draft_ref = _normalize_optional_text(draft_ref)
+        stmt = (
+            select(RuntimeWorkspaceMaterialRecord)
+            .where(RuntimeWorkspaceMaterialRecord.story_id == story_id)
+            .where(RuntimeWorkspaceMaterialRecord.session_id == session_id)
+            .where(RuntimeWorkspaceMaterialRecord.branch_head_id == branch_head_id)
+            .where(
+                RuntimeWorkspaceMaterialRecord.material_kind
+                == RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY.value
+            )
+            .order_by(RuntimeWorkspaceMaterialRecord.created_at.asc())
+            .order_by(RuntimeWorkspaceMaterialRecord.material_id.asc())
+        )
+        records = list(self._session.exec(stmt).all())
+        receipts: list[LongformDraftAdoptionReceipt] = []
+        for record in records:
+            payload = record.payload_json
+            if payload.get("payload_version") != DRAFT_ADOPTION_PAYLOAD_VERSION:
+                continue
+            if payload.get("payload_kind") != "draft_adoption_receipt":
+                continue
+            receipt_payload = payload.get("record")
+            if not isinstance(receipt_payload, dict):
+                continue
+            receipt = LongformDraftAdoptionReceipt.model_validate(receipt_payload)
+            if normalized_draft_ref is not None and receipt.draft_ref != normalized_draft_ref:
+                continue
+            receipts.append(receipt)
         if not receipts:
             return None
         return max(receipts, key=lambda receipt: receipt.adopted_at)

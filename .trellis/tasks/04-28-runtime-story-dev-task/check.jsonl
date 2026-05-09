@@ -2,6 +2,7 @@
 {"file": ".trellis/spec/backend/rp-runtime-identity-persistence-propagation.md", "reason": "Verify branch/turn identity propagation and branch-aware reads remain exact."}
 {"file": ".trellis/spec/backend/rp-runtime-profile-snapshot-minimal-compiler.md", "reason": "Verify immutable snapshot compile/pin behavior and no config drift."}
 {"file": ".trellis/spec/backend/rp-runtime-workspace-persistent-turn-material-store.md", "reason": "Verify Runtime Workspace remains durable turn-material store, not story truth."}
+{"file": ".trellis/spec/backend/rp-runtime-workspace-turn-material-store.md", "reason": "Verify typed Runtime Workspace material kinds, rule-card sidecar selection, and packet/debug provenance boundaries."}
 {"file": ".trellis/spec/backend/rp-persistent-memory-event-record-foundation.md", "reason": "Verify event persistence stays trace/invalidation only and preserves full identity."}
 {"file": ".trellis/spec/backend/rp-branch-visibility-resolver-lineage.md", "reason": "Verify branch visibility and lineage-aware filtering are preserved."}
 {"file": ".trellis/spec/backend/rp-core-projection-read-manifest-hardening.md", "reason": "Verify fact/view separation and deterministic read manifest behavior."}
@@ -25,3 +26,7 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-spec.md", "reason": "Verify rollback/branch semantics, receipts, and active-branch linear view behavior."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-adapter-debug-test-spec.md", "reason": "Verify adapter policy, support matrix, debug surfaces, and migration/testing scope."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-spec-review-gpt55.md", "reason": "Review against the external spec critique and ensure high/medium findings were actually closed."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-runtime-config-surface-development-spec.md", "reason": "Verify runtime config control plane, snapshot publish, and control-history changes against second-stage contract."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-story-evolution-development-spec.md", "reason": "Verify Story Evolution, Archival version/reindex governance, and visibility changes against second-stage contract."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-chapter-review-adapter-development-spec.md", "reason": "Verify longform chapter bridge and review/adoption adapter behavior against second-stage contract."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-roleplay-trpg-extension-slots-development-spec.md", "reason": "Verify roleplay/TRPG extension slots, sidecars, and mode-profile behavior against second-stage contract."}

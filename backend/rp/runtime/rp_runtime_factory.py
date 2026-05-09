@@ -28,6 +28,9 @@ from rp.services.builder_projection_context_service import (
 from rp.services.chapter_workspace_projection_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
+from rp.services.longform_chapter_runtime_service import (
+    LongformChapterRuntimeService,
+)
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.context_orchestration_service import ContextOrchestrationService
@@ -79,6 +82,7 @@ from rp.services.runtime_read_manifest_service import (
     RuntimeReadManifestService,
 )
 from rp.services.runtime_retrieval_card_service import RuntimeRetrievalCardService
+from rp.services.runtime_config_control_service import RuntimeConfigControlService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
@@ -464,12 +468,18 @@ class RpRuntimeFactory:
             session=self._session,
             runtime_workspace_material_service=runtime_workspace_material_service,
         )
+        longform_chapter_runtime_service = LongformChapterRuntimeService(
+            story_session_service=story_session_service,
+            workspace_material_service=runtime_workspace_material_service,
+            session=self._session,
+        )
         context_orchestration_service = ContextOrchestrationService(
             story_session_service=story_session_service,
             builder_projection_context_service=builder_projection_context_service,
             writing_packet_builder=writing_packet_builder,
             runtime_workspace_material_service=runtime_workspace_material_service,
             runtime_read_manifest_service=runtime_read_manifest_service,
+            longform_chapter_runtime_service=longform_chapter_runtime_service,
         )
         worker_execution_service = WorkerExecutionService(
             worker_registry_service=worker_registry_service,
@@ -513,6 +523,7 @@ class RpRuntimeFactory:
             runtime_workflow_job_service=runtime_workflow_job_service,
             post_write_scheduler_service=post_write_scheduler_service,
             post_write_governance_service=post_write_governance_service,
+            longform_chapter_runtime_service=longform_chapter_runtime_service,
         )
         return turn_domain_service
 
@@ -676,6 +687,7 @@ class RpRuntimeFactory:
             runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
                 self._session
             ),
+            runtime_config_control_service=RuntimeConfigControlService(self._session),
             story_runtime_debug_query_service=story_runtime_debug_query_service,
             story_runtime_migration_service=story_runtime_migration_service,
             draft_materialization_service=DraftMaterializationService(),

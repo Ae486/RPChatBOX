@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlmodel import Session
+from sqlmodel import select
+
+from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.revision_overlay_contracts import (
@@ -48,6 +51,7 @@ class RewriteCandidateService:
         workspace_material_service: RuntimeWorkspaceMaterialService | None = None,
         session: Session | None = None,
     ) -> None:
+        self._session = session
         self._workspace_material_service = (
             workspace_material_service
             if workspace_material_service is not None
@@ -211,6 +215,61 @@ class RewriteCandidateService:
                 or candidate.rewrite_scope == normalized_scope
             )
         ]
+
+    def get_candidate_by_output_ref_for_branch(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        branch_head_id: str,
+        candidate_output_ref: str,
+        draft_ref: str | None = None,
+    ) -> RewriteCandidateRecord | None:
+        if self._session is None:
+            return None
+        normalized_output_ref = _require_non_blank(
+            candidate_output_ref,
+            field_name="candidate_output_ref",
+        )
+        normalized_draft_ref = (
+            None
+            if draft_ref is None
+            else _require_non_blank(draft_ref, field_name="draft_ref")
+        )
+        stmt = (
+            select(RuntimeWorkspaceMaterialRecord)
+            .where(RuntimeWorkspaceMaterialRecord.story_id == story_id)
+            .where(RuntimeWorkspaceMaterialRecord.session_id == session_id)
+            .where(RuntimeWorkspaceMaterialRecord.branch_head_id == branch_head_id)
+            .where(
+                RuntimeWorkspaceMaterialRecord.material_kind
+                == RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE.value
+            )
+            .order_by(RuntimeWorkspaceMaterialRecord.created_at.asc())
+            .order_by(RuntimeWorkspaceMaterialRecord.material_id.asc())
+        )
+        records = list(self._session.exec(stmt).all())
+        matches: list[RewriteCandidateRecord] = []
+        for record in records:
+            if record.payload_json.get("payload_version") != REWRITE_CANDIDATE_PAYLOAD_VERSION:
+                continue
+            if record.payload_json.get("payload_kind") != "rewrite_candidate":
+                continue
+            payload_record = record.payload_json.get("record")
+            if not isinstance(payload_record, dict):
+                continue
+            if payload_record.get("candidate_output_ref") != normalized_output_ref:
+                continue
+            candidate = RewriteCandidateRecord.model_validate(payload_record)
+            if (
+                normalized_draft_ref is not None
+                and candidate.draft_ref != normalized_draft_ref
+            ):
+                continue
+            matches.append(candidate)
+        if not matches:
+            return None
+        return max(matches, key=lambda candidate: candidate.created_at)
 
     def _require_request(
         self,

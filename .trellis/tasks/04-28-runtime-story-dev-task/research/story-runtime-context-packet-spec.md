@@ -290,6 +290,30 @@ worker packet 不与 writer packet 混用。
 - 作为 sidecar section，而不是混进 core truth
 - 后续由 writer 在 rewrite 中消费
 
+## 8.4.1 Longform chapter bridge sidecar 规则
+
+`chapter_bridge_material` 可以进入下一章 writer packet，但必须满足：
+
+- 只能从当前 `StorySession / BranchHead` 可见的 Runtime Workspace sidecar 读取
+- 必须按 `target_chapter_index` 匹配下一章，不能把其他章节或其他分支的 bridge 注入当前 packet
+- 只能注入 writer-facing 摘要、chapter goal、accepted outline ref、continuity refs 等压缩材料
+- 不能把 Runtime Workspace 日志、chapter transition receipt、debug trace 或未采用 candidate 当作 bridge 正文注入
+- bridge 仍是 Runtime Workspace sidecar，不因为进入 packet 就变成 Core / Recall / Archival truth
+
+## 8.4.2 Roleplay / TRPG mode sidecar 规则
+
+`RULE_CARD / RULE_STATE_CARD` 等 mode sidecar 可以进入 worker packet 或 writer packet，但必须满足：
+
+- sidecar slot 来源于 `RuntimeProfileSnapshot` / mode extension profile / packet policy
+- `WorkerContextPacket.sidecar_refs` 必须按 `context_requirements.sidecar_slot_ids` 过滤；未请求的 sidecar 不得因为同 mode 已启用而自动进入 worker packet
+- rule card / state card 必须保留 Runtime Workspace material 的正式 `source_refs`，不能只把 provenance 塞在 payload 内部
+- sidecar 不新增 `WritingPacket` 顶层字段，统一挂在 `mode_sidecar_sections` 或 worker packet sidecar refs 下
+- sidecar 是 turn material，不是 Core State truth、Recall history 或 Archival source
+- 后续若 sidecar 被用于 Core proposal、Recall materialization 或 Archival evolution，必须走 post-write governance
+- 未显式请求 `context_requirements.sidecar_slot_ids` 时，`WorkerContextPacket.sidecar_refs` 必须为空；启用 mode sidecar 不等于自动暴露给每个 worker packet
+- `RULE_CARD / RULE_STATE_CARD` 不得通过通用 `workspace_refs` 旁路进入 worker packet
+- mode sidecar packet section 必须写入稳定 family marker，例如 `section_family=mode_sidecar` 或等价 `source_kind / section_id`，debug/read manifest 不应依赖 label 文本猜测 sidecar 类型
+
 ## 8.5 Packet 裁剪规则
 
 裁剪优先顺序建议：

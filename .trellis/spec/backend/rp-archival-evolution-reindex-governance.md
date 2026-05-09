@@ -82,6 +82,7 @@ class ArchivalEvolutionService:
   - `selected_branches`
   - `all_existing_branches`
   - `story_global`
+- `selected_branches` accepts only branch heads that already exist under the same story/session identity; unknown or cross-story branch ids fail closed before source versioning.
 - Visibility changes must be traceable backend records, not silent metadata edits.
 
 #### Versioning contract
@@ -118,6 +119,7 @@ class ArchivalEvolutionService:
 | Setup/activation imports archival material | Default visibility is `story_global` and retrieval-core storage stays unchanged |
 | Active runtime evolution edits archival material without explicit visibility override | New version is current-branch-visible only |
 | Evolution requests `selected_branches` visibility | Only the selected branches see the new version |
+| Evolution requests `selected_branches` with an unknown or cross-story branch id | Request fails closed before creating a new source version |
 | Source edit succeeds | Receipt links new source version, superseded version, reindex jobs, and events |
 | Runtime search runs after evolution | Hidden/superseded chunks are not returned for active reads |
 | Core proposal cites archival evidence | Source refs can trace to the exact source/chunk version used |
@@ -138,6 +140,7 @@ class ArchivalEvolutionService:
   - version/supersession creation on edit;
   - current-branch default visibility;
   - explicit visibility-scope widening.
+  - selected-branch scope rejects unknown or cross-story branch ids before versioning.
 - Retrieval integration tests cover:
   - active runtime search excludes hidden/superseded chunks;
   - provenance can identify the versioned source/chunk chain.

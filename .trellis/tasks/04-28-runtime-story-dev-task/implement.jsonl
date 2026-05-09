@@ -2,6 +2,7 @@
 {"file": ".trellis/spec/backend/rp-runtime-identity-persistence-propagation.md", "reason": "Persistent BranchHead/StoryTurn identity, branch-aware propagation, and runtime-owned identity requirements."}
 {"file": ".trellis/spec/backend/rp-runtime-profile-snapshot-minimal-compiler.md", "reason": "Immutable RuntimeProfileSnapshot compile/publish/pin contract and turn-start pinning behavior."}
 {"file": ".trellis/spec/backend/rp-runtime-workspace-persistent-turn-material-store.md", "reason": "Durable Runtime Workspace turn-material persistence contract keyed by full runtime identity."}
+{"file": ".trellis/spec/backend/rp-runtime-workspace-turn-material-store.md", "reason": "Typed Runtime Workspace material kinds, lifecycle, rule-card sidecar selection, and packet/debug provenance boundaries."}
 {"file": ".trellis/spec/backend/rp-persistent-memory-event-record-foundation.md", "reason": "Durable memory event record foundation for trace/invalidation without becoming a truth store."}
 {"file": ".trellis/spec/backend/rp-branch-visibility-resolver-lineage.md", "reason": "Branch lineage visibility rules across Core, Projection, Runtime Workspace, Recall, and Retrieval reads."}
 {"file": ".trellis/spec/backend/rp-core-projection-read-manifest-hardening.md", "reason": "Strict fact/view separation and deterministic packet-visible read manifest contract."}
@@ -25,3 +26,7 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-spec.md", "reason": "Rollback anchor, branch receipts, visibility rules, and branch control semantics."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-adapter-debug-test-spec.md", "reason": "Adapter policy, debug read surfaces, test matrix, migration strategy, and phase-one support matrix."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-technical-research-and-pseudocode.md", "reason": "Additional technical research and pseudocode support for implementation slices."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-runtime-config-surface-development-spec.md", "reason": "Second-stage runtime config control plane, snapshot publish, and control-history implementation contract."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-story-evolution-development-spec.md", "reason": "Second-stage Story Evolution, Archival version/reindex governance, and visibility implementation contract."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-chapter-review-adapter-development-spec.md", "reason": "Second-stage longform chapter bridge, review/adoption adapter, and old MVP adapter contract."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-roleplay-trpg-extension-slots-development-spec.md", "reason": "Second-stage roleplay/TRPG extension slot, sidecar, and mode-profile contract."}

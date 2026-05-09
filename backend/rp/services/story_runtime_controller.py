@@ -16,6 +16,10 @@ from rp.models.memory_crud import (
     ProvenanceResult,
     VersionListResult,
 )
+from rp.models.runtime_config_contracts import (
+    RuntimeConfigControlReceipt,
+    RuntimeConfigPatchRequest,
+)
 from rp.models.memory_inspection import RecallReviewCommand
 from rp.models.revision_overlay_contracts import (
     DraftDocumentRecord,
@@ -40,6 +44,7 @@ from .recall_scene_transcript_ingestion_service import (
 )
 from .story_runtime_debug_query_service import StoryRuntimeDebugQueryService
 from .story_runtime_migration_service import StoryRuntimeMigrationService
+from .runtime_config_control_service import RuntimeConfigControlService
 from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from .draft_materialization_service import DraftMaterializationService
 from .revision_overlay_service import RevisionOverlayService
@@ -83,6 +88,7 @@ class StoryRuntimeController:
         runtime_profile_snapshot_service: RuntimeProfileSnapshotService | None = None,
         story_runtime_debug_query_service: StoryRuntimeDebugQueryService | None = None,
         story_runtime_migration_service: StoryRuntimeMigrationService | None = None,
+        runtime_config_control_service: RuntimeConfigControlService | None = None,
         draft_materialization_service: DraftMaterializationService | None = None,
         revision_overlay_service: RevisionOverlayService | None = None,
     ) -> None:
@@ -102,6 +108,7 @@ class StoryRuntimeController:
         self._runtime_profile_snapshot_service = runtime_profile_snapshot_service
         self._story_runtime_debug_query_service = story_runtime_debug_query_service
         self._story_runtime_migration_service = story_runtime_migration_service
+        self._runtime_config_control_service = runtime_config_control_service
         self._draft_materialization_service = draft_materialization_service
         self._revision_overlay_service = revision_overlay_service
 
@@ -134,6 +141,14 @@ class StoryRuntimeController:
         session_id: str,
         patch: dict[str, Any],
     ) -> ChapterWorkspaceSnapshot:
+        if self._runtime_config_control_service is not None:
+            snapshot, _receipt = self.publish_runtime_config_patch(
+                RuntimeConfigPatchRequest(
+                    session_id=session_id,
+                    runtime_story_config=patch,
+                )
+            )
+            return snapshot
         if self._runtime_profile_snapshot_service is None:
             raise RuntimeError("runtime_profile_snapshot_service_not_configured")
         updated_session = self._story_session_service.update_session(
@@ -153,6 +168,36 @@ class StoryRuntimeController:
         return self._story_session_service.build_chapter_snapshot(
             session_id=updated_session.session_id,
             chapter_index=updated_session.current_chapter_index,
+        )
+
+    def publish_runtime_config_patch(
+        self,
+        request: RuntimeConfigPatchRequest,
+    ) -> tuple[ChapterWorkspaceSnapshot, RuntimeConfigControlReceipt]:
+        if self._runtime_config_control_service is None:
+            raise RuntimeError("runtime_config_control_service_not_configured")
+        session_id = str(request.session_id or "").strip()
+        if not session_id:
+            raise ValueError("runtime_config_session_id_required")
+        receipt = self._runtime_config_control_service.publish_patch(request)
+        self._story_session_service.commit()
+        session = self._require_session(session_id)
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=session.current_chapter_index,
+        )
+        return snapshot, receipt
+
+    def list_runtime_config_control_history(
+        self,
+        *,
+        session_id: str,
+    ) -> list[RuntimeConfigControlReceipt]:
+        if self._runtime_config_control_service is None:
+            raise RuntimeError("runtime_config_control_service_not_configured")
+        self._require_session(session_id)
+        return self._runtime_config_control_service.list_control_history(
+            session_id=session_id
         )
 
     def read_revision_review_surface(
@@ -477,12 +522,32 @@ class StoryRuntimeController:
         session_id: str,
         branch_head_id: str | None = None,
         turn_id: str | None = None,
+        target_chapter_index: int | None = None,
         limit: int = 25,
     ) -> dict[str, Any]:
         self._require_session(session_id)
         if self._story_runtime_debug_query_service is None:
             raise RuntimeError("story_runtime_debug_query_service_not_configured")
         return self._story_runtime_debug_query_service.read_runtime_inspection(
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            target_chapter_index=target_chapter_index,
+            limit=limit,
+        )
+
+    def read_story_evolution_history(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str | None = None,
+        turn_id: str | None = None,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        self._require_session(session_id)
+        if self._story_runtime_debug_query_service is None:
+            raise RuntimeError("story_runtime_debug_query_service_not_configured")
+        return self._story_runtime_debug_query_service.read_story_evolution_history(
             session_id=session_id,
             branch_head_id=branch_head_id,
             turn_id=turn_id,

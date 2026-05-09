@@ -264,7 +264,12 @@ class ArchivalEvolutionService:
             request.visibility_scope
             == ArchivalEvolutionVisibilityScope.SELECTED_BRANCHES
         ):
-            return _dedupe_text_values(request.selected_branch_head_ids)
+            branch_ids = _dedupe_text_values(request.selected_branch_head_ids)
+            self._require_selected_branches_belong_to_session(
+                request=request,
+                selected_branch_head_ids=branch_ids,
+            )
+            return branch_ids
         if (
             request.visibility_scope
             == ArchivalEvolutionVisibilityScope.ALL_EXISTING_BRANCHES
@@ -281,6 +286,28 @@ class ArchivalEvolutionService:
                 branch_ids.append(request.identity.branch_head_id)
             return _dedupe_text_values(branch_ids)
         return []
+
+    def _require_selected_branches_belong_to_session(
+        self,
+        *,
+        request: ArchivalEvolutionRequest,
+        selected_branch_head_ids: Sequence[str],
+    ) -> None:
+        for branch_head_id in selected_branch_head_ids:
+            branch = self._session.get(BranchHeadRecord, branch_head_id)
+            if branch is None:
+                raise ValueError(
+                    "archival_evolution_selected_branch_not_found:"
+                    f"{branch_head_id}"
+                )
+            if (
+                branch.story_id != request.identity.story_id
+                or branch.session_id != request.identity.session_id
+            ):
+                raise ValueError(
+                    "archival_evolution_cross_branch_scope_forbidden:"
+                    f"{branch_head_id}"
+                )
 
     def _build_new_source_metadata(
         self,

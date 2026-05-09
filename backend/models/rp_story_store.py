@@ -241,6 +241,33 @@ class RuntimeProfileSnapshotRecord(SQLModel, table=True):  # type: ignore[call-a
     superseded_at: datetime | None = Field(default=None, index=True)
 
 
+class RuntimeConfigControlReceiptRecord(SQLModel, table=True):  # type: ignore[call-arg]
+    """Control-plane runtime config receipt outside the story-turn timeline."""
+
+    __tablename__ = "rp_runtime_config_control_receipts"
+
+    receipt_id: str = Field(primary_key=True, index=True)
+    story_id: str = Field(index=True)
+    session_id: str = Field(foreign_key="rp_story_sessions.session_id", index=True)
+    previous_snapshot_id: str | None = Field(default=None, index=True)
+    published_snapshot_id: str = Field(
+        foreign_key="rp_runtime_profile_snapshots.runtime_profile_snapshot_id",
+        index=True,
+    )
+    changed_fields_json: list[str] = Field(
+        default_factory=list,
+        sa_column=Column(_JSON_VARIANT, nullable=False),
+    )
+    actor_id: str | None = Field(default=None, index=True)
+    source: str = Field(index=True)
+    reason: str | None = None
+    metadata_json: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(_JSON_VARIANT, nullable=False),
+    )
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
 class StoryTurnRecord(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = "rp_story_turns"
 
@@ -769,6 +796,21 @@ def ensure_story_store_compatible_schema(engine: Engine) -> None:
                     "CREATE INDEX IF NOT EXISTS "
                     "ix_rp_runtime_profile_snapshots_story_created "
                     "ON rp_runtime_profile_snapshots (story_id, created_at)"
+                )
+            )
+        if "rp_runtime_config_control_receipts" in tables:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_rp_runtime_config_receipts_session_created "
+                    "ON rp_runtime_config_control_receipts (session_id, created_at)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_rp_runtime_config_receipts_snapshot "
+                    "ON rp_runtime_config_control_receipts (published_snapshot_id)"
                 )
             )
         if "rp_story_turns" in tables:

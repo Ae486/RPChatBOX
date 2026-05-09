@@ -506,7 +506,7 @@ class RuntimeReadManifestService:
             return "runtime_workspace"
         if normalized == "worker_hint_digest":
             return "worker_result"
-        if normalized in {"mode_sidecar", "review_overlay"}:
+        if normalized in {"mode_sidecar", "runtime_mode_sidecar", "review_overlay"}:
             return "mode_sidecar"
         return "packet_section"
 

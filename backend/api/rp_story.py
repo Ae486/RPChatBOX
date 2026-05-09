@@ -18,8 +18,12 @@ from rp.models.dsl import Domain, Layer
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import MemoryBlockProposalSubmitRequest
 from rp.models.memory_inspection import RecallReviewCommand
+from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
 from rp.models.story_runtime import ChapterWorkspaceSnapshot
-from rp.models.story_runtime import LongformTurnRequest, StoryRuntimeConfigPatchRequest
+from rp.models.story_runtime import LongformTurnRequest
+from rp.services.runtime_config_control_service import (
+    RuntimeConfigControlServiceError,
+)
 from rp.services.story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
     MemoryBlockProposalNotFoundError,
@@ -234,6 +238,22 @@ def _story_runtime_read_invalid(
     )
 
 
+def _runtime_config_invalid(exc: Exception) -> HTTPException:
+    error_code = getattr(exc, "code", None) or "runtime_config_invalid"
+    status_code = 409 if error_code == "runtime_config_snapshot_conflict" else 400
+    if error_code == "story_session_not_found":
+        status_code = 404
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": error_code,
+            }
+        },
+    )
+
+
 def _revision_review_invalid(exc: Exception) -> HTTPException:
     message = str(exc)
     code = message.split(":", 1)[0] if ":" in message else message
@@ -301,20 +321,47 @@ async def get_story_chapter(
 @router.patch("/api/rp/story-sessions/{session_id}/runtime-config")
 async def patch_story_runtime_config(
     session_id: str,
-    payload: StoryRuntimeConfigPatchRequest,
+    payload: RuntimeConfigPatchRequest,
     controller: StoryRuntimeController = Depends(_story_controller),
 ):
     try:
-        snapshot = controller.update_runtime_story_config(
-            session_id=session_id,
-            patch=payload.runtime_story_config,
+        request = payload.model_copy(update={"session_id": session_id})
+        snapshot, receipt = controller.publish_runtime_config_patch(
+            request,
         )
+    except RuntimeConfigControlServiceError as exc:
+        raise _runtime_config_invalid(exc) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=404,
             detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
         ) from exc
-    return _snapshot_payload(snapshot)
+    response = _snapshot_payload(snapshot)
+    response["runtime_config_receipt"] = receipt.model_dump(mode="json")
+    return response
+
+
+@router.get("/api/rp/story-sessions/{session_id}/runtime-config/history")
+async def list_story_runtime_config_history(
+    session_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        history = controller.list_runtime_config_control_history(
+            session_id=session_id
+        )
+    except RuntimeConfigControlServiceError as exc:
+        raise _runtime_config_invalid(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": str(exc), "code": "story_session_not_found"}},
+        ) from exc
+    return {
+        "object": "list",
+        "session_id": session_id,
+        "data": [item.model_dump(mode="json") for item in history],
+    }
 
 
 @router.get("/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}")
@@ -458,6 +505,7 @@ async def get_story_runtime_inspection(
     session_id: str,
     branch_head_id: str | None = None,
     turn_id: str | None = None,
+    target_chapter_index: int | None = Query(default=None, ge=1),
     limit: int = Query(default=25, ge=1, le=100),
     controller: StoryRuntimeController = Depends(_story_controller),
 ):
@@ -466,6 +514,7 @@ async def get_story_runtime_inspection(
             session_id=session_id,
             branch_head_id=branch_head_id,
             turn_id=turn_id,
+            target_chapter_index=target_chapter_index,
             limit=limit,
         )
     except StoryRuntimeDebugQueryServiceError as exc:
@@ -487,6 +536,43 @@ async def get_story_runtime_inspection(
         raise _story_runtime_read_invalid(
             exc,
             code="story_runtime_inspection_invalid",
+        ) from exc
+
+
+@router.get("/api/rp/story-sessions/{session_id}/memory/archival/evolution/history")
+async def get_story_archival_evolution_history(
+    session_id: str,
+    branch_head_id: str | None = None,
+    turn_id: str | None = None,
+    limit: int = Query(default=25, ge=1, le=100),
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        return controller.read_story_evolution_history(
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            limit=limit,
+        )
+    except StoryRuntimeDebugQueryServiceError as exc:
+        raise _story_runtime_read_invalid(
+            exc,
+            code="story_evolution_history_invalid",
+        ) from exc
+    except ValueError as exc:
+        if str(exc).startswith("StorySession not found:"):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": str(exc),
+                        "code": "story_session_not_found",
+                    }
+                },
+            ) from exc
+        raise _story_runtime_read_invalid(
+            exc,
+            code="story_evolution_history_invalid",
         ) from exc
 
 

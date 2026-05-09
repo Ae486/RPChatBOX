@@ -7,14 +7,20 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from models.rp_memory_store import MemoryChangeEventRecord, RuntimeWorkspaceMaterialRecord
+from models.rp_retrieval_store import IndexJobRecord, SourceAssetRecord
 from models.rp_story_store import (
     BranchControlReceiptRecord,
     BranchHeadRecord,
+    RuntimeConfigControlReceiptRecord,
     RuntimeProfileSnapshotRecord,
     StoryTurnRecord,
 )
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.runtime_workspace_material import (
+    RuntimeWorkspaceMaterialKind,
+    RuntimeWorkspaceMaterialLifecycle,
+)
 
 from .memory_trace_read_service import MemoryTraceReadService
 from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
@@ -32,6 +38,9 @@ _RUNTIME_INSPECT_BOUNDARIES = [
     "graph_checkpoint_debug_remains_separate_route",
     "runtime_workspace_materials_are_evidence_not_truth",
     "branch_control_receipts_stay_outside_story_turn_timeline",
+    "runtime_config_control_history_stays_outside_story_turn_timeline",
+    "story_evolution_history_is_receipt_readback_not_truth",
+    "extension_sidecars_expose_formal_source_refs_only",
 ]
 
 
@@ -78,6 +87,7 @@ class StoryRuntimeDebugQueryService:
         session_id: str,
         branch_head_id: str | None = None,
         turn_id: str | None = None,
+        target_chapter_index: int | None = None,
         limit: int = _DEFAULT_LIMIT,
     ) -> dict[str, Any]:
         normalized_limit = _normalize_limit(limit)
@@ -107,19 +117,13 @@ class StoryRuntimeDebugQueryService:
             selected_turn=selected_turn,
             active_snapshot_id=session.active_runtime_profile_snapshot_id,
         )
-        identity = None if selected_turn is None else MemoryRuntimeIdentity(
-            story_id=selected_turn.story_id,
-            session_id=selected_turn.session_id,
-            branch_head_id=selected_turn.branch_head_id,
-            turn_id=selected_turn.turn_id,
-            runtime_profile_snapshot_id=selected_turn.runtime_profile_snapshot_id,
-        )
-        branch_read_scope = (
+        identity = self._identity_from_turn(selected_turn=selected_turn)
+        branch_read_scope_model = (
             None
             if identity is None
             else self._branch_visibility_resolver.build_runtime_scope(
                 identity=identity
-            ).model_dump(mode="json")
+            )
         )
         turn_trace = (
             None
@@ -152,6 +156,40 @@ class StoryRuntimeDebugQueryService:
                 limit=normalized_limit,
             )
         ]
+        runtime_config = self._runtime_config_summary(
+            session=session,
+            limit=normalized_limit,
+        )
+        story_evolution = self._story_evolution_summary(
+            story_id=session.story_id,
+            session_id=session.session_id,
+            selected_branch_head_id=(
+                None if selected_branch is None else selected_branch.branch_head_id
+            ),
+            selected_turn_id=(None if selected_turn is None else selected_turn.turn_id),
+            branch_read_scope=branch_read_scope_model,
+            limit=normalized_limit,
+        )
+        chapter_bridge = self._chapter_bridge_summary(
+            story_id=session.story_id,
+            session_id=session.session_id,
+            selected_branch_head_id=(
+                None if selected_branch is None else selected_branch.branch_head_id
+            ),
+            branch_read_scope=branch_read_scope_model,
+            target_chapter_index=target_chapter_index,
+            limit=normalized_limit,
+        )
+        mode_sidecars = self._mode_sidecar_summary(
+            story_id=session.story_id,
+            session_id=session.session_id,
+            selected_branch_head_id=(
+                None if selected_branch is None else selected_branch.branch_head_id
+            ),
+            branch_read_scope=branch_read_scope_model,
+            turn_trace=turn_trace,
+            limit=normalized_limit,
+        )
         warnings: list[str] = []
         if selected_branch is None:
             warnings.append("runtime_branch_unavailable_for_session")
@@ -207,10 +245,18 @@ class StoryRuntimeDebugQueryService:
             "runtime_profile_snapshot": (
                 None if snapshot is None else _record_json(snapshot)
             ),
-            "branch_read_scope": branch_read_scope,
+            "branch_read_scope": (
+                None
+                if branch_read_scope_model is None
+                else branch_read_scope_model.model_dump(mode="json")
+            ),
+            "runtime_config": runtime_config,
+            "story_evolution": story_evolution,
             "writer_packet": writer_packet,
             "worker_execution": worker_execution,
             "retrieval": retrieval,
+            "chapter_bridge": chapter_bridge,
+            "mode_sidecars": mode_sidecars,
             "runtime_workspace": {
                 "materials": []
                 if turn_trace is None
@@ -241,6 +287,61 @@ class StoryRuntimeDebugQueryService:
             "warnings": warnings,
             "boundaries": list(_RUNTIME_INSPECT_BOUNDARIES),
         }
+
+    def read_story_evolution_history(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str | None = None,
+        turn_id: str | None = None,
+        limit: int = _DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        normalized_limit = _normalize_limit(limit)
+        session = self._require_session(session_id)
+        branches = self._list_branch_records(session_id=session.session_id)
+        selected_branch = self._select_branch(
+            session_id=session.session_id,
+            active_branch_head_id=session.active_branch_head_id,
+            branches=branches,
+            requested_branch_head_id=branch_head_id,
+        )
+        available_turns = self._list_turn_records(
+            session_id=session.session_id,
+            branch_head_id=(
+                None if selected_branch is None else selected_branch.branch_head_id
+            ),
+            limit=normalized_limit,
+        )
+        selected_turn = self._select_turn(
+            session_id=session.session_id,
+            selected_branch=selected_branch,
+            available_turns=available_turns,
+            requested_turn_id=turn_id,
+        )
+        identity = self._identity_from_turn(selected_turn=selected_turn)
+        branch_read_scope = (
+            None
+            if identity is None
+            else self._branch_visibility_resolver.build_runtime_scope(identity=identity)
+        )
+        payload = self._story_evolution_summary(
+            story_id=session.story_id,
+            session_id=session.session_id,
+            selected_branch_head_id=(
+                None if selected_branch is None else selected_branch.branch_head_id
+            ),
+            selected_turn_id=(None if selected_turn is None else selected_turn.turn_id),
+            branch_read_scope=branch_read_scope,
+            limit=normalized_limit,
+        )
+        payload["read_only"] = True
+        payload["surface_role"] = "story_evolution_history_read_surface"
+        payload["boundaries"] = [
+            "read_only_story_evolution_history_surface",
+            "does_not_mutate_archival_truth",
+            "branch_visibility_filter_applies_to_receipt_readback",
+        ]
+        return payload
 
     def _require_session(self, session_id: str):
         session = self._story_session_service.get_session(session_id)
@@ -349,6 +450,21 @@ class StoryRuntimeDebugQueryService:
         )
         return list(self._session.exec(stmt).all())
 
+    @staticmethod
+    def _identity_from_turn(
+        *,
+        selected_turn: StoryTurnRecord | None,
+    ) -> MemoryRuntimeIdentity | None:
+        if selected_turn is None:
+            return None
+        return MemoryRuntimeIdentity(
+            story_id=selected_turn.story_id,
+            session_id=selected_turn.session_id,
+            branch_head_id=selected_turn.branch_head_id,
+            turn_id=selected_turn.turn_id,
+            runtime_profile_snapshot_id=selected_turn.runtime_profile_snapshot_id,
+        )
+
     def _list_turn_records(
         self,
         *,
@@ -383,6 +499,81 @@ class StoryRuntimeDebugQueryService:
             .order_by(BranchControlReceiptRecord.receipt_id.desc())
             .limit(limit)
         )
+        return list(self._session.exec(stmt).all())
+
+    def _list_runtime_config_receipts(
+        self,
+        *,
+        session_id: str,
+        limit: int,
+    ) -> list[RuntimeConfigControlReceiptRecord]:
+        stmt = (
+            select(RuntimeConfigControlReceiptRecord)
+            .where(RuntimeConfigControlReceiptRecord.session_id == session_id)
+            .order_by(RuntimeConfigControlReceiptRecord.created_at.desc())
+            .order_by(RuntimeConfigControlReceiptRecord.receipt_id.desc())
+            .limit(limit)
+        )
+        return list(self._session.exec(stmt).all())
+
+    def _list_story_evolution_assets(
+        self,
+        *,
+        story_id: str,
+    ) -> list[SourceAssetRecord]:
+        stmt = (
+            select(SourceAssetRecord)
+            .where(SourceAssetRecord.story_id == story_id)
+            .order_by(SourceAssetRecord.created_at.desc())
+            .order_by(SourceAssetRecord.asset_id.desc())
+        )
+        return list(self._session.exec(stmt).all())
+
+    def _list_story_evolution_events(
+        self,
+        *,
+        story_id: str,
+    ) -> list[MemoryChangeEventRecord]:
+        stmt = (
+            select(MemoryChangeEventRecord)
+            .where(MemoryChangeEventRecord.story_id == story_id)
+            .where(MemoryChangeEventRecord.event_kind == "archival_source_evolved")
+            .order_by(MemoryChangeEventRecord.created_at.desc())
+            .order_by(MemoryChangeEventRecord.event_id.desc())
+        )
+        return list(self._session.exec(stmt).all())
+
+    def _list_index_jobs(
+        self,
+        *,
+        story_id: str,
+    ) -> list[IndexJobRecord]:
+        stmt = (
+            select(IndexJobRecord)
+            .where(IndexJobRecord.story_id == story_id)
+            .order_by(IndexJobRecord.created_at.desc())
+            .order_by(IndexJobRecord.job_id.desc())
+        )
+        return list(self._session.exec(stmt).all())
+
+    def _list_branch_workspace_materials(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        branch_head_id: str,
+        material_kind: str | None = None,
+    ) -> list[RuntimeWorkspaceMaterialRecord]:
+        stmt = (
+            select(RuntimeWorkspaceMaterialRecord)
+            .where(RuntimeWorkspaceMaterialRecord.story_id == story_id)
+            .where(RuntimeWorkspaceMaterialRecord.session_id == session_id)
+            .where(RuntimeWorkspaceMaterialRecord.branch_head_id == branch_head_id)
+            .order_by(RuntimeWorkspaceMaterialRecord.created_at.desc())
+            .order_by(RuntimeWorkspaceMaterialRecord.material_id.desc())
+        )
+        if material_kind is not None:
+            stmt = stmt.where(RuntimeWorkspaceMaterialRecord.material_kind == material_kind)
         return list(self._session.exec(stmt).all())
 
     @staticmethod
@@ -432,6 +623,24 @@ class StoryRuntimeDebugQueryService:
             "source_ref_ids": list(record.source_ref_ids_json or []),
             "result_ref_ids": list(record.result_ref_ids_json or []),
             "trace_refs": list(record.trace_refs_json or []),
+            "metadata": deepcopy(record.metadata_json or {}),
+            "created_at": record.created_at.isoformat(),
+        }
+
+    @staticmethod
+    def _runtime_config_receipt_item(
+        record: RuntimeConfigControlReceiptRecord,
+    ) -> dict[str, Any]:
+        return {
+            "receipt_id": record.receipt_id,
+            "story_id": record.story_id,
+            "session_id": record.session_id,
+            "previous_snapshot_id": record.previous_snapshot_id,
+            "published_snapshot_id": record.published_snapshot_id,
+            "changed_fields": list(record.changed_fields_json or []),
+            "actor_id": record.actor_id,
+            "source": record.source,
+            "reason": record.reason,
             "metadata": deepcopy(record.metadata_json or {}),
             "created_at": record.created_at.isoformat(),
         }
@@ -538,6 +747,388 @@ class StoryRuntimeDebugQueryService:
             else list(turn_trace.get("retrieval_usage_refs") or []),
         }
 
+    def _runtime_config_summary(
+        self,
+        *,
+        session,
+        limit: int,
+    ) -> dict[str, Any]:
+        receipts = self._list_runtime_config_receipts(
+            session_id=session.session_id,
+            limit=limit,
+        )
+        return {
+            "active_runtime_profile_snapshot_id": _optional_text(
+                session.active_runtime_profile_snapshot_id
+            ),
+            "effective_runtime_story_config": deepcopy(
+                session.runtime_story_config or {}
+            ),
+            "control_history": [
+                self._runtime_config_receipt_item(item) for item in receipts
+            ],
+        }
+
+    def _story_evolution_summary(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        selected_branch_head_id: str | None,
+        selected_turn_id: str | None,
+        branch_read_scope,
+        limit: int,
+    ) -> dict[str, Any]:
+        items = self._story_evolution_items(
+            story_id=story_id,
+            branch_read_scope=branch_read_scope,
+            limit=limit,
+        )
+        return {
+            "session_id": session_id,
+            "selected_branch_head_id": selected_branch_head_id,
+            "selected_turn_id": selected_turn_id,
+            "items": items,
+        }
+
+    def _story_evolution_items(
+        self,
+        *,
+        story_id: str,
+        branch_read_scope,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        assets = self._list_story_evolution_assets(story_id=story_id)
+        events = self._list_story_evolution_events(story_id=story_id)
+        jobs_by_id = {
+            item.job_id: item for item in self._list_index_jobs(story_id=story_id)
+        }
+        events_by_evolution_id: dict[str, MemoryChangeEventRecord] = {}
+        for event in events:
+            metadata = dict(event.metadata_json or {})
+            evolution_id = _optional_text(metadata.get("evolution_id") or event.entry_id)
+            if evolution_id is None or evolution_id in events_by_evolution_id:
+                continue
+            events_by_evolution_id[evolution_id] = event
+        items: list[dict[str, Any]] = []
+        for asset in assets:
+            metadata = dict(asset.metadata_json or {})
+            evolution_id = _optional_text(metadata.get("archival_evolution_id"))
+            if evolution_id is None:
+                continue
+            if (
+                branch_read_scope is not None
+                and not self._source_asset_visible(
+                    metadata=metadata,
+                    branch_read_scope=branch_read_scope,
+                )
+            ):
+                continue
+            event = events_by_evolution_id.get(evolution_id)
+            event_metadata = {} if event is None else dict(event.metadata_json or {})
+            reindex_job_id = _optional_text(event_metadata.get("reindex_job_id"))
+            reindex_job = (
+                None if reindex_job_id is None else jobs_by_id.get(reindex_job_id)
+            )
+            warnings = list(event_metadata.get("warnings") or [])
+            items.append(
+                {
+                    "evolution_id": evolution_id,
+                    "source_asset_id": asset.asset_id,
+                    "root_source_asset_id": _optional_text(
+                        metadata.get("root_source_asset_id")
+                    ),
+                    "new_source_version": metadata.get("source_version")
+                    or metadata.get("source_asset_version"),
+                    "superseded_source_asset_id": _optional_text(
+                        metadata.get("supersedes_source_asset_id")
+                    ),
+                    "superseded_source_version": metadata.get(
+                        "supersedes_source_version"
+                    ),
+                    "visibility_scope": _optional_text(
+                        metadata.get("visibility_scope")
+                    )
+                    or "current_branch",
+                    "selected_branch_head_ids": _string_list(
+                        metadata.get("selected_branch_head_ids")
+                    ),
+                    "reason": _optional_text(metadata.get("reason")),
+                    "source_refs": deepcopy(
+                        event.source_refs_json if event is not None else metadata.get("source_refs") or []
+                    ),
+                    "event_ids": [] if event is None else [event.event_id],
+                    "dirty_targets": []
+                    if event is None
+                    else deepcopy(event.dirty_targets_json or []),
+                    "replacement_chunk_ids": list(
+                        event_metadata.get("replacement_chunk_ids") or []
+                    ),
+                    "reindex_jobs": []
+                    if reindex_job is None
+                    else [
+                        {
+                            "job_id": reindex_job.job_id,
+                            "job_kind": reindex_job.job_kind,
+                            "job_state": reindex_job.job_state,
+                            "warnings": list(reindex_job.warnings_json or []),
+                            "error_message": reindex_job.error_message,
+                            "created_at": reindex_job.created_at.isoformat(),
+                            "completed_at": _datetime_or_none(
+                                reindex_job.completed_at
+                            ),
+                        }
+                    ],
+                    "status": "pending_reindex"
+                    if warnings
+                    or (
+                        reindex_job is not None
+                        and reindex_job.job_state != "completed"
+                    )
+                    else "accepted",
+                    "metadata": deepcopy(metadata),
+                    "created_at": asset.created_at.isoformat(),
+                    "updated_at": asset.updated_at.isoformat(),
+                }
+            )
+            if len(items) >= limit:
+                break
+        return items
+
+    def _chapter_bridge_summary(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        selected_branch_head_id: str | None,
+        branch_read_scope,
+        target_chapter_index: int | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        if selected_branch_head_id is None:
+            return {
+                "selected_branch_head_id": None,
+                "target_chapter_index": target_chapter_index,
+                "items": [],
+                "latest_for_target_chapter": None,
+            }
+        records = self._list_branch_workspace_materials(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=selected_branch_head_id,
+            material_kind=RuntimeWorkspaceMaterialKind.POST_WRITE_TRACE.value,
+        )
+        items: list[dict[str, Any]] = []
+        for record in records:
+            if (
+                branch_read_scope is not None
+                and not self._workspace_material_visible(
+                    record=record,
+                    branch_read_scope=branch_read_scope,
+                )
+            ):
+                continue
+            payload = dict(record.payload_json or {})
+            if _optional_text(payload.get("payload_kind")) != "chapter_bridge_material":
+                continue
+            bridge = payload.get("record")
+            if not isinstance(bridge, dict):
+                continue
+            if (
+                target_chapter_index is not None
+                and int(bridge.get("target_chapter_index") or -1)
+                != target_chapter_index
+            ):
+                continue
+            items.append(
+                {
+                    "material_id": record.material_id,
+                    "turn_id": record.turn_id,
+                    "runtime_profile_snapshot_id": record.runtime_profile_snapshot_id,
+                    "source_chapter_index": bridge.get("source_chapter_index"),
+                    "target_chapter_index": bridge.get("target_chapter_index"),
+                    "adopted_output_ref": bridge.get("adopted_output_ref"),
+                    "accepted_outline_ref": bridge.get("accepted_outline_ref"),
+                    "chapter_goal_ref": bridge.get("chapter_goal_ref"),
+                    "continuity_refs": list(bridge.get("continuity_refs") or []),
+                    "summary_text": bridge.get("summary_text"),
+                    "source_refs": deepcopy(record.source_refs_json or []),
+                    "metadata": deepcopy(record.metadata_json or {}),
+                    "created_at": record.created_at.isoformat(),
+                }
+            )
+            if len(items) >= limit:
+                break
+        return {
+            "selected_branch_head_id": selected_branch_head_id,
+            "target_chapter_index": target_chapter_index,
+            "items": items,
+            "latest_for_target_chapter": items[0] if items else None,
+        }
+
+    def _mode_sidecar_summary(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        selected_branch_head_id: str | None,
+        branch_read_scope,
+        turn_trace: dict[str, Any] | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        packet_sections: list[dict[str, Any]] = []
+        for manifest in list((turn_trace or {}).get("read_manifests") or []):
+            manifest_id = _optional_text(manifest.get("manifest_id"))
+            for section in list(manifest.get("packet_sections") or []):
+                if not isinstance(section, dict):
+                    continue
+                if self._packet_section_family(section) != "mode_sidecar":
+                    continue
+                packet_sections.append(
+                    {
+                        "manifest_id": manifest_id,
+                        "section_id": section.get("section_id"),
+                        "label": section.get("label"),
+                        "source_ref_ids": list(section.get("source_ref_ids") or []),
+                        "metadata": deepcopy(
+                            section.get("metadata_json") or section.get("metadata") or {}
+                        ),
+                    }
+                )
+        if selected_branch_head_id is None:
+            return {
+                "selected_branch_head_id": None,
+                "materials": [],
+                "packet_sections": packet_sections,
+            }
+        records = self._list_branch_workspace_materials(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=selected_branch_head_id,
+        )
+        sidecar_kinds = {
+            RuntimeWorkspaceMaterialKind.RULE_CARD.value,
+            RuntimeWorkspaceMaterialKind.RULE_STATE_CARD.value,
+        }
+        materials: list[dict[str, Any]] = []
+        for record in records:
+            if record.material_kind not in sidecar_kinds:
+                continue
+            if (
+                branch_read_scope is not None
+                and not self._workspace_material_visible(
+                    record=record,
+                    branch_read_scope=branch_read_scope,
+                )
+            ):
+                continue
+            materials.append(
+                {
+                    "material_id": record.material_id,
+                    "turn_id": record.turn_id,
+                    "runtime_profile_snapshot_id": record.runtime_profile_snapshot_id,
+                    "material_kind": record.material_kind,
+                    "domain": record.domain,
+                    "domain_path": record.domain_path,
+                    "short_id": record.short_id,
+                    "lifecycle": record.lifecycle,
+                    "visibility": record.visibility,
+                    "source_refs": deepcopy(record.source_refs_json or []),
+                    "created_at": record.created_at.isoformat(),
+                }
+            )
+            if len(materials) >= limit:
+                break
+        return {
+            "selected_branch_head_id": selected_branch_head_id,
+            "materials": materials,
+            "packet_sections": packet_sections,
+        }
+
+    @staticmethod
+    def _packet_section_family(section: dict[str, Any]) -> str:
+        metadata = dict(section.get("metadata_json") or section.get("metadata") or {})
+        family = _optional_text(metadata.get("section_family"))
+        if family is not None:
+            return family
+        source_kind = _optional_text(section.get("source_kind"))
+        if source_kind in {"mode_sidecar", "runtime_mode_sidecar"}:
+            return "mode_sidecar"
+        section_id = _optional_text(section.get("section_id")) or ""
+        if section_id.startswith("mode_sidecar."):
+            return "mode_sidecar"
+        return "packet_section"
+
+    def _workspace_material_visible(
+        self,
+        *,
+        record: RuntimeWorkspaceMaterialRecord,
+        branch_read_scope,
+    ) -> bool:
+        lifecycle = str(record.lifecycle or "").strip().lower()
+        visibility_state = (
+            "hidden"
+            if lifecycle
+            in {
+                RuntimeWorkspaceMaterialLifecycle.INVALIDATED.value,
+                RuntimeWorkspaceMaterialLifecycle.EXPIRED.value,
+                RuntimeWorkspaceMaterialLifecycle.DISCARDED.value,
+            }
+            else "active"
+        )
+        return self._branch_visibility_resolver.is_visible(
+            scope=branch_read_scope,
+            visibility_scope="branch_scoped",
+            visibility_state=visibility_state,
+            owning_branch_head_id=record.branch_head_id,
+            origin_turn_id=record.turn_id,
+        )
+
+    def _source_asset_visible(
+        self,
+        *,
+        metadata: dict[str, Any],
+        branch_read_scope,
+    ) -> bool:
+        return self._branch_visibility_resolver.is_visible(
+            scope=branch_read_scope,
+            visibility_scope=(
+                _optional_text(metadata.get("visibility_scope"))
+                or self._default_asset_visibility_scope(metadata)
+            ),
+            visibility_state=(
+                _optional_text(
+                    metadata.get("visibility_state")
+                    or metadata.get("lifecycle_state")
+                )
+                or "active"
+            ),
+            owning_branch_head_id=_first_text(
+                metadata,
+                "owning_branch_head_id",
+                "branch_head_id",
+                "branch_id",
+            ),
+            origin_turn_id=_first_text(metadata, "origin_turn_id", "turn_id"),
+            selected_branch_head_ids=_string_list(
+                metadata.get("selected_branch_head_ids")
+                or metadata.get("branch_ids")
+                or metadata.get("selected_branch_ids")
+            ),
+            hidden_by_branch_head_id=_first_text(metadata, "hidden_by_branch_head_id"),
+            hidden_after_turn_id=_first_text(metadata, "hidden_after_turn_id"),
+        )
+
+    @staticmethod
+    def _default_asset_visibility_scope(metadata: dict[str, Any]) -> str:
+        if metadata.get("selected_branch_head_ids") or metadata.get("branch_ids"):
+            return "selected_branches"
+        if _first_text(
+            metadata, "owning_branch_head_id", "branch_head_id", "branch_id"
+        ):
+            return "branch_scoped"
+        return "story_global"
+
     @staticmethod
     def _group_materials_by_kind(
         materials: list[dict[str, Any]],
@@ -586,6 +1177,20 @@ def _unique_non_blank(values) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _first_text(metadata: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = _optional_text(metadata.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return _unique_non_blank(value)
 
 
 def _datetime_or_none(value) -> str | None:

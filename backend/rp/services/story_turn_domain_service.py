@@ -34,6 +34,7 @@ from rp.models.writing_worker_contracts import (
 )
 from rp.models.writing_runtime import WritingPacket
 from .context_orchestration_service import ContextOrchestrationService
+from .longform_chapter_runtime_service import LongformChapterRuntimeService
 from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_regression_service import LongformRegressionService
 from .longform_specialist_service import LongformSpecialistService
@@ -96,6 +97,7 @@ class StoryTurnDomainService:
         post_write_scheduler_service: PostWriteSchedulerService | None = None,
         post_write_governance_service: PostWriteGovernanceService | None = None,
         story_runtime_adapter_service: StoryRuntimeAdapterService | None = None,
+        longform_chapter_runtime_service: LongformChapterRuntimeService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
@@ -140,6 +142,20 @@ class StoryTurnDomainService:
                 if resolver_session is not None
                 else None
             )
+        self._longform_chapter_runtime_service = (
+            longform_chapter_runtime_service
+            or (
+                LongformChapterRuntimeService(
+                    story_session_service=story_session_service,
+                    workspace_material_service=(
+                        self._runtime_workspace_material_service
+                    ),
+                    session=resolver_session,
+                )
+                if resolver_session is not None
+                else None
+            )
+        )
         self._context_orchestration_service = (
             context_orchestration_service
             or ContextOrchestrationService(
@@ -150,6 +166,9 @@ class StoryTurnDomainService:
                     self._runtime_workspace_material_service
                 ),
                 runtime_read_manifest_service=self._runtime_read_manifest_service,
+                longform_chapter_runtime_service=(
+                    self._longform_chapter_runtime_service
+                ),
             )
         )
         self._runtime_workspace_facade = (
@@ -953,6 +972,15 @@ class StoryTurnDomainService:
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
         chapter = self.require_current_chapter(request.session_id)
+        if self._longform_chapter_runtime_service is not None:
+            prepared_transition = (
+                self._longform_chapter_runtime_service.prepare_chapter_transition(
+                    identity=runtime_identity,
+                    session=session,
+                    chapter=chapter,
+                )
+            )
+            chapter = prepared_transition.chapter
         (
             updated_session,
             updated_chapter,

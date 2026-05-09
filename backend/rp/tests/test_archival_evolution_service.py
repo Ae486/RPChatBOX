@@ -12,28 +12,45 @@ from models.rp_retrieval_store import (
 )
 from models.rp_story_store import BranchHeadRecord
 from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.dsl import Domain
+from rp.models.dsl import Domain, Layer
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_crud import MemorySearchArchivalInput
+from rp.models.memory_crud import MemorySearchArchivalInput, ProposalSubmitInput
 from rp.models.memory_materialization import (
     FOUNDATION_ENTRY_SOURCE_TYPE,
     SETUP_COMMIT_IMPORT_EVENT,
     build_archival_seed_section,
     build_archival_source_metadata,
 )
+from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase
+from rp.models.story_evolution_contracts import (
+    StoryEvolutionOperation,
+    StoryEvolutionRequest,
+    StoryEvolutionStatus,
+    StoryEvolutionTargetLayer,
+)
+from rp.models.worker_memory import WorkerProposalGovernanceMetadata
 from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.memory_change_event_service import MemoryChangeEventService
+from rp.services.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.proposal_apply_service import ProposalApplyService
+from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal_workflow_service import ProposalWorkflowService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService
 from rp.services.retrieval_index_job_service import RetrievalIndexJobService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.story_evolution_service import (
+    StoryEvolutionService,
+    StoryEvolutionServiceError,
+)
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story_state_apply_service import StoryStateApplyService
 
 
 def _seed_runtime_identities(retrieval_session):
@@ -216,6 +233,48 @@ def _seed_non_archival_asset(
     return asset
 
 
+def _seed_branch_identity(
+    retrieval_session,
+    *,
+    identity: MemoryRuntimeIdentity,
+    branch_head_id: str,
+) -> MemoryRuntimeIdentity:
+    branch = BranchHeadRecord(
+        branch_head_id=branch_head_id,
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        branch_name=branch_head_id.rsplit(":", 1)[-1],
+        parent_branch_head_id=None,
+        forked_from_turn_id=None,
+        head_turn_id=None,
+        status="active",
+        visibility_scope="active_lineage",
+    )
+    retrieval_session.add(branch)
+    retrieval_session.flush()
+    turn = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+            retrieval_session
+        ),
+    ).create_turn(
+        session_id=identity.session_id,
+        story_id=identity.story_id,
+        branch_head_id=branch.branch_head_id,
+        runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+        turn_kind="generation",
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    return MemoryRuntimeIdentity(
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        branch_head_id=branch.branch_head_id,
+        turn_id=turn.turn_id,
+        runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+    )
+
+
 def story_time():
     from datetime import datetime, timezone
 
@@ -382,6 +441,208 @@ async def test_archival_evolution_selected_branch_widening_is_explicit(
     )
 
 
+def test_archival_evolution_selected_branch_scope_fails_closed_for_unknown_branch(
+    retrieval_session,
+):
+    main_identity, _ = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-selected-missing-branch",
+        text="selectedmissingoldanchor original law.",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="archival_evolution_selected_branch_not_found",
+    ):
+        ArchivalEvolutionService(retrieval_session).evolve_source(
+            ArchivalEvolutionRequest(
+                identity=main_identity,
+                actor="writer",
+                source_asset_id="asset-selected-missing-branch",
+                visibility_scope="selected_branches",
+                selected_branch_head_ids=[
+                    main_identity.branch_head_id,
+                    f"branch:{main_identity.session_id}:future-uncreated",
+                ],
+                replacement_sections=[
+                    {
+                        "text": "selectedmissingnewanchor should not be accepted.",
+                        "metadata": {"domain": Domain.WORLD_RULE.value},
+                    }
+                ],
+            )
+        )
+
+
+def test_archival_evolution_selected_branch_scope_fails_closed_for_other_story(
+    retrieval_session,
+):
+    main_identity, _ = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-selected-cross-story",
+        text="selectedcrossstoryoldanchor original law.",
+    )
+    other_branch = BranchHeadRecord(
+        branch_head_id="branch:other-session:foreign",
+        story_id="story-other",
+        session_id="session-other",
+        branch_name="foreign",
+        parent_branch_head_id=None,
+        forked_from_turn_id=None,
+        head_turn_id=None,
+        status="active",
+        visibility_scope="active_lineage",
+    )
+    retrieval_session.add(other_branch)
+    retrieval_session.flush()
+
+    with pytest.raises(
+        ValueError,
+        match="archival_evolution_cross_branch_scope_forbidden",
+    ):
+        ArchivalEvolutionService(retrieval_session).evolve_source(
+            ArchivalEvolutionRequest(
+                identity=main_identity,
+                actor="writer",
+                source_asset_id="asset-selected-cross-story",
+                visibility_scope="selected_branches",
+                selected_branch_head_ids=[
+                    main_identity.branch_head_id,
+                    other_branch.branch_head_id,
+                ],
+                replacement_sections=[
+                    {
+                        "text": "selectedcrossstorynewanchor should not be accepted.",
+                        "metadata": {"domain": Domain.WORLD_RULE.value},
+                    }
+                ],
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_archival_evolution_all_existing_branches_excludes_future_branch(
+    retrieval_session,
+):
+    main_identity, sibling_identity = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-all-existing-visibility",
+        text="allexistingoldanchor original law.",
+    )
+
+    receipt = ArchivalEvolutionService(retrieval_session).evolve_source(
+        ArchivalEvolutionRequest(
+            identity=main_identity,
+            actor="writer",
+            source_asset_id="asset-all-existing-visibility",
+            visibility_scope="all_existing_branches",
+            replacement_sections=[
+                {
+                    "text": "allexistinganchor replacement law for existing branches.",
+                    "metadata": {
+                        "domain": Domain.WORLD_RULE.value,
+                        "domain_path": "foundation.world.asset-all-existing-visibility",
+                    },
+                }
+            ],
+        )
+    )
+    future_identity = _seed_branch_identity(
+        retrieval_session,
+        identity=main_identity,
+        branch_head_id=f"branch:{main_identity.session_id}:future",
+    )
+
+    sibling_result = await RetrievalBroker(
+        default_story_id=main_identity.story_id,
+        runtime_identity=sibling_identity,
+        session=retrieval_session,
+    ).search_archival(
+        MemorySearchArchivalInput(
+            query="allexistinganchor",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+        )
+    )
+    future_result = await RetrievalBroker(
+        default_story_id=main_identity.story_id,
+        runtime_identity=future_identity,
+        session=retrieval_session,
+    ).search_archival(
+        MemorySearchArchivalInput(
+            query="allexistinganchor",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+        )
+    )
+
+    assert receipt.visibility_scope == "all_existing_branches"
+    assert main_identity.branch_head_id in receipt.selected_branch_head_ids
+    assert sibling_identity.branch_head_id in receipt.selected_branch_head_ids
+    assert future_identity.branch_head_id not in receipt.selected_branch_head_ids
+    assert sibling_result.hits
+    assert future_result.hits == []
+
+
+@pytest.mark.asyncio
+async def test_archival_evolution_story_global_is_visible_to_future_branch(
+    retrieval_session,
+):
+    main_identity, _ = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-story-global-visibility",
+        text="storyglobaloldanchor original law.",
+    )
+
+    receipt = ArchivalEvolutionService(retrieval_session).evolve_source(
+        ArchivalEvolutionRequest(
+            identity=main_identity,
+            actor="writer",
+            source_asset_id="asset-story-global-visibility",
+            visibility_scope="story_global",
+            replacement_sections=[
+                {
+                    "text": "storyglobalnewanchor replacement law for future branches.",
+                    "metadata": {
+                        "domain": Domain.WORLD_RULE.value,
+                        "domain_path": "foundation.world.asset-story-global-visibility",
+                    },
+                }
+            ],
+        )
+    )
+    future_identity = _seed_branch_identity(
+        retrieval_session,
+        identity=main_identity,
+        branch_head_id=f"branch:{main_identity.session_id}:future-global",
+    )
+
+    future_result = await RetrievalBroker(
+        default_story_id=main_identity.story_id,
+        runtime_identity=future_identity,
+        session=retrieval_session,
+    ).search_archival(
+        MemorySearchArchivalInput(
+            query="storyglobalnewanchor",
+            domains=[Domain.WORLD_RULE],
+            top_k=5,
+        )
+    )
+
+    assert receipt.visibility_scope == "story_global"
+    assert receipt.selected_branch_head_ids == []
+    assert future_result.hits
+    assert future_result.hits[0].metadata["asset_id"] == receipt.source_asset_id
+
+
 @pytest.mark.asyncio
 async def test_archival_evolution_records_version_reindex_event_and_excludes_old(
     retrieval_session,
@@ -486,6 +747,165 @@ async def test_archival_evolution_records_version_reindex_event_and_excludes_old
     assert new_search.hits[0].metadata["source_version"] == 2
     assert new_search.hits[0].metadata["archival_evolution_id"] == (
         receipt.evolution_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_story_evolution_facade_routes_archival_edit_and_rejects_core_raw_write(
+    retrieval_session,
+):
+    main_identity, _ = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-story-evolution-facade",
+        text="facadeoldanchor original law.",
+    )
+    service = StoryEvolutionService(
+        archival_evolution_service=ArchivalEvolutionService(retrieval_session),
+    )
+
+    receipt = service.apply_evolution(
+        StoryEvolutionRequest(
+            identity=main_identity,
+            actor_id="user.memory_editor",
+            target_layer=StoryEvolutionTargetLayer.ARCHIVAL,
+            operation=StoryEvolutionOperation.EDIT,
+            payload={
+                "source_asset_id": "asset-story-evolution-facade",
+                "expected_source_version": 1,
+                "replacement_sections": [
+                    {
+                        "text": "facadenewanchor replacement law via story facade.",
+                        "metadata": {"domain": Domain.WORLD_RULE.value},
+                    }
+                ],
+            },
+            source_refs=[
+                MemorySourceRef(
+                    source_type="story_turn",
+                    source_id=main_identity.turn_id,
+                    layer="runtime_identity",
+                )
+            ],
+            reason="user-visible story evolution correction",
+        )
+    )
+
+    assert receipt.target_layer == StoryEvolutionTargetLayer.ARCHIVAL
+    assert receipt.operation == StoryEvolutionOperation.EDIT
+    assert receipt.visibility_scope == "current_branch"
+    assert receipt.status == StoryEvolutionStatus.ACCEPTED
+    assert receipt.reindex_job_ids
+    assert receipt.event_ids
+    assert any(
+        ref.source_type == "archival_source_asset" and ref.revision == 2
+        for ref in receipt.affected_refs
+    )
+
+    with pytest.raises(
+        StoryEvolutionServiceError,
+        match="story_evolution_core_raw_write_forbidden",
+    ):
+        service.apply_evolution(
+            StoryEvolutionRequest(
+                identity=main_identity,
+                actor_id="user.memory_editor",
+                target_layer=StoryEvolutionTargetLayer.CORE,
+                operation=StoryEvolutionOperation.EDIT,
+                payload={"operations": []},
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_evolved_archival_source_refs_can_back_later_core_proposal(
+    retrieval_session,
+):
+    main_identity, _ = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-proposal-evidence",
+        text="proposalevidenceoldanchor original law.",
+    )
+    archival_receipt = ArchivalEvolutionService(retrieval_session).evolve_source(
+        ArchivalEvolutionRequest(
+            identity=main_identity,
+            actor="writer",
+            source_asset_id="asset-proposal-evidence",
+            replacement_sections=[
+                {
+                    "text": "proposalevidencenewanchor exact evidence law.",
+                    "metadata": {"domain": Domain.WORLD_RULE.value},
+                }
+            ],
+        )
+    )
+    story_session_service = StorySessionService(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    workflow = ProposalWorkflowService(
+        proposal_repository=repository,
+        proposal_apply_service=ProposalApplyService(
+            story_session_service=story_session_service,
+            proposal_repository=repository,
+            story_state_apply_service=StoryStateApplyService(),
+        ),
+        post_write_apply_handler=PostWriteApplyHandler(),
+    )
+
+    proposal_receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id=main_identity.story_id,
+            mode=StoryMode.LONGFORM.value,
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Evidence Backed Chapter"},
+                }
+            ],
+            reason="proposal cites evolved archival evidence",
+        ),
+        session_id=main_identity.session_id,
+        submit_source="worker_memory:specialist",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.REVIEW_REQUIRED,
+        ),
+        governance_metadata=WorkerProposalGovernanceMetadata(
+            identity=main_identity,
+            worker_id="specialist",
+            phase="post_write_maintenance",
+            runtime_profile_snapshot_id=main_identity.runtime_profile_snapshot_id,
+            permission_decision="allowed",
+            permission_reason_codes=["allowed"],
+            source_refs=list(archival_receipt.source_refs),
+            trace_refs=[f"archival_evolution:{archival_receipt.evolution_id}"],
+        ),
+    )
+    proposal_record = repository.get_proposal_record(proposal_receipt.proposal_id)
+    assert proposal_record is not None
+    core_mutation = proposal_record.governance_metadata_json["core_mutation"]
+    source_refs = core_mutation["source_refs"]
+
+    assert any(
+        ref["source_type"] == "archival_source_asset"
+        and ref["source_id"] == archival_receipt.source_asset_id
+        and ref["revision"] == archival_receipt.new_source_version
+        for ref in source_refs
+    )
+    assert any(
+        ref["source_type"] == "archival_chunk"
+        and ref["metadata"]["source_version"] == archival_receipt.new_source_version
+        for ref in source_refs
     )
 
 

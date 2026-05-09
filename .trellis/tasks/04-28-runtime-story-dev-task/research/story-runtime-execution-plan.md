@@ -23,13 +23,14 @@
 3. 主脑禁止直接编写或修改 runtime 业务实现代码、测试代码、前后端功能代码；实现类改动只能派发给 subagent 完成。主脑只负责派发、审阅、计划维护、规格/PRD回写、check 协调与结果收口。
 4. 主脑一次最多只允许 `2` 个 subagent 同时运行。
 5. 开发 subagent 固定使用：
-   - `agent_type = trellis-implement`
+   - `agent_type = default`（prompt 中按 trellis-implement 标准执行）
    - `model = gpt-5.4`
    - `reasoning_effort = xhigh`
 6. check subagent 固定使用：
-   - `agent_type = trellis-check`
-   - `model = GPT-5.5`
+   - `agent_type = default`（prompt 中按 trellis-check 标准执行）
+   - `model = gpt-5.5`
    - `reasoning_effort = xhigh`
+   - 注意：当前 `agent_type = trellis-check` 会被角色配置覆盖成 `gpt-5.4 high`，不能用于需要 `gpt-5.5 xhigh` 的 check 派发。
 7. 同一模块/功能下的连续子切片（例如 `F1/F2/.../Fx`）必须交给同一个开发 subagent 持续负责，直到该模块完成。
 8. `trellis-check` 的粒度默认是模块级，而不是子切片级；例如 `F` 模块要等 `F1/F2/.../Fx` 全部完成后，再统一派一次模块级 check。
 9. 不允许跳过 `trellis-check`；只是 check 的派发时点从“每个子切片后”调整为“每个完整模块后”。
@@ -42,6 +43,8 @@
    - [story-runtime-architecture-question-queue.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-architecture-question-queue.md)
 16. 任何实现中获得的新工程知识，先继续完成当前模块；在模块通过 check 后，再判断是否进入 spec 更新。
 17. 旧 longform MVP 代码只能作为 adapter 或迁移素材，不能反向定义新 runtime 合同。
+18. subagent 在 implement/check 中遇到口径、需求或设计问题时，必须先穷尽当前 task 文档、PRD、spec、开发规格书、项目既有实现和成熟框架/项目的常见处理方式；只有确认现有材料无法安全推出、且该问题会影响实现或验证时，才向主脑升级为 grill-me 问题，并写入 question queue。不得把拿不准的问题临场拍成新口径。
+19. subagent 必须遵守当前工程规范：有项目内框架/服务/轮子优先复用；glue coding 只是规范之一，不是目标本身；新增抽象或新依赖必须证明它减少工作量且不破坏已冻结 runtime truth / snapshot / branch / memory governance 边界。
 
 ## 3. 执行流
 
@@ -397,17 +400,212 @@
     - 新增 first-stage longform runtime acceptance 合同，明确最小可运行闭环不能只验证 Workspace rows 存在，必须验证 writer input / packet / output / token usage / source refs / settlement / checkpoint binding
     - 补入 revision/adoption continuation base、rollback read-scope 回归、checkpoint binding 技术锚点的测试要求与 wrong/correct 示例
 
+### Phase L: Runtime Config Surface
+
+- `[x]` L1. runtime config control plane / snapshot publish
+  - 目标：
+    - runtime 配置侧只改变系统怎么跑，不进入 story turn，不参与 story rollback
+    - runtime panel patch 发布新 `RuntimeProfileSnapshot`
+    - 配置变更进入 control history
+    - 已开始 turn / pending post-write job 继续使用旧 snapshot
+  - 规格：
+    - [story-runtime-runtime-config-surface-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-runtime-config-surface-development-spec.md)
+  - 主要文件候选：
+    - `backend/rp/models/runtime_config_contracts.py`
+    - `backend/rp/services/runtime_config_control_service.py`
+    - `backend/rp/services/runtime_profile_snapshot_service.py`
+    - `backend/rp/services/story_runtime_controller.py`
+    - `backend/api/rp_story.py`
+  - 完成标准：
+    - 新 snapshot publish / activate 有聚焦测试
+    - in-progress turn / pending job snapshot pin 不漂移
+    - control history 可读且不被 story rollback 回退
+  - 结果：
+    - 已完成
+    - runtime config patch 通过 control service 做 fail-closed 校验，写入既有 `StorySession.runtime_story_config_json`，再发布新的 immutable `RuntimeProfileSnapshot`
+    - 新增 control history receipt，记录 previous/new snapshot、changed fields、actor/source/reason，并提供 history read API
+    - 已开始 turn 与 pending workflow job 保持创建时 pinned snapshot；story rollback 不删除、不回退 runtime config history
+    - 旧 snapshot 的 `compiled_profile_json` 不原地修改
+  - 验证：
+    - `pytest backend\rp\tests\test_runtime_config_control_service.py backend\tests\test_rp_story_api.py::test_story_runtime_config_patch_updates_session_snapshot backend\rp\tests\test_runtime_profile_snapshot_service.py backend\rp\tests\test_story_runtime_controller_memory_read_side.py::test_story_runtime_controller_patch_publishes_new_active_snapshot -q`
+    - `ruff check backend\rp\models\runtime_config_contracts.py backend\rp\services\runtime_config_control_service.py backend\rp\services\runtime_profile_snapshot_service.py backend\rp\services\story_runtime_controller.py backend\rp\runtime\rp_runtime_factory.py backend\api\rp_story.py backend\models\rp_story_store.py backend\services\database.py backend\rp\tests\test_runtime_config_control_service.py backend\tests\test_rp_story_api.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\runtime_config_contracts.py backend\rp\services\runtime_config_control_service.py backend\rp\services\runtime_profile_snapshot_service.py backend\rp\services\story_runtime_controller.py backend\rp\runtime\rp_runtime_factory.py backend\api\rp_story.py`
+
+### Phase M: Story Evolution Foundation
+
+- `[x]` M1. Story Evolution / Archival evolution governance
+  - 目标：
+    - Story Evolution 默认 current-branch visible
+    - Archival edits 走 version / supersession / reindex receipt
+    - retrieval 排除 hidden / superseded evolved chunks
+    - Core proposal 可追溯到 evolved archival version
+  - 规格：
+    - [story-runtime-story-evolution-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-story-evolution-development-spec.md)
+  - 主要文件候选：
+    - `backend/rp/models/story_evolution_contracts.py`
+    - `backend/rp/services/story_evolution_service.py`
+    - `backend/rp/services/archival_evolution_service.py`
+    - `backend/rp/services/runtime_memory_persistence_repository.py`
+    - `backend/rp/services/retrieval_maintenance_service.py`
+  - 完成标准：
+    - branch-scoped evolution / selected branches / story-global visibility 均有测试
+    - reindex job 和 memory event 与 evolution receipt 可追溯
+    - 不新增平行 StoryEvolutionWorker 主链
+  - 结果：
+    - 已完成 M1 最小后端 foundation
+    - 新增 story-level `StoryEvolutionRequest / StoryEvolutionReceipt` 与 `StoryEvolutionService` facade，只路由 Archival edit/import 到现有 `ArchivalEvolutionService`
+    - Core raw write 通过 story evolution facade fail-closed，仍要求走 governed Core mutation / proposal/apply
+    - Archival evolution 已覆盖 current-branch default、selected branches、all existing branches、story-global、version/supersession、reindex job、memory event、hidden/superseded retrieval filtering
+    - 后续 Core proposal 可携带 evolved archival source/chunk version refs，并通过既有 proposal governance metadata 追溯
+    - 未新增平行 StoryEvolutionWorker、平行 retrieval-core、平行 proposal/apply 或平行 truth
+  - 验证：
+    - `pytest backend/rp/tests/test_archival_evolution_service.py -q`
+    - `pytest backend/rp/tests/test_memory_inspection_service.py::test_archival_evolution_routes_through_governed_service -q`
+    - `pytest backend/rp/tests/test_memory_lineage_services.py::test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff backend/rp/tests/test_memory_lineage_services.py::test_branch_visibility_resolver_hides_rollback_future_but_allows_new_future -q`
+    - `ruff check backend/rp/models/story_evolution_contracts.py backend/rp/services/story_evolution_service.py backend/rp/services/archival_evolution_service.py backend/rp/tests/test_archival_evolution_service.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend/rp/models/story_evolution_contracts.py backend/rp/services/story_evolution_service.py backend/rp/services/archival_evolution_service.py backend/rp/tests/test_archival_evolution_service.py`
+
+### Phase N: Longform Chapter / Review Adapter
+
+- `[x]` N1. longform chapter lifecycle provider / adapter
+  - 目标：
+    - chapter bridge provider 只消费 adopted draft / accepted outline / chapter goal
+    - `complete_chapter` 不读取未采用 candidate
+    - 旧 longform MVP 入口只能作为 adapter，不能反向定义 truth
+  - 规格：
+    - [story-runtime-longform-chapter-review-adapter-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-chapter-review-adapter-development-spec.md)
+  - 主要文件候选：
+    - `backend/rp/models/longform_chapter_contracts.py`
+    - `backend/rp/services/chapter_bridge_provider.py`
+    - `backend/rp/services/longform_chapter_runtime_service.py`
+    - `backend/rp/services/story_turn_domain_service.py`
+    - `backend/rp/services/draft_selection_service.py`
+  - 完成标准：
+    - complete chapter / next chapter base 使用 adoption receipt
+    - discussion/rewrite/review 与 chapter transition 不混线
+    - branch switch 不泄漏其他分支 pending revision/chapter bridge
+  - 结果：
+    - 已完成并通过模块级 check
+    - `complete_chapter` 已从 legacy pending draft 收口到只认 adopted draft / accepted outline / chapter goal
+    - 有 pending rewrite candidate 时，没有 adoption receipt 会 fail-closed；无 pending draft 时保留已接受 segment 的兼容路径
+    - chapter bridge 作为 branch/turn-scoped Runtime Workspace sidecar 记录，不创建平行 chapter truth
+    - check 修复了 bridge material 未进入下一轮 writer packet 的问题：Context Orchestration 现在按 current branch + target chapter 读取最新 bridge，并组装 `mode_sidecar_sections`
+    - runtime factory / turn-domain 注入链已接入 `LongformChapterRuntimeService`
+  - 验证：
+    - `pytest backend\rp\tests\test_longform_chapter_runtime_service.py -q`
+    - `pytest backend\rp\tests\test_draft_selection_service.py -q`
+    - `pytest backend\rp\tests\test_projection_builder_services.py::test_writing_packet_builder_uses_projection_sections_and_runtime_hints backend\rp\tests\test_projection_builder_services.py::test_writing_packet_builder_has_no_raw_retrieval_hit_surface backend\rp\tests\test_projection_builder_services.py::test_context_orchestration_service_builds_minimal_worker_context_packet backend\rp\tests\test_projection_builder_services.py::test_story_turn_domain_service_build_packet_routes_through_context_orchestration_service backend\rp\tests\test_mode_extension_slots.py::test_context_orchestration_mounts_trpg_sidecars_without_new_packet_fields -q`
+    - `ruff check backend\rp\services\longform_chapter_runtime_service.py backend\rp\services\context_orchestration_service.py backend\rp\services\story_turn_domain_service.py backend\rp\runtime\rp_runtime_factory.py backend\rp\tests\test_longform_chapter_runtime_service.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend\rp\services\longform_chapter_runtime_service.py backend\rp\services\context_orchestration_service.py backend\rp\services\story_turn_domain_service.py backend\rp\runtime\rp_runtime_factory.py`
+
+### Phase O: Roleplay / TRPG Extension Slots
+
+- `[x]` O1. roleplay / TRPG extension slot contract
+  - 目标：
+    - roleplay / TRPG 通过 ModeProfile / snapshot / registry 扩展，不新建 longform-only 分支链
+    - 预留 `CharacterMemoryWorker / SceneInteractionWorker / RuleStateWorker`
+    - 预留 `RULE_CARD / RULE_STATE_CARD` Runtime Workspace material
+    - 验证 extension slot 可挂载，不要求完整 RP/TRPG runtime
+  - 规格：
+    - [story-runtime-roleplay-trpg-extension-slots-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-roleplay-trpg-extension-slots-development-spec.md)
+  - 主要文件候选：
+    - `backend/rp/models/mode_extension_contracts.py`
+    - `backend/rp/models/runtime_workspace_material.py`
+    - `backend/rp/services/story_worker_registry_service.py`
+    - `backend/rp/services/worker_scheduler_service.py`
+    - `backend/rp/services/context_orchestration_service.py`
+    - `backend/rp/services/story_runtime_workspace_facade.py`
+  - 完成标准：
+    - roleplay / TRPG descriptors 可编译进 snapshot
+    - scheduler 不通过 mode hardcode 识别 extension worker
+    - rule card/state card 作为 branch-scoped turn materials 保存，不进入 truth
+  - 结果：
+    - 已完成并通过模块级 check
+    - roleplay / TRPG extension slots 已编译进 pinned snapshot
+    - worker registry / scheduler 可通过 snapshot + registry 发现 extension worker，不靠 mode hardcode
+    - 缺失 executor 时会 degrade 并保留 trace
+    - `RULE_CARD / RULE_STATE_CARD` 可作为 branch-scoped Runtime Workspace turn material 挂入 packet sidecar，不进入 Core / Recall / Archival truth
+    - check 修复了 `WorkerContextPacket.sidecar_refs` 未按 `context_requirements.sidecar_slot_ids` 过滤的问题
+    - check 修复了 rule card / state card provenance 只存在 payload、未进入 Runtime Workspace 正式 `source_refs` 的问题
+  - 验证：
+    - `pytest backend\rp\tests\test_mode_extension_slots.py -q`
+    - `pytest backend\rp\tests\test_runtime_profile_snapshot_service.py backend\rp\tests\test_worker_registry_service.py backend\rp\tests\test_worker_scheduler_service.py -q`
+    - `ruff check backend\rp\models\mode_extension_contracts.py backend\rp\services\runtime_profile_snapshot_service.py backend\rp\services\worker_registry_service.py backend\rp\services\worker_execution_service.py backend\rp\services\story_runtime_workspace_facade.py backend\rp\services\context_orchestration_service.py backend\rp\tests\test_mode_extension_slots.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend\rp\services\context_orchestration_service.py backend\rp\services\story_runtime_workspace_facade.py`
+
+### Phase P: Runtime Surface / Debug / API Hardening
+
+- `[x]` P1. runtime config / story evolution / chapter bridge / extension sidecar read surfaces
+  - 目标：
+    - 已实现的 L/M/N/O 后端能力必须有可审查的 read/debug/API 面
+    - runtime config control history 可从 story session 读取
+    - story evolution history / archival evolution receipts 可通过现有 memory inspection 或 thin API 读取
+    - chapter bridge material 可在 debug/inspect surface 中按 branch/target chapter 查看
+    - extension sidecars 的 packet/debug/provenance read 不需要解析 payload 内部私有字段
+    - check 收紧 debug packet section family，仅保留 `section_family` / `source_kind` / `section_id` 作为稳定分类入口
+  - 规格：
+    - [story-runtime-adapter-debug-test-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-adapter-debug-test-spec.md)
+    - [story-runtime-runtime-config-surface-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-runtime-config-surface-development-spec.md)
+    - [story-runtime-story-evolution-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-story-evolution-development-spec.md)
+    - [story-runtime-longform-chapter-review-adapter-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-chapter-review-adapter-development-spec.md)
+    - [story-runtime-roleplay-trpg-extension-slots-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-roleplay-trpg-extension-slots-development-spec.md)
+  - 主要文件候选：
+    - `backend/rp/services/story_runtime_debug_query_service.py`
+    - `backend/rp/services/story_runtime_controller.py`
+    - `backend/api/rp_story.py`
+    - `backend/rp/tests/test_story_runtime_debug_query_service.py`
+    - `backend/tests/test_rp_story_api.py`
+  - 完成标准：
+    - read/debug/API surfaces 只读，不新增 truth
+    - exact identity / branch scoped reads 不泄漏 sibling branch material
+    - L/M/N/O 的 receipts/materials/source_refs 能被 inspect/debug 查询到
+
+- `[x]` P2. second-stage regression matrix
+  - 目标：
+    - 为 L/M/N/O 建立一组跨模块回归，证明第二阶段能力组合后不互相污染
+    - 覆盖 snapshot hot update、Story Evolution visibility、chapter bridge packet、TRPG sidecar packet/source_refs
+  - 规格：
+    - [story-runtime-adapter-debug-test-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-adapter-debug-test-spec.md)
+    - [story-runtime-context-packet-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-context-packet-spec.md)
+    - [story-runtime-workspace-ledger-trace-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-workspace-ledger-trace-spec.md)
+  - 主要文件候选：
+    - `backend/rp/tests/test_story_runtime_second_stage_regression.py`
+    - existing focused tests only when needed
+  - 完成标准：
+    - focused regression proves second-stage surfaces compose without story truth drift
+    - no full roleplay/TRPG runtime, no full UI, no new worker executor implementation
+    - final check 验证了 O/P strict recheck 回归、runtime surface API、以及 L/M/N 相关服务验证
+
 ## 7. 当前执行策略
 
-当前第一阶段最终 K 模块已完成模块级 `trellis-check`，并已完成 `trellis-update-spec`。`R1-R6` 已完成并通过模块级 check；`J1/J2/J3` 已完成并通过模块级 check。本阶段不重开 R/J/K 模块，不进入完整 branch UI、physical purge、branch merge、跨分支 Evolution 管理或完整 roleplay/TRPG runtime。第一阶段可以进入 finish 判断。
+当前第一阶段最终 K 模块已完成模块级 `trellis-check`，并已完成 `trellis-update-spec`。`R1-R6` 已完成并通过模块级 check；`J1/J2/J3` 已完成并通过模块级 check。本阶段不重开 R/J/K 模块，不进入完整 branch UI、physical purge、branch merge、跨分支 Evolution 管理或完整 roleplay/TRPG runtime。
 
-当前并行策略：
+第二阶段由主脑规划为 `L/M/N/O` 四个模块：
+
+1. `L Runtime Config Surface` 已完成并通过模块级 check，因为它会影响后续所有 turn 的运行规则、worker 权限、retrieval / packet policy 和 snapshot pinning。
+2. `M Story Evolution Foundation` 已完成并通过模块级 check；它依赖 branch visibility / memory event / archival governance，和 L 的主要写入文件不同。
+3. `N Longform Chapter / Review Adapter` 已完成并通过模块级 check。
+4. `O Roleplay / TRPG Extension Slots` 已完成并通过模块级 check；它不做完整 RP/TRPG runtime。
+5. 第三阶段规划为 `P Runtime Surface / Debug / API Hardening`，聚焦把第二阶段已实现能力接成可审查读面和组合回归，不扩成完整 UI 或完整 RP/TRPG runtime。
+
+当前可并行策略：
+
+1. 若后续重新启动实现，最多同时派发两个开发 agent。
+2. 第一批 `L1 / M1` 已完成并通过 check。
+3. 第二批 `N1 / O1` 已完成并通过 check。
+4. 第三批 `P1 / P2` 已完成并通过 `gpt-5.5 xhigh` final check。
+5. 当前不再派发新的实现 agent；下一步进入 Trellis Phase 3 的 spec update / finish 收口。
+6. P 模块最终检查已补强：
+   - `RULE_CARD / RULE_STATE_CARD` 不得在未显式请求 sidecar slot 时进入 packet `sidecar_refs`，也不得经 generic `workspace_refs` 泄漏。
+   - debug/read manifest 对 mode sidecar 的识别必须使用稳定 `section_family` / `source_kind` / `section_id`，不能依赖 label 或 payload 私有字段。
+
+第一阶段历史并行记录：
 
 1. R 模块开发期间遵守单模块同一 dev agent 连续负责规则，由 Maxwell 负责 R1-R6。
 2. R 模块后端合同完成后已做 R1-R5 模块级 check。
 3. R6 frontend/API thin integration 完成后已做第二次 R1-R6 模块级 check。
 4. 当前没有正在运行的 subagent。
-5. 下一批如能证明与 R 模块无依赖/无文件冲突，可重新按并行规则派发。
+5. 第一阶段历史记录只作为追溯，不再作为当前下一刀入口。
 
 此前 `F1/F2` 的推进理由保留如下：
 
@@ -441,7 +639,7 @@
 3. 若实现中拆出了新的必要子项，追加到所属 phase 的队尾
 4. 若实现发现设计问题，先记入 grill 队列，再决定是否暂停
 
-## 10. 当前工作树备注
+## 10. 第一阶段历史工作树备注
 
 E1 当前工作树的关键新增/收口点：
 
@@ -461,4 +659,4 @@ E1 当前工作树的关键新增/收口点：
   - `backend/rp/services/story_turn_domain_service.py`
   - `lib/models/story_runtime.dart`
   - `lib/pages/longform_story_page.dart`
-- 当前下一刀入口已切换为 `F1. post-write trigger / creation-time obligations`
+- 该备注为第一阶段 E1 历史追溯；当前下一刀已切换为第二阶段 `L1 / M1`。

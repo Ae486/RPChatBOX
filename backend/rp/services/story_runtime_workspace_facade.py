@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.mode_extension_contracts import (
+    RuleCardMaterial,
+    RuleStateCardMaterial,
+)
 from rp.models.runtime_workspace_material import (
+    RUNTIME_WORKSPACE_MATERIAL_LAYER,
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialVisibility,
@@ -327,6 +332,62 @@ class StoryRuntimeWorkspaceFacade:
             token_usage_material_id=token_usage_material_id,
         )
 
+    def record_rule_card_material(
+        self,
+        *,
+        material: RuleCardMaterial,
+        domain: str = "rule_state",
+        visibility: str = RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value,
+        created_by: str = "story_runtime.mode_extension",
+    ) -> str | None:
+        return self._record_mode_sidecar_material(
+            identity=material.identity,
+            material_id=material.material_id,
+            material_kind=RuntimeWorkspaceMaterialKind.RULE_CARD,
+            domain=domain,
+            source_refs=_mode_extension_source_refs(
+                source_ref_ids=material.source_refs,
+                domain=domain,
+                material_kind=RuntimeWorkspaceMaterialKind.RULE_CARD,
+            ),
+            payload={
+                "rule_refs": list(material.rule_refs),
+                "adjudication_summary": material.adjudication_summary,
+                "source_refs": list(material.source_refs),
+                "metadata_json": deepcopy(material.metadata_json),
+            },
+            visibility=visibility,
+            created_by=created_by,
+        )
+
+    def record_rule_state_card_material(
+        self,
+        *,
+        material: RuleStateCardMaterial,
+        domain: str = "rule_state",
+        visibility: str = RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value,
+        created_by: str = "story_runtime.mode_extension",
+    ) -> str | None:
+        return self._record_mode_sidecar_material(
+            identity=material.identity,
+            material_id=material.material_id,
+            material_kind=RuntimeWorkspaceMaterialKind.RULE_STATE_CARD,
+            domain=domain,
+            source_refs=_mode_extension_source_refs(
+                source_ref_ids=material.source_refs,
+                domain=domain,
+                material_kind=RuntimeWorkspaceMaterialKind.RULE_STATE_CARD,
+            ),
+            payload={
+                "mechanics_state_patch": deepcopy(material.mechanics_state_patch),
+                "status_effects": deepcopy(material.status_effects),
+                "source_refs": list(material.source_refs),
+                "metadata_json": deepcopy(material.metadata_json),
+            },
+            visibility=visibility,
+            created_by=created_by,
+        )
+
     def _record_material_id(self, material: RuntimeWorkspaceMaterial) -> str | None:
         if self._runtime_workspace_material_service is None:
             return None
@@ -338,6 +399,32 @@ class StoryRuntimeWorkspaceFacade:
             return existing.material_id
         receipt = self._runtime_workspace_material_service.record_material(material)
         return receipt.material.material_id
+
+    def _record_mode_sidecar_material(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        material_id: str,
+        material_kind: RuntimeWorkspaceMaterialKind,
+        domain: str,
+        source_refs: list[MemorySourceRef],
+        payload: dict[str, Any],
+        visibility: str,
+        created_by: str,
+    ) -> str | None:
+        return self._record_material_id(
+            RuntimeWorkspaceMaterial(
+                material_id=material_id,
+                material_kind=material_kind,
+                identity=identity,
+                domain=domain,
+                domain_path=f"{domain}.runtime_workspace.{material_kind.value}",
+                source_refs=source_refs,
+                payload=payload,
+                visibility=visibility,
+                created_by=created_by,
+            )
+        )
 
 
 def _discussion_entry_source_refs(entry_ids: list[str]) -> list[MemorySourceRef]:
@@ -365,6 +452,28 @@ def _runtime_workspace_material_source_refs(
             entry_id=material_id,
         )
         for material_id in material_ids
+    ]
+
+
+def _mode_extension_source_refs(
+    *,
+    source_ref_ids: list[str],
+    domain: str,
+    material_kind: RuntimeWorkspaceMaterialKind,
+) -> list[MemorySourceRef]:
+    return [
+        MemorySourceRef(
+            source_type="mode_extension_source_ref",
+            source_id=source_ref_id,
+            layer=RUNTIME_WORKSPACE_MATERIAL_LAYER,
+            domain=domain,
+            block_id=f"{domain}.runtime_workspace",
+            metadata={
+                "mode_extension_sidecar_kind": material_kind.value,
+                "raw_source_ref": source_ref_id,
+            },
+        )
+        for source_ref_id in _unique_non_blank(source_ref_ids)
     ]
 
 

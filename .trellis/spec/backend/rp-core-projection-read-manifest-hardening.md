@@ -116,6 +116,16 @@ as authoritative fact by default.
   - duplicate/covered by stronger ref
 - The manifest must not expose hidden model reasoning; it only exposes deterministic backend selection metadata.
 
+#### Packet section classification contract
+
+- Packet/debug/read surfaces must classify packet sections through stable backend-authored fields, not presentation labels or payload-private hints.
+- A packet section that represents mode/runtime sidecar material must expose at least one stable classifier:
+  - `metadata.section_family == "mode_sidecar"`;
+  - or `source_kind in {"mode_sidecar", "runtime_mode_sidecar"}`;
+  - or a stable `section_id` namespace such as `mode_sidecar.<slot_id>`.
+- Labels are display text only. Debug/read code must not decide whether a section is a mode sidecar from `label`, localized text, or prose payload content.
+- When a section is selected into `packet_sections`, its `source_ref_ids` must point at formal refs or typed Runtime Workspace material refs rather than payload-local provenance.
+
 #### Retrieval contract
 
 - Retrieval cards remain Runtime Workspace material until later governed promotion.
@@ -143,16 +153,20 @@ as authoritative fact by default.
 | Ref is visible but trimmed by budget | Appears in `omitted_refs` with deterministic reason |
 | Retrieval card enters packet | Appears in manifest retrieval refs, but not as Core truth |
 | Compatibility mirror read is used | Manifest still records route/source version metadata |
+| Mode sidecar enters packet | Section carries stable `section_family` / `source_kind` / `section_id` classifier and formal source refs |
+| Debug reader sees a sidecar-looking label without stable classifier | Treat as ordinary packet section, not as mode sidecar |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: a writer packet shows which Core refs, Projection slots, Runtime Workspace refs, and retrieval cards were selected for that exact turn.
 - Good: the same turn can be debugged later without exposing hidden chain-of-thought, only deterministic selection metadata.
 - Good: projection refresh remains derived-view maintenance with identity and freshness guards.
+- Good: `mode_sidecar.rule_card` is discoverable in debug/read views through `metadata.section_family` and `source_ref_ids`, even if its display label changes.
 - Base: legacy compatibility routes can remain during transition if the manifest records their route/source metadata.
 - Bad: assembling packet context through ad hoc service calls with no reproducible visible/selected/omitted ref contract.
 - Bad: letting runtime-owned projection refresh keep omitting identity indefinitely.
 - Bad: treating retrieval hits selected into the packet as if they were already Core truth.
+- Bad: treating a section as a TRPG/rule sidecar because its label contains "rule" while the manifest lacks a stable section classifier.
 
 ### 6. Tests Required
 
@@ -160,6 +174,7 @@ as authoritative fact by default.
   - deterministic output for same identity/state/profile;
   - visible vs selected vs omitted separation;
   - packet section source/revision/hash metadata;
+  - packet section family classification through stable fields, not labels;
   - retrieval card/expansion/usage ref recording.
 - Projection tests cover:
   - runtime-owned refresh rejects missing identity;

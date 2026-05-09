@@ -267,6 +267,10 @@ story runtime 的技术调研目标，不是继续找一个更大的框架，而
 9. [story-runtime-postwrite-memory-governance-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-postwrite-memory-governance-spec.md)
 10. [story-runtime-branch-rollback-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-spec.md)
 11. [story-runtime-adapter-debug-test-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-adapter-debug-test-spec.md)
+12. [story-runtime-runtime-config-surface-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-runtime-config-surface-development-spec.md)
+13. [story-runtime-story-evolution-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-story-evolution-development-spec.md)
+14. [story-runtime-longform-chapter-review-adapter-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-chapter-review-adapter-development-spec.md)
+15. [story-runtime-roleplay-trpg-extension-slots-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-roleplay-trpg-extension-slots-development-spec.md)
 
 公共合同层前三份必须先冻结，再允许其他模块并行扩散。
 
@@ -290,6 +294,32 @@ story runtime 的技术调研目标，不是继续找一个更大的框架，而
 
 1. `story-runtime-postwrite-memory-governance-spec.md`
 2. integration tests / migration / rewrite strategy
+
+## 5.5 第二阶段补齐模块
+
+第一阶段 runtime acceptance 完成后，第二阶段先补齐会影响后续所有实现的 full-foundation 规格，不直接跳入完整 RP/TRPG 产品实现。
+
+1. `story-runtime-runtime-config-surface-development-spec.md`
+   - runtime control plane
+   - snapshot publish / activation
+   - control history
+   - future-turn-only hot update
+2. `story-runtime-story-evolution-development-spec.md`
+   - branch-scoped Story Evolution
+   - Archival version / reindex governance
+   - visibility scope
+   - memory change event / dirty target
+3. `story-runtime-longform-chapter-review-adapter-development-spec.md`
+   - longform chapter bridge provider
+   - discussion / review / rewrite / adoption alignment
+   - old longform adapter boundary
+4. `story-runtime-roleplay-trpg-extension-slots-development-spec.md`
+   - mode extension slots
+   - roleplay / TRPG worker placeholders
+   - rule card / rule state card Runtime Workspace sidecars
+   - interactive acceptance semantics
+
+第二阶段仍遵守第一阶段冻结的公共合同。除非先回写本总控文档并回收影响面，否则不得修改 `StorySession / BranchHead / Turn / RuntimeProfileSnapshot / RuntimeWorkspaceMaterial / WorkerDescriptor / WorkerExecutionPlan / WorkerContextPacket / WorkerResult / WritingPacket / RuntimeReadManifestRecord` 的核心语义。
 
 ## 6. 公共合同冻结清单
 
