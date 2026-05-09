@@ -1245,6 +1245,16 @@ class StoryRuntimeIdentityService:
                     exc.code,
                     requested_snapshot_id,
                 ) from exc
+        try:
+            return self._runtime_profile_snapshot_service.require_active_snapshot(
+                session_id=session_record.session_id,
+            )
+        except RuntimeProfileSnapshotServiceError as exc:
+            if exc.code != "runtime_profile_snapshot_no_active_snapshot":
+                raise StoryRuntimeIdentityServiceError(
+                    exc.code,
+                    session_record.session_id,
+                ) from exc
         return self._runtime_profile_snapshot_service.ensure_active_snapshot(
             session_id=session_record.session_id,
             created_from="story_runtime.turn_start",

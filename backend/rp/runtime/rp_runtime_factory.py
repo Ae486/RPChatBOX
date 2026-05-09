@@ -407,9 +407,27 @@ class RpRuntimeFactory:
             story_block_prompt_context_service=block_prompt_context_service,
             story_block_prompt_render_service=block_prompt_render_service,
         )
+        runtime_profile_snapshot_service = RuntimeProfileSnapshotService(self._session)
+        runtime_workspace_material_service = RuntimeWorkspaceMaterialService(
+            session=self._session,
+        )
+        runtime_retrieval_card_service = RuntimeRetrievalCardService(
+            runtime_workspace_material_service=runtime_workspace_material_service,
+            session=self._session,
+        )
         specialist_service = LongformSpecialistService(
             authoritative_state_view_service=authoritative_state_view_service,
             projection_state_service=projection_state_service,
+            memory_os_factory=(
+                lambda story_id, session_id=None, runtime_identity=None: MemoryOsService(
+                    retrieval_broker=RetrievalBroker(
+                        default_story_id=story_id,
+                        runtime_identity=runtime_identity,
+                        session=self._session,
+                    )
+                )
+            ),
+            runtime_retrieval_card_service=runtime_retrieval_card_service,
             story_block_prompt_compile_service=block_prompt_compile_service,
             story_block_prompt_context_service=block_prompt_context_service,
             story_block_prompt_render_service=block_prompt_render_service,
@@ -442,14 +460,6 @@ class RpRuntimeFactory:
             ),
         )
         writing_packet_builder = WritingPacketBuilder()
-        runtime_profile_snapshot_service = RuntimeProfileSnapshotService(self._session)
-        runtime_workspace_material_service = RuntimeWorkspaceMaterialService(
-            session=self._session,
-        )
-        runtime_retrieval_card_service = RuntimeRetrievalCardService(
-            runtime_workspace_material_service=runtime_workspace_material_service,
-            session=self._session,
-        )
         writing_worker_execution_service = WritingWorkerExecutionService(
             runtime_retrieval_card_service=runtime_retrieval_card_service,
         )

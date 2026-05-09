@@ -286,6 +286,48 @@ def test_resolve_runtime_entry_identity_explicit_missing_snapshot_fails_closed(
     assert exc_info.value.code == "runtime_profile_snapshot_not_found"
 
 
+def test_resolve_runtime_entry_identity_reuses_committed_active_snapshot_when_profile_revision_drifted(
+    retrieval_session,
+):
+    story_session = _seed_story_session(
+        retrieval_session,
+        story_id="identity-reuse-committed-active-snapshot",
+    )
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    active_snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.identity.reuse_active_snapshot.initial",
+    )
+
+    session_record = retrieval_session.get(StorySessionRecord, story_session.session_id)
+    assert session_record is not None
+    session_record.writer_contract_json = {
+        "style_rules": ["trigger source config revision drift"]
+    }
+    retrieval_session.add(session_record)
+    retrieval_session.flush()
+
+    service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    snapshots = retrieval_session.exec(
+        select(RuntimeProfileSnapshotRecord).where(
+            RuntimeProfileSnapshotRecord.session_id == story_session.session_id
+        )
+    ).all()
+
+    assert identity.runtime_profile_snapshot_id == (
+        active_snapshot.runtime_profile_snapshot_id
+    )
+    assert len(snapshots) == 1
+
+
 def test_create_turn_rejects_non_active_snapshot(retrieval_session):
     story_session = _seed_story_session(
         retrieval_session,
