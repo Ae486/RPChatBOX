@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime_identity import StoryTurnStatus
 from rp.models.story_runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -17,6 +19,7 @@ from rp.models.story_runtime import (
 from rp.services.builder_projection_context_service import (
     BuilderProjectionContextService,
 )
+from rp.services.chapter_bridge_provider import ChapterBridgeProvider
 from rp.services.chapter_workspace_projection_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
@@ -33,6 +36,8 @@ from rp.services.projection_state_service import ProjectionStateService
 from rp.services.revision_overlay_service import RevisionOverlayService
 from rp.services.rewrite_candidate_service import RewriteCandidateService
 from rp.services.rewrite_request_builder_service import RewriteRequestBuilderService
+from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
 from rp.services.writing_packet_builder import WritingPacketBuilder
@@ -63,11 +68,129 @@ class _NoopRegressionService:
         return session, chapter
 
 
+class _RecordingChapterBridgeProvider:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def build_bridge_material(self, **kwargs):
+        from rp.services.chapter_bridge_provider import ChapterBridgeProvider
+
+        self.calls.append({"mode": "sync", **kwargs})
+        return ChapterBridgeProvider().build_bridge_material(**kwargs)
+
+    async def build_bridge_material_with_summary(self, **kwargs):
+        from rp.services.chapter_bridge_provider import ChapterBridgeProvider
+
+        self.calls.append({"mode": "async", **kwargs})
+        bridge = ChapterBridgeProvider().build_bridge_material(
+            identity=kwargs["identity"],
+            from_chapter_index=kwargs["from_chapter_index"],
+            to_chapter_index=kwargs["to_chapter_index"],
+            adopted_output_ref=kwargs.get("adopted_output_ref"),
+            accepted_outline_ref=kwargs.get("accepted_outline_ref"),
+            chapter_goal_ref=kwargs.get("chapter_goal_ref"),
+            adopted_output_text=(
+                "\n\n".join(list(kwargs.get("accepted_segment_texts") or []))
+            ),
+            source_refs=list(kwargs.get("source_refs") or []),
+            covered_beat_ids=list(kwargs.get("covered_beat_ids") or []),
+            metadata_json=dict(kwargs.get("metadata_json") or {}),
+        )
+        return bridge.model_copy(
+            update={
+                "summary_text": "Stub chapter summary for next chapter.",
+                "metadata_json": {
+                    **dict(bridge.metadata_json),
+                    "summary_provider": "recording_stub",
+                },
+            }
+        )
+
+
+class _RecordingSummaryGateway:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def complete_text_with_usage(self, **kwargs):
+        self.calls.append(kwargs)
+        return (
+            '{"summary_text":"LLM bridge summary.",'
+            '"continuity_notes":["Carry the debt consequence forward."],'
+            '"open_threads":["The ledger remains unsettled."]}',
+            {"prompt_tokens": 11, "completion_tokens": 13, "total_tokens": 24},
+        )
+
+
+def test_accept_outline_normalizes_structured_outline_and_initializes_progress(
+    retrieval_session,
+):
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    outline = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.CHAPTER_OUTLINE,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="1. Opening conflict\n2. Decision point",
+    )
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    )
+    identity = _identity(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id="branch-main",
+        turn_id="turn-accept-outline",
+        runtime_profile_snapshot_id="snapshot-outline",
+    )
+
+    response = turn_domain_service.accept_outline(
+        request=LongformTurnRequest(
+            session_id=session.session_id,
+            command_kind=LongformTurnCommandKind.ACCEPT_OUTLINE,
+            model_id="test-model",
+            provider_id="test-provider",
+            target_artifact_id=outline.artifact_id,
+        ),
+        runtime_identity=identity,
+    )
+
+    updated_chapter = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    )
+    assert updated_chapter is not None
+    structured_outline = updated_chapter.accepted_outline_json["structured_outline"]
+    assert structured_outline["schema_version"] == "longform_outline_v1"
+    assert structured_outline["beats"][0]["beat_id"] == "beat_001"
+    assert structured_outline["beats"][1]["beat_id"] == "beat_002"
+    assert response.warnings == ["outline_normalized_from_non_json_output"]
+    progress_service = turn_domain_service._longform_chapter_runtime_service
+    assert progress_service is not None
+    progress_record = progress_service.get_latest_outline_progress_for_chapter(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id=identity.branch_head_id,
+        chapter_index=chapter.chapter_index,
+        identity=identity,
+    )
+    assert progress_record is not None
+    _, progress = progress_record
+    assert progress.current_beat_id == "beat_001"
+    assert progress.covered_beat_ids == []
+
+
 def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridge(
     retrieval_session,
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
+    pending_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.transition.pending",
+        actor="longform.transition.pending",
+    )
     pending = story_session_service.create_artifact(
         session_id=session.session_id,
         chapter_workspace_id=chapter.chapter_workspace_id,
@@ -75,12 +198,23 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
         status=StoryArtifactStatus.DRAFT,
         content_text="Original pending draft.",
         metadata=_artifact_runtime_metadata(
-            story_id=session.story_id,
-            session_id=session.session_id,
-            branch_head_id="branch-main",
-            turn_id="turn-write",
-            runtime_profile_snapshot_id="snapshot-write",
+            story_id=pending_identity.story_id,
+            session_id=pending_identity.session_id,
+            branch_head_id=pending_identity.branch_head_id,
+            turn_id=pending_identity.turn_id,
+            runtime_profile_snapshot_id=pending_identity.runtime_profile_snapshot_id,
         ),
+    )
+    identity_service.update_turn_status(
+        turn_id=pending_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+    )
+    stale_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.transition.stale",
+        actor="longform.transition.stale",
     )
     stale = story_session_service.create_artifact(
         session_id=session.session_id,
@@ -89,11 +223,11 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
         status=StoryArtifactStatus.DRAFT,
         content_text="Stale alternate pending draft.",
         metadata=_artifact_runtime_metadata(
-            story_id=session.story_id,
-            session_id=session.session_id,
-            branch_head_id="branch-main",
-            turn_id="turn-write-alt",
-            runtime_profile_snapshot_id="snapshot-write",
+            story_id=stale_identity.story_id,
+            session_id=stale_identity.session_id,
+            branch_head_id=stale_identity.branch_head_id,
+            turn_id=stale_identity.turn_id,
+            runtime_profile_snapshot_id=stale_identity.runtime_profile_snapshot_id,
         ),
     )
     chapter = story_session_service.update_chapter_workspace(
@@ -102,12 +236,12 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
         pending_segment_artifact_id=pending.artifact_id,
     )
 
-    review_identity = _identity(
-        story_id=session.story_id,
+    review_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
         session_id=session.session_id,
-        branch_head_id="branch-main",
-        turn_id="turn-review",
-        runtime_profile_snapshot_id="snapshot-review",
+        command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
+        created_from="longform.transition.review",
+        actor="longform.transition.review",
     )
     candidate = _create_adopted_candidate(
         retrieval_session,
@@ -120,12 +254,12 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
         story_session_service=story_session_service,
         session=retrieval_session,
     )
-    completion_identity = _identity(
-        story_id=session.story_id,
+    completion_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
         session_id=session.session_id,
-        branch_head_id="branch-main",
-        turn_id="turn-complete",
-        runtime_profile_snapshot_id="snapshot-complete",
+        command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
+        created_from="longform.transition.complete",
+        actor="longform.transition.complete",
     )
 
     prepared = service.prepare_chapter_transition(
@@ -150,7 +284,7 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
     bridge = service.get_latest_bridge_material_for_branch(
         story_id=session.story_id,
         session_id=session.session_id,
-        branch_head_id="branch-main",
+        branch_head_id=completion_identity.branch_head_id,
         source_chapter_index=1,
     )
     assert bridge is not None
@@ -214,11 +348,19 @@ def test_prepare_chapter_transition_uses_accepted_segment_adapter_without_pendin
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
-    accepted = story_session_service.create_artifact(
+    accepted_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
         session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.ACCEPTED,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.transition.adapter.accepted",
+        actor="longform.transition.adapter.accepted",
+    )
+    accepted = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=accepted_identity,
         content_text="Already accepted segment.",
     )
     chapter = story_session_service.update_chapter_workspace(
@@ -230,14 +372,15 @@ def test_prepare_chapter_transition_uses_accepted_segment_adapter_without_pendin
         session=retrieval_session,
     )
 
+    completion_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
+        created_from="longform.transition.adapter.complete",
+        actor="longform.transition.adapter.complete",
+    )
     prepared = service.prepare_chapter_transition(
-        identity=_identity(
-            story_id=session.story_id,
-            session_id=session.session_id,
-            branch_head_id="branch-main",
-            turn_id="turn-complete",
-            runtime_profile_snapshot_id="snapshot-complete",
-        ),
+        identity=completion_identity,
         session=session,
         chapter=chapter,
     )
@@ -252,11 +395,19 @@ def test_context_orchestration_injects_branch_scoped_chapter_bridge_into_next_wr
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
-    accepted = story_session_service.create_artifact(
+    accepted_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
         session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.ACCEPTED,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.bridge.accepted",
+        actor="longform.bridge.accepted",
+    )
+    accepted = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=accepted_identity,
         content_text="Accepted chapter ending for bridge injection.",
     )
     chapter = story_session_service.update_chapter_workspace(
@@ -267,14 +418,15 @@ def test_context_orchestration_injects_branch_scoped_chapter_bridge_into_next_wr
         story_session_service=story_session_service,
         session=retrieval_session,
     )
+    completion_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
+        created_from="longform.bridge.complete",
+        actor="longform.bridge.complete",
+    )
     chapter_runtime_service.prepare_chapter_transition(
-        identity=_identity(
-            story_id=session.story_id,
-            session_id=session.session_id,
-            branch_head_id="branch-main",
-            turn_id="turn-complete",
-            runtime_profile_snapshot_id="snapshot-complete",
-        ),
+        identity=completion_identity,
         session=session,
         chapter=chapter,
     )
@@ -311,7 +463,7 @@ def test_context_orchestration_injects_branch_scoped_chapter_bridge_into_next_wr
         runtime_identity=_identity(
             story_id=session.story_id,
             session_id=session.session_id,
-            branch_head_id="branch-main",
+            branch_head_id=completion_identity.branch_head_id,
             turn_id="turn-next-write",
             runtime_profile_snapshot_id="snapshot-next-write",
         ),
@@ -451,6 +603,120 @@ async def test_story_turn_domain_service_complete_chapter_rejects_unadopted_pend
     assert exc.value.code == "longform_chapter_adoption_required"
 
 
+@pytest.mark.asyncio
+async def test_prepare_chapter_transition_with_summary_provider_receives_adopted_segments_and_covered_beats(
+    retrieval_session,
+):
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    _accept_outline(story_session_service, session, chapter)
+    accepted_one_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.summary.accepted_one",
+        actor="longform.summary.accepted_one",
+    )
+    accepted_one = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=accepted_one_identity,
+        content_text="Beat one accepted.",
+        target_beat_id="beat_001",
+    )
+    accepted_two_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.summary.accepted_two",
+        actor="longform.summary.accepted_two",
+    )
+    accepted_two = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=accepted_two_identity,
+        content_text="Beat two accepted.",
+        target_beat_id="beat_002",
+    )
+    chapter = story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        accepted_segment_ids=[accepted_one.artifact_id, accepted_two.artifact_id],
+    )
+    provider = _RecordingChapterBridgeProvider()
+    service = LongformChapterRuntimeService(
+        story_session_service=story_session_service,
+        chapter_bridge_provider=cast(ChapterBridgeProvider, provider),
+        session=retrieval_session,
+    )
+    completion_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
+        created_from="longform.summary.complete",
+        actor="longform.summary.complete",
+    )
+    prepared = await service.prepare_chapter_transition_with_summary(
+        identity=completion_identity,
+        session=session,
+        chapter=chapter,
+        model_id="summary-model",
+        provider_id="summary-provider",
+    )
+
+    assert prepared.bridge is not None
+    assert prepared.bridge.summary_text == "Stub chapter summary for next chapter."
+    assert prepared.bridge.covered_beat_ids == ["beat_001", "beat_002"]
+    assert prepared.bridge.metadata_json["summary_provider"] == "recording_stub"
+    assert provider.calls
+    call = provider.calls[-1]
+    assert call["accepted_segment_texts"] == ["Beat one accepted.", "Beat two accepted."]
+    assert call["covered_beat_ids"] == ["beat_001", "beat_002"]
+
+
+@pytest.mark.asyncio
+async def test_chapter_bridge_provider_uses_model_summary_when_provider_id_is_omitted():
+    gateway = _RecordingSummaryGateway()
+    provider = ChapterBridgeProvider(llm_gateway=gateway)
+
+    bridge = await provider.build_bridge_material_with_summary(
+        identity=_identity(),
+        from_chapter_index=1,
+        to_chapter_index=2,
+        adopted_output_ref="artifact:accepted-final",
+        accepted_outline_ref="outline-accepted",
+        chapter_goal_ref="chapter-goal:1",
+        chapter_goal="Carry the chapter consequence forward.",
+        adopted_output_text="Fallback accepted chapter ending.",
+        accepted_segment_texts=["Accepted chapter ending."],
+        covered_beat_ids=["beat_001"],
+        covered_beats=[
+            {
+                "beat_id": "beat_001",
+                "title": "Opening debt",
+                "goal": "Establish the debt consequence.",
+            }
+        ],
+        source_refs=["artifact:accepted-final"],
+        model_id="model-story",
+        provider_id=None,
+    )
+
+    assert len(gateway.calls) == 1
+    assert gateway.calls[0]["model_id"] == "model-story"
+    assert gateway.calls[0]["provider_id"] is None
+    assert bridge.summary_text == "LLM bridge summary."
+    assert bridge.covered_beat_ids == ["beat_001"]
+    assert bridge.continuity_notes == ["Carry the debt consequence forward."]
+    assert bridge.open_threads == ["The ledger remains unsettled."]
+    assert bridge.metadata_json["summary_provider"] == "story_llm_gateway"
+    assert bridge.metadata_json["summary_generation_mode"] == "async_llm"
+    assert bridge.metadata_json["summary_model_id"] == "model-story"
+    assert bridge.metadata_json["summary_provider_id"] is None
+
+
 def _seed_story_runtime(retrieval_session):
     service = StorySessionService(retrieval_session)
     session = service.create_session(
@@ -489,6 +755,69 @@ def _seed_story_runtime(retrieval_session):
     return service, session, chapter
 
 
+def _resolve_runtime_identity(
+    retrieval_session,
+    *,
+    session_id: str,
+    command_kind: LongformTurnCommandKind,
+    created_from: str,
+    actor: str,
+) -> tuple[MemoryRuntimeIdentity, StoryRuntimeIdentityService]:
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session_id,
+        created_from=created_from,
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session_id,
+        command_kind=command_kind.value,
+        actor=actor,
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    return identity, identity_service
+
+
+def _create_settled_story_segment(
+    service: StorySessionService,
+    identity_service: StoryRuntimeIdentityService,
+    *,
+    session,
+    chapter,
+    identity: MemoryRuntimeIdentity,
+    content_text: str,
+    target_beat_id: str | None = None,
+):
+    metadata = _artifact_runtime_metadata(
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        branch_head_id=identity.branch_head_id,
+        turn_id=identity.turn_id,
+        runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+    )
+    if target_beat_id is not None:
+        metadata["target_beat_id"] = target_beat_id
+    segment = service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text=content_text,
+        metadata=metadata,
+    )
+    identity_service.update_turn_status(
+        turn_id=identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref=segment.artifact_id,
+        selected_output_ref=segment.artifact_id,
+        settlement_reason="test_settled_story_segment",
+    )
+    return segment
+
+
 def _accept_outline(
     service: StorySessionService,
     session,
@@ -506,7 +835,61 @@ def _accept_outline(
         accepted_outline_json={
             "artifact_id": "outline-accepted",
             "content_text": outline.content_text,
-            "metadata": outline.metadata,
+            "metadata": {
+                **outline.metadata,
+                "structured_outline": {
+                    "schema_version": "longform_outline_v1",
+                    "chapter_index": chapter.chapter_index,
+                    "chapter_goal": chapter.chapter_goal,
+                    "beats": [
+                        {
+                            "beat_id": "beat_001",
+                            "order": 1,
+                            "title": "Opening conflict",
+                            "goal": "Set the debt conflict in motion.",
+                            "must_include": ["bell tower", "debt"],
+                            "avoid": ["future spoiler"],
+                            "continuity_notes": ["Starts the chapter."],
+                        },
+                        {
+                            "beat_id": "beat_002",
+                            "order": 2,
+                            "title": "Decision point",
+                            "goal": "Force Mira to choose what to pay.",
+                            "must_include": ["choice"],
+                            "avoid": [],
+                            "continuity_notes": ["Continue from beat one."],
+                        },
+                    ],
+                    "constraints": {},
+                },
+            },
+            "structured_outline": {
+                "schema_version": "longform_outline_v1",
+                "chapter_index": chapter.chapter_index,
+                "chapter_goal": chapter.chapter_goal,
+                "beats": [
+                    {
+                        "beat_id": "beat_001",
+                        "order": 1,
+                        "title": "Opening conflict",
+                        "goal": "Set the debt conflict in motion.",
+                        "must_include": ["bell tower", "debt"],
+                        "avoid": ["future spoiler"],
+                        "continuity_notes": ["Starts the chapter."],
+                    },
+                    {
+                        "beat_id": "beat_002",
+                        "order": 2,
+                        "title": "Decision point",
+                        "goal": "Force Mira to choose what to pay.",
+                        "must_include": ["choice"],
+                        "avoid": [],
+                        "continuity_notes": ["Continue from beat one."],
+                    },
+                ],
+                "constraints": {},
+            },
         },
     )
     service.commit()
@@ -605,7 +988,7 @@ def _build_turn_domain_service(
         ),
         projection_state_service=projection_state_service,
         writing_packet_builder=WritingPacketBuilder(),
-        writing_worker_execution_service=SimpleNamespace(),
+        writing_worker_execution_service=cast(Any, SimpleNamespace()),
         regression_service=_NoopRegressionService(),
         longform_chapter_runtime_service=LongformChapterRuntimeService(
             story_session_service=service,

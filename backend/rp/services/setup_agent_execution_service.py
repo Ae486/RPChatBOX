@@ -189,10 +189,7 @@ class SetupAgentExecutionService:
                     f"{target_stage.value}:{workspace.mode.value}"
                 )
             expected_step = SetupWorkspaceService._LEGACY_STEP_FOR_STAGE[target_stage]
-            if (
-                request.target_step is not None
-                and request.target_step != expected_step
-            ):
+            if request.target_step is not None and request.target_step != expected_step:
                 raise ValueError(
                     "setup_target_stage_step_mismatch:"
                     f"{target_stage.value}:{request.target_step.value}:{expected_step.value}"
@@ -512,6 +509,7 @@ class SetupAgentExecutionService:
                 launch=launch,
                 stream=False,
             )
+            observation.update(metadata=self._runtime_v2_observation_metadata(prepared))
             result = await runtime_executor.run(
                 prepared.turn_input,
                 prepared.profile,
@@ -567,6 +565,7 @@ class SetupAgentExecutionService:
                 launch=launch,
                 stream=True,
             )
+            observation.update(metadata=self._runtime_v2_observation_metadata(prepared))
             async for chunk in runtime_executor.run_stream(
                 prepared.turn_input,
                 prepared.profile,
@@ -631,6 +630,16 @@ class SetupAgentExecutionService:
             "loop_trace_count": len(payload.get("loop_trace") or [])
             if isinstance(payload, dict)
             else 0,
+        }
+
+    @staticmethod
+    def _runtime_v2_observation_metadata(
+        prepared: "_PreparedRuntimeV2Launch",
+    ) -> dict[str, Any]:
+        """Single-source Langfuse observation metadata for runtime-v2 turns."""
+
+        return {
+            "skill_pack_name": prepared.turn_input.metadata.get("skill_pack_name"),
         }
 
     async def _build_runtime_v2_turn_input(

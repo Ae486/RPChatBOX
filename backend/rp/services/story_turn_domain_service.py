@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
+from typing import AsyncIterator, cast
 from uuid import uuid4
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.block_consumer import BlockConsumerKey
 from rp.models.postwrite_runtime_contracts import (
     PostWriteExecutionEnvelope,
     PostWriteRunKind,
@@ -35,6 +36,7 @@ from rp.models.writing_worker_contracts import (
 from rp.models.writing_runtime import WritingPacket
 from .context_orchestration_service import ContextOrchestrationService
 from .longform_chapter_runtime_service import LongformChapterRuntimeService
+from .longform_chapter_runtime_service import LongformChapterRuntimeServiceError
 from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_regression_service import LongformRegressionService
 from .longform_specialist_service import LongformSpecialistService
@@ -45,6 +47,7 @@ from .projection_state_service import ProjectionStateService
 from .recall_scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
+from .rewrite_packet_constraint_service import RewritePacketConstraintService
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
 from .story_runtime_identity_service import StoryRuntimeIdentityService
 from .story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
@@ -98,6 +101,7 @@ class StoryTurnDomainService:
         post_write_governance_service: PostWriteGovernanceService | None = None,
         story_runtime_adapter_service: StoryRuntimeAdapterService | None = None,
         longform_chapter_runtime_service: LongformChapterRuntimeService | None = None,
+        rewrite_packet_constraint_service: RewritePacketConstraintService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
@@ -112,12 +116,17 @@ class StoryTurnDomainService:
             recall_scene_transcript_ingestion_service
         )
         self._runtime_identity_by_session: dict[str, MemoryRuntimeIdentity] = {}
-        self._runtime_identity_service = runtime_identity_service
+        story_db_session = getattr(story_session_service, "_session", None)
+        self._runtime_identity_service = runtime_identity_service or (
+            StoryRuntimeIdentityService(story_db_session)
+            if story_db_session is not None
+            else None
+        )
         self._worker_scheduler_service = worker_scheduler_service
         self._worker_execution_service = worker_execution_service
         resolver_session = (
-            getattr(runtime_identity_service, "_session", None)
-            if runtime_identity_service is not None
+            getattr(self._runtime_identity_service, "_session", None)
+            if self._runtime_identity_service is not None
             else None
         )
         self._runtime_workspace_material_service = (
@@ -196,6 +205,16 @@ class StoryTurnDomainService:
         self._story_runtime_adapter_service = (
             story_runtime_adapter_service or StoryRuntimeAdapterService()
         )
+        rewrite_session = resolver_session or getattr(
+            story_session_service, "_session", None
+        )
+        self._rewrite_packet_constraint_service = (
+            rewrite_packet_constraint_service
+            or RewritePacketConstraintService(
+                story_session_service=story_session_service,
+                session=rewrite_session,
+            )
+        )
 
     def prepare_generation_inputs(
         self,
@@ -205,7 +224,9 @@ class StoryTurnDomainService:
         target_artifact_id: str | None,
     ) -> dict[str, object]:
         session = self.require_session(session_id)
-        chapter = self.require_current_chapter(session_id)
+        chapter = self._active_branch_chapter_view(
+            self.require_current_chapter(session_id)
+        )
         if user_prompt:
             self._story_session_service.create_discussion_entry(
                 session_id=session.session_id,
@@ -268,18 +289,24 @@ class StoryTurnDomainService:
         runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> SpecialistResultBundle:
         session = self.require_session(session_id)
-        chapter = self.require_current_chapter(session_id)
+        chapter = self._active_branch_chapter_view(
+            self.require_current_chapter(session_id)
+        )
         pending_artifact = self.resolve_pending_artifact(
             chapter=chapter,
             target_artifact_id=pending_artifact_id,
         )
-        accepted_segments = [
-            artifact
-            for artifact in self._story_session_service.list_artifacts(
-                chapter_workspace_id=chapter.chapter_workspace_id
-            )
-            if artifact.artifact_id in set(accepted_segment_ids)
-        ]
+        visible_accepted_by_id = {
+            artifact.artifact_id: artifact for artifact in self.accepted_segments(chapter)
+        }
+        accepted_segments = list(visible_accepted_by_id.values())
+        chapter = chapter.model_copy(
+            update={
+                "accepted_segment_ids": [
+                    artifact.artifact_id for artifact in accepted_segments
+                ]
+            }
+        )
         if (
             runtime_identity is not None
             and self._worker_scheduler_service is not None
@@ -450,12 +477,32 @@ class StoryTurnDomainService:
         specialist_bundle: SpecialistResultBundle,
         command_kind: LongformTurnCommandKind | None = None,
         runtime_identity: MemoryRuntimeIdentity | None = None,
+        target_artifact_id: str | None = None,
     ) -> WritingPacket:
         session = self.require_session(session_id)
-        chapter = self.require_current_chapter(session_id)
+        chapter = self._active_branch_chapter_view(
+            self.require_current_chapter(session_id)
+        )
         resolved_runtime_identity = (
             runtime_identity or self._runtime_identity_by_session.get(session_id)
         )
+        review_overlay_sections: list[dict[str, object]] | None = None
+        if command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT:
+            if resolved_runtime_identity is None:
+                raise ValueError(
+                    "Runtime identity is required for rewrite packet constraint assembly"
+                )
+            rewrite_constraints = (
+                self._rewrite_packet_constraint_service.build_review_overlay_sections(
+                    identity=resolved_runtime_identity,
+                    session=session,
+                    chapter=chapter,
+                    target_artifact_id=target_artifact_id,
+                )
+            )
+            review_overlay_sections = list(
+                rewrite_constraints.review_overlay_sections
+            )
         packet = self._context_orchestration_service.build_writing_packet(
             session=session,
             chapter=chapter,
@@ -465,7 +512,10 @@ class StoryTurnDomainService:
                 command_kind=command_kind,
                 plan=plan,
             ),
+            command_kind=command_kind,
             runtime_identity=resolved_runtime_identity,
+            target_artifact_id=target_artifact_id,
+            review_overlay_sections=review_overlay_sections,
         )
         if (
             resolved_runtime_identity is not None
@@ -803,7 +853,9 @@ class StoryTurnDomainService:
         pending_artifact_id: str | None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
-        chapter = self.require_current_chapter(request.session_id)
+        chapter = self._active_branch_chapter_view(
+            self.require_current_chapter(request.session_id)
+        )
         pending_artifact = self.resolve_pending_artifact(
             chapter=chapter,
             target_artifact_id=pending_artifact_id,
@@ -835,7 +887,12 @@ class StoryTurnDomainService:
             warnings=list(specialist_bundle.validation_findings),
         )
 
-    def accept_outline(self, *, request: LongformTurnRequest) -> LongformTurnResponse:
+    def accept_outline(
+        self,
+        *,
+        request: LongformTurnRequest,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
+    ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
         chapter = self.require_current_chapter(request.session_id)
         artifact = self.resolve_outline_artifact(
@@ -844,25 +901,52 @@ class StoryTurnDomainService:
         )
         if artifact is None:
             raise ValueError("No draft outline available to accept")
-        self._story_session_service.update_artifact(
-            artifact_id=artifact.artifact_id,
-            status=StoryArtifactStatus.ACCEPTED,
-        )
+        warnings: list[str] = []
+        accepted_artifact = artifact
+        if self._longform_chapter_runtime_service is not None:
+            (
+                normalized_text,
+                normalized_metadata,
+                normalization_warnings,
+            ) = self._longform_chapter_runtime_service.normalize_outline_artifact(
+                chapter=chapter,
+                artifact=artifact,
+            )
+            accepted_artifact = self._story_session_service.update_artifact(
+                artifact_id=artifact.artifact_id,
+                status=StoryArtifactStatus.ACCEPTED,
+                content_text=normalized_text,
+                metadata=normalized_metadata,
+            )
+            warnings.extend(normalization_warnings)
+        else:
+            accepted_artifact = self._story_session_service.update_artifact(
+                artifact_id=artifact.artifact_id,
+                status=StoryArtifactStatus.ACCEPTED,
+            )
         next_phase = LongformChapterPhase.SEGMENT_DRAFTING
+        accepted_outline_payload = (
+            self._longform_chapter_runtime_service.build_outline_payload(
+                artifact=accepted_artifact,
+                metadata=accepted_artifact.metadata,
+            )
+            if self._longform_chapter_runtime_service is not None
+            else {
+                "artifact_id": accepted_artifact.artifact_id,
+                "content_text": accepted_artifact.content_text,
+                "metadata": accepted_artifact.metadata,
+            }
+        )
         self._story_session_service.update_chapter_workspace(
             chapter_workspace_id=chapter.chapter_workspace_id,
             phase=next_phase,
             outline_draft_json=chapter.outline_draft_json
             or {
-                "artifact_id": artifact.artifact_id,
-                "content_text": artifact.content_text,
-                "metadata": artifact.metadata,
+                "artifact_id": accepted_artifact.artifact_id,
+                "content_text": accepted_artifact.content_text,
+                "metadata": accepted_artifact.metadata,
             },
-            accepted_outline_json={
-                "artifact_id": artifact.artifact_id,
-                "content_text": artifact.content_text,
-                "metadata": artifact.metadata,
-            },
+            accepted_outline_json=accepted_outline_payload,
         )
         self._story_session_service.update_session(
             session_id=session.session_id,
@@ -870,8 +954,15 @@ class StoryTurnDomainService:
         )
         self._projection_state_service.set_current_outline(
             chapter_workspace_id=chapter.chapter_workspace_id,
-            outline_text=artifact.content_text,
+            outline_text=accepted_artifact.content_text,
         )
+        if self._longform_chapter_runtime_service is not None:
+            updated_chapter = self.require_current_chapter(request.session_id)
+            self._longform_chapter_runtime_service.initialize_outline_progress(
+                identity=runtime_identity,
+                chapter=updated_chapter,
+                accepted_outline_json=accepted_outline_payload,
+            )
         self._story_session_service.commit()
         return LongformTurnResponse(
             session_id=session.session_id,
@@ -880,8 +971,9 @@ class StoryTurnDomainService:
             current_chapter_index=chapter.chapter_index,
             current_phase=next_phase,
             assistant_text="Accepted outline. Ready to draft the next segment.",
-            artifact_id=artifact.artifact_id,
-            artifact_kind=artifact.artifact_kind,
+            artifact_id=accepted_artifact.artifact_id,
+            artifact_kind=accepted_artifact.artifact_kind,
+            warnings=warnings,
         )
 
     async def accept_pending_segment(
@@ -902,15 +994,45 @@ class StoryTurnDomainService:
             artifact=artifact,
             patch=request.story_segment_metadata_patch,
         )
+        if self._longform_chapter_runtime_service is not None:
+            progress_before = self._longform_chapter_runtime_service.effective_outline_progress(
+                chapter=chapter,
+                identity=runtime_identity,
+            )
+            target_beat_id = str(accepted_metadata.get("target_beat_id") or "").strip()
+            if (
+                progress_before is not None
+                and not target_beat_id
+                and progress_before.current_beat_id is not None
+            ):
+                target_beat_id = progress_before.current_beat_id
+                accepted_metadata["target_beat_id"] = target_beat_id
+            current_beat_id = (
+                None if progress_before is None else progress_before.current_beat_id
+            )
+            if current_beat_id and target_beat_id and current_beat_id != target_beat_id:
+                raise LongformChapterRuntimeServiceError(
+                    "longform_outline_progress_target_beat_mismatch",
+                    f"{current_beat_id}:{target_beat_id}",
+                )
         accepted = self._story_session_service.update_artifact(
             artifact_id=artifact.artifact_id,
             status=StoryArtifactStatus.ACCEPTED,
             metadata=accepted_metadata,
         )
+        visible_artifact_ids = {
+            item.artifact_id
+            for item in self._story_session_service.build_chapter_snapshot(
+                session_id=session.session_id,
+                chapter_index=chapter.chapter_index,
+            ).artifacts
+        }
         for candidate in self._story_session_service.list_artifacts(
             chapter_workspace_id=chapter.chapter_workspace_id
         ):
             if candidate.artifact_id == accepted.artifact_id:
+                continue
+            if candidate.artifact_id not in visible_artifact_ids:
                 continue
             if candidate.artifact_kind != StoryArtifactKind.STORY_SEGMENT:
                 continue
@@ -920,12 +1042,35 @@ class StoryTurnDomainService:
                 artifact_id=candidate.artifact_id,
                 status=StoryArtifactStatus.SUPERSEDED,
             )
+        self._bind_accepted_artifact_to_origin_turn_if_visible(
+            session=session,
+            accepted_artifact=accepted,
+        )
+        self._settle_accepted_artifact_origin_turn(
+            session=session,
+            accepted_artifact=accepted,
+        )
+        accepted_segment_ids = [
+            item.artifact_id
+            for item in self._story_session_service.active_branch_accepted_story_segments(
+                session_id=session.session_id,
+                chapter_index=chapter.chapter_index,
+            )
+        ]
         updated_chapter = self._story_session_service.update_chapter_workspace(
             chapter_workspace_id=chapter.chapter_workspace_id,
             phase=LongformChapterPhase.SEGMENT_DRAFTING,
-            accepted_segment_ids=[*chapter.accepted_segment_ids, accepted.artifact_id],
             pending_segment_artifact_id=None,
+        ).model_copy(
+            update={"accepted_segment_ids": accepted_segment_ids}
         )
+        if self._longform_chapter_runtime_service is not None:
+            self._longform_chapter_runtime_service.advance_outline_progress_for_adoption(
+                identity=runtime_identity,
+                chapter_before_accept=chapter,
+                chapter_after_accept=updated_chapter,
+                accepted_artifact=accepted,
+            )
         updated_session = self._story_session_service.update_session(
             session_id=session.session_id,
             current_phase=LongformChapterPhase.SEGMENT_DRAFTING,
@@ -974,10 +1119,12 @@ class StoryTurnDomainService:
         chapter = self.require_current_chapter(request.session_id)
         if self._longform_chapter_runtime_service is not None:
             prepared_transition = (
-                self._longform_chapter_runtime_service.prepare_chapter_transition(
+                await self._longform_chapter_runtime_service.prepare_chapter_transition_with_summary(
                     identity=runtime_identity,
                     session=session,
                     chapter=chapter,
+                    model_id=request.model_id,
+                    provider_id=request.provider_id,
                 )
             )
             chapter = prepared_transition.chapter
@@ -1059,14 +1206,21 @@ class StoryTurnDomainService:
         return chapter
 
     def accepted_segments(self, chapter: ChapterWorkspace) -> list[StoryArtifact]:
-        return [
-            item
-            for item in self._story_session_service.list_artifacts(
-                chapter_workspace_id=chapter.chapter_workspace_id
-            )
-            if item.artifact_kind == StoryArtifactKind.STORY_SEGMENT
-            and item.status == StoryArtifactStatus.ACCEPTED
-        ]
+        return self._story_session_service.active_branch_accepted_segment_artifacts(
+            session_id=chapter.session_id,
+            chapter_index=chapter.chapter_index,
+            chapter=chapter,
+        )
+
+    def _active_branch_chapter_view(
+        self,
+        chapter: ChapterWorkspace,
+    ) -> ChapterWorkspace:
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=chapter.session_id,
+            chapter_index=chapter.chapter_index,
+        )
+        return snapshot.chapter
 
     def resolve_pending_artifact(
         self,
@@ -1077,7 +1231,17 @@ class StoryTurnDomainService:
         artifact_id = target_artifact_id or chapter.pending_segment_artifact_id
         if artifact_id is None:
             return None
-        return self._story_session_service.get_artifact(artifact_id)
+        artifact = self._story_session_service.get_artifact(artifact_id)
+        if artifact is None:
+            return None
+        visible_ids = {
+            item.artifact_id
+            for item in self._story_session_service.build_chapter_snapshot(
+                session_id=chapter.session_id,
+                chapter_index=chapter.chapter_index,
+            ).artifacts
+        }
+        return artifact if artifact.artifact_id in visible_ids else None
 
     def resolve_outline_artifact(
         self,
@@ -1129,7 +1293,7 @@ class StoryTurnDomainService:
             return
         self._block_consumer_state_service.mark_consumer_synced(
             session_id=session_id,
-            consumer_key=consumer_key,
+            consumer_key=cast(BlockConsumerKey, consumer_key),
         )
 
     @staticmethod
@@ -1144,6 +1308,55 @@ class StoryTurnDomainService:
         metadata.pop("foreshadow_status_updates", None)
         metadata.update(patch.to_artifact_metadata())
         return metadata
+
+    def _settle_accepted_artifact_origin_turn(
+        self,
+        *,
+        session: StorySession,
+        accepted_artifact: StoryArtifact,
+    ) -> None:
+        if self._runtime_identity_service is None:
+            return
+        turn_id = _optional_text(
+            dict(accepted_artifact.metadata).get("runtime_turn_id")
+            or dict(accepted_artifact.metadata).get("turn_id")
+        )
+        if turn_id is None:
+            return
+        self._runtime_identity_service.settle_adopted_output_turn_if_visible(
+            session_id=session.session_id,
+            turn_id=turn_id,
+            reason="accept_pending_segment_adopted_visible_output",
+        )
+
+    def _bind_accepted_artifact_to_origin_turn_if_visible(
+        self,
+        *,
+        session: StorySession,
+        accepted_artifact: StoryArtifact,
+    ) -> None:
+        if self._runtime_identity_service is None:
+            return
+        metadata = dict(accepted_artifact.metadata)
+        turn_id = _optional_text(metadata.get("runtime_turn_id"))
+        branch_head_id = _optional_text(metadata.get("runtime_branch_head_id"))
+        if turn_id is None or branch_head_id is None:
+            return
+        turn = self._runtime_identity_service.get_turn(turn_id)
+        if turn is None:
+            return
+        if (
+            turn.session_id != session.session_id
+            or turn.story_id != session.story_id
+            or turn.branch_head_id != branch_head_id
+        ):
+            return
+        self._runtime_identity_service.bind_turn_output_refs_if_visible(
+            session_id=session.session_id,
+            turn_id=turn_id,
+            artifact_id=accepted_artifact.artifact_id,
+            branch_head_id=branch_head_id,
+        )
 
     def _materialize_closed_scene_transcript_if_needed(
         self,
@@ -1268,6 +1481,26 @@ class StoryTurnDomainService:
         ):
             artifact_metadata["runtime_read_manifest_id"] = runtime_read_manifest_id
         if plan.output_kind == StoryArtifactKind.STORY_SEGMENT:
+            target_beat_id = ""
+            if pending_artifact is not None:
+                target_beat_id = str(
+                    dict(pending_artifact.metadata or {}).get("target_beat_id") or ""
+                ).strip()
+            if (
+                not target_beat_id
+                and self._longform_chapter_runtime_service is not None
+            ):
+                progress = self._longform_chapter_runtime_service.effective_outline_progress(
+                    chapter=chapter,
+                    identity=runtime_identity,
+                )
+                target_beat_id = (
+                    ""
+                    if progress is None or progress.current_beat_id is None
+                    else progress.current_beat_id
+                )
+            if target_beat_id:
+                artifact_metadata["target_beat_id"] = target_beat_id
             artifact_metadata.update(
                 specialist_bundle.story_segment_metadata.to_artifact_metadata()
             )
@@ -1289,11 +1522,46 @@ class StoryTurnDomainService:
         finalized_result = writing_result
 
         if artifact.artifact_kind == StoryArtifactKind.CHAPTER_OUTLINE:
-            outline_draft = {
-                "artifact_id": artifact.artifact_id,
-                "content_text": artifact.content_text,
-                "metadata": artifact.metadata,
-            }
+            if self._longform_chapter_runtime_service is not None:
+                (
+                    normalized_text,
+                    normalized_metadata,
+                    normalization_warnings,
+                ) = self._longform_chapter_runtime_service.normalize_outline_artifact(
+                    chapter=chapter,
+                    artifact=artifact,
+                )
+                artifact = self._story_session_service.update_artifact(
+                    artifact_id=artifact.artifact_id,
+                    content_text=normalized_text,
+                    metadata=normalized_metadata,
+                )
+                finalized_result = writing_result.model_copy(
+                    update={
+                        "output_text": normalized_text,
+                        "metadata_json": {
+                            **dict(writing_result.metadata_json),
+                            "outline_normalization_warnings": list(
+                                normalization_warnings
+                            ),
+                            "outline_normalization_source": normalized_metadata.get(
+                                "outline_normalization_source"
+                            ),
+                        },
+                    }
+                )
+                outline_draft = (
+                    self._longform_chapter_runtime_service.build_outline_payload(
+                        artifact=artifact,
+                        metadata=artifact.metadata,
+                    )
+                )
+            else:
+                outline_draft = {
+                    "artifact_id": artifact.artifact_id,
+                    "content_text": artifact.content_text,
+                    "metadata": artifact.metadata,
+                }
             next_phase = LongformChapterPhase.OUTLINE_REVIEW
             self._story_session_service.update_session(
                 session_id=session.session_id,
@@ -1327,14 +1595,14 @@ class StoryTurnDomainService:
             finalized_result = self._finalize_writing_result_refs(
                 request=request,
                 artifact=artifact,
-                result=writing_result,
+                result=finalized_result,
                 surface_refs=surface_refs,
             )
         else:
             finalized_result = self._finalize_writing_result_refs(
                 request=request,
                 artifact=artifact,
-                result=writing_result,
+                result=finalized_result,
                 surface_refs=None,
             )
 

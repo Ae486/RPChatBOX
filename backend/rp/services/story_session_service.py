@@ -44,6 +44,18 @@ _UNSET = object()
 class StorySessionService:
     """Database-backed true source for longform active-story MVP."""
 
+    _HIDDEN_TURN_VISIBILITY_STATES = {
+        "hidden",
+        "invalidated",
+        "hidden_by_rollback",
+        "discarded",
+        "deleted",
+    }
+    _STORY_SEGMENT_TURN_COMMAND_KINDS = {
+        "write_next_segment",
+        "rewrite_pending_segment",
+    }
+
     def __init__(self, session: Session):
         self._session = session
 
@@ -450,8 +462,21 @@ class StorySessionService:
             artifacts=artifacts,
             discussion_entries=discussion_entries,
         )
+        visible_accepted_segment_ids = [
+            artifact.artifact_id
+            for artifact in self.active_branch_accepted_segment_artifacts(
+                session_id=session_id,
+                chapter_index=chapter_index,
+                chapter=chapter,
+                artifacts=artifacts,
+                session_record=session,
+            )
+        ]
         if chapter.pending_segment_artifact_id in hidden_artifact_ids:
             chapter = chapter.model_copy(update={"pending_segment_artifact_id": None})
+        chapter = chapter.model_copy(
+            update={"accepted_segment_ids": visible_accepted_segment_ids}
+        )
         return ChapterWorkspaceSnapshot(
             session=session,
             chapter=chapter,
@@ -466,19 +491,19 @@ class StorySessionService:
         artifacts: list[StoryArtifact],
         discussion_entries: list[StoryDiscussionEntry],
     ) -> tuple[list[StoryArtifact], list[StoryDiscussionEntry], set[str]]:
-        visible_turn_ids = self._active_branch_visible_turn_ids(
-            session_record=session_record
-        )
-        artifact_turn_ids = self._artifact_turn_ids_by_output_ref(
-            session_id=session_record.session_id
-        )
+        visible_turns = {
+            turn.turn_id: turn
+            for turn in self._active_branch_visible_turn_records(
+                session_record=session_record
+            )
+        }
         visible_artifacts: list[StoryArtifact] = []
         hidden_artifact_ids: set[str] = set()
         for artifact in artifacts:
-            turn_id = self._artifact_runtime_turn_id(artifact) or artifact_turn_ids.get(
-                artifact.artifact_id
-            )
-            if turn_id is None or turn_id in visible_turn_ids:
+            if self._artifact_visible_in_active_branch(
+                artifact=artifact,
+                visible_turns=visible_turns,
+            ):
                 visible_artifacts.append(artifact)
                 continue
             hidden_artifact_ids.add(artifact.artifact_id)
@@ -493,28 +518,154 @@ class StorySessionService:
         ]
         return visible_artifacts, visible_discussion_entries, hidden_artifact_ids
 
+    def active_branch_accepted_story_segments(
+        self,
+        *,
+        session_id: str,
+        chapter_index: int,
+        chapter: ChapterWorkspace | None = None,
+        artifacts: list[StoryArtifact] | None = None,
+        session_record: StorySession | StorySessionRecord | None = None,
+    ) -> list[StoryArtifact]:
+        resolved_chapter = chapter or self.get_chapter_by_index(
+            session_id=session_id,
+            chapter_index=chapter_index,
+        )
+        if resolved_chapter is None:
+            return []
+        resolved_artifacts = artifacts
+        resolved_session_record = self._coerce_session_record(
+            session_id=session_id,
+            session=session_record,
+        )
+        if resolved_artifacts is None:
+            all_artifacts = self.list_artifacts(
+                chapter_workspace_id=resolved_chapter.chapter_workspace_id
+            )
+            resolved_artifacts, _, _ = self._filter_active_branch_snapshot_items(
+                session_record=resolved_session_record,
+                artifacts=all_artifacts,
+                discussion_entries=[],
+            )
+        artifact_by_id = {artifact.artifact_id: artifact for artifact in resolved_artifacts}
+        accepted_segments: list[StoryArtifact] = []
+        for turn in self._active_branch_visible_turn_records(
+            session_record=resolved_session_record
+        ):
+            if turn.status != "settled":
+                continue
+            if (
+                str(turn.command_kind or "").strip()
+                not in self._STORY_SEGMENT_TURN_COMMAND_KINDS
+            ):
+                continue
+            for artifact_id in self._turn_output_artifact_ids(turn):
+                artifact = artifact_by_id.get(artifact_id)
+                if artifact is None:
+                    continue
+                if artifact.chapter_workspace_id != resolved_chapter.chapter_workspace_id:
+                    continue
+                if artifact.artifact_kind != StoryArtifactKind.STORY_SEGMENT:
+                    continue
+                if artifact.status != StoryArtifactStatus.ACCEPTED:
+                    continue
+                if not self._story_segment_artifact_matches_turn(
+                    artifact=artifact,
+                    turn=turn,
+                ):
+                    continue
+                accepted_segments.append(artifact)
+                break
+        return accepted_segments
+
+    def active_branch_accepted_segment_artifacts(
+        self,
+        *,
+        session_id: str,
+        chapter_index: int,
+        chapter: ChapterWorkspace | None = None,
+        artifacts: list[StoryArtifact] | None = None,
+        session_record: StorySession | StorySessionRecord | None = None,
+    ) -> list[StoryArtifact]:
+        return self.active_branch_accepted_story_segments(
+            session_id=session_id,
+            chapter_index=chapter_index,
+            chapter=chapter,
+            artifacts=artifacts,
+            session_record=session_record,
+        )
+
+    def _artifact_visible_in_active_branch(
+        self,
+        *,
+        artifact: StoryArtifact,
+        visible_turns: dict[str, StoryTurnRecord],
+    ) -> bool:
+        if artifact.artifact_kind == StoryArtifactKind.STORY_SEGMENT:
+            turn_id = self._artifact_runtime_turn_id(artifact)
+            branch_head_id = self._artifact_runtime_branch_head_id(artifact)
+            if turn_id is None or branch_head_id is None:
+                return False
+            turn = visible_turns.get(turn_id)
+            return (
+                turn is not None
+                and turn.branch_head_id == branch_head_id
+                and self._story_segment_artifact_matches_turn(
+                    artifact=artifact,
+                    turn=turn,
+                    require_output_ref=False,
+                )
+            )
+
+        turn_id = self._artifact_runtime_turn_id(artifact)
+        if turn_id is None:
+            return True
+        turn = visible_turns.get(turn_id)
+        if turn is None:
+            return False
+        branch_head_id = self._artifact_runtime_branch_head_id(artifact)
+        return branch_head_id is None or branch_head_id == turn.branch_head_id
+
     def _active_branch_visible_turn_ids(
         self,
         *,
         session_record: StorySessionRecord,
     ) -> set[str]:
+        return {
+            turn.turn_id
+            for turn in self._active_branch_visible_turn_records(
+                session_record=session_record
+            )
+        }
+
+    def _active_branch_visible_turn_id_order(
+        self,
+        *,
+        session_record: StorySessionRecord,
+    ) -> list[str]:
+        return [
+            turn.turn_id
+            for turn in self._active_branch_visible_turn_records(
+                session_record=session_record
+            )
+        ]
+
+    def _active_branch_visible_turn_records(
+        self,
+        *,
+        session_record: StorySessionRecord,
+    ) -> list[StoryTurnRecord]:
         branch_id = str(session_record.active_branch_head_id or "").strip()
         if not branch_id:
-            return set()
-        visible_turn_ids: set[str] = set()
+            return []
         cutoff_turn_id: str | None = None
         seen_branch_ids: set[str] = set()
+        branch_cutoffs: list[tuple[str, str | None]] = []
         branch = self._session.get(BranchHeadRecord, branch_id)
         while branch is not None and branch.branch_head_id not in seen_branch_ids:
             seen_branch_ids.add(branch.branch_head_id)
             branch_cutoff = cutoff_turn_id or branch.head_turn_id
-            visible_turn_ids.update(
-                self._visible_turn_ids_through_cutoff(
-                    session_id=session_record.session_id,
-                    branch_head_id=branch.branch_head_id,
-                    cutoff_turn_id=branch_cutoff,
-                )
-            )
+            branch_cutoffs.append((branch.branch_head_id, branch_cutoff))
             cutoff_turn_id = branch.forked_from_turn_id
             parent_branch_id = str(branch.parent_branch_head_id or "").strip()
             branch = (
@@ -522,18 +673,31 @@ class StorySessionService:
                 if parent_branch_id
                 else None
             )
-        return visible_turn_ids
+        visible_turns: list[StoryTurnRecord] = []
+        seen_turn_ids: set[str] = set()
+        for branch_head_id, cutoff in reversed(branch_cutoffs):
+            for turn in self._visible_turns_through_cutoff(
+                session_id=session_record.session_id,
+                branch_head_id=branch_head_id,
+                cutoff_turn_id=cutoff,
+            ):
+                turn_id = turn.turn_id
+                if turn_id in seen_turn_ids:
+                    continue
+                seen_turn_ids.add(turn_id)
+                visible_turns.append(turn)
+        return visible_turns
 
-    def _visible_turn_ids_through_cutoff(
+    def _visible_turns_through_cutoff(
         self,
         *,
         session_id: str,
         branch_head_id: str,
         cutoff_turn_id: str | None,
-    ) -> set[str]:
+    ) -> list[StoryTurnRecord]:
         normalized_cutoff = str(cutoff_turn_id or "").strip()
         if not normalized_cutoff:
-            return set()
+            return []
         stmt = (
             select(StoryTurnRecord)
             .where(StoryTurnRecord.session_id == session_id)
@@ -541,41 +705,81 @@ class StorySessionService:
             .order_by(asc(StoryTurnRecord.created_at))
             .order_by(asc(StoryTurnRecord.turn_id))
         )
-        visible_turn_ids: set[str] = set()
+        visible_turns: list[StoryTurnRecord] = []
         for turn in self._session.exec(stmt).all():
-            if str(turn.visibility_state or "").strip() not in {
-                "hidden",
-                "invalidated",
-                "hidden_by_rollback",
-            }:
-                visible_turn_ids.add(turn.turn_id)
+            if (
+                str(turn.visibility_state or "").strip()
+                not in self._HIDDEN_TURN_VISIBILITY_STATES
+            ):
+                visible_turns.append(turn)
             if turn.turn_id == normalized_cutoff:
                 break
-        return visible_turn_ids
-
-    def _artifact_turn_ids_by_output_ref(self, *, session_id: str) -> dict[str, str]:
-        stmt = select(StoryTurnRecord).where(StoryTurnRecord.session_id == session_id)
-        result: dict[str, str] = {}
-        for turn in self._session.exec(stmt).all():
-            for output_ref in (turn.visible_output_ref, turn.selected_output_ref):
-                artifact_id = str(output_ref or "").strip()
-                if artifact_id:
-                    result[artifact_id] = turn.turn_id
-        return result
+        return visible_turns
 
     @staticmethod
     def _artifact_runtime_turn_id(artifact: StoryArtifact) -> str | None:
         metadata = dict(artifact.metadata or {})
-        for key in ("runtime_turn_id", "turn_id"):
-            turn_id = str(metadata.get(key) or "").strip()
-            if turn_id:
-                return turn_id
-        return None
+        turn_id = str(metadata.get("runtime_turn_id") or "").strip()
+        return turn_id or None
+
+    @staticmethod
+    def _artifact_runtime_branch_head_id(artifact: StoryArtifact) -> str | None:
+        metadata = dict(artifact.metadata or {})
+        branch_head_id = str(metadata.get("runtime_branch_head_id") or "").strip()
+        return branch_head_id or None
+
+    @staticmethod
+    def _turn_output_artifact_ids(turn: StoryTurnRecord) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for output_ref in (turn.selected_output_ref, turn.visible_output_ref):
+            normalized = str(output_ref or "").strip()
+            if not normalized:
+                continue
+            candidates = [normalized]
+            if normalized.startswith("artifact:"):
+                stripped = normalized.removeprefix("artifact:").strip()
+                if stripped:
+                    candidates.append(stripped)
+            for candidate in candidates:
+                if candidate not in seen:
+                    seen.add(candidate)
+                    result.append(candidate)
+        return result
+
+    def _story_segment_artifact_matches_turn(
+        self,
+        *,
+        artifact: StoryArtifact,
+        turn: StoryTurnRecord,
+        require_output_ref: bool = True,
+    ) -> bool:
+        if self._artifact_runtime_turn_id(artifact) != turn.turn_id:
+            return False
+        if self._artifact_runtime_branch_head_id(artifact) != turn.branch_head_id:
+            return False
+        return (
+            not require_output_ref
+            or artifact.artifact_id in self._turn_output_artifact_ids(turn)
+        )
 
     def _require_session_record(self, session_id: str) -> StorySessionRecord:
         record = self._session.get(StorySessionRecord, session_id)
         if record is None:
             raise ValueError(f"StorySession not found: {session_id}")
+        return record
+
+    def _coerce_session_record(
+        self,
+        *,
+        session_id: str,
+        session: StorySession | StorySessionRecord | None,
+    ) -> StorySessionRecord:
+        if isinstance(session, StorySessionRecord):
+            return session
+        record = self._require_session_record(session_id)
+        if session is not None and session.session_id != record.session_id:
+            raise ValueError(f"StorySession mismatch: {session.session_id}")
         return record
 
     def _require_chapter_record(

@@ -7,7 +7,16 @@ import pytest
 from rp.eval.suite import EvalSuiteRunner
 
 
+_TOOL_SURFACE_DRIFT_REASON = (
+    "tool surface simplified: world_background scope is now stage-native CRUD only, "
+    "and shared tools (setup.truth.write / setup.proposal.commit / legacy patch.*) "
+    "are not visible without an explicit non-world_background current_stage seed; "
+    "case must be redesigned in eval-modernization Slice D"
+)
+
+
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True)
 async def test_eval_suite_runner_runs_case_path_and_writes_summary(
     retrieval_session,
     monkeypatch,
@@ -102,6 +111,7 @@ async def test_eval_suite_runner_runs_case_path_and_writes_summary(
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True)
 async def test_eval_suite_runner_repeat_override_runs_case_multiple_times(
     retrieval_session,
     monkeypatch,

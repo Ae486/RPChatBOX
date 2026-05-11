@@ -1,4 +1,5 @@
 """Finish, recovery, reflection, and completion policies for RP runtime execution."""
+
 from __future__ import annotations
 
 import json
@@ -34,7 +35,9 @@ class FinishPolicy:
         return (
             "?" in stripped
             or "？" in stripped
-            or lowered.startswith(("what ", "which ", "could you", "can you", "do you", "would you"))
+            or lowered.startswith(
+                ("what ", "which ", "could you", "can you", "do you", "would you")
+            )
             or stripped.startswith(("请问", "你更希望", "你想要", "能否"))
         )
 
@@ -48,7 +51,9 @@ class FinishPolicy:
 
     @classmethod
     def completed_text_finish_reason(cls, text: str) -> str:
-        return "awaiting_user_input" if cls.looks_like_question(text) else "completed_text"
+        return (
+            "awaiting_user_input" if cls.looks_like_question(text) else "completed_text"
+        )
 
 
 class ToolFailureClassifier:
@@ -67,7 +72,10 @@ class ToolFailureClassifier:
         details = raw_details if isinstance(raw_details, dict) else {}
 
         if result.error_code == "SCHEMA_VALIDATION_FAILED":
-            if details.get("ask_user") is True or details.get("repair_strategy") == "ask_user":
+            if (
+                details.get("ask_user") is True
+                or details.get("repair_strategy") == "ask_user"
+            ):
                 return "ask_user"
             return "auto_repair"
 
@@ -152,7 +160,9 @@ class ToolFailureClassifier:
                 continue
             loc = item.get("loc")
             if isinstance(loc, (list, tuple)):
-                field = ".".join(str(part) for part in loc if part not in {"body", "arguments"})
+                field = ".".join(
+                    str(part) for part in loc if part not in {"body", "arguments"}
+                )
             elif loc:
                 field = str(loc)
             else:
@@ -169,7 +179,9 @@ class ToolFailureClassifier:
             message=str(payload.get("message") or result.content_text),
             error_code=str(payload.get("code") or result.error_code or ""),
             tool_name=result.tool_name,
-            details=payload.get("details") if isinstance(payload.get("details"), dict) else {},
+            details=payload.get("details")
+            if isinstance(payload.get("details"), dict)
+            else {},
         )
 
 
@@ -210,7 +222,9 @@ class RepairDecisionPolicy:
             return {
                 "action": "finalize_failure",
                 "finish_reason": "tool_error_unrecoverable",
-                "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
+                "last_failure": failure_state.model_dump(
+                    mode="json", exclude_none=True
+                ),
                 "error": {
                     "message": failure_state.message,
                     "type": "tool_error_unrecoverable",
@@ -224,7 +238,9 @@ class RepairDecisionPolicy:
                 return {
                     "action": "finalize_failure",
                     "finish_reason": "tool_schema_validation_failed",
-                    "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
+                    "last_failure": failure_state.model_dump(
+                        mode="json", exclude_none=True
+                    ),
                     "error": {
                         "message": "Setup tool arguments failed validation more than once",
                         "type": "tool_schema_validation_failed",
@@ -244,8 +260,12 @@ class RepairDecisionPolicy:
                 "schema_retry_count": schema_retry_count + 1,
                 "warning": "tool_schema_validation_retry",
                 "warnings": warnings,
-                "pending_obligation": obligation.model_dump(mode="json", exclude_none=True),
-                "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
+                "pending_obligation": obligation.model_dump(
+                    mode="json", exclude_none=True
+                ),
+                "last_failure": failure_state.model_dump(
+                    mode="json", exclude_none=True
+                ),
                 "reflection_ticket": None,
                 "completion_guard": None,
             }
@@ -264,8 +284,12 @@ class RepairDecisionPolicy:
                 "action": "continue",
                 "warning": "tool_failure_requires_user_input",
                 "warnings": warnings,
-                "pending_obligation": obligation.model_dump(mode="json", exclude_none=True),
-                "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
+                "pending_obligation": obligation.model_dump(
+                    mode="json", exclude_none=True
+                ),
+                "last_failure": failure_state.model_dump(
+                    mode="json", exclude_none=True
+                ),
                 "reflection_ticket": None,
                 "completion_guard": None,
             }
@@ -283,14 +307,36 @@ class RepairDecisionPolicy:
                 "action": "continue",
                 "warning": "commit_reflection_required",
                 "warnings": warnings,
-                "pending_obligation": obligation.model_dump(mode="json", exclude_none=True),
-                "last_failure": failure_state.model_dump(mode="json", exclude_none=True),
+                "pending_obligation": obligation.model_dump(
+                    mode="json", exclude_none=True
+                ),
+                "last_failure": failure_state.model_dump(
+                    mode="json", exclude_none=True
+                ),
                 "reflection_ticket": SetupReflectionTicket(
                     trigger="before_commit_proposal",
                     summary=failure_state.message,
                     required_decision="block_commit",
                 ).model_dump(mode="json", exclude_none=True),
                 "completion_guard": None,
+            }
+
+        if repeated_failure:
+            return {
+                "action": "finalize_failure",
+                "finish_reason": "tool_recovery_budget_exhausted",
+                "warning": "repeated_tool_failure",
+                "warnings": ["repeated_tool_failure"],
+                "last_failure": failure_state.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                ),
+                "error": {
+                    "message": "Recoverable setup tool failure repeated without progress",
+                    "type": "tool_recovery_budget_exhausted",
+                    "tool_name": failure.tool_name,
+                    "error_code": failure.error_code,
+                },
             }
 
         obligation = SetupPendingObligation(
@@ -345,6 +391,7 @@ class ActionDecisionPolicy:
 
     _READ_DRAFT_REFS_TOOL = "setup.read.draft_refs"
     _READ_DRAFT_REFS_QUALIFIED_TOOL = "rp_setup__setup.read.draft_refs"
+    _READ_DRAFT_REFS_MODEL_TOOL = "rp_setup__setup_read_draft_refs"
     _EXACT_DETAIL_MARKERS = (
         "exact",
         "full",
@@ -432,7 +479,9 @@ class ActionDecisionPolicy:
             return None
 
         read_tools = [name for name in tool_names if cls._is_draft_ref_read_tool(name)]
-        non_read_tools = [name for name in tool_names if not cls._is_draft_ref_read_tool(name)]
+        non_read_tools = [
+            name for name in tool_names if not cls._is_draft_ref_read_tool(name)
+        ]
         if read_tools and not non_read_tools:
             return None
 
@@ -462,11 +511,15 @@ class ActionDecisionPolicy:
         return refs[:6]
 
     @classmethod
-    def _prompt_requests_exact_draft_detail(cls, user_prompt: str, *, refs: list[str]) -> bool:
+    def _prompt_requests_exact_draft_detail(
+        cls, user_prompt: str, *, refs: list[str]
+    ) -> bool:
         lowered = str(user_prompt or "").strip().lower()
         if not lowered:
             return False
-        has_exact_marker = any(marker in lowered for marker in cls._EXACT_DETAIL_MARKERS)
+        has_exact_marker = any(
+            marker in lowered for marker in cls._EXACT_DETAIL_MARKERS
+        )
         if not has_exact_marker:
             return False
         if any(marker in lowered for marker in cls._DRAFT_DETAIL_MARKERS):
@@ -503,7 +556,11 @@ class ActionDecisionPolicy:
 
     @staticmethod
     def _observed_draft_refs(result: RuntimeToolResult) -> set[str]:
-        payload = result.structured_payload if isinstance(result.structured_payload, dict) else {}
+        payload = (
+            result.structured_payload
+            if isinstance(result.structured_payload, dict)
+            else {}
+        )
         candidates: list[Any] = []
 
         def append_payload_candidates(root: dict[str, Any]) -> None:
@@ -526,7 +583,11 @@ class ActionDecisionPolicy:
             items = candidate.get("items") if isinstance(candidate, dict) else None
             if isinstance(items, list):
                 for item in items:
-                    if isinstance(item, dict) and item.get("found") is not False and item.get("ref"):
+                    if (
+                        isinstance(item, dict)
+                        and item.get("found") is not False
+                        and item.get("ref")
+                    ):
                         refs.add(str(item["ref"]))
             for key in ("refs", "draft_refs"):
                 raw_refs = candidate.get(key) if isinstance(candidate, dict) else None
@@ -536,7 +597,12 @@ class ActionDecisionPolicy:
 
     @classmethod
     def _is_draft_ref_read_tool(cls, tool_name: str) -> bool:
-        return str(tool_name or "").endswith(cls._READ_DRAFT_REFS_TOOL)
+        name = str(tool_name or "")
+        return name in {
+            cls._READ_DRAFT_REFS_TOOL,
+            cls._READ_DRAFT_REFS_QUALIFIED_TOOL,
+            cls._READ_DRAFT_REFS_MODEL_TOOL,
+        }
 
 
 class CompletionGuardPolicy:
@@ -608,7 +674,9 @@ class CompletionGuardPolicy:
                 )
                 return {
                     "allow_finalize": False,
-                    "completion_guard": guard.model_dump(mode="json", exclude_none=True),
+                    "completion_guard": guard.model_dump(
+                        mode="json", exclude_none=True
+                    ),
                     "reflection_ticket": SetupReflectionTicket(
                         trigger="tool_failure",
                         summary=(
@@ -627,7 +695,9 @@ class CompletionGuardPolicy:
                 )
                 return {
                     "allow_finalize": False,
-                    "completion_guard": guard.model_dump(mode="json", exclude_none=True),
+                    "completion_guard": guard.model_dump(
+                        mode="json", exclude_none=True
+                    ),
                     "reflection_ticket": SetupReflectionTicket(
                         trigger="tool_failure",
                         summary="Assistant output was empty while the turn was still active.",
@@ -664,7 +734,9 @@ class CompletionGuardPolicy:
                 return {
                     "allow_finalize": True,
                     "finish_reason": finish_reason,
-                    "completion_guard": guard.model_dump(mode="json", exclude_none=True),
+                    "completion_guard": guard.model_dump(
+                        mode="json", exclude_none=True
+                    ),
                     "pending_obligation": None,
                     "reflection_ticket": None,
                 }
@@ -711,7 +783,9 @@ class CompletionGuardPolicy:
                 return {
                     "allow_finalize": True,
                     "finish_reason": "awaiting_user_input",
-                    "completion_guard": guard.model_dump(mode="json", exclude_none=True),
+                    "completion_guard": guard.model_dump(
+                        mode="json", exclude_none=True
+                    ),
                     "pending_obligation": None,
                     "reflection_ticket": None,
                 }
@@ -814,7 +888,10 @@ class ReflectionTriggerPolicy:
             return {"action": "continue", "warning": "reflection_retry_required"}
 
         if reflection_ticket.required_decision == "ask_user":
-            return {"action": "continue", "warning": "reflection_requires_user_question"}
+            return {
+                "action": "continue",
+                "warning": "reflection_requires_user_question",
+            }
 
         if reflection_ticket.required_decision == "block_commit":
             return {"action": "continue", "warning": "reflection_blocked_commit"}
@@ -827,7 +904,9 @@ class ReflectionTriggerPolicy:
         context_bundle: dict[str, Any],
         cognitive_state_summary: SetupCognitiveStateSummary | None = None,
     ) -> dict[str, Any] | None:
-        blocking_open_questions = int(context_bundle.get("blocking_open_question_count") or 0)
+        blocking_open_questions = int(
+            context_bundle.get("blocking_open_question_count") or 0
+        )
         if blocking_open_questions > 0:
             return SetupReflectionTicket(
                 trigger="before_commit_proposal",
@@ -861,9 +940,8 @@ class ReflectionTriggerPolicy:
                 required_decision="block_commit",
             ).model_dump(mode="json", exclude_none=True)
 
-        if (
-            cognitive_state_summary is not None
-            and bool(cognitive_state_summary.remaining_open_issues)
+        if cognitive_state_summary is not None and bool(
+            cognitive_state_summary.remaining_open_issues
         ):
             return SetupReflectionTicket(
                 trigger="before_commit_proposal",

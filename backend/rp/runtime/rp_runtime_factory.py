@@ -680,6 +680,7 @@ class RpRuntimeFactory:
         story_runtime_migration_service = StoryRuntimeMigrationService(
             debug_query_service=story_runtime_debug_query_service,
         )
+        runtime_profile_snapshot_service = RuntimeProfileSnapshotService(self._session)
         return StoryRuntimeController(
             story_session_service=story_session_service,
             story_activation_service=story_activation_service,
@@ -694,8 +695,10 @@ class RpRuntimeFactory:
             recall_scene_transcript_ingestion_service=(
                 RecallSceneTranscriptIngestionService(self._session)
             ),
-            runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
-                self._session
+            runtime_profile_snapshot_service=runtime_profile_snapshot_service,
+            story_runtime_identity_service=StoryRuntimeIdentityService(
+                self._session,
+                runtime_profile_snapshot_service=runtime_profile_snapshot_service,
             ),
             runtime_config_control_service=RuntimeConfigControlService(self._session),
             story_runtime_debug_query_service=story_runtime_debug_query_service,

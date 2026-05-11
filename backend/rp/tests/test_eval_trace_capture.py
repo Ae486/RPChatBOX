@@ -142,3 +142,82 @@ def test_build_setup_trace_emits_cognitive_artifacts_and_attributes():
     assert "loop_trace" in artifact_kinds
     assert "tool_sequence" in artifact_kinds
     assert "activation_check" in artifact_kinds
+
+
+def test_build_setup_trace_propagates_skill_pack_name_into_root_attributes():
+    request = SetupAgentTurnRequest.model_validate(
+        {
+            "workspace_id": "workspace-trace-skillpack",
+            "model_id": "model-trace-skillpack",
+            "provider_id": "provider-trace-skillpack",
+            "target_step": "foundation",
+            "target_stage": "character_design",
+            "history": [],
+            "user_prompt": "Help me deepen the protagonist motivation.",
+        }
+    )
+    runtime_result = RpAgentTurnResult(
+        status="completed",
+        finish_reason="completed_text",
+        assistant_text="ack",
+        structured_payload={"skill_pack_name": "character-design.v1"},
+    )
+
+    trace, _ = build_setup_trace(
+        trace_id="trace-skillpack",
+        run_id="run-skillpack",
+        case_id="case-skillpack",
+        story_id="story-trace-skillpack",
+        request=request,
+        runtime_result=runtime_result,
+        runtime_events=[],
+        workspace_before=None,
+        workspace_after=None,
+        runtime_debug=None,
+        activation_check=None,
+        capture_tool_sequence=False,
+        stream_mode=False,
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+    )
+
+    assert trace.spans[0].attributes["skill_pack_name"] == "character-design.v1"
+
+
+def test_build_setup_trace_skill_pack_name_is_none_when_runtime_result_omits_it():
+    request = SetupAgentTurnRequest.model_validate(
+        {
+            "workspace_id": "workspace-trace-skillpack-none",
+            "model_id": "model-trace-skillpack-none",
+            "provider_id": "provider-trace-skillpack-none",
+            "target_step": "story_config",
+            "history": [],
+            "user_prompt": "Continue setup.",
+        }
+    )
+    runtime_result = RpAgentTurnResult(
+        status="completed",
+        finish_reason="completed_text",
+        assistant_text="ack",
+        structured_payload={},
+    )
+
+    trace, _ = build_setup_trace(
+        trace_id="trace-skillpack-none",
+        run_id="run-skillpack-none",
+        case_id="case-skillpack-none",
+        story_id="story-trace-skillpack-none",
+        request=request,
+        runtime_result=runtime_result,
+        runtime_events=[],
+        workspace_before=None,
+        workspace_after=None,
+        runtime_debug=None,
+        activation_check=None,
+        capture_tool_sequence=False,
+        stream_mode=False,
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+    )
+
+    assert trace.spans[0].attributes["skill_pack_name"] is None

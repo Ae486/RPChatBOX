@@ -1,4 +1,5 @@
 """Unit tests for setup cognitive runtime policies."""
+
 from __future__ import annotations
 
 from rp.agent_runtime.contracts import (
@@ -187,6 +188,22 @@ def test_action_decision_policy_allows_read_only_batch_for_required_read():
     assert violation is None
 
 
+def test_action_decision_policy_allows_provider_safe_read_tool_name():
+    expectation = SetupActionExpectation(
+        expectation_type="read_draft_refs",
+        reason="compact_recovery_requires_draft_ref_read",
+        required_tools=["setup.read.draft_refs"],
+        draft_refs=["foundation:magic-law"],
+    )
+
+    violation = ActionDecisionPolicy.tool_batch_violation(
+        expectation=expectation,
+        tool_names=["rp_setup__setup_read_draft_refs"],
+    )
+
+    assert violation is None
+
+
 def test_action_decision_policy_blocks_mixed_read_and_mutation_batch():
     expectation = SetupActionExpectation(
         expectation_type="read_draft_refs",
@@ -308,7 +325,9 @@ def test_repair_decision_policy_returns_ask_user_obligation():
     )
 
     assert decision["action"] == "continue"
-    assert decision["pending_obligation"]["obligation_type"] == "ask_user_for_missing_info"
+    assert (
+        decision["pending_obligation"]["obligation_type"] == "ask_user_for_missing_info"
+    )
     assert decision["last_failure"]["failure_category"] == "ask_user"
 
 
@@ -518,10 +537,12 @@ def test_completion_guard_blocks_repeated_question_without_progress():
     )
 
     assert decision["allow_finalize"] is False
-    assert decision["completion_guard"]["reason"] == "repeated_question_without_progress"
+    assert (
+        decision["completion_guard"]["reason"] == "repeated_question_without_progress"
+    )
 
 
-def test_repair_decision_policy_marks_repeated_tool_failure_warning():
+def test_repair_decision_policy_repeated_recoverable_failure_exhausts_budget():
     result = RuntimeToolResult(
         call_id="call_truth_write",
         tool_name="rp_setup__setup.truth.write",
@@ -557,4 +578,6 @@ def test_repair_decision_policy_marks_repeated_tool_failure_warning():
         round_no=1,
     )
 
-    assert "repeated_tool_failure" in decision["warnings"]
+    assert decision["action"] == "finalize_failure"
+    assert decision["finish_reason"] == "tool_recovery_budget_exhausted"
+    assert decision["error"]["type"] == "tool_recovery_budget_exhausted"

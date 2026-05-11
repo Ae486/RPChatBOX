@@ -33,6 +33,7 @@ from rp.models.story_runtime import (
 )
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.services.story_runtime_identity_service import (
     StoryRuntimeIdentityService,
@@ -117,6 +118,82 @@ def _branch_receipts(
             .order_by(asc(BranchControlReceiptRecord.created_at))
         ).all()
     )
+
+
+def _seed_hidden_adopted_pending_turn_after_rollback(
+    retrieval_session,
+    *,
+    story_id: str,
+):
+    story_session, snapshot, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id=story_id,
+        count=1,
+    )
+    target_identity = identities[0]
+    story_session_service = StorySessionService(retrieval_session)
+    chapter = story_session_service.create_chapter_workspace(
+        session_id=story_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.SEGMENT_DRAFTING,
+    )
+    hidden_identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="write-next-segment",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    hidden_artifact = story_session_service.create_artifact(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="Accepted future segment hidden by rollback.",
+        metadata={
+            "runtime_story_id": hidden_identity.story_id,
+            "runtime_session_id": hidden_identity.session_id,
+            "runtime_branch_head_id": hidden_identity.branch_head_id,
+            "runtime_turn_id": hidden_identity.turn_id,
+            "runtime_profile_snapshot_id": (
+                hidden_identity.runtime_profile_snapshot_id
+            ),
+        },
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        accepted_segment_ids=[hidden_artifact.artifact_id],
+    )
+    service.update_turn_status(
+        turn_id=hidden_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+        visible_output_ref=hidden_artifact.artifact_id,
+        selected_output_ref=hidden_artifact.artifact_id,
+    )
+    workflow_job_service = RuntimeWorkflowJobService(retrieval_session)
+    workflow_job_service.ensure_creation_time_obligations(
+        identity=hidden_identity,
+        metadata={"artifact_id": hidden_artifact.artifact_id},
+    )
+
+    service.rollback_to_turn(
+        session_id=story_session.session_id,
+        target_turn_id=target_identity.turn_id,
+        actor="user",
+    )
+    hidden_turn = retrieval_session.get(StoryTurnRecord, hidden_identity.turn_id)
+    branch = retrieval_session.get(BranchHeadRecord, hidden_identity.branch_head_id)
+    assert hidden_turn is not None
+    assert hidden_turn.status == StoryTurnStatus.POST_WRITE_PENDING.value
+    assert hidden_turn.visibility_state == "hidden_by_rollback"
+    assert branch is not None
+    assert branch.head_turn_id == target_identity.turn_id
+    return {
+        "story_session": story_session,
+        "service": service,
+        "target_identity": target_identity,
+        "hidden_identity": hidden_identity,
+        "workflow_job_service": workflow_job_service,
+    }
 
 
 def test_ensure_default_branch_creates_one_deterministic_row(retrieval_session):
@@ -434,7 +511,7 @@ def test_create_branch_from_settled_turn_writes_receipt_and_switches_active_bran
     assert receipt.branch_head_id == receipt.to_branch_head_id
     assert receipt.from_branch_head_id == base_identity.branch_head_id
     assert receipt.fork_origin_turn_id == origin_identity.turn_id
-    assert receipt.fork_base_turn_id == base_identity.turn_id
+    assert receipt.fork_base_turn_id == origin_identity.turn_id
     assert receipt.source_ref_ids == [f"turn:{origin_identity.turn_id}"]
     assert len(receipt_records) == 1
     assert receipt_records[0].receipt_id == receipt.receipt_id
@@ -445,10 +522,10 @@ def test_create_branch_from_settled_turn_writes_receipt_and_switches_active_bran
     assert created_branch.branch_name == "alternate-future"
     assert created_branch.parent_branch_head_id == base_identity.branch_head_id
     assert created_branch.fork_origin_turn_id == origin_identity.turn_id
-    assert created_branch.fork_base_turn_id == base_identity.turn_id
-    assert created_branch.forked_from_turn_id == base_identity.turn_id
-    assert created_branch.head_turn_id == base_identity.turn_id
-    assert created_branch.last_settled_turn_id == base_identity.turn_id
+    assert created_branch.fork_base_turn_id == origin_identity.turn_id
+    assert created_branch.forked_from_turn_id == origin_identity.turn_id
+    assert created_branch.head_turn_id == origin_identity.turn_id
+    assert created_branch.last_settled_turn_id == origin_identity.turn_id
     assert created_branch.status == BranchHeadStatus.ACTIVE.value
     assert created_branch.visibility_state == BranchVisibilityState.VISIBLE.value
     assert created_branch.created_by_control_receipt_id == receipt.receipt_id
@@ -464,6 +541,174 @@ def test_create_branch_from_settled_turn_writes_receipt_and_switches_active_bran
     assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
         turn_count_before + 1
     )
+
+
+def test_create_branch_from_adopted_visible_output_settles_origin_without_rewinding_head(
+    retrieval_session,
+):
+    story_session, snapshot, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-branch-adopted-origin",
+        count=1,
+    )
+    story_session_service = StorySessionService(retrieval_session)
+    chapter = story_session_service.create_chapter_workspace(
+        session_id=story_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.SEGMENT_DRAFTING,
+    )
+    origin_identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="write-next-segment",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    origin_artifact = story_session_service.create_artifact(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="Accepted origin segment.",
+        metadata={
+            "runtime_story_id": origin_identity.story_id,
+            "runtime_session_id": origin_identity.session_id,
+            "runtime_branch_head_id": origin_identity.branch_head_id,
+            "runtime_turn_id": origin_identity.turn_id,
+            "runtime_profile_snapshot_id": (
+                origin_identity.runtime_profile_snapshot_id
+            ),
+        },
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        accepted_segment_ids=[],
+    )
+    service.update_turn_status(
+        turn_id=origin_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+        visible_output_ref=origin_artifact.artifact_id,
+        selected_output_ref=origin_artifact.artifact_id,
+    )
+    workflow_job_service = RuntimeWorkflowJobService(retrieval_session)
+    workflow_job_service.ensure_creation_time_obligations(
+        identity=origin_identity,
+        metadata={"artifact_id": origin_artifact.artifact_id},
+    )
+    later_identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="accept-pending-segment",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    turn_count_before = _turn_count(
+        retrieval_session,
+        session_id=story_session.session_id,
+    )
+
+    receipt = service.create_branch_from_turn(
+        session_id=story_session.session_id,
+        origin_turn_id=origin_identity.turn_id,
+        actor="user",
+    )
+
+    origin_turn = retrieval_session.get(StoryTurnRecord, origin_identity.turn_id)
+    origin_branch = retrieval_session.get(BranchHeadRecord, origin_identity.branch_head_id)
+    jobs = workflow_job_service.list_jobs_for_turn(turn_id=origin_identity.turn_id)
+
+    assert receipt.control_kind == BranchControlKind.BRANCH_CREATED
+    assert receipt.fork_origin_turn_id == origin_identity.turn_id
+    assert receipt.fork_base_turn_id == origin_identity.turn_id
+    assert origin_turn is not None
+    assert origin_turn.status == StoryTurnStatus.SETTLED.value
+    assert origin_turn.settlement_reason == "required_jobs_deferred_by_policy"
+    assert {job.status for job in jobs} == {"deferred"}
+    assert origin_branch is not None
+    assert origin_branch.head_turn_id == later_identity.turn_id
+    assert origin_branch.last_settled_turn_id == origin_identity.turn_id
+    assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
+        turn_count_before
+    )
+
+
+def test_create_branch_rejects_hidden_adopted_pending_origin_without_side_effects(
+    retrieval_session,
+):
+    seeded = _seed_hidden_adopted_pending_turn_after_rollback(
+        retrieval_session,
+        story_id="identity-branch-hidden-adopted-pending",
+    )
+    story_session = seeded["story_session"]
+    service = seeded["service"]
+    hidden_identity = seeded["hidden_identity"]
+    workflow_job_service = seeded["workflow_job_service"]
+    hidden_turn = retrieval_session.get(StoryTurnRecord, hidden_identity.turn_id)
+    branch = retrieval_session.get(BranchHeadRecord, hidden_identity.branch_head_id)
+    assert hidden_turn is not None
+    assert branch is not None
+    before_turn_state = (
+        hidden_turn.status,
+        hidden_turn.visibility_state,
+        hidden_turn.hidden_by_control_receipt_id,
+        hidden_turn.hidden_after_turn_id,
+        hidden_turn.settlement_reason,
+        hidden_turn.settled_at,
+        hidden_turn.completed_at,
+    )
+    before_branch_state = (branch.head_turn_id, branch.last_settled_turn_id)
+    before_job_statuses = [
+        job.status
+        for job in workflow_job_service.list_jobs_for_turn(
+            turn_id=hidden_identity.turn_id,
+        )
+    ]
+    turn_count_before = _turn_count(
+        retrieval_session,
+        session_id=story_session.session_id,
+    )
+    receipt_count_before = len(
+        _branch_receipts(retrieval_session, session_id=story_session.session_id)
+    )
+
+    with pytest.raises(StoryRuntimeIdentityServiceError) as exc_info:
+        service.create_branch_from_turn(
+            session_id=story_session.session_id,
+            origin_turn_id=hidden_identity.turn_id,
+            actor="user",
+        )
+
+    hidden_turn_after = retrieval_session.get(StoryTurnRecord, hidden_identity.turn_id)
+    branch_after = retrieval_session.get(BranchHeadRecord, hidden_identity.branch_head_id)
+    after_job_statuses = [
+        job.status
+        for job in workflow_job_service.list_jobs_for_turn(
+            turn_id=hidden_identity.turn_id,
+        )
+    ]
+
+    assert exc_info.value.code == "runtime_branch_control_invalid_turn"
+    assert "origin_hidden_by_rollback" in str(exc_info.value)
+    assert hidden_turn_after is not None
+    assert branch_after is not None
+    assert (
+        hidden_turn_after.status,
+        hidden_turn_after.visibility_state,
+        hidden_turn_after.hidden_by_control_receipt_id,
+        hidden_turn_after.hidden_after_turn_id,
+        hidden_turn_after.settlement_reason,
+        hidden_turn_after.settled_at,
+        hidden_turn_after.completed_at,
+    ) == before_turn_state
+    assert (branch_after.head_turn_id, branch_after.last_settled_turn_id) == (
+        before_branch_state
+    )
+    assert before_job_statuses == ["pending", "pending"]
+    assert after_job_statuses == before_job_statuses
+    assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
+        turn_count_before
+    )
+    assert len(
+        _branch_receipts(retrieval_session, session_id=story_session.session_id)
+    ) == receipt_count_before
 
 
 def test_switch_branch_writes_receipt_without_creating_turn(retrieval_session):
@@ -651,7 +896,7 @@ def test_graph_checkpoint_binding_does_not_make_unsettled_turn_rollback_anchor(
     assert exc_info.value.code == "runtime_branch_control_invalid_turn"
 
 
-def test_delete_active_branch_marks_deleted_and_falls_back_without_creating_turn(
+def test_delete_non_active_branch_marks_deleted_without_creating_turn(
     retrieval_session,
 ):
     story_session, _, service, identities = _seed_settled_main_turns(
@@ -666,6 +911,11 @@ def test_delete_active_branch_marks_deleted_and_falls_back_without_creating_turn
     )
     created_branch_id = create_receipt.to_branch_head_id
     assert created_branch_id is not None
+    service.switch_branch(
+        session_id=story_session.session_id,
+        target_branch_head_id=origin_identity.branch_head_id,
+        actor="user",
+    )
     turn_count_before = _turn_count(
         retrieval_session,
         session_id=story_session.session_id,
@@ -689,9 +939,10 @@ def test_delete_active_branch_marks_deleted_and_falls_back_without_creating_turn
 
     assert delete_receipt.control_kind == BranchControlKind.BRANCH_DELETED
     assert delete_receipt.from_branch_head_id == created_branch_id
-    assert delete_receipt.to_branch_head_id == origin_identity.branch_head_id
+    assert delete_receipt.to_branch_head_id is None
     assert [record.control_kind for record in receipt_records] == [
         BranchControlKind.BRANCH_CREATED.value,
+        BranchControlKind.BRANCH_SWITCHED.value,
         BranchControlKind.BRANCH_DELETED.value,
     ]
     assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
@@ -710,6 +961,44 @@ def test_delete_active_branch_marks_deleted_and_falls_back_without_creating_turn
             actor="user",
         )
     assert exc_info.value.code == "runtime_branch_head_not_active"
+
+
+def test_delete_current_branch_is_rejected_without_receipt(retrieval_session):
+    story_session, _, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-branch-delete-current",
+    )
+    origin_identity = identities[-1]
+    create_receipt = service.create_branch_from_turn(
+        session_id=story_session.session_id,
+        origin_turn_id=origin_identity.turn_id,
+        actor="user",
+    )
+    created_branch_id = create_receipt.to_branch_head_id
+    assert created_branch_id is not None
+    turn_count_before = _turn_count(
+        retrieval_session,
+        session_id=story_session.session_id,
+    )
+
+    with pytest.raises(StoryRuntimeIdentityServiceError) as exc_info:
+        service.delete_branch(
+            session_id=story_session.session_id,
+            branch_head_id=created_branch_id,
+            actor="user",
+        )
+
+    assert exc_info.value.code == "runtime_branch_control_current_delete_not_supported"
+    assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
+        turn_count_before
+    )
+    receipt_records = _branch_receipts(
+        retrieval_session,
+        session_id=story_session.session_id,
+    )
+    assert [record.control_kind for record in receipt_records] == [
+        BranchControlKind.BRANCH_CREATED.value
+    ]
 
 
 def test_create_branch_rejects_non_settled_turn_without_receipt(retrieval_session):
@@ -979,29 +1268,125 @@ def test_rollback_rejects_non_settled_target_without_receipt(retrieval_session):
     ) == []
 
 
-def test_rollback_rejects_target_from_inactive_branch_without_new_receipt(
+def test_rollback_to_parent_lineage_origin_hides_active_branch_turns(
     retrieval_session,
 ):
-    story_session, _, service, identities = _seed_settled_main_turns(
+    story_session, snapshot, service, identities = _seed_settled_main_turns(
         retrieval_session,
-        story_id="identity-rollback-inactive-branch",
+        story_id="identity-rollback-parent-lineage-origin",
+        count=1,
     )
-    inactive_branch_target = identities[-1]
+    parent_origin = identities[0]
     create_receipt = service.create_branch_from_turn(
         session_id=story_session.session_id,
-        origin_turn_id=inactive_branch_target.turn_id,
+        origin_turn_id=parent_origin.turn_id,
         actor="user",
     )
     assert create_receipt.to_branch_head_id is not None
+    child_identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="write-child-branch-segment",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    service.update_turn_status(
+        turn_id=child_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref="artifact:child-branch",
+        selected_output_ref="artifact:child-branch",
+        settlement_reason="test_child_branch_settled",
+    )
     turn_count_before = _turn_count(
         retrieval_session,
         session_id=story_session.session_id,
     )
 
+    receipt = service.rollback_to_turn(
+        session_id=story_session.session_id,
+        target_turn_id=parent_origin.turn_id,
+        actor="user",
+    )
+
+    child_branch = retrieval_session.get(
+        BranchHeadRecord,
+        create_receipt.to_branch_head_id,
+    )
+    child_turn = retrieval_session.get(StoryTurnRecord, child_identity.turn_id)
+    refreshed_session = retrieval_session.get(
+        StorySessionRecord,
+        story_session.session_id,
+    )
+
+    assert receipt.control_kind == BranchControlKind.ROLLBACK_APPLIED
+    assert receipt.branch_head_id == create_receipt.to_branch_head_id
+    assert receipt.target_turn_id == parent_origin.turn_id
+    assert receipt.trace_refs == [f"turn:{child_identity.turn_id}"]
+    assert child_branch is not None
+    assert child_branch.head_turn_id == parent_origin.turn_id
+    assert child_branch.last_settled_turn_id == parent_origin.turn_id
+    assert child_branch.forked_from_turn_id == parent_origin.turn_id
+    assert child_turn is not None
+    assert child_turn.visibility_state == "hidden_by_rollback"
+    assert child_turn.hidden_after_turn_id == parent_origin.turn_id
+    assert refreshed_session is not None
+    assert refreshed_session.active_branch_head_id == create_receipt.to_branch_head_id
+    assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
+        turn_count_before
+    )
+
+
+def test_rollback_rejects_target_from_non_lineage_branch_without_new_receipt(
+    retrieval_session,
+):
+    story_session, snapshot, service, identities = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-rollback-non-lineage-branch",
+    )
+    origin_identity = identities[-1]
+    branch_a_receipt = service.create_branch_from_turn(
+        session_id=story_session.session_id,
+        origin_turn_id=origin_identity.turn_id,
+        actor="user",
+        branch_name="branch-a",
+    )
+    assert branch_a_receipt.to_branch_head_id is not None
+    branch_a_turn = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="branch-a-write",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    service.update_turn_status(
+        turn_id=branch_a_turn.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref="artifact:branch-a",
+        selected_output_ref="artifact:branch-a",
+        settlement_reason="test_branch_a_settled",
+    )
+    service.switch_branch(
+        session_id=story_session.session_id,
+        target_branch_head_id=origin_identity.branch_head_id,
+        actor="user",
+    )
+    branch_b_receipt = service.create_branch_from_turn(
+        session_id=story_session.session_id,
+        origin_turn_id=origin_identity.turn_id,
+        actor="user",
+        branch_name="branch-b",
+    )
+    assert branch_b_receipt.to_branch_head_id is not None
+    turn_count_before = _turn_count(
+        retrieval_session,
+        session_id=story_session.session_id,
+    )
+    receipt_count_before = len(
+        _branch_receipts(retrieval_session, session_id=story_session.session_id)
+    )
+
     with pytest.raises(StoryRuntimeIdentityServiceError) as exc_info:
         service.rollback_to_turn(
             session_id=story_session.session_id,
-            target_turn_id=inactive_branch_target.turn_id,
+            target_turn_id=branch_a_turn.turn_id,
             actor="user",
         )
 
@@ -1010,13 +1395,90 @@ def test_rollback_rejects_target_from_inactive_branch_without_new_receipt(
     assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
         turn_count_before
     )
-    receipt_records = _branch_receipts(
+    assert len(
+        _branch_receipts(retrieval_session, session_id=story_session.session_id)
+    ) == receipt_count_before
+
+
+def test_rollback_rejects_hidden_adopted_pending_target_without_side_effects(
+    retrieval_session,
+):
+    seeded = _seed_hidden_adopted_pending_turn_after_rollback(
+        retrieval_session,
+        story_id="identity-rollback-hidden-adopted-pending",
+    )
+    story_session = seeded["story_session"]
+    service = seeded["service"]
+    hidden_identity = seeded["hidden_identity"]
+    workflow_job_service = seeded["workflow_job_service"]
+    hidden_turn = retrieval_session.get(StoryTurnRecord, hidden_identity.turn_id)
+    branch = retrieval_session.get(BranchHeadRecord, hidden_identity.branch_head_id)
+    assert hidden_turn is not None
+    assert branch is not None
+    before_turn_state = (
+        hidden_turn.status,
+        hidden_turn.visibility_state,
+        hidden_turn.hidden_by_control_receipt_id,
+        hidden_turn.hidden_after_turn_id,
+        hidden_turn.settlement_reason,
+        hidden_turn.settled_at,
+        hidden_turn.completed_at,
+    )
+    before_branch_state = (branch.head_turn_id, branch.last_settled_turn_id)
+    before_job_statuses = [
+        job.status
+        for job in workflow_job_service.list_jobs_for_turn(
+            turn_id=hidden_identity.turn_id,
+        )
+    ]
+    turn_count_before = _turn_count(
         retrieval_session,
         session_id=story_session.session_id,
     )
-    assert [record.control_kind for record in receipt_records] == [
-        BranchControlKind.BRANCH_CREATED.value
+    receipt_count_before = len(
+        _branch_receipts(retrieval_session, session_id=story_session.session_id)
+    )
+
+    with pytest.raises(StoryRuntimeIdentityServiceError) as exc_info:
+        service.rollback_to_turn(
+            session_id=story_session.session_id,
+            target_turn_id=hidden_identity.turn_id,
+            actor="user",
+        )
+
+    hidden_turn_after = retrieval_session.get(StoryTurnRecord, hidden_identity.turn_id)
+    branch_after = retrieval_session.get(BranchHeadRecord, hidden_identity.branch_head_id)
+    after_job_statuses = [
+        job.status
+        for job in workflow_job_service.list_jobs_for_turn(
+            turn_id=hidden_identity.turn_id,
+        )
     ]
+
+    assert exc_info.value.code == "runtime_branch_control_invalid_turn"
+    assert "target_hidden_by_rollback" in str(exc_info.value)
+    assert hidden_turn_after is not None
+    assert branch_after is not None
+    assert (
+        hidden_turn_after.status,
+        hidden_turn_after.visibility_state,
+        hidden_turn_after.hidden_by_control_receipt_id,
+        hidden_turn_after.hidden_after_turn_id,
+        hidden_turn_after.settlement_reason,
+        hidden_turn_after.settled_at,
+        hidden_turn_after.completed_at,
+    ) == before_turn_state
+    assert (branch_after.head_turn_id, branch_after.last_settled_turn_id) == (
+        before_branch_state
+    )
+    assert before_job_statuses == ["pending", "pending"]
+    assert after_job_statuses == before_job_statuses
+    assert _turn_count(retrieval_session, session_id=story_session.session_id) == (
+        turn_count_before
+    )
+    assert len(
+        _branch_receipts(retrieval_session, session_id=story_session.session_id)
+    ) == receipt_count_before
 
 
 def test_create_branch_rejects_hidden_rollback_origin_without_receipt(
@@ -1082,6 +1544,10 @@ def test_chapter_snapshot_hides_artifact_bound_to_rollback_future_turn(
         artifact_kind=StoryArtifactKind.STORY_SEGMENT,
         status=StoryArtifactStatus.ACCEPTED,
         content_text="visible target segment",
+        metadata={
+            "runtime_turn_id": target_identity.turn_id,
+            "runtime_branch_head_id": target_identity.branch_head_id,
+        },
     )
     hidden_artifact = story_session_service.create_artifact(
         session_id=story_session.session_id,
@@ -1089,6 +1555,10 @@ def test_chapter_snapshot_hides_artifact_bound_to_rollback_future_turn(
         artifact_kind=StoryArtifactKind.STORY_SEGMENT,
         status=StoryArtifactStatus.ACCEPTED,
         content_text="hidden future segment",
+        metadata={
+            "runtime_turn_id": hidden_identity.turn_id,
+            "runtime_branch_head_id": hidden_identity.branch_head_id,
+        },
     )
     hidden_candidate = story_session_service.create_artifact(
         session_id=story_session.session_id,
@@ -1096,7 +1566,10 @@ def test_chapter_snapshot_hides_artifact_bound_to_rollback_future_turn(
         artifact_kind=StoryArtifactKind.STORY_SEGMENT,
         status=StoryArtifactStatus.DRAFT,
         content_text="hidden future rewrite candidate",
-        metadata={"runtime_turn_id": hidden_identity.turn_id},
+        metadata={
+            "runtime_turn_id": hidden_identity.turn_id,
+            "runtime_branch_head_id": hidden_identity.branch_head_id,
+        },
     )
     story_session_service.update_chapter_workspace(
         chapter_workspace_id=chapter.chapter_workspace_id,
@@ -1176,6 +1649,10 @@ def test_rollback_read_scope_hides_later_materials_and_keeps_checkpoint_anchor(
         artifact_kind=StoryArtifactKind.STORY_SEGMENT,
         status=StoryArtifactStatus.ACCEPTED,
         content_text="rollback target segment",
+        metadata={
+            "runtime_turn_id": target_identity.turn_id,
+            "runtime_branch_head_id": target_identity.branch_head_id,
+        },
     )
     hidden_artifact = story_session_service.create_artifact(
         session_id=story_session.session_id,
@@ -1183,6 +1660,10 @@ def test_rollback_read_scope_hides_later_materials_and_keeps_checkpoint_anchor(
         artifact_kind=StoryArtifactKind.STORY_SEGMENT,
         status=StoryArtifactStatus.ACCEPTED,
         content_text="rollback future segment",
+        metadata={
+            "runtime_turn_id": hidden_identity.turn_id,
+            "runtime_branch_head_id": hidden_identity.branch_head_id,
+        },
     )
     hidden_candidate = story_session_service.create_artifact(
         session_id=story_session.session_id,

@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from models.mcp_config import McpServerConfig, McpToolInfo
+from rp.agent_runtime.tools import RuntimeToolRegistryView
 from services.mcp_manager import McpManager
 from services.tool_runtime_service import ToolRuntimeService
 
@@ -76,7 +77,52 @@ def test_tool_info_qualified_name_prefixes_numeric_server_ids():
     )
 
     assert tool.raw_qualified_name == "1770224826732__ask_question"
-    assert tool.qualified_name == "mcp_1770224826732__ask_question"
+    assert tool.qualified_name == "1770224826732__ask_question"
+    assert "mcp_1770224826732__ask_question" in tool.qualified_name_aliases
+
+
+def test_tool_info_qualified_name_sanitizes_dotted_setup_tool_names():
+    tool = McpToolInfo(
+        server_id="rp_setup",
+        server_name="RP Setup",
+        name="setup.world_background.write_entry",
+        description="Write world background draft entry",
+        input_schema={"type": "object"},
+    )
+
+    assert tool.raw_qualified_name == "rp_setup__setup.world_background.write_entry"
+    assert tool.qualified_name == "rp_setup__setup_world_background_write_entry"
+    assert tool.to_openai_tool()["function"]["name"] == tool.qualified_name
+
+
+def test_runtime_tool_registry_resolves_sanitized_and_raw_names():
+    tool = McpToolInfo(
+        server_id="rp_setup",
+        server_name="RP Setup",
+        name="setup.world_background.write_entry",
+        description="Write world background draft entry",
+        input_schema={"type": "object"},
+    )
+
+    class _Manager:
+        def get_all_tools(self):
+            return [tool]
+
+    registry = RuntimeToolRegistryView(mcp_manager=_Manager())
+    visible = ["setup.world_background.write_entry"]
+
+    assert registry.resolve_tool(
+        tool_name="rp_setup__setup_world_background_write_entry",
+        visible_tool_names=visible,
+    ) == tool
+    assert registry.resolve_tool(
+        tool_name="rp_setup__setup.world_background.write_entry",
+        visible_tool_names=visible,
+    ) == tool
+    assert registry.resolve_tool(
+        tool_name="setup.world_background.write_entry",
+        visible_tool_names=visible,
+    ) == tool
 
 
 class _NestedPatch(BaseModel):

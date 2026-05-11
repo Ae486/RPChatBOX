@@ -24,6 +24,9 @@ from rp.models.story_runtime import LongformTurnRequest
 from rp.services.runtime_config_control_service import (
     RuntimeConfigControlServiceError,
 )
+from rp.services.story_runtime_identity_service import (
+    StoryRuntimeIdentityServiceError,
+)
 from rp.services.story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
     MemoryBlockProposalNotFoundError,
@@ -59,6 +62,15 @@ class RevisionTrackedChangeCreateRequest(BaseModel):
     block_id: str = Field(min_length=1)
     original_text: str | None = None
     suggested_text: str | None = None
+
+
+class StoryBranchCreateRequest(BaseModel):
+    origin_turn_id: str = Field(min_length=1)
+    branch_name: str | None = None
+
+
+class StoryRollbackRequest(BaseModel):
+    target_turn_id: str = Field(min_length=1)
 
 
 def _story_controller(
@@ -272,6 +284,33 @@ def _runtime_config_invalid(exc: Exception) -> HTTPException:
     )
 
 
+def _branch_control_payload(*, snapshot: ChapterWorkspaceSnapshot, receipt: dict) -> dict:
+    return {
+        "data": {
+            "chapter_snapshot": _snapshot_payload(snapshot),
+        },
+        "receipt": receipt,
+    }
+
+
+def _story_branch_control_invalid(exc: Exception) -> HTTPException:
+    message = str(exc)
+    error_code = getattr(exc, "code", None) or "story_branch_control_invalid"
+    status_code = 400
+    if "story_session_not_found:" in message:
+        error_code = "story_session_not_found"
+        status_code = 404
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "message": message,
+                "code": error_code,
+            }
+        },
+    )
+
+
 def _revision_review_invalid(exc: Exception) -> HTTPException:
     message = str(exc)
     code = message.split(":", 1)[0] if ":" in message else message
@@ -334,6 +373,103 @@ async def get_story_chapter(
             detail={"error": {"message": str(exc), "code": "story_chapter_not_found"}},
         ) from exc
     return _snapshot_payload(snapshot)
+
+
+@router.post("/api/rp/story-sessions/{session_id}/branches")
+async def create_story_branch(
+    session_id: str,
+    payload: StoryBranchCreateRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        snapshot, receipt = controller.create_branch_from_turn(
+            session_id=session_id,
+            origin_turn_id=payload.origin_turn_id,
+            branch_name=payload.branch_name,
+            actor="story_runtime_ui",
+            metadata={
+                "source": "story_runtime_product_route",
+                "surface": "segment_action_menu",
+            },
+        )
+    except StoryRuntimeIdentityServiceError as exc:
+        raise _story_branch_control_invalid(exc) from exc
+    return _branch_control_payload(
+        snapshot=snapshot,
+        receipt=receipt.model_dump(mode="json"),
+    )
+
+
+@router.post("/api/rp/story-sessions/{session_id}/branches/{branch_head_id}/switch")
+async def switch_story_branch(
+    session_id: str,
+    branch_head_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        snapshot, receipt = controller.switch_branch(
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            actor="story_runtime_ui",
+            metadata={
+                "source": "story_runtime_product_route",
+                "surface": "branch_panel",
+            },
+        )
+    except StoryRuntimeIdentityServiceError as exc:
+        raise _story_branch_control_invalid(exc) from exc
+    return _branch_control_payload(
+        snapshot=snapshot,
+        receipt=receipt.model_dump(mode="json"),
+    )
+
+
+@router.delete("/api/rp/story-sessions/{session_id}/branches/{branch_head_id}")
+async def delete_story_branch(
+    session_id: str,
+    branch_head_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        snapshot, receipt = controller.delete_branch(
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            actor="story_runtime_ui",
+            metadata={
+                "source": "story_runtime_product_route",
+                "surface": "branch_panel",
+            },
+        )
+    except StoryRuntimeIdentityServiceError as exc:
+        raise _story_branch_control_invalid(exc) from exc
+    return _branch_control_payload(
+        snapshot=snapshot,
+        receipt=receipt.model_dump(mode="json"),
+    )
+
+
+@router.post("/api/rp/story-sessions/{session_id}/rollback")
+async def rollback_story_branch(
+    session_id: str,
+    payload: StoryRollbackRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        snapshot, receipt = controller.rollback_to_turn(
+            session_id=session_id,
+            target_turn_id=payload.target_turn_id,
+            actor="story_runtime_ui",
+            metadata={
+                "source": "story_runtime_product_route",
+                "surface": "segment_action_menu",
+            },
+        )
+    except StoryRuntimeIdentityServiceError as exc:
+        raise _story_branch_control_invalid(exc) from exc
+    return _branch_control_payload(
+        snapshot=snapshot,
+        receipt=receipt.model_dump(mode="json"),
+    )
 
 
 @router.patch("/api/rp/story-sessions/{session_id}/runtime-config")

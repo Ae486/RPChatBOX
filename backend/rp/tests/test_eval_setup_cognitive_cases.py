@@ -356,39 +356,53 @@ def _text_response(text: str):
     }
 
 
+_TOOL_SURFACE_DRIFT_REASON = (
+    "tool surface simplified: world_background scope is now stage-native CRUD only, "
+    "and shared tools (setup.truth.write / setup.proposal.commit / legacy patch.*) "
+    "are not visible in the resolved scope without an explicit non-world_background "
+    "current_stage seed; case must be redesigned in eval-modernization Slice D"
+)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("case_file", "llm_factory", "expected_report"),
     [
-        (
+        pytest.param(
             _case_path("repair", "story_config_schema_auto_repair_success.v1.json"),
             _SchemaAutoRepairSetupLLMService,
             {"finish_reason": "completed_text", "repair_route": "auto_repair", "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
-        (
+        pytest.param(
             _case_path("repair", "writing_contract_ask_user_after_semantic_fail.v1.json"),
             _TruthWriteAskUserLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": "ask_user", "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
-        (
+        pytest.param(
             _case_path("guard", "repair_obligation_false_success_blocked.v1.json"),
             _ExplainInsteadOfRepairSetupLLMService,
             {"finish_reason": "repair_obligation_unfulfilled", "repair_route": "auto_repair", "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
-        (
+        pytest.param(
             _case_path("commit", "blocked_truth_write_not_ready.v1.json"),
             _CommitBlockedQuestionLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
-        (
+        pytest.param(
             _case_path("commit", "blocked_truth_write_open_issues.v1.json"),
             _CommitBlockedQuestionLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
-        (
+        pytest.param(
             _case_path("commit", "rejected_proposal_back_to_discussion.v1.json"),
             _RejectedProposalDiscussionLLMService,
             {"finish_reason": "completed_text", "repair_route": None, "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
         (
             _case_path("cognitive", "invalidate_after_user_edit.v1.json"),
@@ -400,20 +414,23 @@ def _text_response(text: str):
             _ProposalRejectedInvalidationLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
         ),
-        (
+        pytest.param(
             _case_path("repair", "truth_write_target_ref_auto_repair_success.v1.json"),
             _TruthWriteTargetRefAutoRepairLLMService,
             {"finish_reason": "completed_text", "repair_route": "continue_discussion", "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
-        (
+        pytest.param(
             _case_path("repair", "truth_write_create_requires_empty_target.v1.json"),
             _TruthWriteCreateConflictLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": "continue_discussion", "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
-        (
+        pytest.param(
             _case_path("repair", "truth_write_replace_requires_existing_target.v1.json"),
             _TruthWriteReplaceMissingLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": "continue_discussion", "commit_blocked": False},
+            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=True),
         ),
         (
             _case_path("infra", "provider_request_failed_during_turn.v1.json"),

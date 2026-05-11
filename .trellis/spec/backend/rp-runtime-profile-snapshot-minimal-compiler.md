@@ -141,15 +141,18 @@ runtime_profile_snapshot_no_active_snapshot
 | A new runtime config is published | A new snapshot record is created; old snapshot remains immutable |
 | Turn starts after publish | Turn pins the newly active snapshot |
 | Turn started before later publish | Existing turn keeps its original snapshot id |
-| No active snapshot exists for runtime-owned path | Reject with `runtime_profile_snapshot_no_active_snapshot` |
+| Session active snapshot pointer is missing or stale at turn start | Runtime entry resolution must call `ensure_active_snapshot(...)`, create/publish a fresh immutable snapshot for the same compiled content, and re-pin the session instead of silently reusing the old active row |
+| Runtime-owned path cannot compile or publish a snapshot | Reject with a stable runtime profile snapshot error such as `runtime_profile_snapshot_compile_failed` or `runtime_profile_snapshot_no_active_snapshot` |
 | Snapshot id is requested directly and missing | Reject with `runtime_profile_snapshot_not_found` |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: a roleplay session publishes a new snapshot that changes active domains and retrieval policy, but only future turns use it.
+- Good: a turn starts after the session pointer was corrupted or points to a missing snapshot; the runtime rebuilds/publishes a fresh snapshot and pins the turn to that new id.
 - Good: boot runtime uses bootstrap registry defaults plus explicit story/runtime overrides without needing a full config UI.
 - Base: old story-level config services may still exist temporarily, but boot runtime no longer relies on them directly once a turn is pinned.
 - Bad: mutating the active snapshot record in place when the runtime panel changes.
+- Bad: resolving a turn by calling `require_active_snapshot(...)` first and re-pinning the session to an old active row after detecting a stale pointer; turn-start recovery must go through `ensure_active_snapshot(...)`.
 - Bad: reading “latest session config” during a turn and silently drifting retrieval or permission behavior.
 - Bad: hardcoding longform worker activation in the compiler instead of compiling descriptors from registry/config inputs.
 
@@ -166,6 +169,7 @@ runtime_profile_snapshot_no_active_snapshot
 - Pinning tests cover:
   - turn-start uses the active snapshot;
   - later config publish does not change an in-progress turn's snapshot id.
+  - stale session active-snapshot pointers are rebuilt through `ensure_active_snapshot(...)` in both the service-level path and the story turn API stream path.
 - Focused lint/type checks must include the new record/service/tests.
 
 ### 7. Wrong vs Correct

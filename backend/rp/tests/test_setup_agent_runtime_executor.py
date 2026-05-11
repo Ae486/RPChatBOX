@@ -10,9 +10,12 @@ import pytest
 from rp.agent_runtime.contracts import (
     RpAgentTurnInput,
     RuntimeProfile,
+    RuntimeToolCall,
     RuntimeToolResult,
 )
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor, _RuntimeRunDriver
+from rp.agent_runtime.state import RpAgentRunState
+from rp.agent_runtime.tools import RuntimeToolExecutor
 
 
 def _turn_input(
@@ -167,7 +170,7 @@ def _draft_ref_read_result() -> RuntimeToolResult:
     )
 
 
-def _tool_definition(name: str) -> dict:
+def _tool_definition(name: str) -> dict[str, Any]:
     if name.endswith("setup.truth.write"):
         parameters = {
             "type": "object",
@@ -196,24 +199,26 @@ def _tool_definition(name: str) -> dict:
 
 
 def test_runtime_routes_invalid_next_action_to_runtime_failed():
-    state: dict[str, Any] = {"next_action": "undefined_route"}
+    state: RpAgentRunState = {"next_action": "undefined_route"}
 
     route = _RuntimeRunDriver._route_after_assess(state)
 
     assert route == "finalize_failure"
     assert state["next_action"] == "finalize_failure"
     assert state["finish_reason"] == "runtime_failed"
-    assert state["error"]["type"] == "runtime_failed"
+    error = state["error"]
+    assert error is not None
+    assert error["type"] == "runtime_failed"
 
 
-class _FakeToolExecutor:
+class _FakeToolExecutor(RuntimeToolExecutor):
     def __init__(self, *, results: list[RuntimeToolResult] | None = None) -> None:
         self._results = list(results or [])
         self.calls: list[tuple[Any, list[str]]] = []
 
     def get_openai_tool_definitions(
         self, *, visible_tool_names: list[str]
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         return [
             _tool_definition(
                 name if name.startswith("rp_setup__") else f"rp_setup__{name}"
@@ -222,7 +227,7 @@ class _FakeToolExecutor:
         ]
 
     async def execute_tool_call(
-        self, call, *, visible_tool_names: list[str]
+        self, call: RuntimeToolCall, *, visible_tool_names: list[str]
     ) -> RuntimeToolResult:
         self.calls.append((call, list(visible_tool_names)))
         if self._results:
@@ -1037,6 +1042,40 @@ class _StreamUsageLLM:
         yield 'data: {"type":"done"}\n\n'
 
 
+class _PseudoToolCodeTextLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": (
+                            "tool_code print(default_api.rp_setup__setup.truth.write("
+                            '{"truth_write":{"write_id":"write-1"}}))'
+                        ),
+                    }
+                }
+            ]
+        }
+
+
+class _PseudoToolCodeStreamLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion_stream(self, request):
+        self.round += 1
+        yield 'data: {"type":"text_delta","delta":"tool_code print(default_api."}\n\n'
+        yield (
+            'data: {"type":"text_delta","delta":"rp_setup__setup.truth.write({\\"truth_write\\":{\\"write_id\\":\\"write-1\\"}}))"}\n\n'
+        )
+        yield 'data: {"type":"done"}\n\n'
+
+
 @pytest.mark.asyncio
 async def test_runtime_executor_returns_direct_answer_without_tools():
     tool_executor = _FakeToolExecutor()
@@ -1374,6 +1413,46 @@ async def test_runtime_executor_exposes_slim_truth_write_schema_without_strict_f
 
 
 @pytest.mark.asyncio
+async def test_runtime_executor_appends_stage_specific_truth_write_hint_to_tool_description():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            tool_scope=["setup.truth.write"],
+            context_bundle={
+                "current_step": "foundation",
+                "current_stage": "world_background",
+                "context_packet": {
+                    "workspace_id": "workspace-1",
+                    "current_step": "foundation",
+                    "current_stage": "world_background",
+                    "current_draft_snapshot": {},
+                },
+            },
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    truth_write = {
+        item["function"]["name"]: item["function"]
+        for item in (llm.requests[0].tools or [])
+    }["rp_setup__setup.truth.write"]
+    description = truth_write["description"]
+    assert (
+        "Minimal single-entry keys inside payload_json: entry_id, entry_type, semantic_path, title."
+        in description
+    )
+    assert (
+        "Preferred entry_type values for this stage: world_rule, location, faction, race, history."
+        in description
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_executor_removes_inherited_strict_for_non_strict_models():
     tool_executor = _FakeToolExecutor()
     llm = _RecordingTextOnlyLLM()
@@ -1395,6 +1474,77 @@ async def test_runtime_executor_removes_inherited_strict_for_non_strict_models()
     function = tools[0]["function"]
     assert "strict" not in function
     assert function["parameters"]["required"] == ["truth_write"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_filters_pseudo_tool_code_text_from_final_answer():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            tool_scope=["setup.truth.write"],
+            context_bundle={
+                "current_step": "foundation",
+                "current_stage": "world_background",
+                "context_packet": {
+                    "workspace_id": "workspace-1",
+                    "current_step": "foundation",
+                    "current_stage": "world_background",
+                    "current_draft_snapshot": {},
+                },
+            },
+        ),
+        _profile().model_copy(update={"max_rounds": 2}),
+        llm_service=_PseudoToolCodeTextLLM(),
+    )
+
+    assert result.status == "failed"
+    assert result.finish_reason == "invalid_tool_output_retry_budget_exhausted"
+    assert result.assistant_text == ""
+    assert result.tool_invocations == []
+    assert "pseudo_tool_call_text_filtered" in result.warnings
+    assert (
+        result.structured_payload["completion_guard"]["reason"]
+        == "pseudo_tool_call_text_emitted"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_stream_filters_pseudo_tool_code_text_from_typed_events():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    chunks = []
+    async for chunk in executor.run_stream(
+        _turn_input(
+            stream=True,
+            tool_scope=["setup.truth.write"],
+            context_bundle={
+                "current_step": "foundation",
+                "current_stage": "world_background",
+                "context_packet": {
+                    "workspace_id": "workspace-1",
+                    "current_step": "foundation",
+                    "current_stage": "world_background",
+                    "current_draft_snapshot": {},
+                },
+            },
+        ),
+        _profile().model_copy(update={"max_rounds": 2}),
+        llm_service=_PseudoToolCodeStreamLLM(),
+    ):
+        chunks.append(chunk)
+
+    payloads = [json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: ")]
+    assert all(payload.get("type") != "text_delta" for payload in payloads)
+    assert payloads[-2]["type"] == "error"
+    assert payloads[-1] == {"type": "done"}
+    assert executor.last_result is not None
+    assert (
+        executor.last_result.finish_reason
+        == "invalid_tool_output_retry_budget_exhausted"
+    )
 
 
 @pytest.mark.asyncio
@@ -1743,6 +1893,35 @@ async def test_runtime_executor_blocks_repeated_question_at_initial_text_complet
     )
     assert trace[-1]["decision_site"] == "finalize_failure"
     assert trace[-1]["decision"]["finish_reason"] == "max_rounds_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_prefers_runtime_max_rounds_over_langgraph_recursion_limit():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            conversation_messages=[
+                {
+                    "role": "assistant",
+                    "content": "Which style rules do you want me to lock in for this draft?",
+                }
+            ],
+            context_bundle={
+                "working_digest": {
+                    "open_questions": ["Need the exact style rules."],
+                }
+            },
+        ),
+        _profile().model_copy(update={"max_rounds": 5}),
+        llm_service=_RepeatedQuestionLLM(),
+    )
+
+    assert result.status == "failed"
+    assert result.finish_reason == "max_rounds_exceeded"
+    assert result.error is not None
+    assert result.error["type"] == "max_rounds_exceeded"
 
 
 @pytest.mark.asyncio

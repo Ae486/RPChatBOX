@@ -33,7 +33,7 @@ class LocalToolProviderRegistry:
         arguments: dict[str, Any],
     ) -> dict[str, Any] | None:
         for tool in self.list_all_tools():
-            if qualified_name in (tool.qualified_name, tool.raw_qualified_name):
+            if qualified_name in tool.qualified_name_aliases:
                 provider = self._providers.get(tool.server_id)
                 if provider is None:
                     return None
@@ -42,4 +42,3 @@ class LocalToolProviderRegistry:
                     arguments=arguments,
                 )
         return None
-

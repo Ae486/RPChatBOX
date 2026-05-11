@@ -123,3 +123,14 @@ These are real design questions, not implementation uncertainties:
 - Should all stages share one draft CRUD core with stage-native aliases, or should each stage own different write tools?
 - Where should stage-local `entry_type` registry live: draft schema metadata, workspace transient state, or tool-runtime state?
 - Should setup visible dialogue persistence be part of this task or a follow-up task after loop spine stabilizes?
+
+## 7. A1 Correction Note
+
+The A1 check correction keeps world_background CRUD out of the A1 visible/runtime surface. Stage-local world_background CRUD tooling is not registered in `SetupToolProvider`, is not included in `SETUP_AGENT_VISIBLE_TOOLS`, is not returned by `build_setup_agent_tool_scope(...)`, and is not part of A1 tests. Canonical stages still expose shared setup tools such as `setup.truth.write`, `setup.question.raise`, `setup.proposal.commit`, and setup read helpers.
+
+The correction also adds explicit terminal reasons for bounded bad paths before LangGraph recursion is relevant:
+
+- repeated pseudo tool-call text: `invalid_tool_output_retry_budget_exhausted`
+- repeated same-class recoverable tool failure: `tool_recovery_budget_exhausted`
+
+These are task-local A1 stop reasons for current check closure. If they are kept beyond this task, the global loop-semantics spec taxonomy should be updated in a later spec-sync slice.

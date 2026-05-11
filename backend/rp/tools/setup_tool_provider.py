@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from models.mcp_config import McpToolInfo
 from rp.agent_runtime.contracts import (
@@ -20,7 +22,11 @@ from rp.models.setup_drafts import (
     FoundationEntry,
     LongformBlueprintDraft,
     SetupDraftEntry,
+    SetupDraftSection,
+    SetupDraftSectionKind,
+    SetupEntryTypeRecord,
     SetupStageDraftBlock,
+    SetupStageDraftSchemaMetadata,
     StoryConfigDraft,
     WritingContractDraft,
 )
@@ -138,6 +144,130 @@ class SetupTruthWriteInput(BaseModel):
     truth_write: DraftTruthWrite
 
 
+class SetupWorldBackgroundEntryTypeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type_key: str
+    display_name: str | None = None
+    description: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+
+    @field_validator("type_key")
+    @classmethod
+    def _non_empty_type_key(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class SetupWorldBackgroundContentBlockInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    value: str | list[str] | dict[str, Any]
+    retrieval_role: (
+        Literal["summary", "detail", "rule", "relationship", "note"] | None
+    ) = None
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("key")
+    @classmethod
+    def _non_empty_key(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class SetupWorldBackgroundListEntriesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    query: str | None = None
+    entry_type: str | None = None
+    include_sections: bool = False
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class SetupWorldBackgroundReadEntryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    target_ref: str
+    include_sections: bool = True
+
+
+class SetupWorldBackgroundListEntryTypesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+
+
+class SetupWorldBackgroundUpsertEntryTypeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    entry_type: SetupWorldBackgroundEntryTypeInput
+
+
+class SetupWorldBackgroundWriteEntryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    entry_type: SetupWorldBackgroundEntryTypeInput
+    title: str
+    summary: str | None = None
+    content_blocks: list[SetupWorldBackgroundContentBlockInput] = Field(
+        default_factory=list
+    )
+    aliases: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def _non_empty_title(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class SetupWorldBackgroundEntryChangesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry_type: SetupWorldBackgroundEntryTypeInput | None = None
+    title: str | None = None
+    summary: str | None = None
+    upsert_content_blocks: list[SetupWorldBackgroundContentBlockInput] = Field(
+        default_factory=list
+    )
+    remove_content_block_keys: list[str] = Field(default_factory=list)
+    add_aliases: list[str] = Field(default_factory=list)
+    remove_aliases: list[str] = Field(default_factory=list)
+    add_tags: list[str] = Field(default_factory=list)
+    remove_tags: list[str] = Field(default_factory=list)
+
+
+class SetupWorldBackgroundEditEntryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    target_ref: str
+    basis_fingerprint: str
+    changes: SetupWorldBackgroundEntryChangesInput
+
+
+class SetupWorldBackgroundDeleteEntryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    target_ref: str
+    basis_fingerprint: str
+    reason: str | None = None
+
+
 class _SetupContextBuilderLike(Protocol):
     def build(self, input_model: SetupContextBuilderInput) -> Any: ...
 
@@ -223,7 +353,7 @@ class SetupToolProvider:
                 ),
                 (
                     "setup.truth.write",
-                    "Lower one runtime-private draft truth write intent into the current setup draft via the existing patch/controller chain. In canonical setup stages this writes SetupStageDraftBlock entries through the stage-native draft block; in legacy steps it preserves the old draft family path. Use only when one chunk is stable enough to land in draft. Optionally pass selected user_edit_delta_ids when writing a truth update that responds to specific user edits. Do not use this for commit proposal directly. Target object: DraftTruthWrite. Important field: truth_write.",
+                    "Lower one runtime-private draft truth write intent into the current setup draft via the existing patch/controller chain. In canonical setup stages this writes SetupStageDraftBlock entries through the stage-native draft block; in legacy steps it preserves the old draft family path. Use only when one chunk is stable enough to land in draft. Optionally pass selected user_edit_delta_ids when writing a truth update that responds to specific user edits. Do not use this for commit proposal directly. Target object: DraftTruthWrite. Important field: truth_write. Canonical stage payload guidance: prefer one entry payload over a full block unless you are replacing or merging the whole stage block. A minimal single entry needs entry_id, entry_type, semantic_path, and title. summary and sections are optional, but any text section must include content.text. Full-stage block payloads must include stage_id plus entries.",
                     SetupTruthWriteInput,
                 ),
                 (
@@ -1467,6 +1597,7 @@ class SetupToolProvider:
         return (
             SetupStageDraftBlock(
                 stage_id=stage_id,
+                schema_metadata=current_block.schema_metadata,
                 entries=list(entries.values()),
                 notes=current_block.notes,
             ),
@@ -1491,6 +1622,7 @@ class SetupToolProvider:
                 entries[entry.entry_id] = entry
         return SetupStageDraftBlock(
             stage_id=base.stage_id,
+            schema_metadata=incoming.schema_metadata or base.schema_metadata,
             entries=list(entries.values()),
             notes=incoming.notes if incoming.notes is not None else base.notes,
         )
@@ -1742,6 +1874,700 @@ class SetupToolProvider:
             ),
         }
 
+    def _world_background_list_entries(
+        self,
+        input_model: SetupWorldBackgroundListEntriesInput,
+    ) -> dict[str, Any]:
+        block = self._world_background_block(input_model.workspace_id)
+        query = (input_model.query or "").strip().lower()
+        entry_type = (
+            self._normalize_key(input_model.entry_type)
+            if input_model.entry_type
+            else None
+        )
+        items: list[dict[str, Any]] = []
+        for entry in block.entries:
+            if entry_type is not None and entry.entry_type != entry_type:
+                continue
+            if query and not self._entry_matches_query(entry, query):
+                continue
+            items.append(
+                self._world_background_entry_payload(
+                    entry=entry,
+                    include_sections=input_model.include_sections,
+                )
+            )
+            if len(items) >= input_model.limit:
+                break
+        return {
+            "stage_id": SetupStageId.WORLD_BACKGROUND.value,
+            "entries": items,
+            "entry_type_registry": self._entry_type_registry_payload(block),
+        }
+
+    def _world_background_read_entry(
+        self,
+        input_model: SetupWorldBackgroundReadEntryInput,
+    ) -> dict[str, Any]:
+        block = self._world_background_block(input_model.workspace_id)
+        entry = self._require_world_background_entry(
+            block=block,
+            target_ref=input_model.target_ref,
+            tool_name="setup.world_background.read_entry",
+        )
+        return {
+            "stage_id": SetupStageId.WORLD_BACKGROUND.value,
+            "entry": self._world_background_entry_payload(
+                entry=entry,
+                include_sections=input_model.include_sections,
+            ),
+            "entry_type_registry": self._entry_type_registry_payload(block),
+        }
+
+    def _world_background_list_entry_types(
+        self,
+        input_model: SetupWorldBackgroundListEntryTypesInput,
+    ) -> dict[str, Any]:
+        block = self._world_background_block(input_model.workspace_id)
+        return {
+            "stage_id": SetupStageId.WORLD_BACKGROUND.value,
+            "entry_type_registry": self._entry_type_registry_payload(block),
+        }
+
+    def _world_background_upsert_entry_type(
+        self,
+        input_model: SetupWorldBackgroundUpsertEntryTypeInput,
+    ) -> dict[str, Any]:
+        block = self._world_background_block(input_model.workspace_id)
+        updated_block = self._upsert_world_background_entry_type(
+            block=block,
+            entry_type=input_model.entry_type,
+        )
+        self._workspace_service.patch_stage_draft(
+            workspace_id=input_model.workspace_id,
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            draft=updated_block,
+        )
+        type_key = self._normalize_key(input_model.entry_type.type_key)
+        return {
+            "success": True,
+            "message": "Upserted world_background entry type",
+            "updated_refs": [f"draft:world_background:type:{type_key}"],
+            "entry_type_registry": self._entry_type_registry_payload(updated_block),
+        }
+
+    def _world_background_write_entry(
+        self,
+        input_model: SetupWorldBackgroundWriteEntryInput,
+    ) -> dict[str, Any]:
+        block = self._world_background_block(input_model.workspace_id)
+        block = self._upsert_world_background_entry_type(
+            block=block,
+            entry_type=input_model.entry_type,
+        )
+        type_key = self._normalize_key(input_model.entry_type.type_key)
+        entry_id = self._unique_world_background_entry_id(
+            block=block,
+            type_key=type_key,
+            title=input_model.title,
+        )
+        entry = self._build_world_background_entry(
+            entry_id=entry_id,
+            entry_type=input_model.entry_type,
+            title=input_model.title,
+            summary=input_model.summary,
+            content_blocks=input_model.content_blocks,
+            aliases=input_model.aliases,
+            tags=input_model.tags,
+        )
+        updated_block = SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            schema_metadata=block.schema_metadata,
+            entries=[*block.entries, entry],
+            notes=block.notes,
+        )
+        self._workspace_service.patch_stage_draft(
+            workspace_id=input_model.workspace_id,
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            draft=updated_block,
+        )
+        return {
+            "success": True,
+            "message": "Created world_background draft entry",
+            "updated_refs": [self._world_background_entry_ref(entry.entry_id)],
+            "entry": self._world_background_entry_payload(
+                entry=entry,
+                include_sections=True,
+            ),
+            "entry_type_registry": self._entry_type_registry_payload(updated_block),
+        }
+
+    def _world_background_edit_entry(
+        self,
+        input_model: SetupWorldBackgroundEditEntryInput,
+    ) -> dict[str, Any]:
+        block = self._world_background_block(input_model.workspace_id)
+        entry = self._require_world_background_entry(
+            block=block,
+            target_ref=input_model.target_ref,
+            tool_name="setup.world_background.edit_entry",
+        )
+        self._require_entry_fingerprint(
+            entry=entry,
+            basis_fingerprint=input_model.basis_fingerprint,
+            tool_name="setup.world_background.edit_entry",
+        )
+        updated_block = block
+        changes = input_model.changes
+        if changes.entry_type is not None:
+            updated_block = self._upsert_world_background_entry_type(
+                block=updated_block,
+                entry_type=changes.entry_type,
+            )
+        updated_entry = self._apply_world_background_entry_changes(
+            entry=entry,
+            changes=changes,
+        )
+        updated_block = SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            schema_metadata=updated_block.schema_metadata,
+            entries=[
+                updated_entry if item.entry_id == entry.entry_id else item
+                for item in updated_block.entries
+            ],
+            notes=updated_block.notes,
+        )
+        self._workspace_service.patch_stage_draft(
+            workspace_id=input_model.workspace_id,
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            draft=updated_block,
+        )
+        return {
+            "success": True,
+            "message": "Edited world_background draft entry",
+            "updated_refs": [self._world_background_entry_ref(updated_entry.entry_id)],
+            "entry": self._world_background_entry_payload(
+                entry=updated_entry,
+                include_sections=True,
+            ),
+            "entry_type_registry": self._entry_type_registry_payload(updated_block),
+        }
+
+    def _world_background_delete_entry(
+        self,
+        input_model: SetupWorldBackgroundDeleteEntryInput,
+    ) -> dict[str, Any]:
+        block = self._world_background_block(input_model.workspace_id)
+        entry = self._require_world_background_entry(
+            block=block,
+            target_ref=input_model.target_ref,
+            tool_name="setup.world_background.delete_entry",
+        )
+        self._require_entry_fingerprint(
+            entry=entry,
+            basis_fingerprint=input_model.basis_fingerprint,
+            tool_name="setup.world_background.delete_entry",
+        )
+        updated_block = SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            schema_metadata=block.schema_metadata,
+            entries=[item for item in block.entries if item.entry_id != entry.entry_id],
+            notes=block.notes,
+        )
+        self._workspace_service.patch_stage_draft(
+            workspace_id=input_model.workspace_id,
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            draft=updated_block,
+        )
+        return {
+            "success": True,
+            "message": "Deleted world_background draft entry",
+            "removed_refs": [self._world_background_entry_ref(entry.entry_id)],
+            "reason": input_model.reason,
+            "entry_type_registry": self._entry_type_registry_payload(updated_block),
+        }
+
+    def _world_background_block(self, workspace_id: str) -> SetupStageDraftBlock:
+        workspace = self._require_workspace(workspace_id)
+        return workspace.draft_blocks.get(
+            SetupStageId.WORLD_BACKGROUND.value,
+            SetupStageDraftBlock(stage_id=SetupStageId.WORLD_BACKGROUND),
+        )
+
+    def _upsert_world_background_entry_type(
+        self,
+        *,
+        block: SetupStageDraftBlock,
+        entry_type: SetupWorldBackgroundEntryTypeInput,
+    ) -> SetupStageDraftBlock:
+        record = self._entry_type_record(entry_type)
+        existing = {
+            item.type_key: item
+            for item in (
+                block.schema_metadata.entry_types if block.schema_metadata else []
+            )
+        }
+        previous = existing.get(record.type_key)
+        if previous is not None:
+            record = SetupEntryTypeRecord(
+                type_key=record.type_key,
+                display_name=record.display_name or previous.display_name,
+                description=record.description or previous.description,
+                aliases=self._dedupe_strings([*previous.aliases, *record.aliases]),
+                examples=self._dedupe_strings([*previous.examples, *record.examples]),
+            )
+        existing[record.type_key] = record
+        return SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            schema_metadata=SetupStageDraftSchemaMetadata(
+                entry_types=sorted(existing.values(), key=lambda item: item.type_key)
+            ),
+            entries=list(block.entries),
+            notes=block.notes,
+        )
+
+    def _build_world_background_entry(
+        self,
+        *,
+        entry_id: str,
+        entry_type: SetupWorldBackgroundEntryTypeInput,
+        title: str,
+        summary: str | None,
+        content_blocks: list[SetupWorldBackgroundContentBlockInput],
+        aliases: list[str],
+        tags: list[str],
+    ) -> SetupDraftEntry:
+        type_record = self._entry_type_record(entry_type)
+        return SetupDraftEntry(
+            entry_id=entry_id,
+            entry_type=type_record.type_key,
+            semantic_path=self._world_background_semantic_path(
+                entry_type=type_record.type_key,
+                entry_id=entry_id,
+            ),
+            title=title.strip(),
+            display_label=type_record.display_name,
+            summary=summary.strip()
+            if isinstance(summary, str) and summary.strip()
+            else None,
+            aliases=self._dedupe_strings(aliases),
+            tags=self._dedupe_strings(
+                [SetupStageId.WORLD_BACKGROUND.value, type_record.type_key, *tags]
+            ),
+            sections=self._world_background_sections(
+                summary=summary,
+                content_blocks=content_blocks,
+            ),
+        )
+
+    def _apply_world_background_entry_changes(
+        self,
+        *,
+        entry: SetupDraftEntry,
+        changes: SetupWorldBackgroundEntryChangesInput,
+    ) -> SetupDraftEntry:
+        entry_type = entry.entry_type
+        display_label = entry.display_label
+        if changes.entry_type is not None:
+            type_record = self._entry_type_record(changes.entry_type)
+            entry_type = type_record.type_key
+            display_label = type_record.display_name or display_label
+        title = (
+            changes.title.strip()
+            if isinstance(changes.title, str) and changes.title.strip()
+            else entry.title
+        )
+        summary = (
+            changes.summary.strip()
+            if isinstance(changes.summary, str) and changes.summary.strip()
+            else entry.summary
+        )
+        return SetupDraftEntry(
+            entry_id=entry.entry_id,
+            entry_type=entry_type,
+            semantic_path=self._world_background_semantic_path(
+                entry_type=entry_type,
+                entry_id=entry.entry_id,
+            ),
+            title=title,
+            display_label=display_label,
+            summary=summary,
+            aliases=self._remove_strings(
+                self._dedupe_strings([*entry.aliases, *changes.add_aliases]),
+                changes.remove_aliases,
+            ),
+            tags=self._remove_strings(
+                self._dedupe_strings([*entry.tags, entry_type, *changes.add_tags]),
+                changes.remove_tags,
+            ),
+            sections=self._patch_world_background_sections(
+                existing=list(entry.sections),
+                summary=summary,
+                upsert_blocks=changes.upsert_content_blocks,
+                remove_keys=changes.remove_content_block_keys,
+            ),
+        )
+
+    def _world_background_sections(
+        self,
+        *,
+        summary: str | None,
+        content_blocks: list[SetupWorldBackgroundContentBlockInput],
+    ) -> list[SetupDraftSection]:
+        sections: list[SetupDraftSection] = []
+        used_ids: set[str] = set()
+        if isinstance(summary, str) and summary.strip():
+            sections.append(
+                SetupDraftSection(
+                    section_id="summary",
+                    title="Summary",
+                    kind=SetupDraftSectionKind.TEXT,
+                    content={"text": summary.strip()},
+                    retrieval_role="summary",
+                    tags=["summary"],
+                )
+            )
+            used_ids.add("summary")
+        for block in content_blocks:
+            section = self._content_block_to_section(block=block, used_ids=used_ids)
+            sections.append(section)
+            used_ids.add(section.section_id)
+        return sections
+
+    def _patch_world_background_sections(
+        self,
+        *,
+        existing: list[SetupDraftSection],
+        summary: str | None,
+        upsert_blocks: list[SetupWorldBackgroundContentBlockInput],
+        remove_keys: list[str],
+    ) -> list[SetupDraftSection]:
+        sections = {item.section_id: item for item in existing}
+        for key in remove_keys:
+            sections.pop(self._section_id_for_key(key), None)
+        if isinstance(summary, str) and summary.strip():
+            sections["summary"] = SetupDraftSection(
+                section_id="summary",
+                title="Summary",
+                kind=SetupDraftSectionKind.TEXT,
+                content={"text": summary.strip()},
+                retrieval_role="summary",
+                tags=["summary"],
+            )
+        for block in upsert_blocks:
+            section_id = self._section_id_for_key(block.key)
+            section = self._content_block_to_section(
+                block=block,
+                used_ids=set(sections) - {section_id},
+            )
+            sections[section.section_id] = section
+        return list(sections.values())
+
+    def _content_block_to_section(
+        self,
+        *,
+        block: SetupWorldBackgroundContentBlockInput,
+        used_ids: set[str],
+    ) -> SetupDraftSection:
+        section_id = self._unique_section_id(
+            base=self._section_id_for_key(block.key),
+            used_ids=used_ids,
+        )
+        value = block.value
+        content: dict[str, Any]
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                self._raise_world_background_validation(
+                    tool_name="setup.world_background.write_entry",
+                    message="content block text value must not be empty",
+                )
+            kind = SetupDraftSectionKind.TEXT
+            content = {"text": text}
+        elif isinstance(value, list):
+            items = self._dedupe_strings(value)
+            if not items:
+                self._raise_world_background_validation(
+                    tool_name="setup.world_background.write_entry",
+                    message="content block list value must contain at least one item",
+                )
+            kind = SetupDraftSectionKind.LIST
+            content = {"items": items}
+        elif isinstance(value, dict):
+            values = {
+                str(key): val
+                for key, val in value.items()
+                if val not in (None, "", [], {})
+            }
+            if not values:
+                self._raise_world_background_validation(
+                    tool_name="setup.world_background.write_entry",
+                    message="content block object value must contain at least one value",
+                )
+            kind = SetupDraftSectionKind.KEY_VALUE
+            content = {"values": values}
+        else:  # pragma: no cover - pydantic input guards this
+            self._raise_world_background_validation(
+                tool_name="setup.world_background.write_entry",
+                message="unsupported content block value",
+            )
+        return SetupDraftSection(
+            section_id=section_id,
+            title=block.key.strip(),
+            kind=kind,
+            content=content,
+            retrieval_role=block.retrieval_role
+            or self._infer_retrieval_role(block.key),
+            tags=self._dedupe_strings(block.tags),
+        )
+
+    def _require_world_background_entry(
+        self,
+        *,
+        block: SetupStageDraftBlock,
+        target_ref: str,
+        tool_name: str,
+    ) -> SetupDraftEntry:
+        entry_id = self._entry_id_from_world_background_ref(target_ref)
+        for entry in block.entries:
+            if entry.entry_id == entry_id:
+                return entry
+        raise SetupToolContractError(
+            code="world_background_entry_not_found",
+            message=f"World background draft entry not found: {target_ref}",
+            details=self._error_details(
+                tool_name=tool_name,
+                failure_origin="validation",
+                repair_strategy="continue_discussion",
+                required_fields=["target_ref"],
+            ),
+        )
+
+    def _entry_id_from_world_background_ref(self, target_ref: str) -> str:
+        prefix = "stage:world_background:"
+        if not target_ref.startswith(prefix):
+            raise SetupToolContractError(
+                code="world_background_target_ref_invalid",
+                message="target_ref must look like 'stage:world_background:<entry_id>'",
+                details=self._error_details(
+                    tool_name="setup.world_background.read_entry",
+                    failure_origin="validation",
+                    repair_strategy="auto_repair",
+                    required_fields=["target_ref"],
+                ),
+            )
+        entry_id = target_ref[len(prefix) :].split(":", 1)[0].strip()
+        if not entry_id:
+            raise SetupToolContractError(
+                code="world_background_target_ref_invalid",
+                message="target_ref is missing entry_id",
+                details=self._error_details(
+                    tool_name="setup.world_background.read_entry",
+                    failure_origin="validation",
+                    repair_strategy="auto_repair",
+                    required_fields=["target_ref"],
+                ),
+            )
+        return entry_id
+
+    def _require_entry_fingerprint(
+        self,
+        *,
+        entry: SetupDraftEntry,
+        basis_fingerprint: str,
+        tool_name: str,
+    ) -> None:
+        current = self._entry_fingerprint(entry)
+        if basis_fingerprint != current:
+            raise SetupToolContractError(
+                code="world_background_basis_fingerprint_mismatch",
+                message=(
+                    "World background entry changed after it was read; "
+                    "read it again before editing."
+                ),
+                details=self._error_details(
+                    tool_name=tool_name,
+                    failure_origin="validation",
+                    repair_strategy="read_current_state",
+                    required_fields=["basis_fingerprint"],
+                    extra={"current_fingerprint": current},
+                ),
+            )
+
+    @classmethod
+    def _world_background_entry_payload(
+        cls,
+        *,
+        entry: SetupDraftEntry,
+        include_sections: bool,
+    ) -> dict[str, Any]:
+        payload = entry.model_dump(mode="json", exclude_none=True)
+        if not include_sections:
+            payload.pop("sections", None)
+        payload["target_ref"] = cls._world_background_entry_ref(entry.entry_id)
+        payload["basis_fingerprint"] = cls._entry_fingerprint(entry)
+        return payload
+
+    @staticmethod
+    def _entry_fingerprint(entry: SetupDraftEntry) -> str:
+        payload = json.dumps(
+            entry.model_dump(mode="json", exclude_none=True),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _world_background_entry_ref(entry_id: str) -> str:
+        return f"stage:world_background:{entry_id}"
+
+    @staticmethod
+    def _world_background_semantic_path(*, entry_type: str, entry_id: str) -> str:
+        return f"world_background.{entry_type}.{entry_id}"
+
+    def _unique_world_background_entry_id(
+        self,
+        *,
+        block: SetupStageDraftBlock,
+        type_key: str,
+        title: str,
+    ) -> str:
+        title_slug = self._slugify(title)
+        base = (
+            f"{type_key}_{title_slug}"
+            if title_slug
+            else f"{type_key}_{self._hash_slug(title)}"
+        )
+        existing = {entry.entry_id for entry in block.entries}
+        candidate = base
+        index = 2
+        while candidate in existing:
+            candidate = f"{base}_{index}"
+            index += 1
+        return candidate
+
+    def _entry_type_record(
+        self,
+        entry_type: SetupWorldBackgroundEntryTypeInput,
+    ) -> SetupEntryTypeRecord:
+        return SetupEntryTypeRecord(
+            type_key=self._normalize_key(entry_type.type_key),
+            display_name=entry_type.display_name.strip()
+            if isinstance(entry_type.display_name, str)
+            and entry_type.display_name.strip()
+            else None,
+            description=entry_type.description.strip()
+            if isinstance(entry_type.description, str)
+            and entry_type.description.strip()
+            else None,
+            aliases=self._dedupe_strings(entry_type.aliases),
+            examples=self._dedupe_strings(entry_type.examples),
+        )
+
+    @staticmethod
+    def _entry_type_registry_payload(
+        block: SetupStageDraftBlock,
+    ) -> list[dict[str, Any]]:
+        if block.schema_metadata is None:
+            return []
+        return [
+            item.model_dump(mode="json", exclude_none=True)
+            for item in block.schema_metadata.entry_types
+        ]
+
+    @staticmethod
+    def _entry_matches_query(entry: SetupDraftEntry, query: str) -> bool:
+        haystack = " ".join(
+            [
+                entry.entry_id,
+                entry.entry_type,
+                entry.semantic_path,
+                entry.title,
+                entry.summary or "",
+                " ".join(entry.aliases),
+                " ".join(entry.tags),
+            ]
+        ).lower()
+        return query in haystack
+
+    @classmethod
+    def _normalize_key(cls, value: str | None) -> str:
+        return cls._slugify(value or "") or cls._hash_slug(value or "")
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        text = value.strip().lower()
+        text = re.sub(r"[^a-z0-9]+", "_", text)
+        return re.sub(r"_+", "_", text).strip("_")
+
+    @staticmethod
+    def _hash_slug(value: str) -> str:
+        return hashlib.sha1(value.encode("utf-8")).hexdigest()[:10]
+
+    @staticmethod
+    def _unique_section_id(*, base: str, used_ids: set[str]) -> str:
+        section_id = base or "section"
+        candidate = section_id
+        index = 2
+        while candidate in used_ids:
+            candidate = f"{section_id}_{index}"
+            index += 1
+        return candidate
+
+    @classmethod
+    def _section_id_for_key(cls, key: str) -> str:
+        return cls._slugify(key) or f"section_{cls._hash_slug(key)}"
+
+    @staticmethod
+    def _dedupe_strings(values: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value).strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return result
+
+    @classmethod
+    def _remove_strings(cls, values: list[str], remove: list[str]) -> list[str]:
+        removals = set(cls._dedupe_strings(remove))
+        return [value for value in values if value not in removals]
+
+    @staticmethod
+    def _infer_retrieval_role(
+        key: str,
+    ) -> Literal["summary", "detail", "rule", "relationship", "note"]:
+        text = key.lower()
+        if "summary" in text or "概要" in text or "概述" in text:
+            return "summary"
+        if any(
+            token in text for token in ("rule", "law", "taboo", "禁", "规则", "法律")
+        ):
+            return "rule"
+        if any(token in text for token in ("relation", "relationship", "关系", "外交")):
+            return "relationship"
+        if "note" in text or "备注" in text:
+            return "note"
+        return "detail"
+
+    def _raise_world_background_validation(
+        self,
+        *,
+        tool_name: str,
+        message: str,
+    ) -> None:
+        raise SetupToolContractError(
+            code="world_background_validation_failed",
+            message=message,
+            details=self._error_details(
+                tool_name=tool_name,
+                failure_origin="validation",
+                repair_strategy="auto_repair",
+            ),
+        )
+
     def _require_workspace(self, workspace_id: str):
         workspace = self._workspace_service.get_workspace(workspace_id)
         if workspace is None:
@@ -1759,4 +2585,3 @@ class SetupToolProvider:
         if block_type not in mapping:
             raise ValueError(f"Unsupported truth write block_type: {block_type}")
         return mapping[block_type]
-

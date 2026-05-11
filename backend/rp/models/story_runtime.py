@@ -97,6 +97,13 @@ class ChapterWorkspace(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    def accepted_outline_metadata(self) -> dict[str, Any]:
+        accepted_outline = self.accepted_outline_json or {}
+        metadata = accepted_outline.get("metadata")
+        if isinstance(metadata, dict):
+            return dict(metadata)
+        return {}
+
 
 class StoryArtifact(BaseModel):
     model_config = ConfigDict(extra="forbid")

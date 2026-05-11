@@ -77,6 +77,120 @@ class BackendStoryService {
     );
   }
 
+  Future<RpRuntimeInspection> getRuntimeInspection({
+    required String sessionId,
+    String? branchHeadId,
+    String? turnId,
+    int? targetChapterIndex,
+    int? limit,
+  }) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/runtime/inspect',
+      queryParameters: {
+        if (branchHeadId != null && branchHeadId.isNotEmpty)
+          'branch_head_id': branchHeadId,
+        if (turnId != null && turnId.isNotEmpty) 'turn_id': turnId,
+        if (targetChapterIndex != null)
+          'target_chapter_index': targetChapterIndex,
+        if (limit != null) 'limit': limit,
+      },
+    );
+    _ensureSuccess(response, action: 'get story runtime inspection');
+    return RpRuntimeInspection.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpRuntimeDebugSurface> getRuntimeDebug({
+    required String sessionId,
+  }) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/runtime/debug',
+    );
+    _ensureSuccess(response, action: 'get story runtime debug');
+    return RpRuntimeDebugSurface.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<List<RpRuntimeConfigControlReceipt>> getRuntimeConfigHistory({
+    required String sessionId,
+  }) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/runtime-config/history',
+    );
+    _ensureSuccess(response, action: 'get story runtime config history');
+    final payload = Map<String, dynamic>.from(response.data as Map);
+    final items = payload['data'] as List? ?? const [];
+    return items
+        .whereType<Map>()
+        .map(
+          (item) => RpRuntimeConfigControlReceipt.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        )
+        .toList();
+  }
+
+  Future<RpBranchControlResult> createBranchFromTurn({
+    required String sessionId,
+    required String originTurnId,
+    String? branchName,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/branches',
+      data: {
+        'origin_turn_id': originTurnId,
+        if (branchName != null && branchName.trim().isNotEmpty)
+          'branch_name': branchName.trim(),
+      },
+    );
+    _ensureSuccess(response, action: 'create story branch');
+    return RpBranchControlResult.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpBranchControlResult> switchBranch({
+    required String sessionId,
+    required String branchHeadId,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/branches/$branchHeadId/switch',
+    );
+    _ensureSuccess(response, action: 'switch story branch');
+    return RpBranchControlResult.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpBranchControlResult> deleteBranch({
+    required String sessionId,
+    required String branchHeadId,
+  }) async {
+    final response = await _controlDio.delete(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/branches/$branchHeadId',
+    );
+    _ensureSuccess(response, action: 'delete story branch');
+    return RpBranchControlResult.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpBranchControlResult> rollbackToTurn({
+    required String sessionId,
+    required String targetTurnId,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/rollback',
+      data: {'target_turn_id': targetTurnId},
+    );
+    _ensureSuccess(response, action: 'rollback story branch');
+    return RpBranchControlResult.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
   Future<RpRevisionReviewSurface> getRevisionReviewSurface({
     required String sessionId,
     required String artifactId,

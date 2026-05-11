@@ -20,6 +20,7 @@ from rp.models.runtime_config_contracts import (
     RuntimeConfigControlReceipt,
     RuntimeConfigPatchRequest,
 )
+from rp.models.runtime_identity import BranchControlReceipt
 from rp.models.memory_inspection import RecallReviewCommand
 from rp.models.revision_overlay_contracts import (
     DraftDocumentRecord,
@@ -43,6 +44,7 @@ from .recall_scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
 from .story_runtime_debug_query_service import StoryRuntimeDebugQueryService
+from .story_runtime_identity_service import StoryRuntimeIdentityService
 from .story_runtime_migration_service import StoryRuntimeMigrationService
 from .runtime_config_control_service import RuntimeConfigControlService
 from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
@@ -86,6 +88,7 @@ class StoryRuntimeController:
             RecallSceneTranscriptIngestionService | None
         ) = None,
         runtime_profile_snapshot_service: RuntimeProfileSnapshotService | None = None,
+        story_runtime_identity_service: StoryRuntimeIdentityService | None = None,
         story_runtime_debug_query_service: StoryRuntimeDebugQueryService | None = None,
         story_runtime_migration_service: StoryRuntimeMigrationService | None = None,
         runtime_config_control_service: RuntimeConfigControlService | None = None,
@@ -106,6 +109,7 @@ class StoryRuntimeController:
             recall_scene_transcript_ingestion_service
         )
         self._runtime_profile_snapshot_service = runtime_profile_snapshot_service
+        self._story_runtime_identity_service = story_runtime_identity_service
         self._story_runtime_debug_query_service = story_runtime_debug_query_service
         self._story_runtime_migration_service = story_runtime_migration_service
         self._runtime_config_control_service = runtime_config_control_service
@@ -199,6 +203,96 @@ class StoryRuntimeController:
         return self._runtime_config_control_service.list_control_history(
             session_id=session_id
         )
+
+    def create_branch_from_turn(
+        self,
+        *,
+        session_id: str,
+        origin_turn_id: str,
+        branch_name: str | None = None,
+        actor: str = "story_runtime_ui",
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[ChapterWorkspaceSnapshot, BranchControlReceipt]:
+        receipt = self._require_story_runtime_identity_service().create_branch_from_turn(
+            session_id=session_id,
+            origin_turn_id=origin_turn_id,
+            actor=actor,
+            branch_name=branch_name,
+            metadata=metadata,
+        )
+        self._story_session_service.commit()
+        session = self._require_session(session_id)
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=session.current_chapter_index,
+        )
+        return snapshot, receipt
+
+    def switch_branch(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str,
+        actor: str = "story_runtime_ui",
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[ChapterWorkspaceSnapshot, BranchControlReceipt]:
+        receipt = self._require_story_runtime_identity_service().switch_branch(
+            session_id=session_id,
+            target_branch_head_id=branch_head_id,
+            actor=actor,
+            metadata=metadata,
+        )
+        self._story_session_service.commit()
+        session = self._require_session(session_id)
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=session.current_chapter_index,
+        )
+        return snapshot, receipt
+
+    def delete_branch(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str,
+        actor: str = "story_runtime_ui",
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[ChapterWorkspaceSnapshot, BranchControlReceipt]:
+        receipt = self._require_story_runtime_identity_service().delete_branch(
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            actor=actor,
+            metadata=metadata,
+        )
+        self._story_session_service.commit()
+        session = self._require_session(session_id)
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=session.current_chapter_index,
+        )
+        return snapshot, receipt
+
+    def rollback_to_turn(
+        self,
+        *,
+        session_id: str,
+        target_turn_id: str,
+        actor: str = "story_runtime_ui",
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[ChapterWorkspaceSnapshot, BranchControlReceipt]:
+        receipt = self._require_story_runtime_identity_service().rollback_to_turn(
+            session_id=session_id,
+            target_turn_id=target_turn_id,
+            actor=actor,
+            metadata=metadata,
+        )
+        self._story_session_service.commit()
+        session = self._require_session(session_id)
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=session.current_chapter_index,
+        )
+        return snapshot, receipt
 
     def read_revision_review_surface(
         self,
@@ -998,6 +1092,11 @@ class StoryRuntimeController:
         if self._revision_overlay_service is None:
             raise RuntimeError("revision_overlay_service_not_configured")
         return self._revision_overlay_service
+
+    def _require_story_runtime_identity_service(self) -> StoryRuntimeIdentityService:
+        if self._story_runtime_identity_service is None:
+            raise RuntimeError("story_runtime_identity_service_not_configured")
+        return self._story_runtime_identity_service
 
     @staticmethod
     def _surface_block(

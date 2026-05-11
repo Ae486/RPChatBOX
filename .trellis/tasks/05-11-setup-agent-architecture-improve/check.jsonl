@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/setup-agent-module-prd.md", "reason": "Check A0 scope, non-goals, source authority, and acceptance criteria."}
+{"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/research/setup-agent-architecture-handoff-for-new-session.md", "reason": "Check that the new task preserves the handoff constraints and does not regress to narrow bugfix framing."}
+{"file": ".trellis/spec/backend/rp-setup-agent-loop-semantics-react-trace.md", "reason": "Check target architecture against existing setup loop semantics contract."}
+{"file": ".trellis/spec/backend/rp-setup-agent-structured-output-schema-repair.md", "reason": "Check repair-loop planning against existing schema repair contract."}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-aware-tool-scope.md", "reason": "Check capability/tool-scope planning against existing stage-aware allowlist contract."}
+{"file": ".trellis/spec/backend/rp-setup-agent-pre-model-context-assembly.md", "reason": "Check context-pipeline planning against existing context assembly contract."}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-local-context-governance.md", "reason": "Check state/context planning against existing governance persistence boundaries."}
+{"file": ".trellis/spec/backend/rp-setup-agent-execution-service-outer-harness-thin-boundary.md", "reason": "Check outer-harness boundary is preserved."}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-skill-pack.md", "reason": "Check SkillPack remains prompt-layer only."}
+{"file": ".trellis/spec/backend/rp-setup-agent-strict-truth-write-tool-pilot.md", "reason": "Check truth-write and provider validation assumptions are not silently overridden."}

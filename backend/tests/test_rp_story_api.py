@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
+from typing import Any
 
+from sqlmodel import select
 from sqlmodel import Session as SqlSession
 
 from config import get_settings
-from models.rp_story_store import BranchHeadRecord, StorySessionRecord
+from models.rp_story_store import BranchHeadRecord, StorySessionRecord, StoryTurnRecord
 from rp.graphs.story_graph_runner import StoryGraphRunner
 from rp.models.archival_evolution import ArchivalEvolutionRequest
 from rp.models.core_mutation import (
@@ -850,6 +852,140 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _artifact_runtime_metadata(
+    *,
+    story_id: str,
+    session_id: str,
+    branch_head_id: str,
+    turn_id: str,
+    runtime_profile_snapshot_id: str,
+) -> dict[str, str]:
+    return {
+        "runtime_story_id": story_id,
+        "runtime_session_id": session_id,
+        "runtime_branch_head_id": branch_head_id,
+        "runtime_turn_id": turn_id,
+        "runtime_profile_snapshot_id": runtime_profile_snapshot_id,
+    }
+
+
+def _story_turn_count(session_id: str) -> int:
+    with SqlSession(get_engine()) as db_session:
+        return len(
+            list(
+                db_session.exec(
+                    select(StoryTurnRecord).where(
+                        StoryTurnRecord.session_id == session_id
+                    )
+                ).all()
+            )
+        )
+
+
+def _seed_branch_control_product_session() -> dict[str, Any]:
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.create_session(
+            story_id="story-api-branch-productization",
+            source_workspace_id="workspace-api-branch-productization",
+            mode="longform",
+            runtime_story_config={},
+            writer_contract={},
+            current_state_json={},
+            initial_phase=LongformChapterPhase.SEGMENT_REVIEW,
+        )
+        chapter = story_session_service.create_chapter_workspace(
+            session_id=story_session.session_id,
+            chapter_index=1,
+            phase=LongformChapterPhase.SEGMENT_REVIEW,
+            builder_snapshot_json={},
+        )
+        snapshot_service = RuntimeProfileSnapshotService(db_session)
+        snapshot = snapshot_service.ensure_active_snapshot(
+            session_id=story_session.session_id,
+            created_from="test.api.branch_productization",
+        )
+        identity_service = StoryRuntimeIdentityService(
+            db_session,
+            runtime_profile_snapshot_service=snapshot_service,
+        )
+        accepted_segment_ids: list[str] = []
+        turn_ids: list[str] = []
+        segment_ids_by_turn_id: dict[str, str] = {}
+        branch_head_id = story_session.active_branch_head_id
+        if not branch_head_id:
+            raise AssertionError("Seeded story session is missing active branch")
+        for index in range(1, 4):
+            identity = identity_service.resolve_runtime_entry_identity(
+                session_id=story_session.session_id,
+                command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+                actor=f"api.branch_productization.{index}",
+                requested_runtime_profile_snapshot_id=(
+                    snapshot.runtime_profile_snapshot_id
+                ),
+            )
+            artifact = story_session_service.create_artifact(
+                session_id=story_session.session_id,
+                chapter_workspace_id=chapter.chapter_workspace_id,
+                artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+                status=StoryArtifactStatus.ACCEPTED,
+                content_text=f"Accepted segment {index}",
+                metadata={
+                    **_artifact_runtime_metadata(
+                        story_id=identity.story_id,
+                        session_id=identity.session_id,
+                        branch_head_id=identity.branch_head_id,
+                        turn_id=identity.turn_id,
+                        runtime_profile_snapshot_id=(
+                            identity.runtime_profile_snapshot_id
+                        ),
+                    ),
+                    "segment_index": index,
+                },
+            )
+            identity_service.update_turn_status(
+                turn_id=identity.turn_id,
+                status=StoryTurnStatus.SETTLED,
+                visible_output_ref=artifact.artifact_id,
+                selected_output_ref=artifact.artifact_id,
+                settlement_reason="api_branch_productization_seeded",
+            )
+            accepted_segment_ids.append(artifact.artifact_id)
+            turn_ids.append(identity.turn_id)
+            segment_ids_by_turn_id[identity.turn_id] = artifact.artifact_id
+        story_session_service.update_chapter_workspace(
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            accepted_segment_ids=accepted_segment_ids,
+            pending_segment_artifact_id=None,
+            phase=LongformChapterPhase.SEGMENT_REVIEW,
+        )
+        RuntimeWorkspaceMaterialService(session=db_session).record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.branch.rollback.future",
+                material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
+                identity=MemoryRuntimeIdentity(
+                    story_id=story_session.story_id,
+                    session_id=story_session.session_id,
+                    branch_head_id=branch_head_id,
+                    turn_id=turn_ids[-1],
+                    runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+                ),
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.runtime.worker_candidate",
+                payload={"candidate": "future branch-only material"},
+                visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
+                created_by="api.branch.rollback.seed",
+            )
+        )
+        db_session.commit()
+        return {
+            "session_id": story_session.session_id,
+            "branch_head_id": branch_head_id,
+            "turn_ids": turn_ids,
+            "segment_ids_by_turn_id": segment_ids_by_turn_id,
+        }
+
+
 def _seed_runtime_surface_second_stage_data(runtime_seed: dict[str, str]) -> dict[str, str]:
     with SqlSession(get_engine()) as db_session:
         session_id = runtime_seed["session_id"]
@@ -907,10 +1043,47 @@ def _seed_runtime_surface_second_stage_data(runtime_seed: dict[str, str]) -> dic
             adopted_output_ref=f"artifact:{identity.turn_id}:accepted",
             accepted_outline_ref="outline-accepted",
             chapter_goal_ref="chapter-goal:2",
+            covered_beat_ids=["beat_001", "beat_002"],
             continuity_refs=[f"continuity:{identity.turn_id}"],
+            continuity_notes=["Carry the debt consequence into chapter two."],
             summary_text="API main bridge summary.",
             source_refs=[f"artifact:{identity.turn_id}:accepted"],
             metadata_json={"bridge_source": "api_test"},
+        )
+        material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id="api.runtime.progress.main",
+                material_kind=RuntimeWorkspaceMaterialKind.POST_WRITE_TRACE,
+                identity=identity,
+                domain=Domain.CHAPTER.value,
+                domain_path="chapter.longform_outline.progress",
+                payload={
+                    "payload_kind": "longform_outline_progress",
+                    "record_id": "api.runtime.progress.main",
+                    "record": {
+                        "outline_artifact_id": "outline-accepted",
+                        "chapter_index": 2,
+                        "current_beat_id": "beat_003",
+                        "covered_beat_ids": ["beat_001", "beat_002"],
+                        "segment_by_beat_id": {
+                            "beat_001": f"artifact:{identity.turn_id}:001",
+                            "beat_002": f"artifact:{identity.turn_id}:002",
+                        },
+                        "status_by_beat_id": {
+                            "beat_001": "accepted",
+                            "beat_002": "accepted",
+                            "beat_003": "current",
+                        },
+                        "metadata_json": {
+                            "payload_version": "longform-outline-progress.v1",
+                        },
+                    },
+                    "runtime_truth_owner": "rp_runtime",
+                    "canonical_truth": False,
+                },
+                visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
+                created_by="api.runtime.inspect_test",
+            )
         )
         material_service.record_material(
             RuntimeWorkspaceMaterial(
@@ -1074,6 +1247,7 @@ def _seed_runtime_surface_second_stage_data(runtime_seed: dict[str, str]) -> dic
         return {
             "control_history_expected": "runtime_config_receipt_present",
             "main_bridge_material_id": "api.runtime.bridge.main",
+            "main_progress_material_id": "api.runtime.progress.main",
             "main_rule_card_id": main_rule_card_id or "",
             "main_rule_state_id": main_rule_state_id or "",
             "evolution_id": evolution_receipt.evolution_id,
@@ -2159,6 +2333,12 @@ def test_story_runtime_inspection_route_returns_runtime_native_read_bundle(
     assert payload["chapter_bridge"]["latest_for_target_chapter"]["material_id"] == (
         second_stage_seed["main_bridge_material_id"]
     )
+    assert payload["chapter_progress"]["latest_for_chapter"]["material_id"] == (
+        second_stage_seed["main_progress_material_id"]
+    )
+    assert payload["chapter_progress"]["latest_for_chapter"]["current_beat_id"] == (
+        "beat_003"
+    )
     sidecar_material_ids = {
         item["material_id"] for item in payload["mode_sidecars"]["materials"]
     }
@@ -2307,6 +2487,457 @@ def test_story_runtime_inspection_route_warns_when_active_snapshot_anchor_is_sta
     assert "runtime_profile_snapshot_unavailable" in payload["warnings"]
 
 
+def test_story_branch_create_route_switches_active_branch_without_new_turn(client):
+    seeded = _seed_branch_control_product_session()
+    session_id = seeded["session_id"]
+    branch_head_id = seeded["branch_head_id"]
+    turn_ids = seeded["turn_ids"]
+    segment_ids_by_turn_id = seeded["segment_ids_by_turn_id"]
+    turn_count_before = _story_turn_count(session_id)
+
+    response = client.post(
+        f"/api/rp/story-sessions/{session_id}/branches",
+        json={
+            "origin_turn_id": turn_ids[1],
+            "branch_name": "alternate future",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    receipt = payload["receipt"]
+    snapshot = payload["data"]["chapter_snapshot"]
+    assert receipt["control_kind"] == "branch_created"
+    assert receipt["from_branch_head_id"] == branch_head_id
+    assert receipt["fork_origin_turn_id"] == turn_ids[1]
+    assert receipt["fork_base_turn_id"] == turn_ids[1]
+    assert receipt["to_branch_head_id"]
+    assert snapshot["session"]["active_branch_head_id"] == receipt["to_branch_head_id"]
+    accepted_segment_ids = [
+        item["artifact_id"]
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "story_segment" and item["status"] == "accepted"
+    ]
+    assert accepted_segment_ids == [
+        segment_ids_by_turn_id[turn_ids[0]],
+        segment_ids_by_turn_id[turn_ids[1]],
+    ]
+    assert _story_turn_count(session_id) == turn_count_before
+
+
+def test_story_branch_create_route_uses_inclusive_anchor_for_first_segment(client):
+    seeded = _seed_branch_control_product_session()
+    session_id = seeded["session_id"]
+    turn_ids = seeded["turn_ids"]
+    segment_ids_by_turn_id = seeded["segment_ids_by_turn_id"]
+    turn_count_before = _story_turn_count(session_id)
+
+    response = client.post(
+        f"/api/rp/story-sessions/{session_id}/branches",
+        json={
+            "origin_turn_id": turn_ids[0],
+            "branch_name": "from first segment",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    receipt = payload["receipt"]
+    snapshot = payload["data"]["chapter_snapshot"]
+    assert receipt["fork_origin_turn_id"] == turn_ids[0]
+    assert receipt["fork_base_turn_id"] == turn_ids[0]
+    accepted_segment_ids = [
+        item["artifact_id"]
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "story_segment" and item["status"] == "accepted"
+    ]
+    assert accepted_segment_ids == [segment_ids_by_turn_id[turn_ids[0]]]
+    assert _story_turn_count(session_id) == turn_count_before
+
+
+def test_story_branch_create_route_accepts_adopted_visible_output_origin(client):
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.create_session(
+            story_id="story-api-branch-adopted-origin",
+            source_workspace_id="workspace-api-branch-adopted-origin",
+            mode="longform",
+            runtime_story_config={},
+            writer_contract={},
+            current_state_json={},
+            initial_phase=LongformChapterPhase.SEGMENT_DRAFTING,
+        )
+        chapter = story_session_service.create_chapter_workspace(
+            session_id=story_session.session_id,
+            chapter_index=1,
+            phase=LongformChapterPhase.SEGMENT_DRAFTING,
+            builder_snapshot_json={},
+        )
+        snapshot_service = RuntimeProfileSnapshotService(db_session)
+        snapshot = snapshot_service.ensure_active_snapshot(
+            session_id=story_session.session_id,
+            created_from="test.api.branch_adopted_origin",
+        )
+        identity_service = StoryRuntimeIdentityService(
+            db_session,
+            runtime_profile_snapshot_service=snapshot_service,
+        )
+        base_identity = identity_service.resolve_runtime_entry_identity(
+            session_id=story_session.session_id,
+            command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+            actor="api.branch_adopted_origin.base",
+            requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        )
+        base_artifact = story_session_service.create_artifact(
+            session_id=story_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+            status=StoryArtifactStatus.ACCEPTED,
+            content_text="Accepted base segment",
+            metadata=_artifact_runtime_metadata(
+                story_id=base_identity.story_id,
+                session_id=base_identity.session_id,
+                branch_head_id=base_identity.branch_head_id,
+                turn_id=base_identity.turn_id,
+                runtime_profile_snapshot_id=base_identity.runtime_profile_snapshot_id,
+            ),
+        )
+        identity_service.update_turn_status(
+            turn_id=base_identity.turn_id,
+            status=StoryTurnStatus.SETTLED,
+            visible_output_ref=base_artifact.artifact_id,
+            selected_output_ref=base_artifact.artifact_id,
+            settlement_reason="api_branch_adopted_origin_base",
+        )
+        origin_identity = identity_service.resolve_runtime_entry_identity(
+            session_id=story_session.session_id,
+            command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+            actor="api.branch_adopted_origin.origin",
+            requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        )
+        origin_artifact = story_session_service.create_artifact(
+            session_id=story_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+            status=StoryArtifactStatus.ACCEPTED,
+            content_text="Accepted adopted origin segment",
+            metadata=_artifact_runtime_metadata(
+                story_id=origin_identity.story_id,
+                session_id=origin_identity.session_id,
+                branch_head_id=origin_identity.branch_head_id,
+                turn_id=origin_identity.turn_id,
+                runtime_profile_snapshot_id=origin_identity.runtime_profile_snapshot_id,
+            ),
+        )
+        story_session_service.update_chapter_workspace(
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            accepted_segment_ids=[
+                base_artifact.artifact_id,
+                origin_artifact.artifact_id,
+            ],
+            pending_segment_artifact_id=None,
+        )
+        identity_service.update_turn_status(
+            turn_id=origin_identity.turn_id,
+            status=StoryTurnStatus.POST_WRITE_PENDING,
+            visible_output_ref=origin_artifact.artifact_id,
+            selected_output_ref=origin_artifact.artifact_id,
+        )
+        RuntimeWorkflowJobService(db_session).ensure_creation_time_obligations(
+            identity=origin_identity,
+            metadata={"artifact_id": origin_artifact.artifact_id},
+        )
+        db_session.commit()
+        session_id = story_session.session_id
+        origin_turn_id = origin_identity.turn_id
+    turn_count_before = _story_turn_count(session_id)
+
+    response = client.post(
+        f"/api/rp/story-sessions/{session_id}/branches",
+        json={"origin_turn_id": origin_turn_id},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    receipt = payload["receipt"]
+    assert receipt["control_kind"] == "branch_created"
+    assert receipt["fork_origin_turn_id"] == origin_turn_id
+    assert receipt["fork_base_turn_id"] == origin_turn_id
+    assert _story_turn_count(session_id) == turn_count_before
+    with SqlSession(get_engine()) as db_session:
+        origin_turn = db_session.get(StoryTurnRecord, origin_turn_id)
+        jobs = RuntimeWorkflowJobService(db_session).list_jobs_for_turn(
+            turn_id=origin_turn_id,
+        )
+    assert origin_turn is not None
+    assert origin_turn.status == StoryTurnStatus.SETTLED.value
+    assert {job.status for job in jobs} == {"deferred"}
+
+
+def test_story_rollback_route_accepts_parent_lineage_origin_target(client):
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.create_session(
+            story_id="story-api-rollback-parent-lineage-origin",
+            source_workspace_id="workspace-api-rollback-parent-lineage-origin",
+            mode="longform",
+            runtime_story_config={},
+            writer_contract={},
+            current_state_json={},
+            initial_phase=LongformChapterPhase.SEGMENT_DRAFTING,
+        )
+        chapter = story_session_service.create_chapter_workspace(
+            session_id=story_session.session_id,
+            chapter_index=1,
+            phase=LongformChapterPhase.SEGMENT_DRAFTING,
+            builder_snapshot_json={},
+        )
+        snapshot_service = RuntimeProfileSnapshotService(db_session)
+        snapshot = snapshot_service.ensure_active_snapshot(
+            session_id=story_session.session_id,
+            created_from="test.api.rollback_parent_lineage_origin",
+        )
+        identity_service = StoryRuntimeIdentityService(
+            db_session,
+            runtime_profile_snapshot_service=snapshot_service,
+        )
+        parent_origin = identity_service.resolve_runtime_entry_identity(
+            session_id=story_session.session_id,
+            command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+            actor="api.rollback_parent_lineage.parent",
+            requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        )
+        parent_artifact = story_session_service.create_artifact(
+            session_id=story_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+            status=StoryArtifactStatus.ACCEPTED,
+            content_text="Accepted parent origin segment",
+            metadata=_artifact_runtime_metadata(
+                story_id=parent_origin.story_id,
+                session_id=parent_origin.session_id,
+                branch_head_id=parent_origin.branch_head_id,
+                turn_id=parent_origin.turn_id,
+                runtime_profile_snapshot_id=parent_origin.runtime_profile_snapshot_id,
+            ),
+        )
+        identity_service.update_turn_status(
+            turn_id=parent_origin.turn_id,
+            status=StoryTurnStatus.SETTLED,
+            visible_output_ref=parent_artifact.artifact_id,
+            selected_output_ref=parent_artifact.artifact_id,
+            settlement_reason="api_parent_lineage_origin_seeded",
+        )
+        create_receipt = identity_service.create_branch_from_turn(
+            session_id=story_session.session_id,
+            origin_turn_id=parent_origin.turn_id,
+            actor="api.rollback_parent_lineage",
+        )
+        child_identity = identity_service.resolve_runtime_entry_identity(
+            session_id=story_session.session_id,
+            command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+            actor="api.rollback_parent_lineage.child",
+            requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        )
+        child_artifact = story_session_service.create_artifact(
+            session_id=story_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+            status=StoryArtifactStatus.ACCEPTED,
+            content_text="Accepted child branch segment",
+            metadata=_artifact_runtime_metadata(
+                story_id=child_identity.story_id,
+                session_id=child_identity.session_id,
+                branch_head_id=child_identity.branch_head_id,
+                turn_id=child_identity.turn_id,
+                runtime_profile_snapshot_id=child_identity.runtime_profile_snapshot_id,
+            ),
+        )
+        story_session_service.update_chapter_workspace(
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            accepted_segment_ids=[
+                parent_artifact.artifact_id,
+                child_artifact.artifact_id,
+            ],
+            pending_segment_artifact_id=None,
+        )
+        identity_service.update_turn_status(
+            turn_id=child_identity.turn_id,
+            status=StoryTurnStatus.SETTLED,
+            visible_output_ref=child_artifact.artifact_id,
+            selected_output_ref=child_artifact.artifact_id,
+            settlement_reason="api_child_branch_seeded",
+        )
+        db_session.commit()
+        session_id = story_session.session_id
+        target_turn_id = parent_origin.turn_id
+        child_turn_id = child_identity.turn_id
+        child_branch_id = create_receipt.to_branch_head_id
+        parent_artifact_id = parent_artifact.artifact_id
+        child_artifact_id = child_artifact.artifact_id
+    turn_count_before = _story_turn_count(session_id)
+
+    response = client.post(
+        f"/api/rp/story-sessions/{session_id}/rollback",
+        json={"target_turn_id": target_turn_id},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    receipt = payload["receipt"]
+    snapshot = payload["data"]["chapter_snapshot"]
+    accepted_segment_ids = [
+        item["artifact_id"]
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "story_segment" and item["status"] == "accepted"
+    ]
+    assert receipt["control_kind"] == "rollback_applied"
+    assert receipt["branch_head_id"] == child_branch_id
+    assert receipt["target_turn_id"] == target_turn_id
+    assert receipt["trace_refs"] == [f"turn:{child_turn_id}"]
+    assert snapshot["session"]["active_branch_head_id"] == child_branch_id
+    assert accepted_segment_ids == [parent_artifact_id]
+    assert child_artifact_id not in accepted_segment_ids
+    assert _story_turn_count(session_id) == turn_count_before
+    with SqlSession(get_engine()) as db_session:
+        child_turn = db_session.get(StoryTurnRecord, child_turn_id)
+        child_branch = db_session.get(BranchHeadRecord, child_branch_id)
+    assert child_turn is not None
+    assert child_turn.visibility_state == "hidden_by_rollback"
+    assert child_turn.hidden_after_turn_id == target_turn_id
+    assert child_branch is not None
+    assert child_branch.head_turn_id == target_turn_id
+    assert child_branch.last_settled_turn_id == target_turn_id
+    assert child_branch.forked_from_turn_id == target_turn_id
+
+
+def test_story_branch_switch_and_delete_routes_return_refreshed_snapshot(client):
+    seeded = _seed_branch_control_product_session()
+    session_id = seeded["session_id"]
+    branch_head_id = seeded["branch_head_id"]
+    turn_ids = seeded["turn_ids"]
+    segment_ids_by_turn_id = seeded["segment_ids_by_turn_id"]
+
+    create_response = client.post(
+        f"/api/rp/story-sessions/{session_id}/branches",
+        json={"origin_turn_id": turn_ids[1]},
+    )
+    assert create_response.status_code == 200, create_response.text
+    created_branch_id = create_response.json()["receipt"]["to_branch_head_id"]
+    turn_count_after_create = _story_turn_count(session_id)
+
+    switch_response = client.post(
+        f"/api/rp/story-sessions/{session_id}/branches/{branch_head_id}/switch",
+    )
+    assert switch_response.status_code == 200, switch_response.text
+    switch_payload = switch_response.json()
+    switch_receipt = switch_payload["receipt"]
+    switch_snapshot = switch_payload["data"]["chapter_snapshot"]
+    assert switch_receipt["control_kind"] == "branch_switched"
+    assert switch_receipt["from_branch_head_id"] == created_branch_id
+    assert switch_receipt["to_branch_head_id"] == branch_head_id
+    assert switch_snapshot["session"]["active_branch_head_id"] == branch_head_id
+    assert [
+        item["artifact_id"]
+        for item in switch_snapshot["artifacts"]
+        if item["artifact_kind"] == "story_segment" and item["status"] == "accepted"
+    ] == [segment_ids_by_turn_id[turn_id] for turn_id in turn_ids]
+    assert _story_turn_count(session_id) == turn_count_after_create
+
+    delete_response = client.delete(
+        f"/api/rp/story-sessions/{session_id}/branches/{created_branch_id}",
+    )
+    assert delete_response.status_code == 200, delete_response.text
+    delete_payload = delete_response.json()
+    delete_receipt = delete_payload["receipt"]
+    delete_snapshot = delete_payload["data"]["chapter_snapshot"]
+    assert delete_receipt["control_kind"] == "branch_deleted"
+    assert delete_receipt["from_branch_head_id"] == created_branch_id
+    assert delete_receipt["to_branch_head_id"] is None
+    assert delete_snapshot["session"]["active_branch_head_id"] == branch_head_id
+    assert _story_turn_count(session_id) == turn_count_after_create
+
+    with SqlSession(get_engine()) as db_session:
+        deleted_branch = db_session.get(BranchHeadRecord, created_branch_id)
+        assert deleted_branch is not None
+        assert deleted_branch.status == "superseded"
+        assert deleted_branch.visibility_state == "deleted"
+
+
+def test_story_branch_delete_route_rejects_current_and_default_branch(client):
+    seeded = _seed_branch_control_product_session()
+    session_id = seeded["session_id"]
+    branch_head_id = seeded["branch_head_id"]
+    turn_ids = seeded["turn_ids"]
+
+    create_response = client.post(
+        f"/api/rp/story-sessions/{session_id}/branches",
+        json={"origin_turn_id": turn_ids[1]},
+    )
+    assert create_response.status_code == 200, create_response.text
+    created_branch_id = create_response.json()["receipt"]["to_branch_head_id"]
+
+    current_response = client.delete(
+        f"/api/rp/story-sessions/{session_id}/branches/{created_branch_id}",
+    )
+    assert current_response.status_code == 400
+    assert (
+        current_response.json()["detail"]["error"]["code"]
+        == "runtime_branch_control_current_delete_not_supported"
+    )
+
+    default_response = client.delete(
+        f"/api/rp/story-sessions/{session_id}/branches/{branch_head_id}",
+    )
+    assert default_response.status_code == 400
+    assert (
+        default_response.json()["detail"]["error"]["code"]
+        == "runtime_branch_control_default_delete_not_supported"
+    )
+
+
+def test_story_rollback_route_returns_branch_visible_snapshot_without_new_turn(client):
+    seeded = _seed_branch_control_product_session()
+    session_id = seeded["session_id"]
+    branch_head_id = seeded["branch_head_id"]
+    turn_ids = seeded["turn_ids"]
+    segment_ids_by_turn_id = seeded["segment_ids_by_turn_id"]
+    turn_count_before = _story_turn_count(session_id)
+
+    response = client.post(
+        f"/api/rp/story-sessions/{session_id}/rollback",
+        json={"target_turn_id": turn_ids[1]},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    receipt = payload["receipt"]
+    snapshot = payload["data"]["chapter_snapshot"]
+    assert receipt["control_kind"] == "rollback_applied"
+    assert receipt["target_turn_id"] == turn_ids[1]
+    assert receipt["metadata"]["visibility_transition"]["hidden_turn_ids"] == [
+        turn_ids[2]
+    ]
+    assert snapshot["session"]["active_branch_head_id"] == branch_head_id
+    assert [
+        item["artifact_id"]
+        for item in snapshot["artifacts"]
+        if item["artifact_kind"] == "story_segment" and item["status"] == "accepted"
+    ] == [segment_ids_by_turn_id[turn_id] for turn_id in turn_ids[:2]]
+    assert _story_turn_count(session_id) == turn_count_before
+
+    inspect_response = client.get(
+        f"/api/rp/story-sessions/{session_id}/runtime/inspect",
+        params={"turn_id": turn_ids[1]},
+    )
+    assert inspect_response.status_code == 200, inspect_response.text
+    inspect_payload = inspect_response.json()
+    assert any(
+        item["receipt_id"] == receipt["receipt_id"]
+        for item in inspect_payload["branch_control_receipts"]
+    )
+
+
 def test_story_turn_rejects_command_not_allowed_for_phase(client):
     workspace_id = _create_ready_workspace(client)
     activation = client.post(f"/api/rp/setup/workspaces/{workspace_id}/activate")
@@ -2407,7 +3038,7 @@ def test_story_turn_stream_backfills_stale_active_snapshot_and_completes(
     assert '"type": "error"' not in body
     assert refreshed_session is not None
     assert refreshed_session.active_runtime_profile_snapshot_id != "missing-runtime-snapshot"
-    assert refreshed_session.active_runtime_profile_snapshot_id != stale_snapshot_id
+    assert refreshed_session.active_runtime_profile_snapshot_id == stale_snapshot_id
 
 
 def test_story_turn_rejects_story_segment_metadata_patch_on_non_accept_command(client):

@@ -9,7 +9,7 @@ from rp.agent_runtime.skill_packs import (
     render_skill_pack,
 )
 from rp.models.setup_handoff import SetupContextPacket
-from rp.models.setup_stage import SETUP_STAGE_MODULES, SetupStageId
+from rp.models.setup_stage import SETUP_STAGE_MODULES, SetupStageId, get_stage_module
 from rp.models.setup_workspace import SetupStepId, StoryMode
 
 
@@ -36,6 +36,7 @@ class SetupAgentPromptService:
             ensure_ascii=False,
             sort_keys=True,
         )
+        stage_truth_write_hint = self._stage_truth_write_hint(current_stage)
         return (
             "You are SetupAgent. You only work in prestory. "
             "Your job is to help the user converge setup drafts and guide review/commit. "
@@ -51,12 +52,15 @@ class SetupAgentPromptService:
             "6. If compact_summary contains draft_refs or recovery_hints and exact draft detail is needed, call setup.read.draft_refs.\n"
             "7. Use setup.discussion.update_state when the discussion map itself needs to be refreshed or reconciled.\n"
             "8. Use setup.chunk.upsert when one concrete truth candidate is emerging from the discussion.\n"
-            "9. Use setup.truth.write only when one chunk is stable enough to land in the current draft.\n"
+            "9. Use setup.truth.write when one chunk is stable enough to land in the current draft. "
+            "For canonical stages, prefer one entry payload over a full stage block unless you are intentionally replacing the whole block. "
+            "A minimal stage entry needs entry_id, entry_type, semantic_path, and title. "
+            "If you include a text section, its kind must be text and it must carry content.text.\n"
             "10. If the current cognitive state is invalidated by user edits or rejection feedback, reconcile it before proposing commit.\n"
             "11. If setup.truth.write fails, repair it from current context when possible; only ask the user when the missing information is truly user-exclusive.\n"
             "12. Before calling setup.proposal.commit, self-check readiness; if the user explicitly asked to commit, carry unresolved issues as warnings instead of blocking.\n"
             "13. Proposal rejection means return to discussion by default. Do not auto-re-propose commit.\n"
-            "14. Use setup private tools to update SetupWorkspace drafts.\n"
+            "14. Use setup private tools to update SetupWorkspace drafts. When a tool is needed, emit a real tool call; never print tool_code, default_api..., or other pseudo tool-call text in the visible reply.\n"
             "15. Use read-only memory tools only when needed for clarification or archival lookup.\n"
             "16. Ask clarifying questions when important fields are ambiguous.\n"
             "17. Do not invent facts casually.\n"
@@ -82,6 +86,7 @@ class SetupAgentPromptService:
             f"Current stage: {current_stage.value if current_stage is not None else current_step.value}\n"
             "Current stage objective:\n"
             f"{stage_overlay}\n\n"
+            f"{stage_truth_write_hint}"
             "Longform setup guidance:\n"
             "- story_config: converge model/runtime choices and notes.\n"
             "- writing_contract: converge POV, style, constraints, and task rules.\n"
@@ -102,6 +107,23 @@ class SetupAgentPromptService:
             "described in the Stage Skill Pack section below.\n"
             "Treat the Specialist hat as your guiding voice for this turn, "
             "but never break the SetupAgent operating envelope above.\n\n"
+        )
+
+    @staticmethod
+    def _stage_truth_write_hint(stage_id: SetupStageId | None) -> str:
+        if stage_id is None:
+            return ""
+        module = get_stage_module(stage_id)
+        preferred_entry_types = (
+            ", ".join(module.default_entry_types) or "stage-specific types"
+        )
+        return (
+            "Current stage draft-write hint:\n"
+            "- Prefer one entry payload instead of a full stage block unless you are intentionally replacing or merging the whole block.\n"
+            "- Minimal entry fields: entry_id, entry_type, semantic_path, title.\n"
+            "- Optional fields: summary, sections.\n"
+            '- A text section must look like {"section_id":"summary","title":"Summary","kind":"text","content":{"text":"..."}}.\n'
+            f"- Preferred entry_type values for this stage: {preferred_entry_types}.\n\n"
         )
 
     @staticmethod

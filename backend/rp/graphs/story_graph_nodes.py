@@ -207,6 +207,7 @@ class StoryGraphNodes:
             ),
             command_kind=LongformTurnCommandKind(state["command_kind"]),
             runtime_identity=self._runtime_identity_from_state(state),
+            target_artifact_id=state.get("target_artifact_id"),
         )
         return {
             "writing_packet": packet.model_dump(mode="json"),
@@ -329,7 +330,8 @@ class StoryGraphNodes:
             return {}
         try:
             response = self._domain_service.accept_outline(
-                request=self._request_from_state(state)
+                request=self._request_from_state(state),
+                runtime_identity=self._runtime_identity_from_state(state),
             )
         except ValueError as exc:
             return {

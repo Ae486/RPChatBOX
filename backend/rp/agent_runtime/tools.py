@@ -1,4 +1,5 @@
 """Tool-registry and execution adapters for the RP runtime."""
+
 from __future__ import annotations
 
 import json
@@ -26,8 +27,7 @@ class RuntimeToolRegistryView:
             tool
             for tool in tools
             if tool.name in allowed
-            or tool.qualified_name in allowed
-            or tool.raw_qualified_name in allowed
+            or any(alias in allowed for alias in tool.qualified_name_aliases)
         ]
 
     def get_openai_tool_definitions(
@@ -35,7 +35,10 @@ class RuntimeToolRegistryView:
         *,
         visible_tool_names: list[str],
     ) -> list[dict[str, Any]]:
-        return [tool.to_openai_tool() for tool in self.get_visible_tools(visible_tool_names=visible_tool_names)]
+        return [
+            tool.to_openai_tool()
+            for tool in self.get_visible_tools(visible_tool_names=visible_tool_names)
+        ]
 
     def resolve_tool(
         self,
@@ -44,7 +47,7 @@ class RuntimeToolRegistryView:
         visible_tool_names: list[str],
     ) -> McpToolInfo | None:
         for tool in self.get_visible_tools(visible_tool_names=visible_tool_names):
-            if tool_name in (tool.qualified_name, tool.raw_qualified_name, tool.name):
+            if tool_name in (*tool.qualified_name_aliases, tool.name):
                 return tool
         return None
 
@@ -117,7 +120,9 @@ class RuntimeToolExecutor:
                 structured_payload["result_payload"] = content_payload
         else:
             structured_payload["error_payload"] = self._error_payload(
-                error_code=str(result.get("error_code")) if result.get("error_code") else None,
+                error_code=str(result.get("error_code"))
+                if result.get("error_code")
+                else None,
                 content_payload=content_payload,
                 content_text=content_text,
             )
@@ -126,7 +131,9 @@ class RuntimeToolExecutor:
             tool_name=tool_info.qualified_name,
             success=success,
             content_text=content_text,
-            error_code=str(result.get("error_code")) if result.get("error_code") else None,
+            error_code=str(result.get("error_code"))
+            if result.get("error_code")
+            else None,
             structured_payload=structured_payload,
         )
 
@@ -160,7 +167,9 @@ class RuntimeToolExecutor:
                 return {
                     "code": nested.get("code") or error_code,
                     "message": nested.get("message") or content_text,
-                    "details": nested.get("details") or content_payload.get("details") or {},
+                    "details": nested.get("details")
+                    or content_payload.get("details")
+                    or {},
                 }
             return {
                 "code": content_payload.get("code") or error_code,

@@ -1,4 +1,5 @@
 """Execution-state schema for the RP agent runtime graph."""
+
 from __future__ import annotations
 
 from typing import Any, TypedDict
@@ -41,4 +42,5 @@ class RpAgentRunState(TypedDict, total=False):
     loop_trace: list[dict[str, Any]]
     next_action: str
     schema_retry_count: int
+    pseudo_tool_retry_count: int
     error_event_emitted: bool

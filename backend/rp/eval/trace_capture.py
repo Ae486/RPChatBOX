@@ -68,6 +68,9 @@ def build_setup_trace(
                 "repair_route": _structured_payload_value(runtime_result, "repair_route"),
                 "continue_reason": _structured_payload_value(runtime_result, "continue_reason"),
                 "loop_trace_count": len(_structured_payload_list(runtime_result, "loop_trace")),
+                "skill_pack_name": _structured_payload_value(
+                    runtime_result, "skill_pack_name"
+                ),
                 "context_profile": _context_report_value(
                     runtime_result,
                     "context_profile",

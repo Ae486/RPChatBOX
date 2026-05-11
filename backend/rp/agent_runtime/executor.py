@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Callable, cast
+from typing import Any, AsyncIterator, Callable, Literal, cast
 
 from models.chat import ChatCompletionRequest, ChatMessage, ProviderConfig
 from services.langfuse_service import get_langfuse_service
@@ -41,7 +42,7 @@ from .policies import (
 )
 from .state import RpAgentRunState
 from .tools import RuntimeToolExecutor
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_stage import SetupStageId, get_stage_module
 from rp.services.setup_context_governor import SetupContextGovernorService
 
 SETUP_TRUTH_WRITE_QUALIFIED_TOOL_NAME = "rp_setup__setup.truth.write"
@@ -110,6 +111,11 @@ class RpAgentRuntimeExecutor:
 class _RuntimeRunDriver:
     """Per-run LangGraph driver and node implementation."""
 
+    _PSEUDO_TOOL_CALL_TEXT_RE = re.compile(
+        r"(?:tool_code\b|print\s*\(\s*default_api\.|default_api\.rp_setup__setup\.|rp_setup__setup\.[a-z0-9_.]+\s*\()",
+        re.IGNORECASE,
+    )
+
     _INSPECT_ROUTES = {
         "execute_tools",
         "reflect_if_needed",
@@ -146,7 +152,10 @@ class _RuntimeRunDriver:
 
     async def run(self, turn_input: RpAgentTurnInput) -> RpAgentTurnResult:
         graph = self._build_graph()
-        final_state = await graph.ainvoke(self._initial_state(turn_input))
+        final_state = await graph.ainvoke(
+            self._initial_state(turn_input),
+            config=self._graph_invoke_config(),
+        )
         self.last_result = self._state_to_result(final_state)
         return self.last_result
 
@@ -159,7 +168,10 @@ class _RuntimeRunDriver:
         async def _runner() -> None:
             try:
                 graph = self._build_graph()
-                final_state = await graph.ainvoke(self._initial_state(turn_input))
+                final_state = await graph.ainvoke(
+                    self._initial_state(turn_input),
+                    config=self._graph_invoke_config(),
+                )
                 self.last_result = self._state_to_result(final_state)
             except Exception as exc:  # pragma: no cover - defensive safety net
                 error = {"message": str(exc), "type": "runtime_execution_failed"}
@@ -193,6 +205,8 @@ class _RuntimeRunDriver:
                 item = await self._event_queue.get()
                 if item is _SENTINEL:
                     break
+                if not isinstance(item, RuntimeEvent):
+                    continue
                 yield item
         finally:
             await task
@@ -256,6 +270,7 @@ class _RuntimeRunDriver:
             "loop_trace": [],
             "next_action": "build_model_request",
             "schema_retry_count": 0,
+            "pseudo_tool_retry_count": 0,
             "error_event_emitted": False,
         }
 
@@ -584,9 +599,33 @@ class _RuntimeRunDriver:
             f"{description} Runtime fills workspace_id, step_id, current_step, "
             "block_type, and user_edit_delta_ids. Provide payload_json as a JSON "
             "object string for the draft payload."
+            f"{self._truth_write_stage_payload_hint(turn_input)}"
         ).strip()
         adapted["function"] = adapted_function
         return adapted
+
+    def _truth_write_stage_payload_hint(self, turn_input: RpAgentTurnInput) -> str:
+        defaults = self._truth_write_runtime_defaults(turn_input)
+        if not isinstance(defaults, dict):
+            return ""
+        stage_id = self._coerce_setup_stage_id(defaults.get("truth_write_stage_id"))
+        if stage_id is None:
+            return ""
+        module = get_stage_module(stage_id)
+        preferred_entry_types = (
+            ", ".join(module.default_entry_types) or "stage-specific types"
+        )
+        return (
+            " For canonical stage drafts, prefer one entry payload instead of a full "
+            "stage block unless you are replacing or merging the whole block. "
+            "Minimal single-entry keys inside payload_json: entry_id, entry_type, "
+            "semantic_path, title. Optional keys: summary, sections. "
+            "A text section should use "
+            '{"section_id":"summary","title":"Summary","kind":"text","content":{"text":"..."}}. '
+            f"Preferred entry_type values for this stage: {preferred_entry_types}. "
+            f'Use target_ref "stage:{stage_id.value}:<entry_id>" for a single entry, '
+            f'or "draft:{stage_id.value}" for a full-stage block write.'
+        )
 
     @staticmethod
     def _strict_truth_write_pilot_enabled(turn_input: RpAgentTurnInput) -> bool:
@@ -762,9 +801,25 @@ class _RuntimeRunDriver:
     ) -> RpAgentRunState:
         accumulated_tool_calls: dict[int, dict[str, Any]] = {}
         accumulated_text = ""
+        pending_text_chunks: list[str] = []
+        suppress_pending_text = False
         error_payload: dict[str, Any] | None = None
         usage_details: dict[str, int] | None = None
         run_id = str(state["run_id"])
+
+        async def _flush_pending_text() -> None:
+            nonlocal pending_text_chunks, suppress_pending_text
+            if suppress_pending_text:
+                pending_text_chunks = []
+                return
+            for chunk in pending_text_chunks:
+                await self._emit_event(
+                    run_id=run_id,
+                    event_type="text_delta",
+                    payload={"delta": chunk},
+                )
+            pending_text_chunks = []
+
         with self._langfuse.start_as_current_observation(
             name="rp.runtime.model_call.stream",
             as_type="generation",
@@ -786,17 +841,27 @@ class _RuntimeRunDriver:
 
                 event_type = str(payload.get("type") or "")
                 if event_type == "done":
+                    await _flush_pending_text()
                     break
                 if event_type in {"thinking_delta", "text_delta"}:
+                    delta = str(payload.get("delta") or "")
                     if event_type == "text_delta":
-                        accumulated_text += str(payload.get("delta") or "")
-                    await self._emit_event(
-                        run_id=run_id,
-                        event_type=event_type,
-                        payload={"delta": str(payload.get("delta") or "")},
-                    )
+                        accumulated_text += delta
+                        pending_text_chunks.append(delta)
+                        if self._looks_like_pseudo_tool_call_text(
+                            "".join(pending_text_chunks)
+                        ):
+                            suppress_pending_text = True
+                            pending_text_chunks = []
+                    else:
+                        await self._emit_event(
+                            run_id=run_id,
+                            event_type=event_type,
+                            payload={"delta": delta},
+                        )
                     continue
                 if event_type == "tool_call":
+                    await _flush_pending_text()
                     raw_calls = payload.get("tool_calls", [])
                     self._merge_stream_tool_calls(accumulated_tool_calls, raw_calls)
                     await self._emit_event(
@@ -810,6 +875,7 @@ class _RuntimeRunDriver:
                     )
                     continue
                 if event_type == "error":
+                    await _flush_pending_text()
                     error_payload = payload.get("error") or {
                         "message": "model_stream_failed",
                         "type": "model_stream_failed",
@@ -882,8 +948,13 @@ class _RuntimeRunDriver:
             for call in (message_payload.get("tool_calls") or [])
             if isinstance(call, dict)
         ]
+        pseudo_tool_text = (
+            bool(assistant_text)
+            and not runtime_tool_calls
+            and (self._looks_like_pseudo_tool_call_text(assistant_text))
+        )
         normalized_messages = list(state.get("normalized_messages", []))
-        if assistant_text and not runtime_tool_calls:
+        if assistant_text and not runtime_tool_calls and not pseudo_tool_text:
             normalized_messages.append(
                 ChatMessage(role="assistant", content=assistant_text).model_dump(
                     mode="json",
@@ -892,7 +963,7 @@ class _RuntimeRunDriver:
             )
         update: RpAgentRunState = {
             "status": "model_inspected",
-            "assistant_text": assistant_text,
+            "assistant_text": "" if pseudo_tool_text else assistant_text,
             "normalized_messages": normalized_messages,
             "pending_tool_calls": [
                 call.model_dump(mode="json", exclude_none=True)
@@ -908,6 +979,51 @@ class _RuntimeRunDriver:
                 update,
                 decision_site="inspect_model_output",
                 tool_names=[call.tool_name for call in runtime_tool_calls],
+            )
+            return update
+        if pseudo_tool_text:
+            pseudo_tool_retry_count = int(state.get("pseudo_tool_retry_count") or 0)
+            warnings = list(state.get("warnings", []))
+            if "pseudo_tool_call_text_filtered" not in warnings:
+                warnings.append("pseudo_tool_call_text_filtered")
+            update["warnings"] = warnings
+            update["completion_guard"] = {
+                "allow_finalize": False,
+                "reason": "pseudo_tool_call_text_emitted",
+                "required_action": "execute_tools",
+            }
+            update["pseudo_tool_retry_count"] = pseudo_tool_retry_count + 1
+            if pseudo_tool_retry_count >= 1:
+                update["status"] = "failed"
+                update["finish_reason"] = "invalid_tool_output_retry_budget_exhausted"
+                update["error"] = {
+                    "message": (
+                        "The assistant repeatedly emitted pseudo tool-call text "
+                        "instead of a real tool call."
+                    ),
+                    "type": "invalid_tool_output_retry_budget_exhausted",
+                }
+                update["next_action"] = "finalize_failure"
+                update["loop_trace"] = self._append_loop_trace(
+                    state,
+                    update,
+                    decision_site="inspect_model_output",
+                )
+                return update
+            update["reflection_ticket"] = SetupReflectionTicket(
+                trigger="tool_failure",
+                summary=(
+                    "The assistant emitted pseudo tool-call text instead of a real "
+                    "tool call. Issue the setup tool call directly."
+                ),
+                required_decision="retry",
+            ).model_dump(mode="json", exclude_none=True)
+            update["continue_reason"] = "completion_guard_retry"
+            update["next_action"] = "reflect_if_needed"
+            update["loop_trace"] = self._append_loop_trace(
+                state,
+                update,
+                decision_site="inspect_model_output",
             )
             return update
         if runtime_tool_calls and self._contains_blocked_commit_proposal(
@@ -1549,7 +1665,7 @@ class _RuntimeRunDriver:
 
     def _state_to_result(self, state: RpAgentRunState) -> RpAgentTurnResult:
         error = state.get("error")
-        status = "failed" if error else "completed"
+        status: Literal["completed", "failed"] = "failed" if error else "completed"
         turn_input = self._turn_input(state)
         context_bundle = self._context_bundle(turn_input)
         return RpAgentTurnResult(
@@ -1577,6 +1693,7 @@ class _RuntimeRunDriver:
             structured_payload={
                 "profile_id": state.get("profile_id"),
                 "round_no": state.get("round_no"),
+                "skill_pack_name": turn_input.metadata.get("skill_pack_name"),
                 "tool_invocation_count": len(state.get("tool_invocations", [])),
                 "tool_result_count": len(state.get("tool_results", [])),
                 "tool_scope": list(turn_input.tool_scope),
@@ -1934,7 +2051,18 @@ class _RuntimeRunDriver:
         return digest.model_dump(mode="json", exclude_none=True)
 
     @staticmethod
-    def _tool_relevance(tool_name: str, *, success: bool) -> str:
+    def _tool_relevance(
+        tool_name: str, *, success: bool
+    ) -> Literal[
+        "cognitive",
+        "draft",
+        "question",
+        "proposal",
+        "read",
+        "asset",
+        "failure",
+        "other",
+    ]:
         if not success:
             return "failure"
         name = tool_name.removeprefix("rp_setup__")
@@ -2001,7 +2129,13 @@ class _RuntimeRunDriver:
         state: RpAgentRunState,
         update: RpAgentRunState,
         *,
-        decision_site: str,
+        decision_site: Literal[
+            "inspect_model_output",
+            "assess_progress",
+            "reflect_if_needed",
+            "finalize_success",
+            "finalize_failure",
+        ],
         tool_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         merged_state = cast(RpAgentRunState, dict(state))
@@ -2019,7 +2153,13 @@ class _RuntimeRunDriver:
         self,
         state: RpAgentRunState,
         *,
-        decision_site: str,
+        decision_site: Literal[
+            "inspect_model_output",
+            "assess_progress",
+            "reflect_if_needed",
+            "finalize_success",
+            "finalize_failure",
+        ],
         tool_names: list[str] | None = None,
     ) -> SetupReActTraceFrame:
         resolved_tool_names = (
@@ -2089,6 +2229,22 @@ class _RuntimeRunDriver:
                 "action_expectation": state.get("action_expectation"),
             },
         )
+
+    def _graph_invoke_config(self) -> dict[str, Any]:
+        # One semantic round can traverse multiple LangGraph nodes
+        # (derive/plan/request/call/inspect plus optional tool/apply/assess/reflect),
+        # so the framework recursion limit must stay comfortably above
+        # profile.max_rounds or LangGraph will fail before runtime-owned stop
+        # conditions such as max_rounds_exceeded can fire.
+        return {"recursion_limit": self._graph_recursion_limit()}
+
+    def _graph_recursion_limit(self) -> int:
+        max_rounds = max(int(self._profile.max_rounds or 1), 1)
+        return max(32, (max_rounds * 10) + 8)
+
+    @classmethod
+    def _looks_like_pseudo_tool_call_text(cls, text: str) -> bool:
+        return bool(cls._PSEUDO_TOOL_CALL_TEXT_RE.search(str(text or "")))
 
     @staticmethod
     def _trace_tool_names(state: RpAgentRunState) -> list[str]:

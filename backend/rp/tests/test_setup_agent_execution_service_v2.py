@@ -53,8 +53,7 @@ class _SetupProviderBackedToolExecutor(RuntimeToolExecutor):
             for tool in self._provider.list_tools()
             if (
                 tool.name in allowed
-                or tool.qualified_name in allowed
-                or tool.raw_qualified_name in allowed
+                or any(alias in allowed for alias in tool.qualified_name_aliases)
             )
         ]
 
@@ -65,7 +64,15 @@ class _SetupProviderBackedToolExecutor(RuntimeToolExecutor):
         visible_tool_names: list[str],
     ) -> RuntimeToolResult:
         self.calls.append((call, list(visible_tool_names)))
-        raw_name = str(call.tool_name).removeprefix("rp_setup__")
+        tool_info = next(
+            (
+                tool
+                for tool in self._provider.list_tools()
+                if str(call.tool_name) in (*tool.qualified_name_aliases, tool.name)
+            ),
+            None,
+        )
+        raw_name = tool_info.name if tool_info is not None else str(call.tool_name)
         if raw_name not in visible_tool_names:
             return RuntimeToolResult(
                 call_id=call.call_id,
@@ -86,14 +93,16 @@ class _SetupProviderBackedToolExecutor(RuntimeToolExecutor):
         structured_payload = {
             "server_id": self._provider.provider_id,
             "tool_name": raw_name,
-            "qualified_name": f"rp_setup__{raw_name}",
-            "raw_qualified_name": raw_name,
+            "qualified_name": tool_info.qualified_name if tool_info else call.tool_name,
+            "raw_qualified_name": tool_info.raw_qualified_name
+            if tool_info
+            else raw_name,
         }
         if content_payload is not None:
             structured_payload["content_payload"] = content_payload
         return RuntimeToolResult(
             call_id=call.call_id,
-            tool_name=f"rp_setup__{raw_name}",
+            tool_name=tool_info.qualified_name if tool_info else call.tool_name,
             success=bool(result.get("success")),
             content_text=content_text,
             error_code=(
@@ -124,13 +133,13 @@ class _DraftRefRecoveryLLM:
                 "If compact_summary recovery_hints point to draft refs" in visible_text
             )
             assert any(
-                "setup.read.draft_refs" in item["function"]["name"]
+                "setup_read_draft_refs" in item["function"]["name"]
                 for item in (request.tools or [])
             )
             draft_ref_schema = next(
                 item
                 for item in (request.tools or [])
-                if item["function"]["name"] == "rp_setup__setup.read.draft_refs"
+                if item["function"]["name"] == "rp_setup__setup_read_draft_refs"
             )
             assert "refs" in draft_ref_schema["function"]["parameters"]["required"]
             return {
@@ -144,7 +153,7 @@ class _DraftRefRecoveryLLM:
                                     "id": "call_read_magic_law",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "name": "rp_setup__setup_read_draft_refs",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": self.workspace_id,
@@ -406,7 +415,10 @@ async def test_setup_agent_execution_service_v2_builds_governed_history_for_comp
     assert len(turn_input.conversation_messages) == 4
     assert turn_input.conversation_messages[0]["content"] == "history message 6"
     assert turn_input.conversation_messages[-1]["content"] == "history message 9"
+    assert "setup.world_background.write_entry" not in turn_input.tool_scope
     assert "setup.truth.write" in turn_input.tool_scope
+    assert "setup.question.raise" in turn_input.tool_scope
+    assert "setup.proposal.commit" in turn_input.tool_scope
     assert "setup.patch.foundation_entry" not in turn_input.tool_scope
     assert "setup.patch.story_config" not in turn_input.tool_scope
     assert "setup.patch.longform_blueprint" not in turn_input.tool_scope
@@ -565,7 +577,7 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
     assert result.assistant_text.endswith(_RECOVERED_MAGIC_LAW_DETAIL)
     assert llm.recovered_detail == _RECOVERED_MAGIC_LAW_DETAIL
     assert llm.recovered_from_tool_result is True
-    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup.read.draft_refs"
+    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup_read_draft_refs"
     assert result.tool_results[0].success is True
     assert _RECOVERED_MAGIC_LAW_DETAIL in result.tool_results[0].content_text
     assert result.structured_payload["compact_summary"]["draft_refs"] == [
@@ -799,7 +811,10 @@ async def test_setup_agent_execution_service_v2_uses_current_stage_metadata(
     assert turn_input.context_bundle["current_step"] == "foundation"
     assert turn_input.context_bundle["current_stage"] == "world_background"
     assert turn_input.context_bundle["stage_state"]["stage_id"] == "world_background"
+    assert "setup.world_background.write_entry" not in turn_input.tool_scope
     assert "setup.truth.write" in turn_input.tool_scope
+    assert "setup.question.raise" in turn_input.tool_scope
+    assert "setup.proposal.commit" in turn_input.tool_scope
     assert "setup.patch.foundation_entry" not in turn_input.tool_scope
     assert "setup.patch.story_config" not in turn_input.tool_scope
 
@@ -1082,7 +1097,10 @@ async def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stre
 
     assert prepared.turn_input.stream is True
     assert prepared.turn_input.context_bundle["current_step"] == "foundation"
+    assert "setup.world_background.write_entry" not in prepared.turn_input.tool_scope
     assert "setup.truth.write" in prepared.turn_input.tool_scope
+    assert "setup.question.raise" in prepared.turn_input.tool_scope
+    assert "setup.proposal.commit" in prepared.turn_input.tool_scope
     assert "setup.patch.foundation_entry" not in prepared.turn_input.tool_scope
     assert "setup.patch.story_config" not in prepared.turn_input.tool_scope
     assert prepared.context_packet.workspace_id == workspace.workspace_id

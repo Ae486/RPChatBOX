@@ -11,10 +11,13 @@ from rp.models.mode_extension_contracts import (
 )
 from rp.models.story_runtime import (
     ChapterWorkspace,
+    LongformTurnCommandKind,
     OrchestratorPlan,
     SpecialistResultBundle,
+    StoryArtifact,
     StorySession,
 )
+from rp.models.longform_chapter_contracts import LongformStructuredOutline
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
@@ -40,6 +43,14 @@ class ContextOrchestrationService:
         "raw_authoritative_state_json",
         "tool_call_trace",
         "worker_chain_of_thought",
+    )
+    _MANDATORY_CONTINUITY_INSTRUCTION = (
+        "Continue after the latest accepted segment; do not restart the scene; "
+        "do not rewrite already completed outline material."
+    )
+    _MANDATORY_REWRITE_INSTRUCTION = (
+        "Apply every listed review constraint exactly. Treat active comments and "
+        "tracked changes as mandatory rewrite requirements."
     )
 
     def __init__(
@@ -70,7 +81,10 @@ class ContextOrchestrationService:
         plan: OrchestratorPlan,
         specialist_bundle: SpecialistResultBundle,
         operation_mode: str = "writing",
+        command_kind: LongformTurnCommandKind | None = None,
         runtime_identity: MemoryRuntimeIdentity | None = None,
+        target_artifact_id: str | None = None,
+        review_overlay_sections: list[dict[str, object]] | None = None,
     ) -> WritingPacket:
         projection_context_sections = (
             self._builder_projection_context_service.build_context_sections(
@@ -102,6 +116,14 @@ class ContextOrchestrationService:
                 packet_metadata=packet_metadata,
             )
             mode_sidecar_sections.extend(
+                self._build_longform_chapter_progress_sections(
+                    session=session,
+                    chapter=chapter,
+                    identity=runtime_identity,
+                    command_kind=command_kind,
+                )
+            )
+            mode_sidecar_sections.extend(
                 self._build_longform_chapter_bridge_sections(
                     session=session,
                     chapter=chapter,
@@ -111,6 +133,35 @@ class ContextOrchestrationService:
             )
         else:
             mode_sidecar_sections = []
+        if command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT:
+            resolved_target_artifact_id = str(
+                target_artifact_id or chapter.pending_segment_artifact_id or ""
+            ).strip()
+            review_scope = "full"
+            if review_overlay_sections:
+                first_metadata = review_overlay_sections[0].get("metadata_json")
+                if isinstance(first_metadata, dict):
+                    review_scope = (
+                        str(first_metadata.get("rewrite_scope") or "").strip()
+                        or review_scope
+                    )
+            packet_metadata.update(
+                {
+                    "rewrite_scope": review_scope,
+                    "target_artifact_id": resolved_target_artifact_id or None,
+                    "revision_constraint_source": (
+                        "active_review_overlay"
+                        if review_overlay_sections
+                        else "no_active_review_constraints"
+                    ),
+                    "review_overlay_section_count": len(review_overlay_sections or []),
+                    "mandatory_rewrite_instruction": (
+                        self._MANDATORY_REWRITE_INSTRUCTION
+                        if review_overlay_sections
+                        else None
+                    ),
+                }
+            )
         packet = self._writing_packet_builder.build(
             session=session,
             chapter=chapter,
@@ -122,6 +173,7 @@ class ContextOrchestrationService:
             mode_sidecar_sections=mode_sidecar_sections,
             runtime_retrieval_sections=runtime_retrieval_sections,
             runtime_writer_hints=list(specialist_bundle.writer_hints),
+            review_overlay_sections=review_overlay_sections,
             user_instruction=plan.writer_instruction,
             packet_metadata=packet_metadata,
         )
@@ -359,6 +411,134 @@ class ContextOrchestrationService:
             }
         ]
 
+    def _build_longform_chapter_progress_sections(
+        self,
+        *,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        identity: MemoryRuntimeIdentity | None,
+        command_kind: LongformTurnCommandKind | None,
+    ) -> list[dict[str, object]]:
+        if command_kind != LongformTurnCommandKind.WRITE_NEXT_SEGMENT:
+            return []
+        if self._longform_chapter_runtime_service is None:
+            return []
+        branch_head_id = (
+            identity.branch_head_id
+            if identity is not None
+            else str(session.active_branch_head_id or "").strip()
+        )
+        if not branch_head_id:
+            return []
+        outline_progress = self._longform_chapter_runtime_service.effective_outline_progress(
+            chapter=chapter,
+            identity=identity,
+        )
+        if outline_progress is None:
+            return []
+        accepted_segments = self._accepted_story_segments(
+            session=session,
+            chapter=chapter,
+        )
+        latest_segment = accepted_segments[-1] if accepted_segments else None
+        accepted_outline_ref = self._accepted_outline_ref(chapter=chapter)
+        structured_outline = self._accepted_structured_outline(chapter=chapter)
+        current_beat = (
+            None
+            if structured_outline is None
+            else structured_outline.beat_by_id(outline_progress.current_beat_id)
+        )
+        source_ref_ids: list[str] = []
+        if latest_segment is not None:
+            source_ref_ids.append(latest_segment.artifact_id)
+        if accepted_outline_ref is not None:
+            source_ref_ids.append(accepted_outline_ref)
+        source_ref_ids.extend(
+            artifact_id
+            for artifact_id in outline_progress.segment_by_beat_id.values()
+            if str(artifact_id or "").strip()
+        )
+        items = [
+            f"chapter_index: {chapter.chapter_index}",
+            f"chapter_goal: {self._chapter_goal_text(chapter=chapter)}",
+            f"accepted_segment_count: {len(accepted_segments)}",
+            (
+                "covered_beat_ids: "
+                + (
+                    ", ".join(outline_progress.covered_beat_ids)
+                    if outline_progress.covered_beat_ids
+                    else "(none)"
+                )
+            ),
+        ]
+        if current_beat is not None:
+            items.extend(
+                [
+                    f"current_beat_id: {current_beat.beat_id}",
+                    f"current_beat_order: {current_beat.order}",
+                    f"current_beat_title: {current_beat.title}",
+                    f"current_beat_goal: {current_beat.goal}",
+                    (
+                        "current_beat_must_include: "
+                        + (
+                            "; ".join(current_beat.must_include)
+                            if current_beat.must_include
+                            else "(none)"
+                        )
+                    ),
+                    (
+                        "current_beat_avoid: "
+                        + (
+                            "; ".join(current_beat.avoid)
+                            if current_beat.avoid
+                            else "(none)"
+                        )
+                    ),
+                    (
+                        "current_beat_continuity_notes: "
+                        + (
+                            "; ".join(current_beat.continuity_notes)
+                            if current_beat.continuity_notes
+                            else "(none)"
+                        )
+                    ),
+                ]
+            )
+        if accepted_outline_ref is not None:
+            items.append(f"accepted_outline_ref: {accepted_outline_ref}")
+        if latest_segment is not None:
+            items.append(
+                "latest_accepted_segment_excerpt: "
+                f"{self._excerpt(latest_segment.content_text)}"
+            )
+        items.append(
+            "next_required_continuity_instruction: "
+            "Write one segment for the current beat only; continue after the latest "
+            "accepted segment; stop before later beats."
+        )
+        return [
+            {
+                "section_id": "mode_sidecar.longform.chapter_progress",
+                "label": "chapter_progress",
+                "source_kind": "longform_chapter_progress",
+                "source_ref_ids": source_ref_ids,
+                "items": items,
+                "metadata_json": {
+                    "section_family": "mode_sidecar",
+                    "accepted_segment_count": len(accepted_segments),
+                    "latest_accepted_segment_id": (
+                        None if latest_segment is None else latest_segment.artifact_id
+                    ),
+                    "accepted_outline_ref": accepted_outline_ref,
+                    "current_beat_id": outline_progress.current_beat_id,
+                    "covered_beat_ids": list(outline_progress.covered_beat_ids),
+                    "chapter_goal_present": bool(
+                        str(chapter.chapter_goal or "").strip()
+                    ),
+                },
+            }
+        ]
+
     def _build_mode_sidecar_sections(
         self,
         *,
@@ -527,6 +707,7 @@ class ContextOrchestrationService:
                 session_id=identity.session_id,
                 branch_head_id=identity.branch_head_id,
                 target_chapter_index=chapter.chapter_index,
+                identity=identity,
             )
         )
         if resolved is None:
@@ -592,6 +773,83 @@ class ContextOrchestrationService:
         if not outline_ref:
             return None
         return f"Accepted outline ref: {outline_ref}"
+
+    def _accepted_story_segments(
+        self,
+        *,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+    ) -> list[StoryArtifact]:
+        return self._story_session_service.active_branch_accepted_segment_artifacts(
+            session_id=session.session_id,
+            chapter_index=chapter.chapter_index,
+            chapter=chapter,
+        )
+
+    @staticmethod
+    def _accepted_outline_ref(chapter: ChapterWorkspace) -> str | None:
+        accepted_outline = chapter.accepted_outline_json or {}
+        outline_ref = str(accepted_outline.get("artifact_id") or "").strip()
+        return outline_ref or None
+
+    @staticmethod
+    def _accepted_structured_outline(
+        chapter: ChapterWorkspace,
+    ) -> LongformStructuredOutline | None:
+        accepted_outline = chapter.accepted_outline_json or {}
+        payload = accepted_outline.get("structured_outline")
+        if isinstance(payload, dict):
+            try:
+                return LongformStructuredOutline.model_validate(payload)
+            except ValueError:
+                return None
+        metadata = accepted_outline.get("metadata")
+        if isinstance(metadata, dict):
+            structured = metadata.get("structured_outline")
+            if isinstance(structured, dict):
+                try:
+                    return LongformStructuredOutline.model_validate(structured)
+                except ValueError:
+                    return None
+        return None
+
+    @staticmethod
+    def _accepted_outline_digest(chapter: ChapterWorkspace) -> str | None:
+        accepted_outline = chapter.accepted_outline_json or {}
+        structured_outline = ContextOrchestrationService._accepted_structured_outline(
+            chapter=chapter
+        )
+        if structured_outline is not None:
+            beat_summaries = [
+                f"{beat.order}. {beat.title}: {beat.goal}"
+                for beat in structured_outline.beats[:4]
+            ]
+            if beat_summaries:
+                return " | ".join(beat_summaries)
+        outline_text = str(accepted_outline.get("content_text") or "").strip()
+        if outline_text:
+            return ContextOrchestrationService._excerpt(outline_text)
+        snapshot = chapter.builder_snapshot_json or {}
+        outline_digest = snapshot.get("current_outline_digest")
+        if isinstance(outline_digest, list):
+            items = [str(item).strip() for item in outline_digest if str(item).strip()]
+            if items:
+                return " | ".join(items)
+        return None
+
+    @staticmethod
+    def _chapter_goal_text(*, chapter: ChapterWorkspace) -> str:
+        goal = str(chapter.chapter_goal or "").strip()
+        return goal or "(not set)"
+
+    @staticmethod
+    def _excerpt(value: str | None, *, limit: int = 280) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return "(empty)"
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 3].rstrip() + "..."
 
     @staticmethod
     def _mode_sidecar_item_text(payload: Mapping[str, object]) -> str:

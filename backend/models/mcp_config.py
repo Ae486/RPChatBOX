@@ -110,8 +110,8 @@ class McpToolInfo(BaseModel):
     description: str = ""
     input_schema: dict | None = None
 
-    _SAFE_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$")
-    _FUNCTION_NAME_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
+    _SAFE_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+    _FUNCTION_NAME_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
     def to_openai_tool(self) -> dict:
         """Convert to OpenAI function-calling tool definition."""
@@ -144,6 +144,18 @@ class McpToolInfo(BaseModel):
         return f"{self.server_id}__{self.name}"
 
     @property
+    def qualified_name_aliases(self) -> tuple[str, ...]:
+        """All accepted names for resolving a tool call back to this tool."""
+        aliases = [self.qualified_name, self.raw_qualified_name]
+        legacy_numeric_alias = f"mcp_{self.raw_qualified_name}"
+        if (
+            self.raw_qualified_name[:1].isdigit()
+            and self._SAFE_FUNCTION_NAME_RE.fullmatch(legacy_numeric_alias)
+        ):
+            aliases.append(legacy_numeric_alias)
+        return tuple(dict.fromkeys(aliases))
+
+    @property
     def qualified_name(self) -> str:
         """LLM-safe tool name for providers with stricter function naming rules."""
         raw_name = self.raw_qualified_name
@@ -151,12 +163,12 @@ class McpToolInfo(BaseModel):
             return raw_name
 
         normalized = self._FUNCTION_NAME_SANITIZE_RE.sub("_", raw_name)
-        if not normalized or not re.match(r"^[A-Za-z_]", normalized):
+        if not normalized:
             normalized = f"mcp_{normalized}"
         if self._SAFE_FUNCTION_NAME_RE.fullmatch(normalized):
             return normalized
 
-        safe_tool_name = self._FUNCTION_NAME_SANITIZE_RE.sub("_", self.name).strip("_.:-")
+        safe_tool_name = self._FUNCTION_NAME_SANITIZE_RE.sub("_", self.name).strip("_-")
         if not safe_tool_name:
             safe_tool_name = "tool"
         digest = hashlib.sha1(raw_name.encode("utf-8")).hexdigest()[:10]

@@ -1,0 +1,14 @@
+{"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/setup-agent-module-prd.md", "reason": "Controller PRD for the new SetupAgent architecture-improvement task."}
+{"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/research/setup-agent-architecture-handoff-for-new-session.md", "reason": "Handoff that reframed the old recursion bugfix into SetupAgent architecture work."}
+{"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/prd.md", "reason": "Old task PRD containing observed pseudo-tool and recursion symptoms plus preserved non-goals."}
+{"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/research/setup-agent-optimization-execution-plan.md", "reason": "Prior execution plan and module ordering input; treat as investigation material, not final authority."}
+{"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/research/setup-agent-current-gap-analysis.md", "reason": "Current gap analysis describing loop, tool, repair, stop, and scope drift points."}
+{"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/research/setup-agent-optimization-question-queue.md", "reason": "Prior question queue with answered/deferred setup architecture decisions."}
+{"file": ".trellis/spec/backend/rp-setup-agent-loop-semantics-react-trace.md", "reason": "Executable contract for inner setup turn-loop semantics, continue/finish reasons, and trace boundaries."}
+{"file": ".trellis/spec/backend/rp-setup-agent-structured-output-schema-repair.md", "reason": "Executable contract for machine-readable tool validation errors and bounded repair."}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-aware-tool-scope.md", "reason": "Executable contract for stage/step-aware tool visibility and turn-level allowlist behavior."}
+{"file": ".trellis/spec/backend/rp-setup-agent-pre-model-context-assembly.md", "reason": "Executable contract for layered pre-model context assembly and request message ordering."}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-local-context-governance.md", "reason": "Executable contract for working digest, tool outcomes, compact summary, and draft-ref recovery."}
+{"file": ".trellis/spec/backend/rp-setup-agent-execution-service-outer-harness-thin-boundary.md", "reason": "Executable contract that keeps SetupAgentExecutionService as a thin outer harness."}
+{"file": ".trellis/spec/backend/rp-setup-agent-stage-skill-pack.md", "reason": "Executable contract for SkillPack prompt-only stage-local injection and observability metadata."}
+{"file": ".trellis/spec/backend/rp-setup-agent-strict-truth-write-tool-pilot.md", "reason": "Executable contract for slim truth-write tool surface and provider-side validation authority."}

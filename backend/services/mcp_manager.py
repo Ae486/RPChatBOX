@@ -240,7 +240,7 @@ class McpManager:
             remote_tools.extend(server_tools)
 
         for tool in remote_tools:
-            if qualified_name in (tool.qualified_name, tool.raw_qualified_name):
+            if qualified_name in tool.qualified_name_aliases:
                 return await self.call_tool(
                     server_id=tool.server_id,
                     tool_name=tool.name,

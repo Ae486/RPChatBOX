@@ -125,10 +125,10 @@
 
 ## Q6. Setup search selector strength
 
-- Status: open
+- Status: deferred
 - Raised by: main-brain
 - Module: Phase A/B / setup truth index and context pipeline
-- Blocking: whether first implementation needs an LLM side-query selector
+- Blocking: none for A1 Agent Loop Spine
 - Context:
   - Claude Code style retrieval often uses cheap deterministic search plus exact read, and sometimes a side-query over small candidate summaries.
   - Current `SetupTruthIndexService.search` is lexical/path/filter scoring over committed setup truth rows.
@@ -140,6 +140,26 @@
 - Current recommendation:
   - A for the first architecture/tool repair slice. B can be added later as an optimization if evals show poor candidate selection. C is too heavy for setup editing-time recovery and blurs retrieval ownership.
 - Decision:
-  - Pending user confirmation.
+  - Deferred. User explicitly set current priority to agent architecture optimization first. Setup search selector strength belongs to later setup retrieval/module optimization, not A1.
 - Follow-up:
-  - If A is accepted, initial dev scope focuses on tool boundaries, loop repair, and deterministic setup reads/searches.
+  - Reopen when starting the setup retrieval roadmap after A1 architecture work.
+
+## Q7. A1 Agent Loop Spine priority
+
+- Status: answered
+- Raised by: main-brain
+- Module: Phase A / agent architecture spine
+- Blocking: dispatching A1 implementation
+- Context:
+  - Current bug symptoms are architecture-level: pseudo tool text reaches users, and successful tool calls can continue until graph recursion limit.
+  - User clarified that current priority is agent architecture optimization before setup retrieval, draft CRUD, or SkillPack module/function expansion.
+  - LangGraph may remain as execution/checkpoint/streaming substrate, but SetupAgent product semantics need to be explicit above graph topology.
+- Options:
+  - A. Start A1 Agent Loop Spine now and defer setup retrieval/draft CRUD/SkillPack expansion.
+  - B. Build setup retrieval or draft CRUD first.
+- Current recommendation:
+  - A. A1 is the foundation for reliable later module work.
+- Decision:
+  - User accepted A1 first.
+- Follow-up:
+  - Dispatch one development subagent for A1 with ownership over setup agent runtime/service/graph boundary files and focused tests. After A1 lands, run one module-level check subagent before starting another module.

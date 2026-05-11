@@ -104,6 +104,50 @@ def test_openai_compatible_gemini_named_model_does_not_inject_gemini_native_extr
     assert normalized.extra_body is None
 
 
+def test_deepseek_tool_request_disables_thinking_by_default():
+    service = RequestNormalizationService()
+    request = build_request(
+        provider_type="openai",
+        model="deepseek-v4-flash",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "rp_setup__setup_world_background_write_entry",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    )
+    request.provider.api_url = "https://api.deepseek.com/v1/chat/completions"
+
+    normalized = service.normalize(request)
+
+    assert normalized.extra_body == {"thinking": {"type": "disabled"}}
+
+
+def test_deepseek_tool_request_preserves_explicit_thinking_extra_body():
+    service = RequestNormalizationService()
+    request = build_request(
+        provider_type="deepseek",
+        model="deepseek-chat",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+        extra_body={"thinking": {"type": "enabled"}},
+    )
+
+    normalized = service.normalize(request)
+
+    assert normalized.extra_body == {"thinking": {"type": "enabled"}}
+
+
 def test_files_are_merged_into_last_user_message_and_cleared_from_request(tmp_path):
     text_file = tmp_path / "notes.txt"
     text_file.write_text("Alpha content", encoding="utf-8")

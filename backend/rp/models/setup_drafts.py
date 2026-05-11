@@ -116,12 +116,41 @@ class SetupDraftEntry(BaseModel):
         return text
 
 
+class SetupEntryTypeRecord(BaseModel):
+    """Stage-local draft entry type metadata used while editing setup drafts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type_key: str
+    display_name: str | None = None
+    description: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+
+    @field_validator("type_key")
+    @classmethod
+    def _non_empty_type_key(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class SetupStageDraftSchemaMetadata(BaseModel):
+    """Editable-stage schema aids that are not Memory OS truth."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entry_types: list[SetupEntryTypeRecord] = Field(default_factory=list)
+
+
 class SetupStageDraftBlock(BaseModel):
     """Canonical data-driven setup draft block owned by one setup stage."""
 
     model_config = ConfigDict(extra="forbid")
 
     stage_id: SetupStageId
+    schema_metadata: SetupStageDraftSchemaMetadata | None = None
     entries: list[SetupDraftEntry] = Field(default_factory=list)
     notes: str | None = None
 

@@ -12,6 +12,7 @@ import '../models/story_runtime.dart';
 import '../pages/rp_model_config_page.dart';
 import '../services/backend_story_service.dart';
 import '../widgets/story_session_drawer.dart';
+import '../widgets/story_runtime_inspection_sheet.dart';
 
 class LongformStoryPage extends StatefulWidget {
   final String? sessionId;
@@ -30,6 +31,11 @@ enum _RevisionReviewMode {
   final String wireName;
 
   const _RevisionReviewMode(this.wireName);
+}
+
+enum _SegmentBranchAction {
+  createBranch,
+  rollback,
 }
 
 class _LongformStoryPageState extends State<LongformStoryPage> {
@@ -61,6 +67,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   _RevisionReviewMode _reviewMode = _RevisionReviewMode.viewing;
   bool _isReviewLoading = false;
   bool _isReviewSaving = false;
+  RpRuntimeInspection? _branchInspection;
+  Map<String, dynamic>? _latestBranchControlReceipt;
 
   @override
   void initState() {
@@ -94,6 +102,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         _sessions = sessions;
         _currentSessionId = resolvedSessionId;
         _snapshot = snapshot;
+        _branchInspection = null;
+        _latestBranchControlReceipt = null;
         _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
           snapshot,
           previousSelected: _selectedPendingArtifactId,
@@ -124,6 +134,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       _sessions = sessions;
       _currentSessionId = resolvedSessionId;
       _snapshot = snapshot;
+      _branchInspection = null;
+      _latestBranchControlReceipt = null;
       _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
         snapshot,
         previousSelected: _selectedPendingArtifactId,
@@ -174,6 +186,493 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       }
     }
     return snapshot.pendingSegment;
+  }
+
+  RpStoryArtifact? _runtimeInspectionAnchorArtifact(
+    RpChapterSnapshot snapshot,
+  ) {
+    final pending = _selectedPendingSegment(snapshot);
+    if (pending != null) return pending;
+    final acceptedSegments = snapshot.acceptedSegmentArtifacts;
+    return acceptedSegments.isEmpty ? null : acceptedSegments.last;
+  }
+
+  int _activeReviewCommentCount() {
+    final surface = _reviewSurface;
+    if (surface == null) return 0;
+    return surface.comments.where((item) => item.isActive).length;
+  }
+
+  int _activeTrackedChangeCount() {
+    final surface = _reviewSurface;
+    if (surface == null) return 0;
+    return surface.trackedChanges.where((item) => item.isActive).length;
+  }
+
+  Future<void> _openRuntimeInspectionPanel() async {
+    final snapshot = _snapshot;
+    final sessionId = _currentSessionId;
+    if (snapshot == null || sessionId == null) return;
+    final anchorArtifact = _runtimeInspectionAnchorArtifact(snapshot);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => StoryRuntimeInspectionSheet(
+        service: _service,
+        sessionId: sessionId,
+        chapterIndex: snapshot.chapter.chapterIndex,
+        mode: snapshot.session.mode,
+        preferredBranchHeadId:
+            anchorArtifact?.runtimeBranchHeadId ??
+            snapshot.session.activeBranchHeadId,
+        preferredTurnId: anchorArtifact?.runtimeTurnId,
+        activeCommentCount: _activeReviewCommentCount(),
+        activeTrackedChangeCount: _activeTrackedChangeCount(),
+      ),
+    );
+  }
+
+  String? _normalizedText(Object? value) {
+    final normalized = value?.toString().trim() ?? '';
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  Map<String, dynamic>? _mapOrNull(Object? value) {
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return null;
+  }
+
+  RpRuntimeInspection? _inspectionForSnapshot(RpChapterSnapshot snapshot) {
+    final inspection = _branchInspection;
+    if (inspection == null) return null;
+    final inspectionSessionId = _normalizedText(inspection.session['session_id']);
+    if (inspectionSessionId != snapshot.session.sessionId) return null;
+    final activeBranchId = snapshot.session.activeBranchHeadId;
+    if (inspection.activeBranchHeadId != activeBranchId) return null;
+    return inspection;
+  }
+
+  Map<String, dynamic>? _branchById(
+    RpRuntimeInspection inspection,
+    String? branchHeadId,
+  ) {
+    final normalizedBranchId = _normalizedText(branchHeadId);
+    if (normalizedBranchId == null) return null;
+    for (final branch in inspection.availableBranches) {
+      if (_normalizedText(branch['branch_head_id']) == normalizedBranchId) {
+        return branch;
+      }
+    }
+    final selectedBranch = inspection.selectedBranch;
+    if (_normalizedText(selectedBranch?['branch_head_id']) == normalizedBranchId) {
+      return selectedBranch;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _activeBranchRecord(RpChapterSnapshot snapshot) {
+    final inspection = _inspectionForSnapshot(snapshot);
+    if (inspection == null) return null;
+    return _branchById(inspection, snapshot.session.activeBranchHeadId);
+  }
+
+  String _branchShortLabel(String? branchHeadId) {
+    final normalized = _normalizedText(branchHeadId);
+    if (normalized == null) return 'unknown';
+    final tail = normalized.split(':').last;
+    if (tail.isEmpty) return normalized;
+    return tail.length <= 8 ? tail : tail.substring(0, 8);
+  }
+
+  String _branchDisplayNameById(RpChapterSnapshot snapshot, String? branchHeadId) {
+    final inspection = _inspectionForSnapshot(snapshot);
+    final branch = inspection == null ? null : _branchById(inspection, branchHeadId);
+    return _normalizedText(branch?['branch_name']) ??
+        _branchShortLabel(branchHeadId);
+  }
+
+  String _turnShortLabel(String? turnId) {
+    final normalized = _normalizedText(turnId);
+    if (normalized == null) return '起点';
+    final tail = normalized.split(':').last;
+    if (tail.isEmpty) return normalized;
+    return tail.length <= 8 ? tail : tail.substring(0, 8);
+  }
+
+  Future<RpRuntimeInspection?> _loadBranchInspection({
+    bool force = false,
+    bool showError = false,
+  }) async {
+    final snapshot = _snapshot;
+    final sessionId = _currentSessionId;
+    if (snapshot == null || sessionId == null) return null;
+    if (!force) {
+      final cached = _inspectionForSnapshot(snapshot);
+      if (cached != null) return cached;
+    }
+    try {
+      final inspection = await _service.getRuntimeInspection(
+        sessionId: sessionId,
+        branchHeadId: snapshot.session.activeBranchHeadId,
+        targetChapterIndex: snapshot.chapter.chapterIndex,
+        limit: 25,
+      );
+      if (!mounted) return inspection;
+      setState(() {
+        _branchInspection = inspection;
+      });
+      return inspection;
+    } catch (e) {
+      if (showError && mounted) {
+        OwuiSnackBars.warning(context, message: '加载分支信息失败: $e');
+      }
+      return null;
+    }
+  }
+
+  Future<List<RpStorySession>?> _safeListSessions() async {
+    try {
+      return await _service.listSessions();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<RpRuntimeInspection?> _applyBranchControlResult({
+    required RpBranchControlResult result,
+    required String successMessage,
+  }) async {
+    final sessions = await _safeListSessions();
+    final previousSelected = _selectedPendingArtifactId;
+    if (!mounted) return null;
+    setState(() {
+      _snapshot = result.snapshot;
+      if (sessions != null) {
+        _sessions = sessions;
+      }
+      _branchInspection = null;
+      _latestBranchControlReceipt = Map<String, dynamic>.from(result.receipt);
+      _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
+        result.snapshot,
+        previousSelected: previousSelected,
+      );
+      if (_reviewSurface?.artifactId != _selectedPendingArtifactId) {
+        _reviewSurface = null;
+        _selectedReviewBlockId = null;
+      }
+    });
+    await _loadReviewSurfaceForSelection();
+    final inspection = await _loadBranchInspection(force: true);
+    if (mounted) {
+      OwuiSnackBars.success(context, message: successMessage);
+    }
+    return inspection;
+  }
+
+  Future<RpRuntimeInspection?> _createBranchFromArtifact(
+    RpStoryArtifact artifact,
+  ) async {
+    final sessionId = _currentSessionId;
+    final originTurnId = artifact.runtimeTurnId;
+    if (sessionId == null || originTurnId == null || _isSending) return null;
+    setState(() => _isSending = true);
+    try {
+      final result = await _service.createBranchFromTurn(
+        sessionId: sessionId,
+        originTurnId: originTurnId,
+      );
+      return await _applyBranchControlResult(
+        result: result,
+        successMessage: '已创建分支并切换到新故事线',
+      );
+    } catch (e) {
+      if (mounted) {
+        OwuiSnackBars.error(context, message: '创建分支失败: $e');
+      }
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  Future<RpRuntimeInspection?> _switchBranchById(String branchHeadId) async {
+    final sessionId = _currentSessionId;
+    if (sessionId == null || _isSending) return null;
+    setState(() => _isSending = true);
+    try {
+      final result = await _service.switchBranch(
+        sessionId: sessionId,
+        branchHeadId: branchHeadId,
+      );
+      return await _applyBranchControlResult(
+        result: result,
+        successMessage: '已切换分支',
+      );
+    } catch (e) {
+      if (mounted) {
+        OwuiSnackBars.error(context, message: '切换分支失败: $e');
+      }
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  Future<bool> _confirmDeleteBranch(Map<String, dynamic> branch) async {
+    final branchName =
+        _normalizedText(branch['branch_name']) ??
+        _branchShortLabel(_normalizedText(branch['branch_head_id']));
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除分支'),
+        content: Text(
+          '将隐藏分支“$branchName”。这一步不会物理删除共享历史，也不会自动清理 LangGraph checkpoint。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  Future<RpRuntimeInspection?> _deleteBranchRecord(
+    Map<String, dynamic> branch,
+  ) async {
+    final sessionId = _currentSessionId;
+    final branchHeadId = _normalizedText(branch['branch_head_id']);
+    if (sessionId == null || branchHeadId == null || _isSending) return null;
+    final confirmed = await _confirmDeleteBranch(branch);
+    if (!confirmed) return null;
+    setState(() => _isSending = true);
+    try {
+      final result = await _service.deleteBranch(
+        sessionId: sessionId,
+        branchHeadId: branchHeadId,
+      );
+      return await _applyBranchControlResult(
+        result: result,
+        successMessage: '已隐藏该分支',
+      );
+    } catch (e) {
+      if (mounted) {
+        OwuiSnackBars.error(context, message: '删除分支失败: $e');
+      }
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  Future<bool> _confirmRollbackToArtifact(RpStoryArtifact artifact) async {
+    final turnId = artifact.runtimeTurnId;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('回退到这里'),
+        content: Text(
+          turnId == null
+              ? '目标 turn 不可用，当前无法执行回退。'
+              : '确认把当前主线回退到这条已结算内容吗？目标 turn 之后的内容会从当前分支隐藏，但不是物理删除。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: turnId == null
+                ? null
+                : () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认回退'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  Future<RpRuntimeInspection?> _rollbackToArtifact(RpStoryArtifact artifact) async {
+    final sessionId = _currentSessionId;
+    final targetTurnId = artifact.runtimeTurnId;
+    if (sessionId == null || targetTurnId == null || _isSending) return null;
+    final confirmed = await _confirmRollbackToArtifact(artifact);
+    if (!confirmed) return null;
+    setState(() => _isSending = true);
+    try {
+      final result = await _service.rollbackToTurn(
+        sessionId: sessionId,
+        targetTurnId: targetTurnId,
+      );
+      return await _applyBranchControlResult(
+        result: result,
+        successMessage: '已回退到所选 turn',
+      );
+    } catch (e) {
+      if (mounted) {
+        OwuiSnackBars.error(context, message: '回退失败: $e');
+      }
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  Future<void> _openBranchPanel() async {
+    final snapshot = _snapshot;
+    if (snapshot == null) return;
+    final initialInspection = await _loadBranchInspection(
+      force: true,
+      showError: true,
+    );
+    if (!mounted || initialInspection == null) return;
+
+    var currentInspection = initialInspection;
+    var isWorking = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> refreshInspection() async {
+              setSheetState(() => isWorking = true);
+              final refreshed = await _loadBranchInspection(
+                force: true,
+                showError: true,
+              );
+              if (refreshed != null) {
+                currentInspection = refreshed;
+              }
+              if (mounted) {
+                setSheetState(() => isWorking = false);
+              }
+            }
+
+            Future<void> switchBranch(Map<String, dynamic> branch) async {
+              final branchHeadId = _normalizedText(branch['branch_head_id']);
+              if (branchHeadId == null) return;
+              setSheetState(() => isWorking = true);
+              final refreshed = await _switchBranchById(branchHeadId);
+              if (refreshed != null) {
+                currentInspection = refreshed;
+              }
+              if (mounted) {
+                setSheetState(() => isWorking = false);
+              }
+            }
+
+            Future<void> deleteBranch(Map<String, dynamic> branch) async {
+              setSheetState(() => isWorking = true);
+              final refreshed = await _deleteBranchRecord(branch);
+              if (refreshed != null) {
+                currentInspection = refreshed;
+              }
+              if (mounted) {
+                setSheetState(() => isWorking = false);
+              }
+            }
+
+            return SafeArea(
+              top: false,
+              child: FractionallySizedBox(
+                heightFactor: 0.88,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    context.owuiSpacing.lg,
+                    0,
+                    context.owuiSpacing.lg,
+                    context.owuiSpacing.lg,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '分支面板',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleLarge,
+                                ),
+                                SizedBox(height: context.owuiSpacing.xs),
+                                Text(
+                                  '查看 / 切换 / 删除当前 session 的分支。这里只做产品控制，不读取 LangGraph fork 作为真相。',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: context
+                                            .owuiColors
+                                            .textSecondary,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '刷新分支面板',
+                            onPressed: isWorking ? null : refreshInspection,
+                            icon: const Icon(Icons.refresh),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: context.owuiSpacing.md),
+                      if (isWorking)
+                        const LinearProgressIndicator(minHeight: 2),
+                      if (isWorking)
+                        SizedBox(height: context.owuiSpacing.md),
+                      Expanded(
+                        child: ListView(
+                          children: [
+                            for (final branch in currentInspection.availableBranches)
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  bottom: context.owuiSpacing.md,
+                                ),
+                                child: _buildBranchPanelItem(
+                                  snapshot: _snapshot ?? snapshot,
+                                  branch: branch,
+                                  isWorking: isWorking,
+                                  onSwitch: () => switchBranch(branch),
+                                  onDelete: () => deleteBranch(branch),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _selectPendingArtifact(String artifactId) async {
@@ -263,6 +762,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         _sessions = sessions;
         _snapshot = snapshot;
         _currentSessionId = sessionId;
+        _branchInspection = null;
+        _latestBranchControlReceipt = null;
         _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
           snapshot,
           previousSelected: null,
@@ -995,12 +1496,36 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.4,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              SizedBox(width: spacing.md),
+              Wrap(
+                spacing: spacing.sm,
+                runSpacing: spacing.sm,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _openBranchPanel,
+                    icon: const Icon(Icons.alt_route),
+                    label: const Text('分支'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _openRuntimeInspectionPanel,
+                    icon: const Icon(Icons.visibility_outlined),
+                    label: const Text('运行态'),
+                  ),
+                ],
+              ),
+            ],
           ),
           SizedBox(height: spacing.sm),
           Wrap(
@@ -1025,11 +1550,112 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
             ],
           ),
           SizedBox(height: spacing.md),
+          _buildBranchIndicator(snapshot),
+          SizedBox(height: spacing.md),
           Text(
-            'Left column keeps accepted outline and prose visible. Right column stays for discussion, review, and command control.',
+            '当前页面只展示 active branch 的线性正文；创建分支后会立即切线，旧未来不会继续留在主视图里。',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Map<String, dynamic>? _latestBranchCreatedReceiptForSnapshot(
+    RpChapterSnapshot snapshot,
+  ) {
+    final receipt = _latestBranchControlReceipt;
+    if (receipt == null) return null;
+    if (_normalizedText(receipt['control_kind']) != 'branch_created') {
+      return null;
+    }
+    if (_normalizedText(receipt['to_branch_head_id']) !=
+        snapshot.session.activeBranchHeadId) {
+      return null;
+    }
+    return receipt;
+  }
+
+  Widget _buildBranchIndicator(RpChapterSnapshot snapshot) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final activeBranch = _activeBranchRecord(snapshot);
+    final activeBranchId = snapshot.session.activeBranchHeadId;
+    final branchName =
+        _normalizedText(activeBranch?['branch_name']) ??
+        _branchShortLabel(activeBranchId);
+    final parentBranchId = _normalizedText(activeBranch?['parent_branch_head_id']);
+    final forkOriginTurnId = _normalizedText(activeBranch?['fork_origin_turn_id']);
+    final forkBaseTurnId = _normalizedText(activeBranch?['fork_base_turn_id']);
+    final detailText =
+        parentBranchId == null && forkOriginTurnId == null
+        ? '当前正文只展示这条 active branch 的线性历史。'
+        : '来自 ${_branchDisplayNameById(snapshot, parentBranchId)} · origin ${_turnShortLabel(forkOriginTurnId)} · base ${_turnShortLabel(forkBaseTurnId)}';
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.alt_route, size: 18),
+          ),
+          SizedBox(width: spacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: spacing.sm,
+                  runSpacing: spacing.xs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      '当前分支 · $branchName',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colors.surface,
+                        borderRadius: BorderRadius.circular(
+                          context.owuiRadius.rXl,
+                        ),
+                        border: Border.all(color: colors.borderSubtle),
+                      ),
+                      child: Text(
+                        _branchShortLabel(activeBranchId),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: spacing.xs),
+                Text(
+                  detailText,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1079,12 +1705,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             SizedBox(height: spacing.md),
-            ...acceptedSegments.map(
-              (item) => Padding(
-                padding: EdgeInsets.only(bottom: spacing.md),
-                child: _buildArtifactCard(item),
-              ),
-            ),
+            ..._buildAcceptedSegmentCards(snapshot, acceptedSegments),
           ],
           if (pendingCandidates.isNotEmpty || _isStreamingLeftPane) ...[
             SizedBox(height: spacing.lg),
@@ -1102,6 +1723,72 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                 child: _buildStreamingCard(),
               ),
           ],
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildAcceptedSegmentCards(
+    RpChapterSnapshot snapshot,
+    List<RpStoryArtifact> acceptedSegments,
+  ) {
+    final spacing = context.owuiSpacing;
+    final receipt = _latestBranchCreatedReceiptForSnapshot(snapshot);
+    final widgets = <Widget>[];
+    if (receipt != null && _normalizedText(receipt['fork_base_turn_id']) == null) {
+      widgets.add(_buildBranchForkNotice(snapshot, receipt: receipt));
+      widgets.add(SizedBox(height: spacing.md));
+    }
+    for (final item in acceptedSegments) {
+      widgets.add(
+        Padding(
+          padding: EdgeInsets.only(bottom: spacing.md),
+          child: _buildArtifactCard(item, showBranchActions: true),
+        ),
+      );
+      if (receipt != null &&
+          item.runtimeTurnId == _normalizedText(receipt['fork_base_turn_id'])) {
+        widgets.add(_buildBranchForkNotice(snapshot, receipt: receipt));
+        widgets.add(SizedBox(height: spacing.md));
+      }
+    }
+    return widgets;
+  }
+
+  Widget _buildBranchForkNotice(
+    RpChapterSnapshot snapshot, {
+    required Map<String, dynamic> receipt,
+  }) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final branchName = _branchDisplayNameById(
+      snapshot,
+      _normalizedText(receipt['to_branch_head_id']),
+    );
+    return Container(
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.call_split, size: 18),
+          ),
+          SizedBox(width: spacing.sm),
+          Expanded(
+            child: Text(
+              '已切换到分支 $branchName。当前正文从 ${_turnShortLabel(_normalizedText(receipt["fork_base_turn_id"]))} 之后重新展开；origin ${_turnShortLabel(_normalizedText(receipt["fork_origin_turn_id"]))} 及其后续保留在原分支。',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.45,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1151,6 +1838,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
             candidates: pendingCandidates,
             selectedArtifactId: selectedId,
           ),
+          SizedBox(height: spacing.md),
+          _buildCandidatePreviewNotice(),
           SizedBox(height: spacing.md),
           _buildReviewToolbar(
             multipleCandidates: multipleCandidates,
@@ -1204,13 +1893,45 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       children: [
         for (var index = 0; index < candidates.length; index++)
           ChoiceChip(
-            label: Text('Candidate ${index + 1}'),
+            label: Text('候选 ${index + 1}'),
             selected: candidates[index].artifactId == selectedArtifactId,
             onSelected: _isSending || _isReviewSaving
                 ? null
                 : (_) => _selectPendingArtifact(candidates[index].artifactId),
           ),
       ],
+    );
+  }
+
+  Widget _buildCandidatePreviewNotice() {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    return Container(
+      padding: EdgeInsets.all(spacing.md),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.info_outline, size: 18),
+          ),
+          SizedBox(width: spacing.sm),
+          Expanded(
+            child: Text(
+              '选择候选只会切换当前预览，不会立即采用。只有 “Accept & Continue” 才会把当前候选作为后续续写基础。',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.45,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1833,7 +2554,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                   'accept_pending_segment',
                   targetArtifactId: pendingSegment.artifactId,
                 ),
-          child: const Text('Accept Segment'),
+          child: const Text('Accept & Continue'),
         ),
       );
     }
@@ -1856,9 +2577,11 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     RpStoryArtifact artifact, {
     bool isPrimary = false,
     bool isPending = false,
+    bool showBranchActions = false,
   }) {
     final spacing = context.owuiSpacing;
     final colors = context.owuiColors;
+    final canShowBranchActions = showBranchActions && artifact.runtimeTurnId != null;
     return Container(
       padding: EdgeInsets.all(spacing.lg),
       decoration: BoxDecoration(
@@ -1875,16 +2598,221 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '${artifact.artifactKind} · ${artifact.status} · r${artifact.revision}',
-            style: Theme.of(
-              context,
-            ).textTheme.labelLarge?.copyWith(color: colors.textSecondary),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  '${artifact.artifactKind} · ${artifact.status} · r${artifact.revision}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(color: colors.textSecondary),
+                ),
+              ),
+              if (canShowBranchActions)
+                PopupMenuButton<_SegmentBranchAction>(
+                  tooltip: '分支 / 回退动作',
+                  onSelected: (action) {
+                    switch (action) {
+                      case _SegmentBranchAction.createBranch:
+                        _createBranchFromArtifact(artifact);
+                        break;
+                      case _SegmentBranchAction.rollback:
+                        _rollbackToArtifact(artifact);
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _SegmentBranchAction.createBranch,
+                      child: Text('从这里分支'),
+                    ),
+                    PopupMenuItem(
+                      value: _SegmentBranchAction.rollback,
+                      child: Text('回退到这里'),
+                    ),
+                  ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.surface,
+                      borderRadius: BorderRadius.circular(
+                        context.owuiRadius.rXl,
+                      ),
+                      border: Border.all(color: colors.borderSubtle),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.alt_route, size: 16),
+                        SizedBox(width: spacing.xs),
+                        const Text('分支'),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
           SizedBox(height: spacing.sm),
           SelectableText(
             artifact.contentText,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBranchPanelItem({
+    required RpChapterSnapshot snapshot,
+    required Map<String, dynamic> branch,
+    required bool isWorking,
+    required Future<void> Function() onSwitch,
+    required Future<void> Function() onDelete,
+  }) {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final branchHeadId = _normalizedText(branch['branch_head_id']);
+    final isCurrent = branchHeadId == snapshot.session.activeBranchHeadId;
+    final isDefault =
+        branchHeadId == 'branch:${snapshot.session.sessionId}:main';
+    final visibilityState = _normalizedText(branch['visibility_state']) ?? 'visible';
+    final status = _normalizedText(branch['status']) ?? 'active';
+    final branchName =
+        _normalizedText(branch['branch_name']) ??
+        _branchShortLabel(branchHeadId);
+    final parentBranchId = _normalizedText(branch['parent_branch_head_id']);
+    final latestReceipt = _mapOrNull(branch['latest_control_receipt']);
+    final originLabel = parentBranchId == null
+        ? '故事起点'
+        : _branchDisplayNameById(snapshot, parentBranchId);
+    final canSwitch = !isCurrent && visibilityState == 'visible' && status == 'active';
+    final canDelete =
+        !isCurrent && !isDefault && visibilityState != 'deleted' && status == 'active';
+    final receiptSummary = latestReceipt == null
+        ? '当前不可用'
+        : '${_normalizedText(latestReceipt['control_kind']) ?? 'unknown'} · ${_turnShortLabel(_normalizedText(latestReceipt['target_turn_id']) ?? _normalizedText(latestReceipt['fork_origin_turn_id']))}';
+
+    return Container(
+      padding: EdgeInsets.all(spacing.lg),
+      decoration: BoxDecoration(
+        color: isCurrent
+            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.06)
+            : colors.surface2,
+        borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+        border: Border.all(color: colors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: spacing.sm,
+                      runSpacing: spacing.xs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          branchName,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.surface,
+                            borderRadius: BorderRadius.circular(
+                              context.owuiRadius.rXl,
+                            ),
+                            border: Border.all(color: colors.borderSubtle),
+                          ),
+                          child: Text(
+                            _branchShortLabel(branchHeadId),
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodySmall?.copyWith(
+                              color: colors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        if (isCurrent)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(
+                                context.owuiRadius.rXl,
+                              ),
+                            ),
+                            child: Text(
+                              '当前',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: spacing.xs),
+                    Text(
+                      'status $status · visibility $visibilityState',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: spacing.md),
+          Text(
+            'origin $originLabel · fork ${_turnShortLabel(_normalizedText(branch["fork_origin_turn_id"]))} · base ${_turnShortLabel(_normalizedText(branch["fork_base_turn_id"]))} · head ${_turnShortLabel(_normalizedText(branch["head_turn_id"]))}',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.4,
+            ),
+          ),
+          SizedBox(height: spacing.sm),
+          Text(
+            '最近回执: $receiptSummary',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+            ),
+          ),
+          SizedBox(height: spacing.md),
+          Wrap(
+            spacing: spacing.sm,
+            runSpacing: spacing.sm,
+            children: [
+              OutlinedButton.icon(
+                onPressed: !canSwitch || isWorking ? null : onSwitch,
+                icon: const Icon(Icons.swap_horiz),
+                label: const Text('切换'),
+              ),
+              OutlinedButton.icon(
+                onPressed: !canDelete || isWorking ? null : onDelete,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('删除'),
+              ),
+            ],
           ),
         ],
       ),

@@ -81,8 +81,11 @@ class WritingWorkerExecutionService:
             "packet_ref": request.packet_ref,
         }
         if self._should_use_retrieval_loop(request=request):
+            identity = request.identity
+            if identity is None:
+                raise ValueError("Runtime identity is required for retrieval loop")
             loop_result = await self._retrieval_loop().run(
-                identity=request.identity,
+                identity=identity,
                 model_id=request.writer_model_id,
                 provider_id=request.writer_provider_id,
                 messages=messages,
@@ -118,7 +121,7 @@ class WritingWorkerExecutionService:
             output_kind=request.packet.output_kind,
             usage_metadata=usage_metadata,
             writer_tool_trace_refs=writer_tool_trace_refs,
-            retrieval_source_ref_bundle=retrieval_source_ref_bundle or {},
+            retrieval_source_ref_bundle=retrieval_source_ref_bundle,
             result_status="completed",
             metadata_json=metadata_json,
         )
@@ -237,12 +240,23 @@ class WritingWorkerExecutionService:
             context_blocks.append(
                 f"{label}:\n" + "\n".join(f"- {item}" for item in items)
             )
+        mandatory_rewrite_instruction = ""
+        if packet.operation_mode == "rewrite" and packet.review_overlay_sections:
+            mandatory_rewrite_instruction = str(
+                packet.metadata.get("mandatory_rewrite_instruction") or ""
+            ).strip() or (
+                "Mandatory rewrite instruction:\n"
+                "- Apply every listed review constraint exactly.\n"
+                "- Treat active comments and tracked changes as required edits.\n"
+                "- Do not ignore or soften the requested changes."
+            )
         user_prompt = "\n\n".join(
             block
             for block in (
                 f"output_kind: {packet.output_kind}",
                 f"phase: {packet.phase}",
                 "\n\n".join(context_blocks),
+                mandatory_rewrite_instruction,
                 f"user_instruction:\n{packet.user_instruction}",
             )
             if block

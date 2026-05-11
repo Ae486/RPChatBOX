@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from rp.models.longform_chapter_contracts import LONGFORM_OUTLINE_SCHEMA_VERSION
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.story_runtime import ChapterWorkspace, OrchestratorPlan, StorySession
 from rp.models.writing_runtime import PacketSection, WritingPacket
@@ -35,6 +36,12 @@ class WritingPacketBuilder:
             "You are the writing_worker for a longform story system.",
             "Write only the requested output. Do not expose internal planning, retrieval, or worker steps.",
         ]
+        if plan.output_kind == "chapter_outline":
+            system_sections.append(
+                "When drafting a chapter outline, return structured JSON with "
+                f"schema_version={LONGFORM_OUTLINE_SCHEMA_VERSION}, chapter_goal, "
+                "and an ordered beats array. Markdown rendering can be derived later."
+            )
         if writer_contract:
             contract_lines = [
                 str(item)

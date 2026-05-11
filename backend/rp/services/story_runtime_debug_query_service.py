@@ -115,6 +115,9 @@ class StoryRuntimeDebugQueryService:
             available_turns=available_turns,
             requested_turn_id=turn_id,
         )
+        latest_branch_receipts = self._latest_branch_control_receipts_by_branch(
+            session_id=session.session_id
+        )
         snapshot = self._resolve_snapshot(
             session_id=session.session_id,
             selected_turn=selected_turn,
@@ -183,6 +186,16 @@ class StoryRuntimeDebugQueryService:
             target_chapter_index=target_chapter_index,
             limit=normalized_limit,
         )
+        chapter_progress = self._chapter_progress_summary(
+            story_id=session.story_id,
+            session_id=session.session_id,
+            selected_branch_head_id=(
+                None if selected_branch is None else selected_branch.branch_head_id
+            ),
+            branch_read_scope=branch_read_scope_model,
+            target_chapter_index=target_chapter_index,
+            limit=normalized_limit,
+        )
         mode_sidecars = self._mode_sidecar_summary(
             story_id=session.story_id,
             session_id=session.session_id,
@@ -223,9 +236,22 @@ class StoryRuntimeDebugQueryService:
             },
             "session": session.model_dump(mode="json"),
             "selected_branch": (
-                None if selected_branch is None else _record_json(selected_branch)
+                None
+                if selected_branch is None
+                else self._branch_record_item(
+                    selected_branch,
+                    latest_receipt=latest_branch_receipts.get(
+                        selected_branch.branch_head_id
+                    ),
+                )
             ),
-            "available_branches": [_record_json(item) for item in branches],
+            "available_branches": [
+                self._branch_record_item(
+                    item,
+                    latest_receipt=latest_branch_receipts.get(item.branch_head_id),
+                )
+                for item in branches
+            ],
             "selected_turn": (
                 None if selected_turn is None else _record_json(selected_turn)
             ),
@@ -262,6 +288,7 @@ class StoryRuntimeDebugQueryService:
             "worker_execution": worker_execution,
             "retrieval": retrieval,
             "chapter_bridge": chapter_bridge,
+            "chapter_progress": chapter_progress,
             "mode_sidecars": mode_sidecars,
             "runtime_workspace": {
                 "materials": []
@@ -514,6 +541,24 @@ class StoryRuntimeDebugQueryService:
         )
         return list(self._session.exec(stmt).all())
 
+    def _latest_branch_control_receipts_by_branch(
+        self,
+        *,
+        session_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        stmt = (
+            select(BranchControlReceiptRecord)
+            .where(BranchControlReceiptRecord.session_id == session_id)
+            .order_by(BranchControlReceiptRecord.created_at.desc())
+            .order_by(BranchControlReceiptRecord.receipt_id.desc())
+        )
+        latest: dict[str, dict[str, Any]] = {}
+        for record in self._session.exec(stmt).all():
+            if record.branch_head_id in latest:
+                continue
+            latest[record.branch_head_id] = self._branch_control_receipt_item(record)
+        return latest
+
     def _list_runtime_config_receipts(
         self,
         *,
@@ -657,6 +702,16 @@ class StoryRuntimeDebugQueryService:
             "metadata": deepcopy(record.metadata_json or {}),
             "created_at": record.created_at.isoformat(),
         }
+
+    @staticmethod
+    def _branch_record_item(
+        record: BranchHeadRecord,
+        *,
+        latest_receipt: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = _record_json(record)
+        payload["latest_control_receipt"] = deepcopy(latest_receipt)
+        return payload
 
     @classmethod
     def _writer_packet_summary(cls, *, turn_trace: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -977,6 +1032,80 @@ class StoryRuntimeDebugQueryService:
             "target_chapter_index": target_chapter_index,
             "items": items,
             "latest_for_target_chapter": items[0] if items else None,
+        }
+
+    def _chapter_progress_summary(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        selected_branch_head_id: str | None,
+        branch_read_scope,
+        target_chapter_index: int | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        if selected_branch_head_id is None:
+            return {
+                "selected_branch_head_id": None,
+                "chapter_index": target_chapter_index,
+                "items": [],
+                "latest_for_chapter": None,
+            }
+        records = self._list_branch_workspace_materials(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=selected_branch_head_id,
+            material_kind=RuntimeWorkspaceMaterialKind.POST_WRITE_TRACE.value,
+        )
+        items: list[dict[str, Any]] = []
+        for record in records:
+            if (
+                branch_read_scope is not None
+                and not self._workspace_material_visible(
+                    record=record,
+                    branch_read_scope=branch_read_scope,
+                )
+            ):
+                continue
+            payload = dict(record.payload_json or {})
+            if _optional_text(payload.get("payload_kind")) != "longform_outline_progress":
+                continue
+            progress = payload.get("record")
+            if not isinstance(progress, dict):
+                continue
+            if (
+                target_chapter_index is not None
+                and int(progress.get("chapter_index") or -1) != target_chapter_index
+            ):
+                continue
+            covered_beat_ids = [
+                str(item).strip()
+                for item in list(progress.get("covered_beat_ids") or [])
+                if str(item).strip()
+            ]
+            items.append(
+                {
+                    "material_id": record.material_id,
+                    "turn_id": record.turn_id,
+                    "runtime_profile_snapshot_id": record.runtime_profile_snapshot_id,
+                    "chapter_index": progress.get("chapter_index"),
+                    "outline_artifact_id": progress.get("outline_artifact_id"),
+                    "current_beat_id": progress.get("current_beat_id"),
+                    "covered_beat_ids": covered_beat_ids,
+                    "covered_beat_count": len(covered_beat_ids),
+                    "segment_by_beat_id": deepcopy(progress.get("segment_by_beat_id") or {}),
+                    "status_by_beat_id": deepcopy(progress.get("status_by_beat_id") or {}),
+                    "metadata": deepcopy(record.metadata_json or {}),
+                    "created_at": record.created_at.isoformat(),
+                }
+            )
+            if len(items) >= limit:
+                break
+        return {
+            "selected_branch_head_id": selected_branch_head_id,
+            "chapter_index": target_chapter_index,
+            "items": items,
+            "latest_for_chapter": items[0] if items else None,
         }
 
     def _mode_sidecar_summary(

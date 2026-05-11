@@ -139,6 +139,28 @@ def test_non_character_design_stages_do_not_load_any_skill_pack(stage_id):
     assert "For this turn, you operate in the" not in prompt
 
 
+def test_world_background_prompt_exposes_stage_truth_write_hint():
+    service = SetupAgentPromptService()
+    packet = _packet(current_stage=SetupStageId.WORLD_BACKGROUND)
+
+    prompt = service.build_system_prompt(
+        mode=StoryMode.LONGFORM,
+        current_step=SetupStepId.FOUNDATION,
+        current_stage=SetupStageId.WORLD_BACKGROUND,
+        context_packet=packet,
+    )
+
+    assert "Current stage draft-write hint:" in prompt
+    assert "Use the setup.world_background.* tools" not in prompt
+    assert "setup.world_background.write_entry" not in prompt
+    assert "setup.world_background.edit_entry" not in prompt
+    assert "setup.world_background.delete_entry" not in prompt
+    assert (
+        "- Preferred entry_type values for this stage: world_rule, location, faction, race, history."
+        in prompt
+    )
+
+
 @pytest.mark.parametrize(
     "stage_id",
     [
@@ -238,6 +260,25 @@ def _legacy_prompt(
     import json
 
     stage_overlay = _legacy_stage_overlay(current_stage or current_step)
+    stage_truth_write_hint = ""
+    if current_stage is not None:
+        preferred_types = {
+            SetupStageId.WORLD_BACKGROUND: "world_rule, location, faction, race, history",
+            SetupStageId.CHARACTER_DESIGN: "character, relationship, group",
+            SetupStageId.PLOT_BLUEPRINT: "plot_thread, foreshadow, chapter_plan",
+            SetupStageId.WRITER_CONFIG: "style_rule, pov_rule, writing_constraint",
+            SetupStageId.WORKER_CONFIG: "worker_policy, tool_policy, handoff_rule",
+            SetupStageId.RP_INTERACTION_CONTRACT: "interaction_rule, player_agency_rule",
+            SetupStageId.TRPG_RULES: "rule, mechanic, table",
+        }.get(current_stage, "stage-specific types")
+        stage_truth_write_hint = (
+            "Current stage draft-write hint:\n"
+            "- Prefer one entry payload instead of a full stage block unless you are intentionally replacing or merging the whole block.\n"
+            "- Minimal entry fields: entry_id, entry_type, semantic_path, title.\n"
+            "- Optional fields: summary, sections.\n"
+            '- A text section must look like {"section_id":"summary","title":"Summary","kind":"text","content":{"text":"..."}}.\n'
+            f"- Preferred entry_type values for this stage: {preferred_types}.\n\n"
+        )
     workspace_snapshot = json.dumps(
         context_packet.model_dump(mode="json", exclude_none=True),
         ensure_ascii=False,
@@ -257,12 +298,15 @@ def _legacy_prompt(
         "6. If compact_summary contains draft_refs or recovery_hints and exact draft detail is needed, call setup.read.draft_refs.\n"
         "7. Use setup.discussion.update_state when the discussion map itself needs to be refreshed or reconciled.\n"
         "8. Use setup.chunk.upsert when one concrete truth candidate is emerging from the discussion.\n"
-        "9. Use setup.truth.write only when one chunk is stable enough to land in the current draft.\n"
+        "9. Use setup.truth.write when one chunk is stable enough to land in the current draft. "
+        "For canonical stages, prefer one entry payload over a full stage block unless you are intentionally replacing the whole block. "
+        "A minimal stage entry needs entry_id, entry_type, semantic_path, and title. "
+        "If you include a text section, its kind must be text and it must carry content.text.\n"
         "10. If the current cognitive state is invalidated by user edits or rejection feedback, reconcile it before proposing commit.\n"
         "11. If setup.truth.write fails, repair it from current context when possible; only ask the user when the missing information is truly user-exclusive.\n"
         "12. Before calling setup.proposal.commit, self-check readiness; if the user explicitly asked to commit, carry unresolved issues as warnings instead of blocking.\n"
         "13. Proposal rejection means return to discussion by default. Do not auto-re-propose commit.\n"
-        "14. Use setup private tools to update SetupWorkspace drafts.\n"
+        "14. Use setup private tools to update SetupWorkspace drafts. When a tool is needed, emit a real tool call; never print tool_code, default_api..., or other pseudo tool-call text in the visible reply.\n"
         "15. Use read-only memory tools only when needed for clarification or archival lookup.\n"
         "16. Ask clarifying questions when important fields are ambiguous.\n"
         "17. Do not invent facts casually.\n"
@@ -288,6 +332,7 @@ def _legacy_prompt(
         f"Current stage: {current_stage.value if current_stage is not None else current_step.value}\n"
         "Current stage objective:\n"
         f"{stage_overlay}\n\n"
+        f"{stage_truth_write_hint}"
         "Longform setup guidance:\n"
         "- story_config: converge model/runtime choices and notes.\n"
         "- writing_contract: converge POV, style, constraints, and task rules.\n"

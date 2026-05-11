@@ -41,13 +41,15 @@ def test_foundation_tool_scope_keeps_shared_tools_and_foundation_patch_only():
     assert "setup.patch.longform_blueprint" not in tool_scope
 
 
-def test_world_background_stage_tool_scope_uses_stage_native_truth_write_only():
+def test_world_background_stage_tool_scope_uses_shared_tools_without_crud_pilot():
     tool_scope = build_setup_agent_tool_scope("world_background")
 
-    assert "setup.read.draft_refs" in tool_scope
-    assert "setup.truth_index.search" in tool_scope
-    assert "setup.truth_index.read_refs" in tool_scope
+    assert "setup.read.workspace" in tool_scope
+    assert "setup.question.raise" in tool_scope
+    assert "setup.proposal.commit" in tool_scope
     assert "setup.truth.write" in tool_scope
+    assert "setup.world_background.list_entries" not in tool_scope
+    assert "setup.world_background.write_entry" not in tool_scope
     assert "setup.patch.foundation_entry" not in tool_scope
     assert "setup.patch.story_config" not in tool_scope
     assert "setup.patch.longform_blueprint" not in tool_scope
@@ -66,6 +68,8 @@ def test_plot_blueprint_stage_tool_scope_uses_stage_native_truth_write_only():
 def test_known_canonical_stage_tool_scope_hides_all_legacy_patch_tools(stage_id):
     tool_scope = build_setup_agent_tool_scope(stage_id.value)
 
+    if stage_id == SetupStageId.WORLD_BACKGROUND:
+        assert "setup.world_background.write_entry" not in tool_scope
     assert "setup.truth.write" in tool_scope
     assert LEGACY_PATCH_TOOLS.isdisjoint(tool_scope)
 

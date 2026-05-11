@@ -99,6 +99,14 @@ class RequestNormalizationService:
     ) -> dict | None:
         provider_type = request.provider.type if request.provider else None
         extra_body = deepcopy(request.extra_body) if request.extra_body else None
+        if self._is_deepseek_tool_request(request):
+            if extra_body is None:
+                extra_body = {}
+            # DeepSeek thinking-mode tool calls require reasoning_content to be
+            # replayed in the next assistant message. The runtime keeps OpenAI
+            # standard assistant/tool messages only, so disable thinking unless
+            # the caller explicitly opted into handling it.
+            extra_body.setdefault("thinking", {"type": "disabled"})
         if provider_type != "gemini":
             return extra_body
 
@@ -109,6 +117,20 @@ class RequestNormalizationService:
         thinking_config = google.setdefault("thinking_config", {})
         thinking_config.setdefault("include_thoughts", True)
         return extra_body
+
+    @staticmethod
+    def _is_deepseek_tool_request(request: ChatCompletionRequest) -> bool:
+        if not request.tools:
+            return False
+        provider = request.provider
+        if provider is None:
+            return False
+        provider_type = str(provider.type or "").lower()
+        api_url = str(provider.api_url or "").lower()
+        model = str(request.model or "").lower()
+        return provider_type == "deepseek" or (
+            "deepseek" in model and "deepseek.com" in api_url
+        )
 
 
 _request_normalization_service: RequestNormalizationService | None = None

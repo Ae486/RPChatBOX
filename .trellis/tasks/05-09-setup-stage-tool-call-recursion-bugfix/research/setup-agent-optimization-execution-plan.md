@@ -169,9 +169,11 @@ Status marks: `[ ]` not started, `[>]` in progress, `[x]` complete, `[!]` blocke
 
 ### Phase A: Agent Architecture Spine
 
-- `[ ]` A1. Refactor/clarify SetupAgent loop spine boundaries.
+- `[>]` A1. Refactor/clarify SetupAgent loop spine boundaries.
 - Goal:
   - Make session, context, model gateway, output inspector, tool runtime, decision policy, and event sink explicit enough to test and reason about.
+- Priority:
+  - User accepted A1 as the current implementation priority. Setup retrieval, unified draft CRUD migration, model-page sync, dialogue persistence, and SkillPack expansion are deferred unless required to validate the A1 loop contract.
 - Expected owned responsibility:
   - setup agent runtime/service/graph boundary files only, assigned to one dev subagent.
 - Must preserve:
