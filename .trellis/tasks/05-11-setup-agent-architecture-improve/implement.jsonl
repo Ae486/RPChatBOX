@@ -1,4 +1,5 @@
 {"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/setup-agent-module-prd.md", "reason": "Controller PRD for the new SetupAgent architecture-improvement task."}
+{"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/research/setup-agent-current-architecture-audit.md", "reason": "A0 audit of current SetupAgent disk architecture, accepted contracts, and working-tree candidates."}
 {"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/research/setup-agent-architecture-handoff-for-new-session.md", "reason": "Handoff that reframed the old recursion bugfix into SetupAgent architecture work."}
 {"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/prd.md", "reason": "Old task PRD containing observed pseudo-tool and recursion symptoms plus preserved non-goals."}
 {"file": ".trellis/tasks/05-09-setup-stage-tool-call-recursion-bugfix/research/setup-agent-optimization-execution-plan.md", "reason": "Prior execution plan and module ordering input; treat as investigation material, not final authority."}

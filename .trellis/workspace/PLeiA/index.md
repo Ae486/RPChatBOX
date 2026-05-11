@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
-- **Last Active**: 2026-05-06
+- **Total Sessions**: 2
+- **Last Active**: 2026-05-11
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~40 | Active |
+| `journal-1.md` | ~74 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-05-11 | skills-builder finish: SkillPack trace propagation + legacy patch case xfail | `97dea1e`, `66068c9` | `main` |
 | 1 | 2026-05-06 | RP memory strengthening completion | `916bc81c97cd28b0cea86f69a54fdc230ec89328` | `main` |
 <!-- @@@/auto:session-history -->
 
