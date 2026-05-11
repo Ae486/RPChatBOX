@@ -576,6 +576,267 @@
     - no full roleplay/TRPG runtime, no full UI, no new worker executor implementation
     - final check 验证了 O/P strict recheck 回归、runtime surface API、以及 L/M/N 相关服务验证
 
+### Phase Q: Runtime Product Acceptance / User-facing Integration Gate
+
+- `[x]` Q1. product acceptance matrix / backend scenario tests
+  - 目标：
+    - 用 product-like backend scenario tests 验收已完成 runtime foundation
+    - 覆盖 longform review/rewrite/adopt/continue、chapter bridge、runtime config hot update、Story Evolution visibility、mode sidecar isolation、inspect debug/read bundle
+    - 绑定现有 `/api/rp/story-sessions/{session_id}/runtime/inspect` route，不新增 debug truth store 或新 public mutation command
+  - 主要文件：
+    - `backend/rp/tests/test_story_runtime_product_acceptance.py`
+  - 结果：
+    - 新增 6 条 Q1 backend acceptance tests
+    - `accept_and_continue` 语义通过既有 draft adoption / `accept_pending_segment` flow 验证，没有新增 command name
+    - debug/read 验收走既有 inspect route
+    - 未进入 Q2，未新增 SuperDoc/WebView、debug panel、branch UI、active RP/TRPG runtime 或 eval runner
+  - 验证：
+    - `pytest backend\rp\tests\test_story_runtime_product_acceptance.py -q`
+    - `pytest backend\rp\tests\test_story_runtime_product_acceptance.py backend\rp\tests\test_draft_selection_service.py backend\rp\tests\test_longform_chapter_runtime_service.py backend\rp\tests\test_runtime_config_control_service.py backend\rp\tests\test_archival_evolution_service.py backend\rp\tests\test_mode_extension_slots.py -q`
+    - `ruff check backend\rp\tests\test_story_runtime_product_acceptance.py`
+    - `mypy --follow-imports=skip --check-untyped-defs backend\rp\tests\test_story_runtime_product_acceptance.py`
+
+- `[x]` Q2. thin product/API wiring
+  - 判定：
+    - Q1 没有暴露必须新增 route / controller / frontend wiring 才能验收的 reachability gap。
+    - 既有 `/api/rp/story-sessions/{session_id}/runtime/inspect` route 已能覆盖 debug/read 验收。
+    - 既有 `/turn` command surface 已能覆盖 write/rewrite/accept/complete chapter product-like flow。
+    - 因此 Q2 按规格 skipped / not needed，不做新 product/API wiring。
+  - 结果：
+    - 未新增 route / controller / frontend 文件改动。
+    - 未新增 debug panel 或第二套 debug truth store。
+    - 未新增 SuperDoc/WebView、branch UI、active RP/TRPG runtime 或 eval runner。
+    - 未新增 public mutation command；`accept_and_continue` 仍只是语义名，映射既有 `accept_pending_segment` / Accept & Continue flow。
+    - debug/read 继续绑定既有 `/api/rp/story-sessions/{session_id}/runtime/inspect`。
+
+- `[x]` Q3. manual QA checklist / handoff
+  - 主要文件：
+    - [story-runtime-product-acceptance-manual-qa.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-acceptance-manual-qa.md)
+  - 结果：
+    - 已补可执行手工 QA 清单，用于 Q1 自动测试通过后的人工验收。
+    - 清单覆盖 open session、write next segment、suggesting/rewrite、select/adopt/continue、complete chapter、runtime config patch、Story Evolution visibility、runtime inspect、sidecar isolation、branch-visible read behavior。
+    - 每步记录 action、route/command、product evidence、inspect/debug evidence、pass/fail 和 failure classification。
+    - 清单仅使用既有 runtime surface，不要求新增 debug panel、SuperDoc/WebView、branch UI、active RP/TRPG runtime 或 eval runner。
+  - 模块状态：
+    - Q1/Q2/Q3 已由同一 module owner 收口。
+    - Q 模块已完成模块级 `gpt-5.5 xhigh` check，未发现 blocking findings。
+    - 自动验证证据：`pytest backend\rp\tests\test_story_runtime_product_acceptance.py -q` 为 `6 passed`；Q + 既有 draft selection / chapter runtime / runtime config / archival evolution / mode extension slots 组合回归为 `51 passed`；`ruff check backend\rp\tests\test_story_runtime_product_acceptance.py` 通过；`mypy --follow-imports=skip --check-untyped-defs backend\rp\tests\test_story_runtime_product_acceptance.py` 通过。
+    - 剩余边界：Q3 manual QA 是人工产品验收清单，尚需人工按 checklist 执行后才能声明完整 UI/product path 已人工跑通。
+
+- `[!]` Q4. manual QA correction
+  - 结论：
+    - Q 自动化和模块级 check 只能证明后端 foundation acceptance，不等于产品路径验收通过。
+    - 手动 QA 发现产品级阻塞：前端无 inspect/runtime config/branch/mode 入口；rewrite 未遵循批注/修订；continue 未遵循大纲进度和上一段上下文。
+    - 之前 Q2 “thin product/API wiring not needed” 的判断被手动 QA 推翻。后续不得继续把隐藏后端 route 当作产品可达能力。
+  - 处理：
+    - 新增 Phase S：Product Wiring / Writer Constraint Closure。
+    - Q 保留为后端 foundation acceptance 记录；产品可用性进入 S 阶段重新验收。
+
+### Phase S: Product Wiring / Writer Constraint Closure
+
+- `[x]` S0. spec and planning correction
+  - 目标：
+    - 将 Q manual QA 失败反馈固化为正式规格。
+    - 明确 S1/S2/S3 模块边界、并行规则、完成标准。
+  - 主要文件：
+    - [story-runtime-product-wiring-writer-constraint-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-wiring-writer-constraint-spec.md)
+    - [story-runtime-product-wiring-writer-constraint-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-wiring-writer-constraint-development-spec.md)
+    - [story-runtime-development-master-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-development-master-spec.md)
+    - [story-runtime-execution-plan.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-execution-plan.md)
+  - 完成标准：
+    - Q 状态被修正为后端 foundation acceptance，而不是产品验收通过。
+    - S1/S2 可以并行，且文件 owner 不冲突。
+    - implement/check 上下文包含 S 规格。
+  - 结果：
+    - 已新增 Phase S requirement spec 和 development spec。
+    - 已更新 master spec、execution plan、implement.jsonl、check.jsonl。
+    - JSONL 已验证可解析且引用文件存在。
+
+- `[x]` S1. backend writer constraint closure
+  - owner：单一 backend implement agent。
+  - 目标：
+    - `rewrite_pending_segment` 读取 active review overlay，并把 comment / tracked change 写入 `WritingPacket.review_overlay_sections`。
+    - `write_next_segment` 写入章节进度与上一段承接强约束，不能只靠 `writer_hints`。
+    - 有 active review constraints 但无法组装 writer sidecar 时 fail closed。
+  - 主要文件候选：
+    - `backend/rp/services/story_turn_domain_service.py`
+    - `backend/rp/services/context_orchestration_service.py`
+    - `backend/rp/services/writing_packet_builder.py`
+    - `backend/rp/services/rewrite_request_builder_service.py`
+    - `backend/rp/services/rewrite_packet_constraint_service.py`
+    - `backend/rp/tests/test_story_runtime_product_wiring_writer_constraints.py`
+  - 完成标准：
+    - 真实 graph/domain rewrite path 的 writer packet 包含 review overlay constraints。
+    - writer prompt 包含 review overlay 和 mandatory rewrite instruction。
+    - 真实 write-next packet 包含 continuity/progress section。
+    - focused backend tests pass。
+  - 结果：
+    - 已完成并通过模块级 `gpt-5.5 xhigh` check。
+    - `rewrite_pending_segment` 真实 graph/domain 路径已读取 active review overlay，并将 comment / tracked change 约束写入 `WritingPacket.review_overlay_sections`。
+    - rewrite 且存在 review overlay 时，writer prompt 已注入 mandatory rewrite instruction。
+    - `write_next_segment` 已写入 `chapter_progress` section，包含已采用段落数量、上一段摘录、章节目标、outline ref/digest 与承接指令。
+    - check 阶段修复 rollback/branch governance 缺口：rollback 后隐藏的 future accepted segment 不再进入 `specialist_analyze` / generation inputs。
+    - 验证通过：
+      - `pytest backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py -q`：4 passed
+      - `pytest backend\rp\tests\test_rewrite_request_builder_service.py -q`：8 passed
+      - `pytest backend\rp\tests\test_rewrite_candidate_service.py -q`：6 passed
+      - `pytest backend\rp\tests\test_draft_selection_service.py -q`：8 passed
+      - `pytest backend\rp\tests\test_longform_chapter_runtime_service.py -q`：6 passed
+      - `pytest backend\rp\tests\test_story_runtime_product_acceptance.py -q`：6 passed
+      - `ruff check ...`：passed
+      - `mypy --follow-imports=skip --check-untyped-defs ...`：passed
+
+- `[x]` S2. frontend runtime visibility
+  - owner：单一 frontend implement agent。
+  - 目标：
+    - Longform 页面暴露最小 Runtime/Inspect 只读入口。
+    - 展示 active branch、selected turn、snapshot、mode、runtime config history、writer/review/job/retrieval/mode sidecar 摘要。
+    - 明确 candidate preview 与 adoption 的区别。
+  - 主要文件候选：
+    - `lib/services/backend_story_service.dart`
+    - `lib/models/story_runtime.dart`
+    - `lib/pages/longform_story_page.dart`
+    - optional `lib/widgets/*`
+  - 完成标准：
+    - 前端可打开 inspect/runtime panel。
+    - 缺失字段不崩溃，显示为 unavailable / not available。
+    - Flutter analyzer/build focused check pass。
+  - 结果：
+    - 已完成并通过模块级 `gpt-5.5 xhigh` check。
+    - Longform 页面已新增明显的 `运行态` 只读入口。
+    - 新增 runtime inspection bottom sheet，展示 mode、active branch、selected turn、snapshot、runtime config/history、writer packet、review overlay、chapter bridge、job ledger、retrieval、mode sidecars、branch receipts、graph checkpoint summary。
+    - candidate selector 文案已收敛为 preview-only 语义；按钮已统一为 `Accept & Continue`，避免把单纯选择误读为 adoption。
+    - 未新增 branch mutation UI、runtime mode switch、SuperDoc/WebView 或 inspect/debug mutation；S2 只做产品可见的读面板。
+    - 验证通过：
+      - `dart format --output=none --set-exit-if-changed lib\models\story_runtime.dart lib\services\backend_story_service.dart lib\pages\longform_story_page.dart lib\widgets\story_runtime_inspection_sheet.dart`：passed，0 changed
+      - `flutter analyze lib\models\story_runtime.dart lib\services\backend_story_service.dart lib\pages\longform_story_page.dart lib\widgets\story_runtime_inspection_sheet.dart`：No issues found
+
+- `[x]` S3. product acceptance re-run
+  - 依赖：
+    - S1 完成并通过模块级 check。
+    - S2 完成并通过模块级 check。
+  - 目标：
+    - 重新跑用户手测失败链路：批注/修订 -> rewrite -> candidate -> accept -> continue -> inspect evidence。
+  - 完成标准：
+    - 产品路径可以看见 writer 是否收到修订约束。
+    - 续写至少可以证明收到上一段承接和章节进度约束。
+    - 若模型仍生成差，能够通过 inspect 判断是模型未遵循还是系统未传约束。
+  - 当前状态：
+    - S1/S2 前置已完成并通过模块级 check。
+    - 用户复测确认：批注/修订 -> rewrite 的大方向基本可用，模型确实能看到并遵循修订约束。
+    - 复测同时暴露：续写承接和大纲遵循仍弱。根因是当前只有 `chapter_progress` / outline digest，没有稳定 structured outline beat cursor，writer 未被约束到“当前 beat 只写一个 segment”。
+    - S3 不能被解释为完整产品验收通过；它完成了复测和故障归类，并将 blocker 转入 Phase T。
+
+### Phase T: Longform Outline Progress / Chapter Summary Closure
+
+- `[x]` T0. spec and planning correction
+  - 目标：
+    - 将 Phase S 复测暴露的 continuation / outline-following 问题固化为正式规格。
+    - 明确 structured outline JSON、beat cursor、one-segment-one-beat、chapter summary provider 的开发边界。
+    - 防止后续测试继续断言未实现的 manual beat editing、paragraph rewrite product UI、SuperDoc/WebView。
+  - 主要文件：
+    - [story-runtime-longform-outline-progress-chapter-summary-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-outline-progress-chapter-summary-spec.md)
+    - [story-runtime-longform-outline-progress-chapter-summary-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-outline-progress-chapter-summary-development-spec.md)
+    - [story-runtime-development-master-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-development-master-spec.md)
+    - [story-runtime-execution-plan.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-execution-plan.md)
+  - 当前冻结口径：
+    - outline progress 采用结构化 outline JSON，不以 Markdown `\n` 后处理作为 canonical beat 来源。
+    - 一段 accepted segment 覆盖一个 beat。
+    - chapter summary 由可替换 provider 生成；第一版 provider 可复用 WritingWorker / writer model gateway 的执行能力和 summary prompt，但 summary 是 chapter bridge sidecar，不是用户可见正文或 Core/Recall truth。
+    - 暂不做 manual beat status editing；当前问题是 beat 约束不足，手动修正属于后续细节补强。
+  - 文档复查结果：
+    - Phase T 已准确承接 Module 23 的确认口径。
+    - 已补充说明：旧 chapter bridge lightweight provider 口径被 Phase T 后续强化，不构成冲突；`complete_chapter` 仍是 deterministic product action，summary LLM 调用只属于 provider 内部 bridge maintenance。
+    - 无需新增 grill-me 问题；可进入 T1/T2/T3 同一 implement agent 连续实现，完成 T 模块后再统一 check。
+
+- `[x]` T1. structured outline and beat cursor backend closure
+  - owner：单一 backend/product implement agent，T1/T2/T3 不拆 owner。
+  - 目标：
+    - `generate_outline` 输出或规范化为 typed structured outline JSON。
+    - `accept_outline` 初始化 beat progress。
+    - `write_next_segment` packet 明确 current beat，并要求只写当前 beat。
+    - segment candidate 记录 `target_beat_id`。
+    - `accept_and_continue` 只在 adoption 后推进 beat cursor。
+  - 主要文件候选：
+    - `backend/rp/models/longform_chapter_contracts.py`
+    - `backend/rp/models/story_runtime.py`
+    - `backend/rp/models/writing_runtime.py`
+    - `backend/rp/services/longform_chapter_runtime_service.py`
+    - `backend/rp/services/story_turn_domain_service.py`
+    - `backend/rp/services/context_orchestration_service.py`
+    - `backend/rp/services/writing_packet_builder.py`
+    - `backend/rp/tests/test_longform_chapter_runtime_service.py`
+    - optional `backend/rp/tests/test_longform_outline_progress_chapter_summary.py`
+  - 完成标准：
+    - accepted outline 有稳定 beat ids。
+    - write-next packet 每次只绑定一个 current beat。
+    - adoption 后 cursor 进入下一 beat；rewrite/selection 不推进 cursor。
+    - focused backend tests pass。
+  - 当前结果：
+    - 已完成并通过模块级 check。
+    - accepted outline 会规范化为 `longform_outline_v1` structured outline，并初始化 branch-scoped outline progress。
+    - `write_next_segment` packet 暴露 current beat / covered beats / latest accepted excerpt，并写入 candidate `target_beat_id`。
+    - rewrite 和 selection 不推进 cursor；`accept_pending_segment` adoption 后推进到下一 beat或标记 ready for completion。
+
+- `[x]` T2. chapter summary provider closure
+  - owner：与 T1 同一 implement agent。
+  - 目标：
+    - `complete_chapter` 通过 provider 生成 chapter summary / bridge material。
+    - provider 可复用 writer/model gateway 执行 summary prompt，但结果作为 Runtime Workspace / chapter bridge sidecar 保存。
+    - next chapter packet 读取当前 branch 的 bridge summary，不泄漏 sibling branch 或 hidden future materials。
+  - 主要文件候选：
+    - `backend/rp/services/chapter_bridge_provider.py`
+    - `backend/rp/services/longform_chapter_runtime_service.py`
+    - `backend/rp/services/context_orchestration_service.py`
+    - `backend/rp/tests/test_longform_chapter_runtime_service.py`
+  - 完成标准：
+    - provider receives adopted segment refs and covered beat ids.
+    - summary material records full identity / branch / source refs / provider metadata.
+    - next chapter packet includes only current branch bridge summary.
+  - 当前结果：
+    - 已完成并通过模块级 check。
+    - `complete_chapter` 通过 `ChapterBridgeProvider.build_bridge_material_with_summary(...)` 生成 summary bridge sidecar。
+    - provider 接收 adopted segment texts、covered beat ids、covered beat records、source refs 和 model/provider metadata。
+    - next chapter packet 只读取当前 branch 可见的 latest chapter bridge summary；sibling branch / hidden future material 不进入 packet。
+
+- `[x]` T3. minimal product visibility and acceptance
+  - owner：与 T1/T2 同一 implement agent；仅在需要展示新字段时触碰 Flutter。
+  - 目标：
+    - inspect/runtime panel 或 longform 页面能看到 current beat / covered beat count（如果 backend 已暴露）。
+    - manual QA 清单只覆盖已实现的 beat cursor / summary provider 行为。
+    - 不新增 manual beat editor、paragraph rewrite UI、SuperDoc/WebView。
+  - 主要文件候选：
+    - `lib/models/story_runtime.dart`
+    - `lib/services/backend_story_service.dart`
+    - `lib/pages/longform_story_page.dart`
+    - `lib/widgets/story_runtime_inspection_sheet.dart`
+    - [story-runtime-product-acceptance-manual-qa.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-acceptance-manual-qa.md)
+  - 完成标准：
+    - product evidence 能说明当前 segment 对应哪个 beat。
+    - 测试和手测不再覆盖未实现功能。
+    - T 模块完成后统一派 `gpt-5.5 xhigh` check。
+  - 当前结果：
+    - 已完成并通过模块级 check。
+    - runtime inspection / longform page DTO 已暴露 chapter progress / beat evidence / chapter bridge summary 相关只读字段。
+    - 未新增 manual beat editor、paragraph rewrite UI、SuperDoc/WebView。
+
+- `[x]` T4. T module-level trellis-check / spec update
+  - 当前结果：
+    - 已完成模块级 check；check 阶段修复了 story turn stream stale active snapshot recovery：turn entry snapshot resolution 现在直接走 `ensure_active_snapshot(...)`，避免 session pointer 缺失时重新 pin 回旧 active snapshot。
+    - 独立 `gpt-5.5 xhigh` 模块级 check 继续修复了 `ChapterBridgeProvider` 真实 product path 缺口：`complete_chapter` 常只传 `model_id` 而省略 `provider_id`，provider 现在只要有 `model_id` 和 adopted segment 即调用 `StoryLlmGateway`，由 gateway 解析 provider；补充了 provider_id 省略时仍生成 LLM bridge summary 的回归测试。
+    - 已将 stale snapshot turn-start recovery 写回 backend code-spec：[rp-runtime-profile-snapshot-minimal-compiler.md](H:/chatboxapp/.trellis/spec/backend/rp-runtime-profile-snapshot-minimal-compiler.md)。
+  - 自动验证证据：
+    - `pytest backend/rp/tests/test_longform_chapter_runtime_service.py backend/rp/tests/test_story_runtime_product_wiring_writer_constraints.py backend/tests/test_rp_story_api.py -q --tb=short`：`43 passed`
+    - `pytest backend/rp/tests/test_longform_chapter_runtime_service.py backend/rp/tests/test_story_runtime_product_wiring_writer_constraints.py backend/tests/test_rp_story_api.py::test_story_turn_stream_backfills_stale_active_snapshot_and_completes -q --tb=short`：`15 passed`
+    - `pytest backend/tests/test_rp_story_api.py::test_story_turn_stream_backfills_stale_active_snapshot_and_completes backend/rp/tests/test_runtime_profile_snapshot_service.py::test_ensure_active_snapshot_rebuilds_when_session_pointer_is_stale -q --tb=short`：`2 passed`
+    - 独立 check 复跑 `pytest backend/rp/tests/test_longform_chapter_runtime_service.py backend/rp/tests/test_story_runtime_product_wiring_writer_constraints.py -q`：`15 passed`
+    - 独立 check 复跑 `pytest backend/tests/test_rp_story_api.py -q`：`29 passed`
+    - `ruff check backend/rp/models/longform_chapter_contracts.py backend/rp/services/chapter_bridge_provider.py backend/rp/services/longform_chapter_runtime_service.py backend/rp/services/story_turn_domain_service.py backend/rp/services/writing_worker_execution_service.py backend/rp/services/story_runtime_identity_service.py`：passed
+    - `mypy --follow-imports=skip backend/rp/models/longform_chapter_contracts.py backend/rp/services/chapter_bridge_provider.py backend/rp/services/longform_chapter_runtime_service.py backend/rp/services/story_turn_domain_service.py backend/rp/services/writing_worker_execution_service.py backend/rp/services/story_runtime_identity_service.py`：passed
+    - `flutter analyze lib/models/story_runtime.dart lib/pages/longform_story_page.dart lib/services/backend_story_service.dart lib/widgets/story_runtime_inspection_sheet.dart`：passed
+  - 剩余边界：
+    - 全量 mypy 仍被仓库既有 baseline 阻塞，本轮只修复了 Phase T touched files 的窄类型问题。
+
 ## 7. 当前执行策略
 
 当前第一阶段最终 K 模块已完成模块级 `trellis-check`，并已完成 `trellis-update-spec`。`R1-R6` 已完成并通过模块级 check；`J1/J2/J3` 已完成并通过模块级 check。本阶段不重开 R/J/K 模块，不进入完整 branch UI、physical purge、branch merge、跨分支 Evolution 管理或完整 roleplay/TRPG runtime。
@@ -586,7 +847,10 @@
 2. `M Story Evolution Foundation` 已完成并通过模块级 check；它依赖 branch visibility / memory event / archival governance，和 L 的主要写入文件不同。
 3. `N Longform Chapter / Review Adapter` 已完成并通过模块级 check。
 4. `O Roleplay / TRPG Extension Slots` 已完成并通过模块级 check；它不做完整 RP/TRPG runtime。
-5. 第三阶段规划为 `P Runtime Surface / Debug / API Hardening`，聚焦把第二阶段已实现能力接成可审查读面和组合回归，不扩成完整 UI 或完整 RP/TRPG runtime。
+5. 第三阶段 `P Runtime Surface / Debug / API Hardening` 已完成并通过 final check。
+6. `Q Runtime Product Acceptance / User-facing Integration Gate` 已完成后端 foundation acceptance 并通过模块级 check；但 manual QA 发现产品路径未通过，不能声明产品可用。
+7. `S Product Wiring / Writer Constraint Closure` 作为 Q manual QA 后续阶段启动，负责补前端可见入口和 writer 约束闭环。
+8. `T Longform Outline Progress / Chapter Summary Closure` 已完成并通过模块级 check，负责解决 outline beat 约束和章节承接 summary 问题。
 
 当前可并行策略：
 
@@ -594,10 +858,62 @@
 2. 第一批 `L1 / M1` 已完成并通过 check。
 3. 第二批 `N1 / O1` 已完成并通过 check。
 4. 第三批 `P1 / P2` 已完成并通过 `gpt-5.5 xhigh` final check。
-5. 当前不再派发新的实现 agent；下一步进入 Trellis Phase 3 的 spec update / finish 收口。
-6. P 模块最终检查已补强：
-   - `RULE_CARD / RULE_STATE_CARD` 不得在未显式请求 sidecar slot 时进入 packet `sidecar_refs`，也不得经 generic `workspace_refs` 泄漏。
-   - debug/read manifest 对 mode sidecar 的识别必须使用稳定 `section_family` / `source_kind` / `section_id`，不能依赖 label 或 payload 私有字段。
+5. 当前 P 阶段已经收口，不继续扩写 P。
+6. 当前 Q 阶段 Q1/Q2/Q3 已完成并通过模块级 `gpt-5.5 xhigh` check，但 Q3 manual QA 暴露产品阻塞，当前不进入 finish。
+7. S3 product acceptance re-run 已完成复测和故障归类：rewrite 约束路径基本可用，continuation / outline following 暴露 Phase T blocker。
+8. T0/T1/T2/T3/T4 已完成，T 模块已通过统一 check；后续不得再把 continuation blocker 归因为“没有 beat cursor / 没有章节 summary provider”，应转入新的产品验收或下一 FIFO 阶段。
+
+## 7.1 下一阶段规划：Branch / Rollback Productization
+
+当前下一阶段不重开旧 session / legacy outline 兼容，不把之前误称的 `Phase U` 作为独立 longform hardening 阶段。T 模块尾部只保留结论：新 session / 新 outline 路径已经由 structured outline + beat cursor + chapter bridge summary 收口；若后续新 session 复测再发现 outline 约束问题，必须作为 T 模块缺陷回归处理，而不是另起旧数据适配阶段。
+
+下一阶段进入既有 `Branch / Rollback` 模块的产品化闭环，规格来源：
+
+- PRD 已要求 rollback 与 branch 严格区分：rollback 后目标 turn 之后内容对当前主线失效；如果要保留旧未来，那是 branch；branch control actions 不创建 story turn。
+- PRD 已要求第一版 branch UX：主聊天流展示 active branch 线性 turn；提供“从这里分支”入口和最小 branch 面板；创建后立即切换；fork 点之后旧未来从主视图消失；pending/workspace 不跨 branch。
+- `story-runtime-branch-rollback-spec.md` 已冻结最小前端约束：每条历史消息动作菜单提供 `从这里分支`，回退和分支动作必须分开，禁止模糊的“从这里继续”。
+- `story-runtime-langgraph-branch-rollback-preflight.md` 已冻结 LangGraph 边界：LangGraph 是 checkpoint / replay / fork 技术壳，不能作为产品 branch / rollback truth。
+- 现有代码已有 `StoryRuntimeIdentityService.create_branch_from_turn`、`switch_branch`、`delete_branch`、`rollback_to_turn` 和 `BranchVisibilityResolver`，但 `backend/api/rp_story.py` / `BackendStoryService` / `LongformStoryPage` 尚未提供用户可达的 branch mutation 产品入口。
+
+新增阶段文档：
+
+- [story-runtime-branch-rollback-productization-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-productization-spec.md)
+- [story-runtime-branch-rollback-productization-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-productization-development-spec.md)
+
+执行策略：
+
+1. Branch / Rollback productization 是同一个模块，不能把 create/switch/delete/rollback 拆给多个 implement agent。
+2. 模块完成后再做一次模块级 check。
+3. 实现 agent 使用 `gpt-5.4 xhigh`；check agent 使用 `gpt-5.5 xhigh`，与本计划 §2 的固定派发规则一致。
+4. 当前无 grill blocker；实现中如果发现 snapshot 无法表达 active branch 线性正文、current branch delete fallback、或 branch panel lineage 粒度无法由现有文档决定，再进入 grill。
+
+当前结果：
+
+- `[x]` Branch / Rollback productization spec / development spec 已完成并经独立文档复查；无必须 grill。
+- `[x]` Branch / Rollback productization implementation 已由单一 implement owner 完成，未拆分 create/switch/delete/rollback owner。
+- `[x]` 后端 product routes 已接入：
+  - `POST /api/rp/story-sessions/{session_id}/branches`
+  - `POST /api/rp/story-sessions/{session_id}/branches/{branch_head_id}/switch`
+  - `DELETE /api/rp/story-sessions/{session_id}/branches/{branch_head_id}`
+  - `POST /api/rp/story-sessions/{session_id}/rollback`
+- `[x]` routes 通过 `StoryRuntimeController` 调用既有 `StoryRuntimeIdentityService`，返回 refreshed chapter snapshot + branch control receipt envelope。
+- `[x]` `delete_branch` 产品合同收敛为：默认分支不可删，当前 active branch 不可删，非当前 branch 做 hide / status transition；本阶段不做 physical purge。
+- `[x]` inspect 保持只读，只补 branch panel 所需的可读 branch metadata / latest receipt evidence，不承载 mutation UI。
+- `[x]` Longform 前端已新增 branch indicator、branch panel、visible accepted segment 的 `从这里分支` / `回退到这里`、rollback/delete confirmation、snackbar feedback、action 后 snapshot refresh。
+- `[x]` 独立 `gpt-5.5 xhigh` 模块级 check 未发现模块内 blocker，未发现必须 grill。
+- 验证证据：
+  - `pytest backend/tests/test_rp_story_api.py -q`：`33 passed`
+  - `pytest backend/rp/tests/test_story_runtime_identity_service.py backend/rp/tests/test_story_runtime_product_wiring_writer_constraints.py -q`：`29 passed`
+  - `ruff check backend/api/rp_story.py backend/tests/test_rp_story_api.py backend/rp/services/story_runtime_identity_service.py backend/rp/services/story_runtime_controller.py backend/rp/services/story_runtime_debug_query_service.py`：passed
+  - `mypy --follow-imports=skip --check-untyped-defs backend/api/rp_story.py backend/tests/test_rp_story_api.py`：passed
+  - `flutter analyze lib/models/story_runtime.dart lib/services/backend_story_service.dart lib/pages/longform_story_page.dart lib/widgets/story_runtime_inspection_sheet.dart`：passed
+  - scoped `git diff --check`：无 whitespace error，仅 LF/CRLF 工作区提示。
+  - 剩余 warning：Pydantic v2 config deprecation 与 FastAPI `on_event` deprecation，属于仓库既有基础设施 warning，不属于本模块 blocker。
+
+补充历史 P 模块最终检查证据：
+
+- `RULE_CARD / RULE_STATE_CARD` 不得在未显式请求 sidecar slot 时进入 packet `sidecar_refs`，也不得经 generic `workspace_refs` 泄漏。
+- debug/read manifest 对 mode sidecar 的识别必须使用稳定 `section_family` / `source_kind` / `section_id`，不能依赖 label 或 payload 私有字段。
 
 第一阶段历史并行记录：
 

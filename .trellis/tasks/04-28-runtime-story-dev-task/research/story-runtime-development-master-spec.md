@@ -271,6 +271,15 @@ story runtime 的技术调研目标，不是继续找一个更大的框架，而
 13. [story-runtime-story-evolution-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-story-evolution-development-spec.md)
 14. [story-runtime-longform-chapter-review-adapter-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-chapter-review-adapter-development-spec.md)
 15. [story-runtime-roleplay-trpg-extension-slots-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-roleplay-trpg-extension-slots-development-spec.md)
+16. [story-runtime-product-acceptance-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-acceptance-spec.md)
+17. [story-runtime-product-acceptance-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-acceptance-development-spec.md)
+18. [story-runtime-product-acceptance-manual-qa.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-acceptance-manual-qa.md)
+19. [story-runtime-product-wiring-writer-constraint-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-wiring-writer-constraint-spec.md)
+20. [story-runtime-product-wiring-writer-constraint-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-wiring-writer-constraint-development-spec.md)
+21. [story-runtime-longform-outline-progress-chapter-summary-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-outline-progress-chapter-summary-spec.md)
+22. [story-runtime-longform-outline-progress-chapter-summary-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-outline-progress-chapter-summary-development-spec.md)
+23. [story-runtime-branch-rollback-productization-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-productization-spec.md)
+24. [story-runtime-branch-rollback-productization-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-productization-development-spec.md)
 
 公共合同层前三份必须先冻结，再允许其他模块并行扩散。
 
@@ -468,6 +477,10 @@ story runtime 的技术调研目标，不是继续找一个更大的框架，而
 8. Retrieval
 9. Post-write / Memory Governance
 10. Adapter / Debug / Test / Migration
+11. Product Acceptance / User-facing Integration Gate
+12. Product Wiring / Writer Constraint Closure
+13. Longform Outline Progress / Chapter Summary Closure
+14. Branch / Rollback Productization Closure
 
 ## 11. 当前完成定义
 
@@ -480,3 +493,12 @@ story runtime 的技术调研目标，不是继续找一个更大的框架，而
 3. 并行开发边界清楚
 4. 遇到的设计缺陷已修正文档或进入 grill 队列
 5. 后续 dev session 可以按模块拿文档直接开发
+
+### 11.1 Branch / Rollback Productization Closure
+
+Branch / Rollback 早期 preflight 和 foundation 已完成，但产品入口仍需独立收口。当前补充规格：
+
+- `story-runtime-branch-rollback-productization-spec.md`
+- `story-runtime-branch-rollback-productization-development-spec.md`
+
+该 closure 仍属于既有 Branch / Rollback 模块，不是新的 story truth 层，也不是旧 session 兼容阶段。实现必须复用 `StoryRuntimeIdentityService`、`BranchVisibilityResolver`、现有 chapter snapshot/read path 和 runtime inspect read surface；不得把 LangGraph checkpoint fork/replay 提升为产品 branch truth。

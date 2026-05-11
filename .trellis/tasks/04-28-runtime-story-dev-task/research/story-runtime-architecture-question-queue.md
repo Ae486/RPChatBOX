@@ -4,7 +4,7 @@
 >
 > Purpose: maintain the FIFO grill-me queue for story runtime requirements, design, and architecture discussion.
 >
-> Last updated: 2026-05-08
+> Last updated: 2026-05-10
 
 ## Queue Rules
 
@@ -19,7 +19,7 @@
 
 ## Current Pointer
 
-Next discussion batch: none. Module 21 branch operation semantics and Module 22 longform revision / rewrite scope are confirmed; continue via implementation plan.
+Next discussion batch: none. Module 21 branch operation semantics, Module 22 longform revision / rewrite scope, and Module 23 longform outline progress / chapter summary closure are confirmed; continue via implementation plan.
 
 ## Module 1: Overall Boundary / First-stage Goal
 
@@ -470,3 +470,21 @@ Next discussion batch: none. Module 21 branch operation semantics and Module 22 
 - [x] Q10. comment 在 rewrite 生成新 candidate 后，第一阶段是否默认保留并由用户手动 resolve，而不是系统自动 resolve？
   - Recommended direction: 是。自动判断“已经满足批注”会过早替用户做主观决定；更稳的语义是保持 comment active，等待用户显式 resolve。
   - Confirmed direction: 是。rewrite 后 comment 默认继续保留，不自动删除、不自动 resolve；resolved comment 从主修订视图收起，但保留留痕、锚点和 provenance。
+
+## Module 23: Longform Outline Progress / Chapter Summary Closure
+
+- [x] Q1. writer 产出的大纲应该按 Markdown 后处理拆段，还是要求结构化 outline JSON？
+  - Recommended direction: 采用结构化 outline JSON。理由是 Phase S 暴露的问题是 beat 约束不足；beat cursor 需要稳定 id、order、goal、must_include、avoid、continuity_notes，不能依赖 Markdown 换行作为 canonical 语义。Markdown 可以继续作为展示层文本，但 runtime progress 必须读取 typed beat records。
+  - Confirmed direction: 由主脑选择最佳方案，冻结为结构化 outline JSON。
+
+- [x] Q2. 一个 story segment 应覆盖几个 outline beat？
+  - Recommended direction: 一个 accepted segment 覆盖一个 beat。这样 writer packet、candidate metadata、adoption receipt、rollback/branch visibility 和 QA 证据都能保持清晰。
+  - Confirmed direction: 一段覆盖一个 beat。
+
+- [x] Q3. chapter summary 应由独立 summary worker 负责，还是复用 writer 能力？
+  - Recommended direction: 第一版通过 `ChapterSummaryProvider` 复用 writer/model execution 能力和 summary prompt，但 summary 不是用户可见正文，也不直接成为 Core / Recall / Archival truth。它作为 Runtime Workspace / chapter bridge sidecar 保存，后续若要进入 Recall/Core 仍走 post-write governance。
+  - Confirmed direction: 由 writer 执行更合适，因为 writer 基本拿到必要上下文；工程落位采用 provider 边界，避免把 summary prompt 硬编码进 chapter transaction。
+
+- [x] Q4. Phase T 是否实现手动 beat 状态修正？
+  - Recommended direction: 暂不做。当前实际问题是 writer packet 对 beat 的约束不足，先补 structured outline、beat cursor 和 one-segment-one-beat。手动 beat 修正属于后续细节补强，不进入本阶段测试。
+  - Confirmed direction: 先不做。
