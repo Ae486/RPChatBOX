@@ -11,7 +11,7 @@ from sqlalchemy import asc
 from sqlmodel import Session, select
 
 from models.rp_story_store import BranchHeadRecord, StoryTurnRecord
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.runtime_read_contract import RuntimeBranchReadScope, RuntimeReadManifest
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialKind,
@@ -41,6 +41,7 @@ class BranchVisibilityResolver:
         self,
         *,
         identity: MemoryRuntimeIdentity,
+        selected_turn_id: str | None = None,
     ) -> RuntimeBranchReadScope:
         branch = self._session.get(BranchHeadRecord, identity.branch_head_id)
         if branch is None:
@@ -56,15 +57,16 @@ class BranchVisibilityResolver:
                 "runtime_read_manifest_branch_scope_missing",
                 identity.branch_head_id,
             )
-        self._require_turn(identity=identity)
+        scope_turn = self._require_scope_turn(
+            identity=identity,
+            selected_turn_id=selected_turn_id,
+        )
+        scope_turn_id = scope_turn.turn_id
         visible_branch_head_ids: list[str] = []
         turn_cutoff_by_branch: dict[str, str | None] = {}
         hidden_turn_ids_by_branch: dict[str, list[str]] = {}
         current: BranchHeadRecord | None = branch
-        current_cutoff_turn_id: str | None = self._active_branch_cutoff_turn_id(
-            branch=branch,
-            identity_turn_id=identity.turn_id,
-        )
+        current_cutoff_turn_id: str | None = scope_turn_id
         seen: set[str] = set()
         while current is not None and current.branch_head_id not in seen:
             seen.add(current.branch_head_id)
@@ -90,11 +92,25 @@ class BranchVisibilityResolver:
             story_id=identity.story_id,
             session_id=identity.session_id,
             active_branch_head_id=identity.branch_head_id,
-            active_turn_id=identity.turn_id,
+            active_turn_id=scope_turn_id,
+            selected_turn_id=scope_turn_id,
             visible_branch_head_ids=visible_branch_head_ids,
             turn_cutoff_by_branch=turn_cutoff_by_branch,
             hidden_turn_ids_by_branch=hidden_turn_ids_by_branch,
             include_story_global=True,
+        )
+
+    def build_scope(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        selected_turn_id: str | None = None,
+    ) -> RuntimeBranchReadScope:
+        """Stage-V resolver alias shared by writer/debug/inspection callers."""
+
+        return self.build_runtime_scope(
+            identity=identity,
+            selected_turn_id=selected_turn_id,
         )
 
     def is_visible(
@@ -194,6 +210,55 @@ class BranchVisibilityResolver:
             hidden_after_turn_id=hidden_after_turn_id,
         )
 
+    def filter_visible_memory_refs(
+        self,
+        *,
+        scope: RuntimeBranchReadScope,
+        refs: list[MemorySourceRef],
+    ) -> list[MemorySourceRef]:
+        """Apply the same branch-visibility rules to formal memory source refs."""
+
+        visible_refs: list[MemorySourceRef] = []
+        for ref in refs:
+            metadata = dict(ref.metadata or {})
+            if self.is_visible(
+                scope=scope,
+                visibility_scope=str(
+                    metadata.get("visibility_scope")
+                    or self._default_visibility_scope(metadata)
+                ),
+                visibility_state=str(
+                    metadata.get("visibility_state")
+                    or metadata.get("lifecycle_state")
+                    or "active"
+                ),
+                owning_branch_head_id=_first_text(
+                    metadata,
+                    "owning_branch_head_id",
+                    "runtime_branch_head_id",
+                    "branch_head_id",
+                    "branch_id",
+                ),
+                origin_turn_id=_first_text(
+                    metadata,
+                    "origin_turn_id",
+                    "runtime_turn_id",
+                    "turn_id",
+                ),
+                selected_branch_head_ids=_string_list(
+                    metadata.get("selected_branch_head_ids")
+                    or metadata.get("branch_ids")
+                    or metadata.get("selected_branch_ids")
+                ),
+                hidden_by_branch_head_id=_first_text(
+                    metadata,
+                    "hidden_by_branch_head_id",
+                ),
+                hidden_after_turn_id=_first_text(metadata, "hidden_after_turn_id"),
+            ):
+                visible_refs.append(ref)
+        return visible_refs
+
     def _require_turn(self, *, identity: MemoryRuntimeIdentity) -> StoryTurnRecord:
         turn = self._session.get(StoryTurnRecord, identity.turn_id)
         if turn is None:
@@ -210,6 +275,35 @@ class BranchVisibilityResolver:
             raise RuntimeReadManifestServiceError(
                 "runtime_read_manifest_branch_scope_missing",
                 identity.turn_id,
+            )
+        return turn
+
+    def _require_scope_turn(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        selected_turn_id: str | None,
+    ) -> StoryTurnRecord:
+        normalized_selected_turn_id = str(selected_turn_id or "").strip()
+        if (
+            not normalized_selected_turn_id
+            or normalized_selected_turn_id == identity.turn_id
+        ):
+            return self._require_turn(identity=identity)
+        turn = self._session.get(StoryTurnRecord, normalized_selected_turn_id)
+        if turn is None:
+            raise RuntimeReadManifestServiceError(
+                "runtime_read_manifest_branch_scope_missing",
+                normalized_selected_turn_id,
+            )
+        if (
+            turn.story_id != identity.story_id
+            or turn.session_id != identity.session_id
+            or turn.branch_head_id != identity.branch_head_id
+        ):
+            raise RuntimeReadManifestServiceError(
+                "runtime_read_manifest_branch_scope_missing",
+                normalized_selected_turn_id,
             )
         return turn
 
@@ -285,6 +379,24 @@ class BranchVisibilityResolver:
             return cutoff_turn_id == normalized_hidden_after
         return cutoff_order >= hidden_after_order
 
+    @staticmethod
+    def _default_visibility_scope(metadata: dict[str, Any]) -> str:
+        if (
+            metadata.get("selected_branch_head_ids")
+            or metadata.get("branch_ids")
+            or metadata.get("selected_branch_ids")
+        ):
+            return "selected_branches"
+        if _first_text(
+            metadata,
+            "owning_branch_head_id",
+            "runtime_branch_head_id",
+            "branch_head_id",
+            "branch_id",
+        ):
+            return "branch_scoped"
+        return "story_global"
+
 
 class RuntimeReadManifestService:
     """Build deterministic packet-visible runtime read manifests."""
@@ -304,6 +416,19 @@ class RuntimeReadManifestService:
         self._runtime_workspace_material_service = (
             runtime_workspace_material_service
             or RuntimeWorkspaceMaterialService(session=session)
+        )
+
+    def build_branch_scope(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        selected_turn_id: str | None = None,
+    ) -> RuntimeBranchReadScope:
+        """Expose the shared branch scope for packet builders and diagnostics."""
+
+        return self._branch_visibility_resolver.build_scope(
+            identity=identity,
+            selected_turn_id=selected_turn_id,
         )
 
     def build_writer_manifest(
@@ -353,6 +478,7 @@ class RuntimeReadManifestService:
             self._manifest_seed(
                 identity=identity,
                 packet_kind=packet_kind,
+                branch_scope=scope.model_dump(mode="json"),
                 visible_refs=visible_refs,
                 selected_refs=selected,
                 omitted_refs=omitted,
@@ -382,6 +508,7 @@ class RuntimeReadManifestService:
             manifest_id=manifest_id,
             identity=identity,
             active_branch_lineage=list(scope.visible_branch_head_ids),
+            branch_scope=scope.model_dump(mode="json"),
             runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
             policy_versions=dict(policy_versions or {"packet_kind": packet_kind}),
             visible_refs=visible_refs,
@@ -562,6 +689,7 @@ class RuntimeReadManifestService:
         *,
         identity: MemoryRuntimeIdentity,
         packet_kind: str,
+        branch_scope: dict[str, Any],
         visible_refs: list[dict[str, Any]],
         selected_refs: list[dict[str, Any]],
         omitted_refs: list[dict[str, Any]],
@@ -571,6 +699,7 @@ class RuntimeReadManifestService:
             {
                 "identity": identity.model_dump(mode="json"),
                 "packet_kind": packet_kind,
+                "branch_scope": branch_scope,
                 "visible_refs": visible_refs,
                 "selected_refs": selected_refs,
                 "omitted_refs": omitted_refs,
@@ -598,6 +727,7 @@ def filter_hits_by_branch_visibility(
             _first_text(
                 metadata,
                 "owning_branch_head_id",
+                "runtime_branch_head_id",
                 "branch_head_id",
                 "branch_id",
             )
@@ -617,16 +747,20 @@ def filter_hits_by_branch_visibility(
             owning_branch_head_id=_first_text(
                 metadata,
                 "owning_branch_head_id",
+                "runtime_branch_head_id",
                 "branch_head_id",
                 "branch_id",
             ),
             origin_turn_id=_first_text(
                 metadata,
                 "origin_turn_id",
+                "runtime_turn_id",
                 "turn_id",
             ),
             selected_branch_head_ids=_string_list(
-                metadata.get("selected_branch_head_ids") or metadata.get("branch_ids")
+                metadata.get("selected_branch_head_ids")
+                or metadata.get("branch_ids")
+                or metadata.get("selected_branch_ids")
             ),
             hidden_by_branch_head_id=_first_text(metadata, "hidden_by_branch_head_id"),
             hidden_after_turn_id=_first_text(metadata, "hidden_after_turn_id"),

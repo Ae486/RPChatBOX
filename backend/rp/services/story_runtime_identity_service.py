@@ -991,18 +991,14 @@ class StoryRuntimeIdentityService:
             artifact_turn_id = self._metadata_text(
                 metadata,
                 "runtime_turn_id",
-                "turn_id",
             )
             if artifact_turn_id != turn.turn_id:
                 continue
             artifact_branch_id = self._metadata_text(
                 metadata,
                 "runtime_branch_head_id",
-                "branch_head_id",
             )
-            if artifact_branch_id and artifact_branch_id != turn.branch_head_id:
-                continue
-            if not artifact_branch_id:
+            if artifact_branch_id != turn.branch_head_id:
                 continue
             return artifact
         return None

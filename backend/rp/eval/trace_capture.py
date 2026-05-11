@@ -556,7 +556,12 @@ def _root_status(runtime_result: RpAgentTurnResult | None) -> str:
     return "error" if runtime_result.status == "failed" else "ok"
 
 
-def _normalize_tool_name(tool_name: str) -> str:
+def normalize_tool_name(tool_name: str) -> str:
+    """Strip the runtime tool prefix (e.g. `rp_setup__setup.truth.write` → `setup.truth.write`)."""
+
     if "__" not in tool_name:
         return tool_name
     return tool_name.split("__", 1)[1]
+
+
+_normalize_tool_name = normalize_tool_name  # backward-compat alias for in-module callers

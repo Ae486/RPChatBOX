@@ -1,0 +1,80 @@
+{
+  "case_id": "setup.skill_pack.character_design.pack_loaded_on_stage.v1",
+  "title": "SkillPack character-design.v1 loads on the character_design stage and shapes the agent into a probing facilitator that avoids forbidden moves",
+  "scope": "setup",
+  "category": "skill_pack",
+  "tags": ["mvp", "deterministic", "setup-v2", "skill-pack", "character-design"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-skill-pack-character-design-pack-loaded-001",
+      "target_step": "foundation",
+      "target_stage": "character_design",
+      "user_prompt": "帮我设计主角，目前只想到他叫林夕，是个勇敢的少年。",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-skill-pack-character-design-pack-loaded-001",
+      "mode": "longform",
+      "current_step": "foundation"
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [],
+    "subjective_hooks": [
+      {
+        "hook_id": "character_design_persona_alignment",
+        "judge_family": "llm_judge",
+        "rubric_ref": "setup/persona-alignment/v1",
+        "target": "assistant_text"
+      }
+    ],
+    "expected_target_stage": "character_design",
+    "expected_effective_stage": "character_design",
+    "expected_skill_pack_name": "character-design.v1",
+    "expected_finish_reason": "awaiting_user_input",
+    "expected_tool_calls_contains": [],
+    "expected_tool_calls_excludes": [
+      "setup.patch.foundation_entry",
+      "setup.patch.story_config",
+      "setup.patch.writing_contract",
+      "setup.patch.longform_blueprint",
+      "setup.proposal.commit"
+    ]
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": [
+      "finish_reason",
+      "assertion_pass_rate",
+      "skill_pack_name",
+      "tool_calls"
+    ],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {
+    "pilot_purpose": "Reference fixture for Stage 3 LLM-judge rubrics: the mock assistant reply embodies the SkillPack Specialist hat (senior dramatist), uses the SkillPack Chinese clarification template targeting motivation.real / world_fit, and avoids all Forbidden moves (no narrative prose, no auto-commit, no claim of ready).",
+    "rubric_reference_for": [
+      "setup/persona-alignment/v1",
+      "setup/forbidden-compliance/v1",
+      "setup/facilitation-depth/v1"
+    ]
+  }
+}

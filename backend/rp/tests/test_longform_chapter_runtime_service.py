@@ -303,6 +303,13 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
 def test_prepare_chapter_transition_blocks_unadopted_pending_draft(retrieval_session):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
+    pending_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.transition.unadopted_pending",
+        actor="longform.transition.unadopted_pending",
+    )
     pending = story_session_service.create_artifact(
         session_id=session.session_id,
         chapter_workspace_id=chapter.chapter_workspace_id,
@@ -310,12 +317,16 @@ def test_prepare_chapter_transition_blocks_unadopted_pending_draft(retrieval_ses
         status=StoryArtifactStatus.DRAFT,
         content_text="Pending draft without adoption.",
         metadata=_artifact_runtime_metadata(
-            story_id=session.story_id,
-            session_id=session.session_id,
-            branch_head_id="branch-main",
-            turn_id="turn-write",
-            runtime_profile_snapshot_id="snapshot-write",
+            story_id=pending_identity.story_id,
+            session_id=pending_identity.session_id,
+            branch_head_id=pending_identity.branch_head_id,
+            turn_id=pending_identity.turn_id,
+            runtime_profile_snapshot_id=pending_identity.runtime_profile_snapshot_id,
         ),
+    )
+    identity_service.update_turn_status(
+        turn_id=pending_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
     )
     chapter = story_session_service.update_chapter_workspace(
         chapter_workspace_id=chapter.chapter_workspace_id,
@@ -554,12 +565,220 @@ def test_context_orchestration_does_not_leak_other_branch_chapter_bridge(
     assert "chapter_bridge_material_ref" not in packet.metadata
 
 
+def test_chapter_transition_ignores_rollback_hidden_pending_pointer_and_adoption(
+    retrieval_session,
+):
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    _accept_outline(story_session_service, session, chapter)
+    target_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.transition.rollback_target",
+        actor="longform.transition.rollback_target",
+    )
+    target = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=target_identity,
+        content_text="Visible rollback target segment.",
+        target_beat_id="beat_001",
+    )
+    hidden_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.transition.hidden_pending",
+        actor="longform.transition.hidden_pending",
+    )
+    hidden_pending = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Rollback-hidden pending must not be adopted.",
+        metadata={
+            **_artifact_runtime_metadata(
+                story_id=hidden_identity.story_id,
+                session_id=hidden_identity.session_id,
+                branch_head_id=hidden_identity.branch_head_id,
+                turn_id=hidden_identity.turn_id,
+                runtime_profile_snapshot_id=hidden_identity.runtime_profile_snapshot_id,
+            ),
+            "target_beat_id": "beat_002",
+        },
+    )
+    identity_service.update_turn_status(
+        turn_id=hidden_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+        visible_output_ref=hidden_pending.artifact_id,
+        selected_output_ref=hidden_pending.artifact_id,
+    )
+    raw_chapter = story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=LongformChapterPhase.SEGMENT_REVIEW,
+        pending_segment_artifact_id=hidden_pending.artifact_id,
+    )
+    review_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
+        created_from="longform.transition.hidden_review",
+        actor="longform.transition.hidden_review",
+    )
+    hidden_candidate = _create_adopted_candidate(
+        retrieval_session,
+        identity=review_identity,
+        draft_ref=f"artifact:{hidden_pending.artifact_id}",
+        output_text="Hidden adoption must not be used.",
+    )
+    identity_service.rollback_to_turn(
+        session_id=session.session_id,
+        target_turn_id=target_identity.turn_id,
+        actor="user",
+    )
+    completion_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
+        created_from="longform.transition.hidden_complete",
+        actor="longform.transition.hidden_complete",
+    )
+    service = LongformChapterRuntimeService(
+        story_session_service=story_session_service,
+        session=retrieval_session,
+    )
+
+    prepared = service.prepare_chapter_transition(
+        identity=completion_identity,
+        session=session,
+        chapter=raw_chapter,
+    )
+
+    hidden_after = story_session_service.get_artifact(hidden_pending.artifact_id)
+    assert prepared.receipt is not None
+    assert prepared.receipt.metadata_json["bridge_source"] == "accepted_segment_adapter"
+    assert prepared.receipt.adopted_output_ref == target.artifact_id
+    assert prepared.receipt.adopted_output_ref != hidden_candidate.candidate_output_ref
+    assert prepared.chapter.pending_segment_artifact_id is None
+    assert hidden_after is not None
+    assert hidden_after.status == StoryArtifactStatus.DRAFT
+
+
+@pytest.mark.asyncio
+async def test_complete_chapter_ignores_rollback_hidden_pending_pointer(
+    retrieval_session,
+):
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    _accept_outline(story_session_service, session, chapter)
+    target_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.complete.rollback_target",
+        actor="longform.complete.rollback_target",
+    )
+    _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=target_identity,
+        content_text="Visible segment before completing chapter.",
+        target_beat_id="beat_001",
+    )
+    hidden_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.complete.hidden_pending",
+        actor="longform.complete.hidden_pending",
+    )
+    hidden_pending = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Hidden pending should not block complete chapter.",
+        metadata={
+            **_artifact_runtime_metadata(
+                story_id=hidden_identity.story_id,
+                session_id=hidden_identity.session_id,
+                branch_head_id=hidden_identity.branch_head_id,
+                turn_id=hidden_identity.turn_id,
+                runtime_profile_snapshot_id=hidden_identity.runtime_profile_snapshot_id,
+            ),
+            "target_beat_id": "beat_002",
+        },
+    )
+    identity_service.update_turn_status(
+        turn_id=hidden_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+        visible_output_ref=hidden_pending.artifact_id,
+        selected_output_ref=hidden_pending.artifact_id,
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=LongformChapterPhase.SEGMENT_REVIEW,
+        pending_segment_artifact_id=hidden_pending.artifact_id,
+    )
+    identity_service.rollback_to_turn(
+        session_id=session.session_id,
+        target_turn_id=target_identity.turn_id,
+        actor="user",
+    )
+    complete_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
+        created_from="longform.complete.after_rollback",
+        actor="longform.complete.after_rollback",
+    )
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    )
+    turn_domain_service._longform_chapter_runtime_service = (  # noqa: SLF001
+        LongformChapterRuntimeService(
+            story_session_service=story_session_service,
+            chapter_bridge_provider=cast(
+                ChapterBridgeProvider,
+                _RecordingChapterBridgeProvider(),
+            ),
+            session=retrieval_session,
+        )
+    )
+
+    response = await turn_domain_service.complete_chapter(
+        request=LongformTurnRequest(
+            session_id=session.session_id,
+            command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
+            model_id="model-longform-chapter",
+        ),
+        runtime_identity=complete_identity,
+    )
+
+    hidden_after = story_session_service.get_artifact(hidden_pending.artifact_id)
+    assert response.current_chapter_index == 2
+    assert hidden_after is not None
+    assert hidden_after.status == StoryArtifactStatus.DRAFT
+
+
 @pytest.mark.asyncio
 async def test_story_turn_domain_service_complete_chapter_rejects_unadopted_pending_draft(
     retrieval_session,
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
+    pending_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.complete.unadopted_pending",
+        actor="longform.complete.unadopted_pending",
+    )
     pending = story_session_service.create_artifact(
         session_id=session.session_id,
         chapter_workspace_id=chapter.chapter_workspace_id,
@@ -567,12 +786,16 @@ async def test_story_turn_domain_service_complete_chapter_rejects_unadopted_pend
         status=StoryArtifactStatus.DRAFT,
         content_text="Still pending.",
         metadata=_artifact_runtime_metadata(
-            story_id=session.story_id,
-            session_id=session.session_id,
-            branch_head_id="branch-main",
-            turn_id="turn-write",
-            runtime_profile_snapshot_id="snapshot-write",
+            story_id=pending_identity.story_id,
+            session_id=pending_identity.session_id,
+            branch_head_id=pending_identity.branch_head_id,
+            turn_id=pending_identity.turn_id,
+            runtime_profile_snapshot_id=pending_identity.runtime_profile_snapshot_id,
         ),
+    )
+    identity_service.update_turn_status(
+        turn_id=pending_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
     )
     story_session_service.update_chapter_workspace(
         chapter_workspace_id=chapter.chapter_workspace_id,

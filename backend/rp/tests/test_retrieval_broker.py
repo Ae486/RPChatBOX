@@ -15,7 +15,7 @@ from models.rp_retrieval_store import (
     SourceAssetRecord,
 )
 from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import MemorySourceRef
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
@@ -1119,6 +1119,86 @@ async def test_runtime_owned_retrieval_filters_branch_hidden_hits_even_with_bran
     assert any(
         warning.startswith("runtime_branch_visibility_filtered:")
         for warning in result.warnings
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_owned_retrieval_fails_closed_when_branch_scope_unresolved(
+    retrieval_session,
+):
+    session_service = StorySessionService(retrieval_session)
+    story_session = session_service.create_session(
+        story_id="story-runtime-branch-scope-missing",
+        source_workspace_id="workspace-runtime-branch-scope-missing",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    snapshot = RuntimeProfileSnapshotService(retrieval_session).ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.runtime_branch_scope_missing",
+    )
+    retrieval_session.commit()
+    identity = MemoryRuntimeIdentity(
+        story_id=story_session.story_id,
+        session_id=story_session.session_id,
+        branch_head_id="missing-branch-head",
+        turn_id="missing-turn",
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+
+    class StubRetrievalService:
+        async def search_chunks(self, query: RetrievalQuery) -> RetrievalSearchResult:
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[
+                    RetrievalHit(
+                        hit_id="hit-would-leak-without-scope",
+                        query_id=query.query_id,
+                        layer="recall",
+                        domain=Domain.CHAPTER,
+                        domain_path="recall.scope_missing",
+                        excerpt_text="This hit must be omitted when scope is missing.",
+                        score=0.9,
+                        rank=1,
+                        metadata={"visibility_scope": "story_global"},
+                    )
+                ],
+                trace=RetrievalTrace(
+                    trace_id="trace-runtime-scope-missing",
+                    query_id=query.query_id,
+                    route="retrieval.stub.runtime_scope_missing",
+                    result_kind="chunk",
+                    returned_count=1,
+                    candidate_count=1,
+                ),
+            )
+
+    result = await RetrievalBroker(
+        default_story_id=story_session.story_id,
+        runtime_identity=identity,
+        retrieval_service_factory=lambda _session: StubRetrievalService(),
+    ).search_recall(
+        MemorySearchRecallInput(
+            query="runtime branch scope missing",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=5,
+        )
+    )
+
+    assert result.hits == []
+    assert (
+        "runtime_branch_scope_unresolved:runtime_read_manifest_branch_scope_missing"
+        in result.warnings
+    )
+    assert result.trace is not None
+    assert result.trace.returned_count == 0
+    assert "runtime_branch_scope_unresolved" in result.trace.warnings
+    assert result.trace.details["branch_visibility"]["status"] == (
+        "omitted_fail_closed"
     )
 
 

@@ -1,0 +1,75 @@
+{
+  "case_id": "setup.skill_pack.character_design.pack_unloaded_on_other_stage.v1",
+  "title": "Switching target_stage away from character_design hard-unloads the SkillPack so skill_pack_name is None",
+  "scope": "setup",
+  "category": "skill_pack",
+  "tags": ["mvp", "deterministic", "setup-v2", "skill-pack", "character-design", "hard-unload"],
+  "runtime_target": {
+    "mode": "in_process",
+    "entrypoint": "setup_graph_runner.run_turn",
+    "graph_id": "setup_v2",
+    "stream": false
+  },
+  "input": {
+    "request": {
+      "workspace_id": "case-skill-pack-character-design-pack-unloaded-001",
+      "target_step": "longform_blueprint",
+      "target_stage": "plot_blueprint",
+      "user_prompt": "把现在的剧情骨架按主线、副线、转折再梳理一次。",
+      "history": [],
+      "model_id": "model-eval",
+      "provider_id": "provider-eval"
+    },
+    "workspace_seed": {
+      "story_id": "story-case-skill-pack-character-design-pack-unloaded-001",
+      "mode": "longform",
+      "current_step": "longform_blueprint"
+    },
+    "env_overrides": {}
+  },
+  "preconditions": {},
+  "expected": {
+    "deterministic_assertions": [
+      {
+        "assertion_id": "skill_pack_name_is_none_after_unload",
+        "source": "runtime_result",
+        "type": "equals",
+        "path": "structured_payload.skill_pack_name",
+        "expected": null,
+        "severity": "error"
+      }
+    ],
+    "subjective_hooks": [],
+    "expected_target_stage": "plot_blueprint",
+    "expected_effective_stage": "plot_blueprint",
+    "expected_finish_reason": "awaiting_user_input",
+    "expected_tool_calls_contains": [],
+    "expected_tool_calls_excludes": [
+      "setup.patch.foundation_entry",
+      "setup.patch.story_config",
+      "setup.patch.writing_contract",
+      "setup.patch.longform_blueprint",
+      "setup.proposal.commit"
+    ]
+  },
+  "trace_hooks": {
+    "capture_runtime_events": true,
+    "capture_graph_debug": true,
+    "capture_workspace_before_after": true
+  },
+  "repeat": {
+    "count": 1,
+    "stop_on_first_hard_failure": false
+  },
+  "baseline": {
+    "compare_by": [
+      "finish_reason",
+      "assertion_pass_rate",
+      "skill_pack_name"
+    ],
+    "baseline_tags": ["main"]
+  },
+  "metadata": {
+    "unload_purpose": "Verify that when target_stage moves away from character_design (the only stage with a SkillPack today), the runtime hard-unloads the pack: structured_payload.skill_pack_name is None and the trace root span attribute is None. This protects the hard-unload contract documented in rp-setup-agent-stage-skill-pack.md §3.5."
+  }
+}

@@ -630,6 +630,73 @@ def test_create_branch_from_adopted_visible_output_settles_origin_without_rewind
     )
 
 
+def test_legacy_turn_metadata_cannot_settle_or_enter_active_story_truth(
+    retrieval_session,
+):
+    story_session, snapshot, service, _ = _seed_settled_main_turns(
+        retrieval_session,
+        story_id="identity-branch-legacy-metadata-rejected",
+        count=1,
+    )
+    story_session_service = StorySessionService(retrieval_session)
+    chapter = story_session_service.create_chapter_workspace(
+        session_id=story_session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.SEGMENT_DRAFTING,
+    )
+    origin_identity = service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind="write-next-segment",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    legacy_artifact = story_session_service.create_artifact(
+        session_id=story_session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.ACCEPTED,
+        content_text="Legacy metadata segment must stay outside runtime truth.",
+        metadata={
+            "story_id": origin_identity.story_id,
+            "session_id": origin_identity.session_id,
+            "branch_head_id": origin_identity.branch_head_id,
+            "turn_id": origin_identity.turn_id,
+        },
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        accepted_segment_ids=[legacy_artifact.artifact_id],
+    )
+    service.update_turn_status(
+        turn_id=origin_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+        visible_output_ref=legacy_artifact.artifact_id,
+        selected_output_ref=legacy_artifact.artifact_id,
+    )
+
+    with pytest.raises(StoryRuntimeIdentityServiceError) as exc_info:
+        service.create_branch_from_turn(
+            session_id=story_session.session_id,
+            origin_turn_id=origin_identity.turn_id,
+            actor="user",
+        )
+
+    origin_turn = retrieval_session.get(StoryTurnRecord, origin_identity.turn_id)
+    snapshot_view = story_session_service.build_chapter_snapshot(
+        session_id=story_session.session_id,
+        chapter_index=chapter.chapter_index,
+    )
+    assert exc_info.value.code == "runtime_branch_control_invalid_turn"
+    assert "origin_not_settled" in str(exc_info.value)
+    assert origin_turn is not None
+    assert origin_turn.status == StoryTurnStatus.POST_WRITE_PENDING.value
+    assert origin_turn.settlement_reason is None
+    assert snapshot_view.chapter.accepted_segment_ids == []
+    assert legacy_artifact.artifact_id not in {
+        artifact.artifact_id for artifact in snapshot_view.artifacts
+    }
+
+
 def test_create_branch_rejects_hidden_adopted_pending_origin_without_side_effects(
     retrieval_session,
 ):

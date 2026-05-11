@@ -1116,7 +1116,9 @@ class StoryTurnDomainService:
         runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
-        chapter = self.require_current_chapter(request.session_id)
+        chapter = self._active_branch_chapter_view(
+            self.require_current_chapter(request.session_id)
+        )
         if self._longform_chapter_runtime_service is not None:
             prepared_transition = (
                 await self._longform_chapter_runtime_service.prepare_chapter_transition_with_summary(
@@ -1319,7 +1321,6 @@ class StoryTurnDomainService:
             return
         turn_id = _optional_text(
             dict(accepted_artifact.metadata).get("runtime_turn_id")
-            or dict(accepted_artifact.metadata).get("turn_id")
         )
         if turn_id is None:
             return

@@ -11,6 +11,7 @@
 | [RP Eval Diagnostics CLI Surfaces](./rp-eval-diagnostics-cli-surfaces.md) | Setup diagnostic reason-code extraction and default CLI summary contracts | Active |
 | [RP Eval Setup Case Contracts](./rp-eval-setup-case-contracts.md) | Setup bad-path eval case contract for expected diagnostics coverage | Active |
 | [RP Eval Setup Stage And SkillPack Assertion Contract](./rp-eval-setup-stage-skillpack-assertion-contract.md) | Additive setup eval contract for stage-aware assertions now and SkillPack-aware assertions only after runtime-owned SkillPack truth exists | Active |
+| [RP Eval Expected Extensions](./rp-eval-expected-extensions.md) | Optional `EvalExpected` fields (`expected_skill_pack_name`, `expected_finish_reason`, `expected_tool_calls_contains/excludes`) mapped to single runtime trace sources, replacing ad-hoc JSONPath assertions | Active |
 | [RP Setup Agent Prior-Stage Handoff Context](./rp-setup-agent-prior-stage-handoff-context.md) | Compact earlier-stage truth handoffs and budget-driven setup context compaction | Active |
 | [RP Setup Agent Stage-Local Context Governance](./rp-setup-agent-stage-local-context-governance.md) | Thin working digest, retained tool outcomes, compacted current-step history, and minimal no-progress guards | Active |
 | [RP Setup Agent Pre-Model Context Assembly](./rp-setup-agent-pre-model-context-assembly.md) | Deterministic `SetupContextPacket -> governed history -> runtime overlay -> final request messages` contract for setup turns | Active |
@@ -87,6 +88,7 @@
 - [ ] If the change touches Langfuse runtime settings or observability enablement, read [Langfuse Runtime Config Surface](./langfuse-runtime-config-surface.md).
 - [ ] If the change touches SetupAgent context packet assembly, prior-stage handoffs, or budget-driven setup context compaction, read [RP Setup Agent Prior-Stage Handoff Context](./rp-setup-agent-prior-stage-handoff-context.md).
 - [ ] If the change touches setup eval case expectations, stage-aware setup assertions, or future SkillPack-aware setup eval metadata, read [RP Eval Setup Stage And SkillPack Assertion Contract](./rp-eval-setup-stage-skillpack-assertion-contract.md).
+- [ ] If the change adds or modifies optional `EvalExpected` fields, the `evaluate_diagnostic_expectation_scores` pipeline, or the `report["tool_calls"]` surface, read [RP Eval Expected Extensions](./rp-eval-expected-extensions.md).
 - [ ] If the change touches SetupAgent current-step context governance, digest/tool-outcome retention, history compaction, or no-progress guards, read [RP Setup Agent Stage-Local Context Governance](./rp-setup-agent-stage-local-context-governance.md).
 - [ ] If the change touches SetupAgent pre-model context assembly, runtime overlay insertion, or final request message ordering, read [RP Setup Agent Pre-Model Context Assembly](./rp-setup-agent-pre-model-context-assembly.md).
 - [ ] If the change touches SetupAgent per-step tool visibility, narrowed allowed-tool scope, or patch-family exposure, read [RP Setup Agent Stage-Aware Tool Scope](./rp-setup-agent-stage-aware-tool-scope.md).

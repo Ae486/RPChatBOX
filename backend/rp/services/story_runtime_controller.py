@@ -1011,14 +1011,10 @@ class StoryRuntimeController:
         artifact: StoryArtifact,
     ) -> MemoryRuntimeIdentity:
         metadata = dict(artifact.metadata or {})
-        story_id = self._metadata_text(metadata, "runtime_story_id", "story_id")
-        session_id = self._metadata_text(metadata, "runtime_session_id", "session_id")
-        branch_head_id = self._metadata_text(
-            metadata,
-            "runtime_branch_head_id",
-            "branch_head_id",
-        )
-        turn_id = self._metadata_text(metadata, "runtime_turn_id", "turn_id")
+        story_id = self._metadata_text(metadata, "runtime_story_id")
+        session_id = self._metadata_text(metadata, "runtime_session_id")
+        branch_head_id = self._metadata_text(metadata, "runtime_branch_head_id")
+        turn_id = self._metadata_text(metadata, "runtime_turn_id")
         runtime_profile_snapshot_id = self._metadata_text(
             metadata,
             "runtime_profile_snapshot_id",

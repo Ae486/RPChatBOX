@@ -129,6 +129,50 @@ def evaluate_diagnostic_expectation_scores(
                 source="trace.root.attributes.setup_stage",
             )
         )
+    if case.expected.expected_skill_pack_name is not None:
+        scores.append(
+            _evaluate_expected_value(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.skill_pack_name_alignment",
+                expected=case.expected.expected_skill_pack_name,
+                actual=trace_root_attributes.get("skill_pack_name"),
+                source="trace.root.attributes.skill_pack_name",
+            )
+        )
+    if case.expected.expected_finish_reason is not None:
+        scores.append(
+            _evaluate_expected_value(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.finish_reason_alignment",
+                expected=case.expected.expected_finish_reason,
+                actual=report.get("finish_reason"),
+                source="report.finish_reason",
+            )
+        )
+    if case.expected.expected_tool_calls_contains:
+        scores.append(
+            _evaluate_expected_list_subset(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.tool_calls_contains_alignment",
+                expected=case.expected.expected_tool_calls_contains,
+                actual=report.get("tool_calls") or [],
+                source="report.tool_calls",
+            )
+        )
+    if case.expected.expected_tool_calls_excludes:
+        scores.append(
+            _evaluate_expected_list_disjoint(
+                run_id=run_id,
+                span_id=root_span_id,
+                name="diagnostic.tool_calls_excludes_alignment",
+                forbidden=case.expected.expected_tool_calls_excludes,
+                actual=report.get("tool_calls") or [],
+                source="report.tool_calls",
+            )
+        )
     return scores
 
 
@@ -192,6 +236,39 @@ def _evaluate_expected_list_subset(
             "expected": expected_values,
             "actual": actual_values,
             "missing": missing,
+        },
+    )
+
+
+def _evaluate_expected_list_disjoint(
+    *,
+    run_id: str,
+    span_id: str | None,
+    name: str,
+    forbidden: list[str],
+    actual: Any,
+    source: str,
+) -> EvalScore:
+    forbidden_values = _normalize_string_list(forbidden)
+    actual_values = _normalize_string_list(actual)
+    actual_set = set(actual_values)
+    violations = [item for item in forbidden_values if item in actual_set]
+    passed = not violations
+    explanation = (
+        f"forbidden={forbidden_values!r} actual={actual_values!r} "
+        f"violations={violations!r}"
+    )
+    return _diagnostic_score(
+        run_id=run_id,
+        span_id=span_id,
+        name=name,
+        passed=passed,
+        explanation=explanation,
+        metadata={
+            "source": source,
+            "expected": forbidden_values,
+            "actual": actual_values,
+            "violations": violations,
         },
     )
 

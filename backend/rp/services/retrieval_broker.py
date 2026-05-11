@@ -34,7 +34,6 @@ from rp.models.memory_crud import (
     SummaryReadResult,
     VersionListResult,
 )
-from rp.models.runtime_read_contract import RuntimeBranchReadScope
 from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
 from rp.models.runtime_identity import RuntimeProfileSnapshotCompiledProfile
 from rp.observability.langfuse_scores import emit_retrieval_trace_scores
@@ -904,18 +903,34 @@ class RetrievalBroker:
                 "runtime_branch_filters_ignored:" + ",".join(ignored_filter_keys)
             )
         try:
-            scope = resolver.build_runtime_scope(identity=runtime_identity)
-        except RuntimeReadManifestServiceError:
-            warnings.append("runtime_branch_scope_identity_only_fallback")
-            scope = RuntimeBranchReadScope(
-                story_id=runtime_identity.story_id,
-                session_id=runtime_identity.session_id,
-                active_branch_head_id=runtime_identity.branch_head_id,
-                active_turn_id=runtime_identity.turn_id,
-                visible_branch_head_ids=[runtime_identity.branch_head_id],
-                turn_cutoff_by_branch={
-                    runtime_identity.branch_head_id: runtime_identity.turn_id
-                },
+            scope = resolver.build_scope(identity=runtime_identity)
+        except RuntimeReadManifestServiceError as exc:
+            warnings.append(f"runtime_branch_scope_unresolved:{exc.code}")
+            trace = result.trace
+            if trace is not None:
+                details = dict(trace.details or {})
+                details["branch_visibility"] = {
+                    "status": "omitted_fail_closed",
+                    "reason": "runtime_branch_scope_unresolved",
+                    "error_code": exc.code,
+                    "identity": runtime_identity.model_dump(mode="json"),
+                }
+                trace = trace.model_copy(
+                    update={
+                        "returned_count": 0,
+                        "warnings": [
+                            *list(trace.warnings),
+                            "runtime_branch_scope_unresolved",
+                        ],
+                        "details": details,
+                    }
+                )
+            return result.model_copy(
+                update={
+                    "hits": [],
+                    "warnings": warnings,
+                    "trace": trace,
+                }
             )
         filtered_hits, omitted_refs = filter_hits_by_branch_visibility(
             resolver=resolver,

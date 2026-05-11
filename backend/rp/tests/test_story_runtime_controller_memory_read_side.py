@@ -349,6 +349,54 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def test_revision_identity_rejects_legacy_branch_turn_metadata(retrieval_session):
+    story_session_service = StorySessionService(retrieval_session)
+    session = story_session_service.create_session(
+        story_id="story-revision-legacy-runtime",
+        source_workspace_id="workspace-revision-legacy-runtime",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.SEGMENT_REVIEW,
+    )
+    chapter = story_session_service.create_chapter_workspace(
+        session_id=session.session_id,
+        chapter_index=1,
+        phase=LongformChapterPhase.SEGMENT_REVIEW,
+        builder_snapshot_json={},
+    )
+    artifact = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Legacy runtime metadata must not identify draft truth.",
+        metadata={
+            "runtime_story_id": session.story_id,
+            "runtime_session_id": session.session_id,
+            "branch_head_id": "legacy-branch",
+            "turn_id": "legacy-turn",
+            "runtime_profile_snapshot_id": "snapshot-revision-legacy",
+        },
+    )
+    controller = _build_controller(
+        retrieval_session,
+        story_session_service,
+        ProposalRepository(retrieval_session),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        controller._revision_identity_from_artifact(
+            session=session,
+            artifact=artifact,
+        )
+
+    assert str(exc_info.value) == (
+        "revision_runtime_identity_missing:branch_head_id,turn_id"
+    )
+
+
 def _seed_sibling_identity(
     retrieval_session,
     *,

@@ -62,17 +62,23 @@
   - they are not mandatory for all existing setup cases
   - they should be populated only when the case is intentionally stage-sensitive
 
-### 3.3 SkillPack Assertions Must Wait For Runtime-Owned Truth
+### 3.3 SkillPack Assertions Are Now Authoritative (Slice B Unblocked Runtime Truth)
 
 - Eval must not infer SkillPack activation from:
   - assistant prose style
   - guessed prompt content
   - stage id alone
-- SkillPack-aware assertions are blocked until runtime exposes real SkillPack truth, such as:
-  - `skill_pack_name`
-  - stable prompt/debug markers
-  - pack-driven tool-scope metadata
-- Before that runtime truth exists, F4 must not add setup cases that pretend SkillPack assertions are authoritative.
+- Runtime now owns the SkillPack truth surface:
+  - `RpAgentTurnResult.structured_payload["skill_pack_name"]` is populated by the runtime executor from `RpAgentTurnInput.metadata["skill_pack_name"]` (set by `SetupRuntimeAdapter` per `rp-setup-agent-stage-skill-pack.md` §3.7a)
+  - `EvalTrace` root span `attributes["skill_pack_name"]` is populated by `trace_capture.build_setup_trace` from that structured payload
+  - `EvalExpected.expected_skill_pack_name` consumes the trace attribute (see `rp-eval-expected-extensions.md`)
+- SkillPack-aware assertions are therefore allowed as of skills-builder Slice B; cases under `backend/rp/eval/cases/setup/skill_pack/<stage>/*.json` may pin `expected_skill_pack_name`.
+
+### 3.3a SkillPack Cases Are Exempt From Diagnostic-Attribution Shape Contract
+
+- Cases with `category == "skill_pack"` test SkillPack persona / forbidden / facilitation alignment via the additive `EvalExpected` field surface and (in Stage 3) `subjective_hooks` rubrics. They do NOT test runtime diagnostic remediation.
+- These cases are exempt from the all-cases shape contract (`test_all_setup_case_files_define_diagnostic_expectations`) that requires non-empty `expected_reason_codes`, `expected_outcome_chain`, and `expected_recommended_next_action`. The vocabulary of those fields (`tighten_tool_schema_and_error_messages`, `fix_provider_model_config_and_runtime_connectivity`, etc.) is diagnostic-attribution-shaped and does not apply.
+- The exemption is implemented by skipping `category == "skill_pack"` in the validator. It must not be widened to other categories without an explicit spec update.
 
 ### 3.4 Reuse Existing Deterministic Assertion Machinery
 
@@ -90,10 +96,22 @@
 
 ### 3.6 Case Coverage Strategy
 
-- Immediate F4 coverage should focus on stage-aware setup cases only.
-- The first SkillPack-aware case family belongs under:
+- The first SkillPack-aware case family lives under:
   - `backend/rp/eval/cases/setup/skill_pack/<stage_id>/*.json`
-- That family must remain deferred until runtime-owned SkillPack truth is implemented.
+- The character_design pilot case (`pack_loaded_on_stage.v1.json`) is the reference fixture for the §3.7 rubrics; its mock assistant reply doubles as the pass-anchor reference.
+
+### 3.7 SkillPack Subjective Rubric Vocabulary
+
+- Three rubrics are registered in `eval/graders/judge_registry._RUBRICS` for SkillPack persona evaluation; all share `judge_family = "llm_judge"`, `prompt_version = "llm-judge/v2"`, `response_schema_version = "judge-response/v2"`, `metadata = {"scope": "setup", "target_type": "assistant_text"}`:
+  - `setup/persona-alignment/v1` — judges whether the reply speaks from the SkillPack Specialist hat (e.g. senior dramatist for character_design) instead of a generic AI-assistant voice.
+  - `setup/forbidden-compliance/v1` — judges whether the reply triggers any SkillPack `## Forbidden` clause (narrative prose, claim of stage readiness, auto-commit, mutating other-stage drafts).
+  - `setup/facilitation-depth/v1` — judges whether clarifications probe deep dimensions named by the SkillPack (e.g. `motivation.real`, `world_fit`, contradiction) rather than surface traits.
+- Rubric anchors are calibrated against the D-pilot mock assistant reply (the Stage 2 reference fixture). Authors of future SkillPack cases must keep this anchor convention: each new SkillPack mock reply must remain a coherent pass-anchor for these three rubrics, or new rubrics must be authored with their own concrete reference replies.
+- MVP gate (mock-judge): each rubric must produce a structured `EvalScore` with the right band when fed scripted judge payloads (3 positive + 2 negative); see `test_skill_pack_persona_alignment_score_band_assignment`. Real-LLM consistency (≥ 0.85 across N>=5 dialog samples) is a Stretch goal tracked separately and is not blocking for this contract.
+- Forbid:
+  - introducing a rubric whose anchors are abstract descriptions without at least one concrete reference reply,
+  - reusing an existing rubric ref for a new rubric version (use `setup/<rubric>/v2` instead),
+  - judging SkillPack compliance via `deterministic_assertions` alone — these rubrics own the subjective surface.
 
 ## 4. Validation & Error Matrix
 

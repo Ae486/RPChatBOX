@@ -22,6 +22,8 @@ The current SetupAgent implementation already contains most of the pieces needed
 
 The core architecture problem is not missing parts. The problem is that the authoritative contract spine is still implicit and spread across files. The implementation is node-rich and policy-rich, but the top-level responsibilities are not yet documented as one module architecture.
 
+This matches the user's latest clarification: SetupAgent already learned from Claude Code at the design level, but the local implementation still lacks the clean engineering layering and module ownership needed for maintainability. Tool changes are the representative pain point because prompt guidance, scope, schema, provider execution, and tests can require separate edits.
+
 The next architecture work should therefore converge ownership and contracts instead of adding another feature surface.
 
 ## 2. Audit Source Policy
@@ -89,7 +91,7 @@ Current layering is broadly correct: setup harness stays outside the inner turn 
 | `ModelGateway` | `RpAgentRuntimeExecutor._build_model_request`, `_call_model_*`, `_model_facing_tool_definitions`, slim truth-write adapter | Present inside executor | Good candidate to extract conceptually first, possibly code later. Provider compatibility should not be prompt folklore. |
 | `OutputInspector` | `RpAgentRuntimeExecutor._inspect_model_output` plus pseudo tool text detection helpers | Present, with candidate pseudo-tool filtering | Should become explicit contract: real tool calls, text, pseudo tool leakage, malformed arguments, provider errors. |
 | `SetupToolRuntime` | `RuntimeToolExecutor`, `RuntimeToolRegistryView`, `SetupToolProvider` | Present | Provider validation and workspace mutation are deterministic, but candidate CRUD surfaces must not leak before capability plan accepts them. |
-| `DecisionPolicy` | `FinishPolicy`, `ToolFailureClassifier`, `RepairDecisionPolicy`, `ActionDecisionPolicy`, `CompletionGuardPolicy`, `ReflectionTriggerPolicy`, route helpers in executor | Strong policy set | Good substance, but decision surfaces should be unified as one policy layer with clear terminal/continue taxonomy. |
+| `SetupTurnLoop` transition rules | `FinishPolicy`, `ToolFailureClassifier`, `RepairDecisionPolicy`, `ActionDecisionPolicy`, `CompletionGuardPolicy`, `ReflectionTriggerPolicy`, route helpers in executor | Strong policy set, but fragmented | Good substance, but decision surfaces should become small transition rules under the loop state-machine contract, not a larger standalone policy owner. |
 | `SetupEventSink` | `RuntimeEvent`, `TypedSseEventAdapter`, executor `_emit_event`, execution-service stream path | Present | Must preserve typed tool events and keep pseudo/debug/internal text out of assistant content. |
 | `SetupRuntimeStateStore` | `SetupAgentRuntimeStateService`, `SetupWorkspace` interaction, runtime structured payload | Present | Boundary must stay clear: workspace truth vs runtime cognition vs transient trace. |
 
@@ -192,7 +194,7 @@ Pseudo tool text handling exists in `_inspect_model_output`, stream filtering, a
 
 Without that named boundary, pseudo-tool fixes risk becoming local regex patches rather than an accepted contract.
 
-### 7.3 Decision Policy Is Strong But Fragmented
+### 7.3 Transition Rules Are Strong But Fragmented
 
 Policy classes are real and useful, but final routing still spans:
 
@@ -267,7 +269,7 @@ OutputInspector
 SetupToolRuntime
   current code: RuntimeToolExecutor + SetupToolProvider
 
-DecisionPolicy
+SetupTurnLoop transition rules
   current code: policies.py + executor route application
 
 SetupEventSink

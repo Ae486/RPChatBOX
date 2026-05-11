@@ -14,6 +14,7 @@
     "request": {
       "workspace_id": "case-truth-write-create-conflict-001",
       "target_step": "story_config",
+      "target_stage": "worker_config",
       "user_prompt": "Try to create a fresh story-config block if needed.",
       "history": [],
       "model_id": "model-eval",

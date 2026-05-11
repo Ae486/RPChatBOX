@@ -14,6 +14,7 @@
     "request": {
       "workspace_id": "case-ask-user-001",
       "target_step": "writing_contract",
+      "target_stage": "writer_config",
       "user_prompt": "请整理写作契约。",
       "history": [],
       "model_id": "model-eval",

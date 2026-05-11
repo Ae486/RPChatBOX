@@ -12,6 +12,7 @@ from rp.models.memory_crud import (
     MemoryReadProvenanceInput,
     ProposalSubmitInput,
 )
+from rp.models.memory_contract_registry import MemorySourceRef
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.chapter_workspace_projection_adapter import (
@@ -434,6 +435,84 @@ def test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff(
         owning_branch_head_id=branch.branch_head_id,
         origin_turn_id=fork_turn.turn_id,
     )
+
+
+def test_branch_visibility_resolver_stage_v_alias_filters_memory_source_refs(
+    retrieval_session,
+):
+    session, _, _ = _seed_story_runtime(retrieval_session)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.branch_visibility.stage_v_alias",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    main_branch = identity_service.ensure_default_branch(
+        session_id=session.session_id,
+        story_id=session.story_id,
+    )
+    turn_one = identity_service.create_turn(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        branch_head_id=main_branch.branch_head_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        turn_kind="generation",
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    turn_two = identity_service.create_turn(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        branch_head_id=main_branch.branch_head_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        turn_kind="generation",
+        command_kind="continue",
+        actor="story_runtime",
+    )
+    identity = identity_service.resolve_memory_identity(
+        session_id=session.session_id,
+        story_id=session.story_id,
+        branch_head_id=main_branch.branch_head_id,
+        turn_id=turn_two.turn_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    resolver = BranchVisibilityResolver(retrieval_session)
+
+    scope = resolver.build_scope(
+        identity=identity,
+        selected_turn_id=turn_one.turn_id,
+    )
+    refs = [
+        MemorySourceRef(
+            source_type="story_turn",
+            source_id=turn_one.turn_id,
+            metadata={
+                "visibility_scope": "branch_scoped",
+                "owning_branch_head_id": main_branch.branch_head_id,
+                "origin_turn_id": turn_one.turn_id,
+            },
+        ),
+        MemorySourceRef(
+            source_type="story_turn",
+            source_id=turn_two.turn_id,
+            metadata={
+                "visibility_scope": "branch_scoped",
+                "owning_branch_head_id": main_branch.branch_head_id,
+                "origin_turn_id": turn_two.turn_id,
+            },
+        ),
+        MemorySourceRef(source_type="story_seed", source_id="global"),
+    ]
+
+    assert scope.selected_turn_id == turn_one.turn_id
+    assert scope.turn_cutoff_by_branch[main_branch.branch_head_id] == turn_one.turn_id
+    assert [
+        ref.source_id
+        for ref in resolver.filter_visible_memory_refs(scope=scope, refs=refs)
+    ] == [turn_one.turn_id, "global"]
 
 
 def test_branch_visibility_resolver_hides_rollback_future_but_allows_new_future(

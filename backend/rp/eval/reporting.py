@@ -7,6 +7,7 @@ from typing import Any
 from .diagnostics import build_diagnostics
 from .models import EvalRunResult, EvalScore
 from .ragas_reporting import extract_ragas_report
+from .trace_capture import normalize_tool_name
 
 
 def build_report(result: EvalRunResult) -> dict:
@@ -125,6 +126,7 @@ def build_report(result: EvalRunResult) -> dict:
         "hard_failures": hard_failures,
         "failure_layer": result.run.failure.layer if result.run.failure else None,
         "finish_reason": result.runtime_result.get("finish_reason"),
+        "tool_calls": _extract_normalized_tool_calls(result.runtime_result),
         "repair_route": repair_route,
         "completion_guard_reason": completion_guard.get("reason"),
         "last_failure_category": last_failure.get("failure_category"),
@@ -287,6 +289,7 @@ def attach_diagnostic_expectation_results(
                 "actual": score.metadata.get("actual"),
                 "missing": score.metadata.get("missing"),
                 "mismatches": score.metadata.get("mismatches"),
+                "violations": score.metadata.get("violations"),
                 "source": score.metadata.get("source"),
                 "explanation": score.explanation,
             }
@@ -886,3 +889,27 @@ def _finalize_rubric_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "hook_ids": hook_ids,
         "case_count": 1 if total > 0 else 0,
     }
+
+
+def _extract_normalized_tool_calls(runtime_result: dict[str, Any]) -> list[str]:
+    """Return the list of normalized tool names invoked during the turn.
+
+    Pulled from `runtime_result.tool_invocations`. The raw tool_name carries a
+    runtime prefix (e.g. `rp_setup__setup.truth.write`) which is stripped via
+    `normalize_tool_name` so eval cases can assert on the stable surface name
+    (e.g. `setup.truth.write`). The function tolerates missing/malformed entries
+    rather than failing the report build.
+    """
+
+    invocations = runtime_result.get("tool_invocations")
+    if not isinstance(invocations, list):
+        return []
+    names: list[str] = []
+    for item in invocations:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("tool_name")
+        if not isinstance(raw, str) or not raw:
+            continue
+        names.append(normalize_tool_name(raw))
+    return names

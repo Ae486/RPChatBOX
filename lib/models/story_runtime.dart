@@ -203,14 +203,13 @@ class RpStoryArtifact {
   bool get isPendingSegment =>
       artifactKind == 'story_segment' && status == 'draft';
   String? get runtimeStoryId =>
-      _stringOrNull(metadata['runtime_story_id'] ?? metadata['story_id']);
+      _stringOrNull(metadata['runtime_story_id']);
   String? get runtimeSessionId =>
-      _stringOrNull(metadata['runtime_session_id'] ?? metadata['session_id']);
-  String? get runtimeBranchHeadId => _stringOrNull(
-    metadata['runtime_branch_head_id'] ?? metadata['branch_head_id'],
-  );
+      _stringOrNull(metadata['runtime_session_id']);
+  String? get runtimeBranchHeadId =>
+      _stringOrNull(metadata['runtime_branch_head_id']);
   String? get runtimeTurnId =>
-      _stringOrNull(metadata['runtime_turn_id'] ?? metadata['turn_id']);
+      _stringOrNull(metadata['runtime_turn_id']);
   String? get runtimeProfileSnapshotId =>
       _stringOrNull(metadata['runtime_profile_snapshot_id']);
 
@@ -282,9 +281,16 @@ class RpChapterSnapshot {
       )
       .toList();
 
-  List<RpStoryArtifact> get acceptedSegmentArtifacts => artifacts
-      .where((item) => item.artifactKind == 'story_segment' && item.isAccepted)
-      .toList();
+  List<RpStoryArtifact> get acceptedSegmentArtifacts {
+    final artifactById = {
+      for (final item in artifacts) item.artifactId: item,
+    };
+    return chapter.acceptedSegmentIds
+        .map((artifactId) => artifactById[artifactId])
+        .whereType<RpStoryArtifact>()
+        .where((item) => item.artifactKind == 'story_segment' && item.isAccepted)
+        .toList();
+  }
 
   RpStoryArtifact? get latestOutlineDraft {
     final items = artifacts

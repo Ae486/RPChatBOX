@@ -504,12 +504,13 @@ class LongformChapterRuntimeService:
         identity: MemoryRuntimeIdentity,
         chapter: ChapterWorkspace,
     ) -> dict[str, Any]:
-        updated_chapter = chapter
+        active_chapter = self._active_branch_chapter_view(chapter)
+        updated_chapter = active_chapter
         adopted_output_ref: str | None = None
         adopted_output_text: str | None = None
         adoption_source = "empty_chapter_adapter"
         source_refs: list[str] = []
-        pending_artifact = self._pending_segment_artifact(chapter=chapter)
+        pending_artifact = self._pending_segment_artifact(chapter=active_chapter)
         accepted_segment_texts: list[str] = []
         if pending_artifact is not None:
             adoption = self._draft_selection_service.get_latest_adoption_receipt_for_branch(
@@ -551,12 +552,12 @@ class LongformChapterRuntimeService:
                 accepted_artifact_id=acceptance_artifact.artifact_id,
             )
             updated_chapter = self._story_session_service.update_chapter_workspace(
-                chapter_workspace_id=chapter.chapter_workspace_id,
+                chapter_workspace_id=active_chapter.chapter_workspace_id,
                 pending_segment_artifact_id=None,
             )
             self.advance_outline_progress_for_adoption(
                 identity=identity,
-                chapter_before_accept=chapter,
+                chapter_before_accept=active_chapter,
                 chapter_after_accept=updated_chapter,
                 accepted_artifact=acceptance_artifact,
             )
@@ -568,7 +569,7 @@ class LongformChapterRuntimeService:
             ]
         else:
             latest_accepted = self._latest_accepted_segment(
-                chapter=chapter,
+                chapter=active_chapter,
                 identity=identity,
             )
             if latest_accepted is not None:
@@ -751,10 +752,19 @@ class LongformChapterRuntimeService:
         *,
         chapter: ChapterWorkspace,
     ) -> StoryArtifact | None:
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=chapter.session_id,
+            chapter_index=chapter.chapter_index,
+        )
+        visible_artifacts = {
+            artifact.artifact_id: artifact for artifact in snapshot.artifacts
+        }
         artifact_id = str(chapter.pending_segment_artifact_id or "").strip()
         if not artifact_id:
             return None
-        artifact = self._story_session_service.get_artifact(artifact_id)
+        if snapshot.chapter.pending_segment_artifact_id != artifact_id:
+            return None
+        artifact = visible_artifacts.get(artifact_id)
         if artifact is None:
             return None
         if artifact.artifact_kind != StoryArtifactKind.STORY_SEGMENT:
@@ -762,6 +772,12 @@ class LongformChapterRuntimeService:
         if artifact.status != StoryArtifactStatus.DRAFT:
             return None
         return artifact
+
+    def _active_branch_chapter_view(self, chapter: ChapterWorkspace) -> ChapterWorkspace:
+        return self._story_session_service.build_chapter_snapshot(
+            session_id=chapter.session_id,
+            chapter_index=chapter.chapter_index,
+        ).chapter
 
     def _accepted_segments_for_progress(
         self,

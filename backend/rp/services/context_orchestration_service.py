@@ -39,6 +39,10 @@ from .writing_packet_builder import WritingPacketBuilder
 class ContextOrchestrationService:
     """Assemble deterministic writer and worker packets from stable read surfaces."""
 
+    _BRANCH_SENSITIVE_PROJECTION_LABELS = {
+        "current_state_digest",
+        "recent_segment_digest",
+    }
     _DEFAULT_FORBIDDEN_CONTEXT = (
         "raw_authoritative_state_json",
         "tool_call_trace",
@@ -86,16 +90,23 @@ class ContextOrchestrationService:
         target_artifact_id: str | None = None,
         review_overlay_sections: list[dict[str, object]] | None = None,
     ) -> WritingPacket:
+        packet_metadata: dict[str, object] = {}
         projection_context_sections = (
             self._builder_projection_context_service.build_context_sections(
                 session_id=session.session_id,
+            )
+        )
+        projection_context_sections = (
+            self._branch_scoped_projection_context_sections(
+                sections=projection_context_sections,
+                runtime_identity=runtime_identity,
+                packet_metadata=packet_metadata,
             )
         )
         recent_raw_turn_sections = self._build_recent_raw_turn_sections(
             chapter=chapter,
         )
         runtime_retrieval_sections: list[dict[str, object]] = []
-        packet_metadata: dict[str, object] = {}
         if runtime_identity is not None:
             packet_metadata["runtime_identity"] = runtime_identity.model_dump(
                 mode="json"
@@ -205,6 +216,53 @@ class ContextOrchestrationService:
                     "runtime_read_manifest": manifest.model_dump(mode="json"),
                 }
             }
+        )
+
+    def _branch_scoped_projection_context_sections(
+        self,
+        *,
+        sections: list[dict[str, object]],
+        runtime_identity: MemoryRuntimeIdentity | None,
+        packet_metadata: dict[str, object],
+    ) -> list[dict[str, object]]:
+        if runtime_identity is None or self._runtime_read_manifest_service is None:
+            return [dict(section) for section in sections]
+        scope = self._runtime_read_manifest_service.build_branch_scope(
+            identity=runtime_identity
+        )
+        if not self._scope_requires_projection_omission(scope):
+            return [dict(section) for section in sections]
+        filtered_sections: list[dict[str, object]] = []
+        omitted: list[dict[str, object]] = []
+        for section in sections:
+            label = str(section.get("label") or "").strip()
+            if label not in self._BRANCH_SENSITIVE_PROJECTION_LABELS:
+                filtered_sections.append(dict(section))
+                continue
+            omitted.append(
+                {
+                    "label": label,
+                    "reason": (
+                        "branch_sensitive_projection_omitted_until_"
+                        "branch_scoped_projection_refresh"
+                    ),
+                    "active_branch_head_id": scope.active_branch_head_id,
+                    "selected_turn_id": scope.selected_turn_id,
+                    "active_branch_lineage": list(scope.visible_branch_head_ids),
+                    "turn_cutoff_by_branch": dict(scope.turn_cutoff_by_branch),
+                }
+            )
+        if omitted:
+            packet_metadata["branch_visibility_omitted_projection_sections"] = omitted
+        return filtered_sections
+
+    @staticmethod
+    def _scope_requires_projection_omission(scope) -> bool:
+        if len(scope.visible_branch_head_ids) > 1:
+            return True
+        return any(
+            bool(turn_ids)
+            for turn_ids in dict(scope.hidden_turn_ids_by_branch).values()
         )
 
     def build_worker_context_packet(

@@ -121,6 +121,40 @@ class EvalExpected(BaseModel):
         default=None,
         description="Expected diagnostics remediation action when the case asserts one.",
     )
+    expected_skill_pack_name: str | None = Field(
+        default=None,
+        description=(
+            "Expected SkillPack name resolved by the runtime adapter for the turn. "
+            "Sourced from the eval root span attribute `skill_pack_name`, which "
+            "is in turn propagated from RpAgentTurnResult.structured_payload "
+            "(see rp-setup-agent-stage-skill-pack.md §3.7a)."
+        ),
+    )
+    expected_finish_reason: str | None = Field(
+        default=None,
+        description=(
+            "Expected RpAgentTurnResult.finish_reason scalar for this turn, "
+            "sourced from the setup report's `finish_reason` field. Use this "
+            "instead of pinning finish_reason via a generic JSONPath assertion."
+        ),
+    )
+    expected_tool_calls_contains: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Normalized tool names (without the `rp_setup__` qualifier prefix) "
+            "that MUST appear among the turn's tool invocations. Sourced from "
+            "the setup report's `tool_calls` field."
+        ),
+    )
+    expected_tool_calls_excludes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Normalized tool names that MUST NOT appear among the turn's tool "
+            "invocations. Use this for SkillPack forbidden compliance and "
+            "stage-scope guard checks. Sourced from the setup report's "
+            "`tool_calls` field."
+        ),
+    )
 
 
 class EvalTraceHooks(BaseModel):

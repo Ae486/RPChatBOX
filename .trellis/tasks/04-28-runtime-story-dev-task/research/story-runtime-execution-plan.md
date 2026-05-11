@@ -910,6 +910,23 @@
   - scoped `git diff --check`：无 whitespace error，仅 LF/CRLF 工作区提示。
   - 剩余 warning：Pydantic v2 config deprecation 与 FastAPI `on_event` deprecation，属于仓库既有基础设施 warning，不属于本模块 blocker。
 
+Branch / Rollback manual QA 后续清理：
+
+- `[x]` 已按用户反馈完成 Branch Runtime Single-Path Cleanup：产品正文真相只来自 active branch lineage 下可见且 settled 的 writer turns，再精确匹配带 `runtime_turn_id` / `runtime_branch_head_id` 的 accepted `story_segment` artifacts。
+- `[x]` `accepted_segment_ids_json` / `ChapterWorkspace.accepted_segment_ids` 只保留为存储字段、DTO/projection 输出和前端排序投影，不再作为 snapshot / writer context / outline progress / rollback / settlement bridge 的正文 truth 或兜底 truth。
+- `[x]` legacy artifact metadata keys（`turn_id` / `branch_head_id`）不能冒充 runtime ownership；缺少或不匹配 `runtime_turn_id` / `runtime_branch_head_id` 的 story segment 对产品正文读路径不可见，也不能触发 adopted-output settlement。
+- `[x]` output-ref reverse lookup 不进入 runtime product read path；只允许在显式 migration / repair tool path 中使用。
+- `[x]` `从这里分支` 语义收敛为 inclusive anchor：点击第 N 段创建分支，新分支保留第 1..N 段，从第 N+1 段开始写新未来。
+- `[x]` rollback 后被隐藏的 future segment / pending pointer / stale accepted ids 不再进入 writer context、outline progress 或 complete-chapter transition。
+- 验证证据：
+  - `python -m pytest backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_branch_accept_sequence_is_isolated_per_active_branch backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_active_branch_story_segments_ignore_legacy_accepted_list_pollution backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_active_branch_story_segments_do_not_need_legacy_accepted_list backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_graph_state_stale_accepted_ids_do_not_pollute_specialist_context backend\rp\tests\test_story_runtime_identity_service.py::test_legacy_turn_metadata_cannot_settle_or_enter_active_story_truth backend\rp\tests\test_story_runtime_identity_service.py::test_rollback_read_scope_hides_later_materials_and_keeps_checkpoint_anchor backend\rp\tests\test_longform_chapter_runtime_service.py::test_chapter_transition_ignores_rollback_hidden_pending_pointer_and_adoption backend\rp\tests\test_longform_chapter_runtime_service.py::test_complete_chapter_ignores_rollback_hidden_pending_pointer -q`：`8 passed`
+  - `ruff check backend\rp\services\story_session_service.py backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\services\longform_chapter_runtime_service.py backend\rp\tests\test_story_runtime_identity_service.py backend\rp\tests\test_longform_chapter_runtime_service.py`：passed
+  - `mypy --follow-imports=skip --check-untyped-defs backend\rp\services\story_session_service.py backend\rp\services\story_runtime_identity_service.py backend\rp\services\story_turn_domain_service.py backend\rp\services\longform_chapter_runtime_service.py`：passed
+  - `flutter analyze lib\models\story_runtime.dart`：passed
+- 验证限制：
+  - 三个大测试文件合跑在本地 184 秒超时，未取得完整结果；本轮采用聚焦回归测试覆盖 manual QA 暴露的核心风险。
+  - Dart 侧目前只有 `flutter analyze`，尚未补 `acceptedSegmentArtifacts` 排序的 Dart 单元测试。
+
 补充历史 P 模块最终检查证据：
 
 - `RULE_CARD / RULE_STATE_CARD` 不得在未显式请求 sidecar slot 时进入 packet `sidecar_refs`，也不得经 generic `workspace_refs` 泄漏。
@@ -976,3 +993,98 @@ E1 当前工作树的关键新增/收口点：
   - `lib/models/story_runtime.dart`
   - `lib/pages/longform_story_page.dart`
 - 该备注为第一阶段 E1 历史追溯；当前下一刀已切换为第二阶段 `L1 / M1`。
+
+## 11. 下一阶段：Stage V Branch-aware Memory Product Foundation
+
+当前下一阶段进入 `Stage V: Branch-aware Memory Product Foundation`。
+
+阶段文档：
+
+- [story-runtime-branch-aware-memory-product-foundation-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-aware-memory-product-foundation-spec.md)
+- [story-runtime-branch-aware-memory-product-foundation-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-aware-memory-product-foundation-development-spec.md)
+
+阶段目标：
+
+1. 先锁定当前 clean longform + branch baseline，不把旧 session / 旧 outline
+   观察偏差当作新阶段 blocker。
+2. 修复并实现 branch-aware memory resolver，使 writer context、memory
+   inspection、Recall/Retrieval runtime reads 都按 active branch lineage +
+   cutoff turn 取数。
+3. 将 Memory OS 做成可读 + 可编辑产品面：
+   - Core direct edit；
+   - Recall lifecycle action；
+   - Archival Story Evolution / version / reindex；
+   - canonical block/entry envelope；
+   - frontend Memory entrypoint。
+4. 将 writer brainstorm apply 纳入 Memory 可编辑闭环：brainstorm 不直接改
+   block，只产出用户确认后的 summary items，再走 shared mutation /
+   lifecycle / evolution governance。
+5. 收口 post-write memory maintenance 的最小下一轮可依赖能力，避免 writer
+   packet 读取未完成或跨分支的 memory materialization。
+
+执行顺序：
+
+- `[x]` V0. Product Evidence Lock
+- `[x]` V1. Branch-aware Memory Resolver And Writer Context
+- `[ ]` V2. Backend Memory Product Contract
+- `[ ]` V3. Frontend Memory Product Surface
+- `[ ]` V4. Writer Brainstorm Apply
+- `[ ]` V5. Post-write Memory Maintenance Minimum Closure
+- `[ ]` V6. Product Acceptance
+
+V0/V1 implementation evidence:
+
+- V0 locked the clean longform + branch + runtime inspect baseline in
+  `story-runtime-product-acceptance-manual-qa.md`. It classifies old
+  session/old outline artifacts outside Stage V blocker scope and keeps V0 from
+  testing V2/V3/V4/V5 capabilities before they exist.
+- V1 implemented one shared branch-aware read scope for writer context,
+  packet-visible read manifests, Memory inspection/runtime inspect callers, and
+  runtime-owned Recall/RetrievalBroker reads.
+- `BranchVisibilityResolver.build_scope()` / `build_runtime_scope()` now accepts
+  `selected_turn_id`, records it on `RuntimeBranchReadScope`, and treats the
+  selected/runtime turn as the active branch cutoff. Parent lineage still uses
+  the fork turn cutoff, so branch-from-turn `N` keeps pre-fork material and
+  excludes source-branch post-`N` future memory.
+- RetrievalBroker runtime reads no longer fall back to an identity-only weak
+  scope when branch scope resolution fails. They fail closed with zero hits and
+  explicit `runtime_branch_scope_unresolved:*` / branch visibility trace
+  metadata.
+- Writer packet assembly omits branch-sensitive projection sections
+  (`recent_segment_digest`, `current_state_digest`) under multi-branch lineage
+  or rollback-hidden future conditions until branch-scoped projection refresh is
+  available.
+- Runtime product revision identity now rejects legacy artifact metadata
+  fallback keys and requires canonical `runtime_*` ownership metadata.
+
+V1 focused verification:
+
+- `python -m pytest backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_stage_v_alias_filters_memory_source_refs -q --tb=short`:
+  `1 passed`
+- `python -m pytest backend\rp\tests\test_retrieval_broker.py::test_runtime_owned_retrieval_fails_closed_when_branch_scope_unresolved -q --tb=short`:
+  `1 passed`
+- `python -m pytest backend\rp\tests\test_retrieval_broker.py::test_runtime_owned_retrieval_filters_branch_hidden_hits_even_with_branch_filter backend\rp\tests\test_retrieval_broker.py::test_runtime_owned_recall_search_uses_identity_metadata_for_branch_cutoff -q --tb=short`:
+  `2 passed`
+- `python -m pytest backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_stage_v_alias_filters_memory_source_refs backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_hides_rollback_future_but_allows_new_future -q --tb=short`:
+  `3 passed`
+- `python -m pytest backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_branch_writer_packet_omits_source_future_projection_digest backend\rp\tests\test_story_runtime_controller_memory_read_side.py::test_revision_identity_rejects_legacy_branch_turn_metadata -q --tb=short`:
+  `2 passed`
+- `ruff check backend\rp\models\runtime_read_contract.py backend\rp\services\runtime_read_manifest_service.py backend\rp\services\context_orchestration_service.py backend\rp\services\story_runtime_controller.py backend\rp\services\retrieval_broker.py backend\rp\tests\test_memory_lineage_services.py backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py backend\rp\tests\test_story_runtime_controller_memory_read_side.py backend\rp\tests\test_retrieval_broker.py`:
+  passed
+- `mypy --follow-imports=skip --check-untyped-defs backend\rp\models\runtime_read_contract.py backend\rp\services\runtime_read_manifest_service.py backend\rp\services\context_orchestration_service.py backend\rp\services\story_runtime_controller.py backend\rp\services\retrieval_broker.py`:
+  passed
+
+Validation limitation:
+
+- The earlier combined three-file pytest command timed out locally after 184
+  seconds. V1 closure therefore uses focused contract nodeids plus ruff/mypy
+  instead of full related-file pytest completion.
+
+并行规则：
+
+1. V1 是 V2/V3/V4/V5 的前置依赖，默认串行。
+2. V1 通过模块级 check 后，V2 后端合同与 V3 前端产品面可以在 DTO/action
+   surface 冻结后有限并行。
+3. V4 不得早于 V2 的 Core/Recall/Archival action contract。
+4. V5 可与 V3 并行的前提是只触碰 backend maintenance 服务，不改变 Memory UI DTO。
+5. 同时最多两个 subagent，且每个模块内部子切片仍由同一 implement owner 连续负责，模块完成后再做模块级 check。

@@ -85,7 +85,7 @@ runtime_turn_id
 runtime_profile_snapshot_id
 ```
 
-These fields are required because draft/rewrite candidates may exist without being the `visible_output_ref` or `selected_output_ref` of a turn. Branch-aware artifact reads must consult artifact runtime ownership metadata before falling back to output-ref lookup.
+These fields are required because draft/rewrite candidates may exist without being the `visible_output_ref` or `selected_output_ref` of a turn. Runtime product reads must use these explicit `runtime_*` ownership fields as the artifact ownership truth. Output-ref reverse lookup is allowed only inside an explicit migration/repair tool path that marks its repair source; it must not be used by snapshot, writer context, outline progress, rollback, or settlement bridge product read paths.
 
 ### 3. Contracts
 
@@ -148,6 +148,7 @@ These fields are required because draft/rewrite candidates may exist without bei
 
 - Legacy/global reads may remain for admin/debug or old paths temporarily.
 - Boot-bar runtime-owned paths must build `RuntimeBranchReadScope` from `MemoryRuntimeIdentity` before reading data.
+- Legacy artifact metadata keys such as `turn_id` or `branch_head_id` are not runtime ownership keys. A runtime-owned `story_segment` without matching `runtime_turn_id` and `runtime_branch_head_id` is invisible to product story-body reads and cannot trigger accepted-output settlement. If old data must be recovered, do it through an explicit migration/repair flow that writes canonical `runtime_*` metadata before the artifact becomes product-visible.
 - Physical purge can come later after visibility-first behavior is proven.
 
 ### 4. Validation Matrix
@@ -190,11 +191,29 @@ These fields are required because draft/rewrite candidates may exist without bei
   - Core / Projection / Runtime Workspace / Recall / RetrievalBroker runtime reads all respect active visibility;
   - optional `branch_ids` style filters do not bypass active visibility for runtime paths.
 - Snapshot tests cover:
-  - artifact visibility uses `runtime_turn_id` / `runtime_branch_head_id` metadata when output-ref lookup is insufficient;
+  - `story_segment` visibility uses exact `runtime_turn_id` / `runtime_branch_head_id` metadata and fails closed when either key is missing or mismatched;
+  - output-ref reverse lookup is absent from runtime product read paths and reserved for explicit migration/repair;
   - `pending_segment_artifact_id` is cleared from the returned snapshot when the target artifact is hidden.
 - Focused lint/type checks must include the resolver contract and tests.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+artifact_turn_id = artifact.metadata.get("runtime_turn_id") or artifact.metadata.get("turn_id")
+```
+
+This lets legacy metadata masquerade as runtime ownership and can settle or render artifacts that were never repaired into the branch runtime model.
+
+#### Correct
+
+```python
+artifact_turn_id = artifact.metadata.get("runtime_turn_id")
+artifact_branch_id = artifact.metadata.get("runtime_branch_head_id")
+```
+
+Runtime product reads fail closed unless both canonical ownership keys match the visible active-lineage turn.
 
 #### Wrong
 

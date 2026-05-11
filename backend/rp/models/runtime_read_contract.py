@@ -25,6 +25,7 @@ class RuntimeBranchReadScope(BaseModel):
     session_id: str
     active_branch_head_id: str
     active_turn_id: str | None = None
+    selected_turn_id: str | None = None
     visible_branch_head_ids: list[str] = Field(default_factory=list)
     turn_cutoff_by_branch: dict[str, str | None] = Field(default_factory=dict)
     hidden_turn_ids_by_branch: dict[str, list[str]] = Field(default_factory=dict)
@@ -35,12 +36,12 @@ class RuntimeBranchReadScope(BaseModel):
     def _normalize_required_text(cls, value: str, info: ValidationInfo) -> str:
         return _require_non_blank(value, field_name=info.field_name or "value")
 
-    @field_validator("active_turn_id")
+    @field_validator("active_turn_id", "selected_turn_id")
     @classmethod
     def _normalize_optional_turn(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _require_non_blank(value, field_name="active_turn_id")
+        return _require_non_blank(value, field_name="turn_id")
 
     @field_validator("visible_branch_head_ids")
     @classmethod
@@ -97,6 +98,7 @@ class RuntimeReadManifest(BaseModel):
     manifest_id: str
     identity: MemoryRuntimeIdentity
     active_branch_lineage: list[str] = Field(default_factory=list)
+    branch_scope: dict[str, Any] = Field(default_factory=dict)
     runtime_profile_snapshot_id: str
     policy_versions: dict[str, str] = Field(default_factory=dict)
     visible_refs: list[dict[str, Any]] = Field(default_factory=list)

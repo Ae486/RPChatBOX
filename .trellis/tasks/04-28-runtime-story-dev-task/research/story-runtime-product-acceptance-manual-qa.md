@@ -6,6 +6,36 @@
 >
 > Phase S addendum: Product Wiring / Writer Constraint Closure
 
+## Stage V / V0 Product Evidence Lock
+
+这段是 Stage V 进入 Memory Product Foundation 前的 baseline evidence 口径。
+V0 只锁定 clean longform + branch + inspect 的证据范围和失败分流，不验证
+V2/V3/V4/V5 尚未实现的 Memory product/edit/brainstorm/maintenance 能力。
+
+### V0 基线流程
+
+| Step | 操作 | Product evidence | Inspect/debug evidence | Failure classification |
+|---|---|---|---|---|
+| Clean longform | 新建或打开干净 longform session，接受结构化 outline | 当前章节有 accepted structured outline，且不是旧 outline repair 场景 | runtime inspect 能看到 `session_id` / active branch / selected turn / snapshot | old session / old outline artifact 或 frontend/backend reachability gap |
+| First two segments | 连续产出并采用前两段 story segment | 正文只显示已采用段落；候选/未采用 rewrite 不成为正文基础 | writer packet/read manifest 能看到当前 beat、accepted excerpt、runtime identity | branch body truth bug 或 model-following weakness |
+| Branch from earlier segment | 从第一段对应 settled turn 创建分支并切到新 branch | branch 不复制整套 memory；UI/route 显示新 active branch | `branch_read_scope.visible_branch_head_ids` 含 child + parent，parent cutoff 为第一段 turn | branch-aware memory/read-scope missing |
+| Continue on branch | 在新 branch 继续写下一段 | 新段从第一段后继续，不读取 source branch 第二段作为已发生正文 | writer packet/read manifest 不含 source branch post-fork `recent_segment_digest/current_state_digest`，或明确列为 omitted with reason | V1 bug：writer sees source-branch future memory after fork |
+| Runtime inspect | 调 `/runtime/inspect`，必要时带 `branch_head_id` / `turn_id` | inspect 可解释当前 branch/turn/profile，不需要私有 payload spelunking | Workspace/Recall/retrieval/debug reads 使用同一 branch scope；hidden future material 不在默认 reads 中 | V1 bug 或 frontend/backend reachability gap |
+
+### V0 分流规则
+
+| Failure | Classification | Route |
+|---|---|---|
+| branch 后正文基础混入 source branch 第二段 | branch body truth bug | 先修 story body / accepted segment active-branch truth |
+| writer/read manifest/inspect/retrieval 读取 source branch post-fork material | branch-aware memory/read-scope missing / V1 bug | 修 shared branch-aware resolver 和 writer context |
+| 只有旧 session、旧 outline、缺 runtime metadata 的数据坏 | old session / old outline artifact | V0 不作为 blocker；仅在用户重开 migration scope 时处理 |
+| packet 证据正确但模型仍乱写 | model-following weakness | 不阻塞 V1；后续 prompt/constraint 强化 |
+| route 有证据但产品入口不可达 | frontend/backend reachability gap | 归入后续 V3 或 product wiring，不阻塞 V1 backend resolver |
+
+V0 当前结论：证据口径已锁定，未发现阻塞 V1 的 grill 问题。进入 V1 时，
+writer context、Memory inspection、runtime inspect、runtime-owned Recall search、
+RetrievalBroker runtime calls、debug/eval reads 必须共享 branch-aware read scope。
+
 ## Phase S 复测清单
 
 这段是当前 S3 人工复测的主清单。下面保留的 Phase Q 英文清单只作为历史追溯；Q 的结论已经被修正为“后端 foundation acceptance”，不能再代表产品路径通过。

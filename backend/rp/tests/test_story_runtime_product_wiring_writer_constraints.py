@@ -733,6 +733,107 @@ async def test_branch_accept_sequence_is_isolated_per_active_branch(retrieval_se
     }
 
 
+def test_branch_writer_packet_omits_source_future_projection_digest(
+    retrieval_session,
+):
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    _accept_outline(story_session_service, session, chapter)
+    first_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="v1.branch_scope.first",
+        actor="v1.branch_scope.first",
+    )
+    first_segment = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=first_identity,
+        content_text="First shared segment before branch.",
+        target_beat_id="beat_001",
+    )
+    second_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="v1.branch_scope.source_future",
+        actor="v1.branch_scope.source_future",
+    )
+    second_segment = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=second_identity,
+        content_text="Source branch future segment must not leak.",
+        target_beat_id="beat_002",
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=LongformChapterPhase.SEGMENT_DRAFTING,
+        accepted_segment_ids=[first_segment.artifact_id, second_segment.artifact_id],
+        builder_snapshot_json={
+            **dict(chapter.builder_snapshot_json or {}),
+            "recent_segment_digest": ["Source branch future segment must not leak."],
+            "current_state_digest": ["State after the source branch future."],
+        },
+    )
+    identity_service.create_branch_from_turn(
+        session_id=session.session_id,
+        origin_turn_id=first_identity.turn_id,
+        actor="v1.branch_scope.create_branch",
+        branch_name="from-first",
+    )
+    branch_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="v1.branch_scope.child_writer",
+        actor="v1.branch_scope.child_writer",
+    )
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    )
+
+    packet = turn_domain_service.build_packet(
+        session_id=session.session_id,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            writer_instruction="Continue on the child branch.",
+        ),
+        specialist_bundle=SpecialistResultBundle(),
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        runtime_identity=branch_identity,
+    )
+
+    labels = [section["label"] for section in packet.context_sections]
+    assert "recent_segment_digest" not in labels
+    assert "current_state_digest" not in labels
+    joined_packet = "\n".join(
+        item
+        for section in packet.context_sections
+        for item in section.get("items", [])
+    )
+    assert "Source branch future segment must not leak." not in joined_packet
+    assert "State after the source branch future." not in joined_packet
+    omitted = packet.metadata["branch_visibility_omitted_projection_sections"]
+    assert {item["label"] for item in omitted} == {
+        "recent_segment_digest",
+        "current_state_digest",
+    }
+    manifest = packet.metadata["runtime_read_manifest"]
+    assert second_identity.branch_head_id in manifest["active_branch_lineage"]
+    assert (
+        manifest["branch_scope"]["turn_cutoff_by_branch"][
+            second_identity.branch_head_id
+        ]
+        == first_identity.turn_id
+    )
+
+
 def test_active_branch_story_segments_ignore_legacy_accepted_list_pollution(
     retrieval_session,
 ):

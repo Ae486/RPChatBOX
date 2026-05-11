@@ -16,6 +16,8 @@ SetupAgent has grown enough real runtime pieces to be useful, but its module arc
 - prompt guidance, tool provider registration, runtime allowlist, policy, and tests can drift from each other
 - current code has many strong local modules, but no single architecture document defines the authoritative contract spine
 
+User clarification for this task: the original SetupAgent was already designed with Claude Code as one important inspiration. The current gap is not lack of Claude Code influence. The gap is engineering architecture: layering is too implicit, module ownership is unclear, and maintainability suffers when one conceptual change, especially a tool-related change, requires edits across multiple files and concerns.
+
 This task reframes the old narrow bugfix into a SetupAgent module architecture improvement task.
 
 ## 2. Goal
@@ -30,10 +32,12 @@ SetupAgentSession
       -> ModelGateway
       -> OutputInspector
       -> SetupToolRuntime
-      -> DecisionPolicy
+      -> turn transition rules
       -> SetupEventSink
       -> SetupRuntimeStateStore
 ```
+
+`turn transition rules` are small rules owned by `SetupTurnLoop`, not a larger standalone `DecisionPolicy` layer. This correction prevents the architecture work from becoming another patch-shaped policy object.
 
 The architecture must make SetupAgent reliable enough to serve as the reference creative-agent loop for setup and later RP runtime agents.
 
@@ -43,6 +47,7 @@ The architecture must make SetupAgent reliable enough to serve as the reference 
 | --- | --- | --- |
 | `H:/Agent-Learn/pi-mono-python` and `docs/research/pi-mono-main` | Learn the optimal minimal agent layering: session, state, events, loop, model stream, tool execution, tool result, continue/stop | Do not copy coding-agent-specific features or replace the current runtime stack |
 | `docs/research/claude-code-from-scratch-main` and `docs/research/how-claude-code-works-main/docs` | Learn mature module/function design: tool lifecycle, permissions, context compression, memory/skills, subagents, transcript and output separation, repair and retry behavior | Do not transfer file-editing CLI assumptions directly into a creative setup agent |
+| OpenAI / Anthropic / LangGraph / LangChain primary docs and local source evidence | Learn mature provider, tool-calling, tracing, eval, structured-output, graph/checkpoint, and agent-loop implementation patterns when they are relevant to this task | Do not rely on memory, blog paraphrase, or non-primary engineering articles for concrete claims; use official/current primary sources or local source evidence before writing specific architecture decisions |
 | Current SetupAgent specs and code | Requirement truth for project behavior, product contracts, setup drafts, review/commit/readiness, typed SSE, runtime cognition, context governance, and stage lifecycle | Do not let external references override frozen project contracts silently |
 
 ## 4. Authority Order
@@ -51,10 +56,15 @@ When sources disagree, use this order:
 
 1. Current user decisions in this task.
 2. Active executable setup specs under `.trellis/spec/backend/`.
-3. Current SetupAgent implementation and tests as migration truth.
+3. Current SetupAgent implementation and tests as requirement/migration evidence, not automatic architecture authority.
 4. Old `05-09` task docs as investigation input, not final authority.
 5. Claude Code as mature function/module reference.
 6. pi-mono as minimal architecture layering reference.
+7. OpenAI / Anthropic / LangGraph / LangChain primary docs or local source evidence for provider, tracing, eval, structured output, graph, and agent-loop mechanisms.
+
+Reference adoption rule: if a concern is not a current-product special requirement and pi-mono, Claude Code, or other mature primary references point to a clear implementation pattern, prefer learning/adapting that mature pattern over preserving the current accidental SetupAgent shape. Current code proves the project needs a capability; it does not prove the current implementation is the right module boundary.
+
+External-reference rule: A0 does not require network research. If local task docs, current code/specs, `pi-mono`, and local Claude Code references answer a question, prefer those sources. Use network only when a future implementation spec depends on concrete provider/framework behavior that local evidence cannot answer, and then cite primary/current docs rather than secondary articles.
 
 Any change that would alter `SetupWorkspace`, review/commit/readiness, typed SSE event taxonomy, stage handoff truth, or setup draft write semantics must become an explicit spec decision before implementation.
 
@@ -97,21 +107,29 @@ A0 is complete only when these planning documents exist and agree with each othe
    - pi-mono minimal layering lessons
    - Claude Code mature module/function lessons
    - what this project should not copy
-4. `research/setup-agent-target-architecture-hld.md`
+4. `research/setup-agent-architecture-grill-decisions.md`
+   - persisted `$grill-me` architecture decisions
+   - confirmed boundaries for runtime core vs setup shell, CapabilityPlan, ToolProvider, OutputInspector, EventSink, and TurnLoop
+   - corrected direction that A1 should rebuild the SetupTurnLoop state-machine boundary instead of adding another patch policy layer
+5. `research/setup-agent-architecture-grounding-matrix.md`
+   - current problem -> reference design -> project landing matrix
+   - proves target HLD is grounded in current SetupAgent code and pi-mono / Claude Code references
+   - identifies when future `$grill-me` or primary external docs are required
+6. `research/setup-agent-target-architecture-hld.md`
    - target architecture
    - module boundaries
    - data/control/event flow
-5. `research/setup-agent-contract-spine-spec.md`
+7. `research/setup-agent-contract-spine-spec.md`
    - loop, context, capability, model gateway, output inspector, tool runtime, decision, event, and state contracts
-6. `research/setup-agent-implementation-slices.md`
+8. `research/setup-agent-implementation-slices.md`
    - phased rollout from A1 onward
    - owned files, forbidden files, tests, and check cadence per slice
-7. `research/setup-agent-test-eval-plan.md`
+9. `research/setup-agent-test-eval-plan.md`
    - bad-path tests
    - provider/gateway tests
    - typed SSE tests
    - opt-in live model smoke and eval plan
-8. `research/setup-agent-question-queue.md`
+10. `research/setup-agent-question-queue.md`
    - only real product/design questions that cannot be answered from code/docs/reference projects
 
 ## 8. Implementation Slice Direction
@@ -143,6 +161,13 @@ Each slice must be coherent enough to verify end-to-end, then run module-level `
 - All unresolved product/design questions are either answered from evidence or placed into the question queue for one-at-a-time `$grill-me`.
 - No backend/frontend implementation code is changed during A0 planning.
 
-## 10. Immediate Next Step
+## 10. Current A0 Status
 
-Create `research/setup-agent-current-architecture-audit.md` next. It should start from current SetupAgent docs and code, not from external references, because the current project defines the real requirements.
+A0 planning docs are now expected to be complete when all files listed in section 7 exist and are registered in `implement.jsonl` / `check.jsonl`.
+
+Before backend/frontend implementation starts:
+
+1. validate the task context
+2. run a docs-slice `trellis-check`
+3. confirm no blocking `$grill-me` item remains in `research/setup-agent-question-queue.md`
+4. start A1 from `research/setup-agent-implementation-slices.md`

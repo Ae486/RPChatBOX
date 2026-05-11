@@ -9,7 +9,11 @@ from models.provider_registry import ProviderRegistryEntry
 from rp.eval.case_loader import load_case
 from rp.eval.replay import load_replay
 from rp.eval.runner import EvalRunner
-from rp.tests.test_eval_setup_cognitive_cases import _TruthWriteAskUserLLMService
+from rp.tests.test_eval_setup_cognitive_cases import (
+    _CharacterDesignSkillPackFacilitatorLLMService,
+    _TruthWriteAskUserLLMService,
+)
+from rp.eval.graders.judge_registry import get_judge_rubric, list_judge_rubrics
 from services.model_registry import get_model_registry_service
 from services.provider_registry import get_provider_registry_service
 import services.model_registry as model_registry_module
@@ -371,3 +375,167 @@ async def test_eval_runner_replay_persists_subjective_hook_artifacts(
     assert judge_artifact["payload"]["hook_id"] == "retrieval_query_quality"
     assert judge_artifact["payload"]["request"]["rubric"]["ref"] == "retrieval/query-quality/v1"
     assert judge_artifact["payload"]["response"]["score"] == 0.62
+
+
+# -----------------------------------------------------------------------------
+# Stage 3: SkillPack rubric registration + end-to-end mock-judge wiring
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "rubric_ref",
+    [
+        "setup/persona-alignment/v1",
+        "setup/forbidden-compliance/v1",
+        "setup/facilitation-depth/v1",
+    ],
+)
+def test_skill_pack_rubrics_are_registered_with_expected_metadata(rubric_ref):
+    rubric = get_judge_rubric(rubric_ref)
+    assert rubric is not None, f"rubric {rubric_ref} must be registered"
+    assert rubric.judge_family == "llm_judge"
+    assert rubric.prompt_version == "llm-judge/v2"
+    assert rubric.response_schema_version == "judge-response/v2"
+    assert rubric.metadata.get("scope") == "setup"
+    assert rubric.metadata.get("target_type") == "assistant_text"
+    # anchors must be non-empty so judge prompts have concrete band guidance
+    assert rubric.pass_anchor.strip()
+    assert rubric.warn_anchor.strip()
+    assert rubric.fail_anchor.strip()
+    # criteria must be a non-empty list so the rubric is steerable
+    assert rubric.criteria, "rubric must declare at least one criterion"
+
+
+def test_skill_pack_rubrics_appear_in_registry_listing():
+    listed_refs = {item.rubric_ref for item in list_judge_rubrics()}
+    assert {
+        "setup/persona-alignment/v1",
+        "setup/forbidden-compliance/v1",
+        "setup/facilitation-depth/v1",
+    }.issubset(listed_refs)
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_executes_skill_pack_persona_alignment_judge(
+    retrieval_session,
+    monkeypatch,
+):
+    """End-to-end mock-judge wiring on the SkillPack D-pilot case.
+
+    Stage 3 acceptance: the persona-alignment rubric flows through case →
+    subjective_hooks → grader → mock judge and produces a structured score.
+    Real-LLM consistency is a separate Stretch goal.
+    """
+
+    _seed_judge_model_registry()
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
+    )
+    monkeypatch.setattr(
+        "rp.services.story_llm_gateway.get_litellm_service",
+        lambda: _FakeJudgeLLMService(
+            response_payload={
+                "status": "pass",
+                "label": "persona-aligned",
+                "score": 0.92,
+                "explanation": (
+                    "Speaks as a senior dramatist, probes motivation.real and "
+                    "world_fit, no AI-assistant framing."
+                ),
+            }
+        ),
+    )
+
+    case = load_case(
+        _case_path(
+            "setup",
+            "skill_pack",
+            "character_design",
+            "pack_loaded_on_stage.v1.json",
+        )
+    )
+    case.input.env_overrides.update(
+        {
+            "enable_subjective_judges": True,
+            "judge_model_id": "model-eval",
+            "judge_provider_id": "provider-eval",
+        }
+    )
+    result = await EvalRunner(retrieval_session).run_case(case)
+
+    subjective_scores = [score for score in result.scores if score.kind == "llm"]
+    assert len(subjective_scores) == 1
+    score = subjective_scores[0]
+    assert score.metadata["rubric_ref"] == "setup/persona-alignment/v1"
+    assert score.metadata["hook_id"] == "character_design_persona_alignment"
+    assert score.status == "pass"
+    assert score.value == 0.92
+    assert score.metadata["judge_prompt_version"] == "llm-judge/v2"
+    assert score.metadata["judge_response_schema_version"] == "judge-response/v2"
+    assert result.report["subjective_hook_summary"]["status_counts"] == {"pass": 1}
+    assert result.report["subjective_hook_summary"]["rubric_refs"] == [
+        "setup/persona-alignment/v1"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("judge_status", "judge_score", "expected_band"),
+    [
+        ("pass", 0.95, "pass"),
+        ("pass", 0.88, "pass"),
+        ("pass", 0.81, "pass"),
+        ("fail", 0.20, "fail"),
+        ("fail", 0.05, "fail"),
+    ],
+)
+async def test_skill_pack_persona_alignment_score_band_assignment(
+    retrieval_session,
+    monkeypatch,
+    judge_status,
+    judge_score,
+    expected_band,
+):
+    """MVP rubric acceptance: 3 positive + 2 negative scripted judge payloads
+    must each map to the correct score band (pass / fail). Stretch goal
+    (real-LLM consistency ≥ 0.85) is tracked separately.
+    """
+
+    _seed_judge_model_registry()
+    monkeypatch.setattr(
+        "rp.services.setup_agent_execution_service.get_litellm_service",
+        lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
+    )
+    monkeypatch.setattr(
+        "rp.services.story_llm_gateway.get_litellm_service",
+        lambda: _FakeJudgeLLMService(
+            response_payload={
+                "status": judge_status,
+                "label": judge_status,
+                "score": judge_score,
+                "explanation": "scripted band-assignment test",
+            }
+        ),
+    )
+
+    case = load_case(
+        _case_path(
+            "setup",
+            "skill_pack",
+            "character_design",
+            "pack_loaded_on_stage.v1.json",
+        )
+    )
+    case.input.env_overrides.update(
+        {
+            "enable_subjective_judges": True,
+            "judge_model_id": "model-eval",
+            "judge_provider_id": "provider-eval",
+        }
+    )
+    result = await EvalRunner(retrieval_session).run_case(case)
+    subjective_scores = [score for score in result.scores if score.kind == "llm"]
+    assert len(subjective_scores) == 1
+    score = subjective_scores[0]
+    assert score.metadata["judge_score_band"] == expected_band

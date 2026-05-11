@@ -14,6 +14,7 @@
     "request": {
       "workspace_id": "case-truth-write-replace-missing-001",
       "target_step": "foundation",
+      "target_stage": "character_design",
       "user_prompt": "Replace the missing foundation entry if it already exists.",
       "history": [],
       "model_id": "model-eval",
