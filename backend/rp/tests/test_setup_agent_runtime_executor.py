@@ -13,6 +13,7 @@ from rp.agent_runtime.contracts import (
     RuntimeToolCall,
     RuntimeToolResult,
 )
+from rp.agent_runtime.events import RuntimeEvent, TypedSseEventAdapter
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor, _RuntimeRunDriver
 from rp.agent_runtime.state import RpAgentRunState
 from rp.agent_runtime.tools import RuntimeToolExecutor
@@ -80,7 +81,9 @@ def _turn_input(
         user_visible_request=user_prompt,
         conversation_messages=list(conversation_messages or []),
         context_bundle=runtime_context,
-        tool_scope=tool_scope or ["setup.patch.story_config"],
+        tool_scope=(
+            tool_scope if tool_scope is not None else ["setup.patch.story_config"]
+        ),
         metadata={
             "model_name": "gpt-4o-mini",
             "provider": {
@@ -104,6 +107,16 @@ def _profile() -> RuntimeProfile:
     )
 
 
+def test_runtime_executor_respects_explicit_empty_tool_scope():
+    driver = _RuntimeRunDriver(
+        llm_service=object(),
+        profile=_profile(),
+        tool_executor=_FakeToolExecutor(),
+    )
+
+    assert driver._visible_tool_names(_turn_input(tool_scope=[])) == []
+
+
 def _compact_exact_detail_context() -> dict[str, Any]:
     return {
         "compact_summary": {
@@ -117,21 +130,6 @@ def _compact_exact_detail_context() -> dict[str, Any]:
                     "reason": "Exact magic-law detail lives in the draft.",
                 }
             ],
-        },
-        "context_report": {
-            "context_profile": "compact",
-            "profile_reasons": ["history_count_threshold"],
-            "raw_history_count": 12,
-            "raw_history_chars": 4800,
-            "user_edit_delta_count": 0,
-            "prior_stage_handoff_count": 1,
-            "raw_history_limit": 4,
-            "kept_history_count": 4,
-            "compacted_history_count": 8,
-            "retained_tool_outcome_count": 0,
-            "summary_strategy": "deterministic_prefix_summary",
-            "summary_action": "rebuilt",
-            "summary_line_count": 1,
         },
     }
 
@@ -239,6 +237,132 @@ class _FakeToolExecutor(RuntimeToolExecutor):
             content_text='{"success": true}',
             error_code=None,
         )
+
+
+def _driver_for_inspection() -> _RuntimeRunDriver:
+    return _RuntimeRunDriver(
+        llm_service=object(),
+        tool_executor=_FakeToolExecutor(),
+        profile=_profile(),
+    )
+
+
+def _inspection_state(message: dict[str, Any]) -> RpAgentRunState:
+    driver = _driver_for_inspection()
+    state = driver._initial_state(_turn_input(tool_scope=["setup.patch.story_config"]))
+    state["latest_response"] = {"message": message}
+    return state
+
+
+def test_output_inspector_classifies_pseudo_tool_text_without_public_text():
+    driver = _driver_for_inspection()
+    state = _inspection_state(
+        {
+            "role": "assistant",
+            "content": (
+                "tool_code print(default_api.rp_setup__setup.patch.story_config("
+                '{"patch":{"style_rules":["tight"]}}))'
+            ),
+        }
+    )
+
+    update = driver._inspect_model_output(state)
+
+    assert update["assistant_text"] == ""
+    assert update["pending_tool_calls"] == []
+    assert update["next_action"] == "reflect_if_needed"
+    assert update["output_inspection"]["classification"] == "pseudo_tool_text"
+    assert update["continue_reason"] == "completion_guard_retry"
+
+
+def test_output_inspector_routes_repeated_invalid_tool_output_to_active_taxonomy():
+    driver = _driver_for_inspection()
+    state = _inspection_state(
+        {
+            "role": "assistant",
+            "content": (
+                "tool_code print(default_api.rp_setup__setup.patch.story_config("
+                '{"patch":{"style_rules":["tight"]}}))'
+            ),
+        }
+    )
+    state["pseudo_tool_retry_count"] = 1
+
+    update = driver._inspect_model_output(state)
+
+    assert update["status"] == "failed"
+    assert update["finish_reason"] == "repair_obligation_unfulfilled"
+    assert update["error"]["type"] == "repair_obligation_unfulfilled"
+    assert update["output_inspection"]["classification"] == "pseudo_tool_text"
+
+
+def test_output_inspector_mixed_text_and_tool_call_keeps_text_private():
+    driver = _driver_for_inspection()
+    state = _inspection_state(
+        {
+            "role": "assistant",
+            "content": "tool_code print(default_api.rp_setup__setup.patch.story_config(...))",
+            "tool_calls": [
+                {
+                    "id": "call_patch",
+                    "function": {
+                        "name": "rp_setup__setup.patch.story_config",
+                        "arguments": '{"workspace_id":"workspace-1","patch":{"style_rules":["tight"]}}',
+                    },
+                }
+            ],
+        }
+    )
+
+    update = driver._inspect_model_output(state)
+
+    assert update["assistant_text"] == ""
+    assert update["next_action"] == "execute_tools"
+    assert update["continue_reason"] == "tool_call_batch_pending"
+    assert update["output_inspection"]["classification"] == "mixed_text_and_tool_call"
+    assert update["pending_tool_calls"][0]["tool_name"] == (
+        "rp_setup__setup.patch.story_config"
+    )
+
+
+def test_output_inspector_malformed_tool_call_enters_repair_route():
+    driver = _driver_for_inspection()
+    state = _inspection_state(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_bad",
+                    "function": {
+                        "name": "rp_setup__setup.patch.story_config",
+                        "arguments": "{not valid json",
+                    },
+                }
+            ],
+        }
+    )
+
+    update = driver._inspect_model_output(state)
+
+    assert update["assistant_text"] == ""
+    assert update["pending_tool_calls"] == []
+    assert update["next_action"] == "reflect_if_needed"
+    assert update["output_inspection"]["classification"] == "malformed_tool_call"
+    assert update["completion_guard"]["reason"] == "malformed_tool_call_emitted"
+
+
+def test_output_inspector_empty_output_cannot_finalize_success():
+    driver = _driver_for_inspection()
+    state = _inspection_state({"role": "assistant", "content": ""})
+
+    update = driver._inspect_model_output(state)
+
+    assert update["assistant_text"] == ""
+    assert update["next_action"] == "reflect_if_needed"
+    assert update["continue_reason"] == "completion_guard_retry"
+    assert update["output_inspection"]["classification"] == "empty_output"
+    assert update["completion_guard"]["reason"] == "assistant_output_empty"
 
 
 class _FakeLangfuseObservation:
@@ -1042,6 +1166,37 @@ class _StreamUsageLLM:
         yield 'data: {"type":"done"}\n\n'
 
 
+class _StreamProviderErrorLLM:
+    async def chat_completion_stream(self, request):
+        yield 'data: {"type":"text_delta","delta":"This must stay private."}\n\n'
+        yield (
+            'data: {"type":"error","error":{"message":"provider stack trace: token leaked","type":"ProviderSchemaError","raw_provider_delta":{"debug":true}}}\n\n'
+        )
+
+
+class _StreamMalformedPayloadLLM:
+    async def chat_completion_stream(self, request):
+        yield 'data: {"type":"text_delta","delta":"Buffered before parse failure."}\n\n'
+        yield 'data: {"type":"text_delta","delta":\n\n'
+
+
+class _StreamSafeProviderErrorLLM:
+    async def chat_completion_stream(self, request):
+        yield 'data: {"type":"error","error":{"message":"upstream timeout","type":"TimeoutError"}}\n\n'
+
+
+class _StreamPrivateDeltaThenTextLLM:
+    async def chat_completion_stream(self, request):
+        yield 'data: {"type":"raw_provider_delta","delta":"private-token","debug":{"trace":"hidden"}}\n\n'
+        yield 'data: {"type":"text_delta","delta":"Public answer."}\n\n'
+        yield 'data: {"type":"done"}\n\n'
+
+
+class _ProviderExceptionLLM:
+    async def chat_completion(self, request):
+        raise RuntimeError("provider schema explosion")
+
+
 class _PseudoToolCodeTextLLM:
     def __init__(self) -> None:
         self.round = 0
@@ -1106,68 +1261,82 @@ async def test_runtime_executor_places_runtime_overlay_after_system_prompt():
     llm = _RecordingTextOnlyLLM()
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
-    result = await executor.run(
-        _turn_input(
-            context_bundle={
-                "cognitive_state_summary": {
-                    "current_step": "story_config",
-                    "invalidated": False,
-                    "invalidation_reasons": [],
-                    "open_questions": ["Which preset should be used?"],
-                },
-                "working_digest": {
-                    "current_goal": "Clarify setup",
-                    "next_focus": "Lock runtime preset",
-                    "open_questions": ["Which preset should be used?"],
-                    "draft_refs": ["draft:story_config"],
-                    "commit_blockers": [],
-                },
-                "tool_outcomes": [
+    turn_input = _turn_input(
+        conversation_messages=[
+            {"role": "user", "content": "governed history user"},
+            {"role": "assistant", "content": "governed history assistant"},
+        ],
+        context_bundle={
+            "cognitive_state_summary": {
+                "current_step": "story_config",
+                "invalidated": False,
+                "invalidation_reasons": [],
+                "open_questions": ["Which preset should be used?"],
+            },
+            "working_digest": {
+                "current_goal": "Clarify setup",
+                "next_focus": "Lock runtime preset",
+                "open_questions": ["Which preset should be used?"],
+                "draft_refs": ["draft:story_config"],
+                "commit_blockers": [],
+            },
+            "tool_outcomes": [
+                {
+                    "tool_name": "rp_setup__setup.read.step_context",
+                    "success": True,
+                    "summary": "Read current story config draft",
+                    "updated_refs": ["draft:story_config"],
+                    "relevance": "read",
+                    "recorded_at": "2026-04-28T00:00:00Z",
+                }
+            ],
+            "compact_summary": {
+                "source_fingerprint": "fp-1",
+                "source_message_count": 4,
+                "summary_lines": ["Earlier draft discussion was compacted."],
+                "open_threads": ["Need exact preset name."],
+                "draft_refs": ["draft:story_config"],
+                "recovery_hints": [
                     {
-                        "tool_name": "rp_setup__setup.read.step_context",
-                        "success": True,
-                        "summary": "Read current story config draft",
-                        "updated_refs": ["draft:story_config"],
-                        "relevance": "read",
-                        "recorded_at": "2026-04-28T00:00:00Z",
+                        "ref": "draft:story_config",
+                        "reason": "Need exact draft detail.",
                     }
                 ],
-                "compact_summary": {
-                    "source_fingerprint": "fp-1",
-                    "source_message_count": 4,
-                    "summary_lines": ["Earlier draft discussion was compacted."],
-                    "open_threads": ["Need exact preset name."],
-                    "draft_refs": ["draft:story_config"],
-                    "recovery_hints": [
-                        {
-                            "ref": "draft:story_config",
-                            "reason": "Need exact draft detail.",
-                        }
-                    ],
-                },
-                "context_report": {
-                    "context_profile": "compact",
-                    "profile_reasons": [
-                        "history_count_threshold",
-                        "user_edit_threshold",
-                    ],
-                    "raw_history_count": 10,
-                    "raw_history_chars": 3200,
-                    "estimated_input_tokens": 900,
-                    "previous_prompt_tokens": 1200,
-                    "previous_total_tokens": 1600,
-                    "user_edit_delta_count": 3,
-                    "prior_stage_handoff_count": 1,
-                    "raw_history_limit": 4,
-                    "kept_history_count": 4,
-                    "compacted_history_count": 6,
-                    "retained_tool_outcome_count": 1,
-                    "summary_strategy": "deterministic_prefix_summary",
-                    "summary_action": "rebuilt",
-                    "summary_line_count": 1,
-                },
-            }
-        ),
+            },
+        },
+    )
+    turn_input.metadata["context_report"] = {
+        "context_profile": "compact",
+        "profile_reasons": [
+            "history_count_threshold",
+            "user_edit_threshold",
+        ],
+        "raw_history_count": 10,
+        "raw_history_chars": 3200,
+        "estimated_input_tokens": 900,
+        "previous_prompt_tokens": 1200,
+        "previous_total_tokens": 1600,
+        "user_edit_delta_count": 3,
+        "prior_stage_handoff_count": 1,
+        "raw_history_limit": 4,
+        "kept_history_count": 4,
+        "compacted_history_count": 6,
+        "retained_tool_outcome_count": 1,
+        "summary_strategy": "deterministic_prefix_summary",
+        "summary_action": "rebuilt",
+        "summary_line_count": 1,
+    }
+    turn_input.metadata["context_pipeline"] = {
+        "final_request_message_order": [
+            "stable_system_prompt",
+            "runtime_overlay_system_message",
+            "governed_history",
+            "current_user",
+        ]
+    }
+
+    result = await executor.run(
+        turn_input,
         _profile(),
         llm_service=llm,
     )
@@ -1183,9 +1352,21 @@ async def test_runtime_executor_places_runtime_overlay_after_system_prompt():
     assert "setup.read.draft_refs" in messages[1].content
     assert "context_packet" not in messages[1].content
     assert "context_report" not in messages[1].content
+    assert messages[2].role == "user"
+    assert messages[2].content == "governed history user"
+    assert messages[3].role == "assistant"
+    assert messages[3].content == "governed history assistant"
     assert messages[-1].role == "user"
     assert messages[-1].content == "Please help with setup."
     assert result.structured_payload["context_report"]["context_profile"] == "compact"
+    assert result.structured_payload["context_pipeline"][
+        "final_request_message_order"
+    ] == [
+        "stable_system_prompt",
+        "runtime_overlay_system_message",
+        "governed_history",
+        "current_user",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1477,6 +1658,32 @@ async def test_runtime_executor_removes_inherited_strict_for_non_strict_models()
 
 
 @pytest.mark.asyncio
+async def test_runtime_executor_uses_capability_plan_for_truth_write_schema_mode():
+    tool_executor = _FakeToolExecutor()
+    llm = _RecordingTextOnlyLLM()
+    driver = _RuntimeRunDriver(
+        llm_service=llm,
+        tool_executor=tool_executor,
+        profile=_profile(),
+    )
+    turn_input = _turn_input(tool_scope=["setup.truth.write"])
+    turn_input.metadata["capability_plan"] = {
+        "model_schema_modes": {"setup.truth.write": "provider_default"}
+    }
+    inherited_tool = _tool_definition("rp_setup__setup.truth.write")
+    inherited_parameters = inherited_tool["function"]["parameters"]
+
+    tools = driver._model_facing_tool_definitions(
+        [inherited_tool],
+        turn_input=turn_input,
+    )
+
+    function = tools[0]["function"]
+    assert function["parameters"] == inherited_parameters
+    assert function["description"] == "test tool"
+
+
+@pytest.mark.asyncio
 async def test_runtime_executor_filters_pseudo_tool_code_text_from_final_answer():
     tool_executor = _FakeToolExecutor()
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
@@ -1500,13 +1707,17 @@ async def test_runtime_executor_filters_pseudo_tool_code_text_from_final_answer(
     )
 
     assert result.status == "failed"
-    assert result.finish_reason == "invalid_tool_output_retry_budget_exhausted"
+    assert result.finish_reason == "repair_obligation_unfulfilled"
     assert result.assistant_text == ""
     assert result.tool_invocations == []
     assert "pseudo_tool_call_text_filtered" in result.warnings
     assert (
         result.structured_payload["completion_guard"]["reason"]
         == "pseudo_tool_call_text_emitted"
+    )
+    assert (
+        result.structured_payload["output_inspection"]["classification"]
+        == "pseudo_tool_text"
     )
 
 
@@ -1541,10 +1752,7 @@ async def test_runtime_executor_stream_filters_pseudo_tool_code_text_from_typed_
     assert payloads[-2]["type"] == "error"
     assert payloads[-1] == {"type": "done"}
     assert executor.last_result is not None
-    assert (
-        executor.last_result.finish_reason
-        == "invalid_tool_output_retry_budget_exhausted"
-    )
+    assert executor.last_result.finish_reason == "repair_obligation_unfulfilled"
 
 
 @pytest.mark.asyncio
@@ -2158,13 +2366,192 @@ async def test_runtime_executor_stream_preserves_typed_event_order():
 
     payloads = [json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: ")]
     assert [payload["type"] for payload in payloads] == [
-        "text_delta",
         "tool_call",
         "tool_started",
         "tool_result",
         "text_delta",
         "done",
     ]
+    assert all(payload.get("delta") != "Checking draft." for payload in payloads)
+
+
+def test_typed_sse_event_adapter_filters_private_provider_fields():
+    event = RuntimeEvent(
+        type="text_delta",
+        run_id="run-1",
+        sequence_no=1,
+        payload={
+            "delta": "public",
+            "raw_provider_delta": {"token": "hidden"},
+            "debug": {"trace": "hidden"},
+        },
+    )
+    private_event = RuntimeEvent(
+        type="raw_provider_delta",
+        run_id="run-1",
+        sequence_no=2,
+        payload={"delta": "hidden"},
+    )
+    thinking_event = RuntimeEvent(
+        type="thinking_delta",
+        run_id="run-1",
+        sequence_no=3,
+        payload={"delta": "thinking", "raw_provider_delta": {"token": "hidden"}},
+    )
+
+    assert TypedSseEventAdapter.to_payload(event) == {
+        "type": "text_delta",
+        "delta": "public",
+    }
+    assert TypedSseEventAdapter.to_payload(thinking_event) == {
+        "type": "thinking_delta",
+        "delta": "thinking",
+    }
+    assert TypedSseEventAdapter.to_payload(private_event) is None
+    assert TypedSseEventAdapter.to_sse_line(private_event) is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_stream_keeps_raw_provider_deltas_private():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    chunks = []
+    async for chunk in executor.run_stream(
+        _turn_input(stream=True, tool_scope=[]),
+        _profile(),
+        llm_service=_StreamPrivateDeltaThenTextLLM(),
+    ):
+        chunks.append(chunk)
+
+    payloads = [json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: ")]
+    assert [payload["type"] for payload in payloads] == ["text_delta", "done"]
+    assert payloads[0]["delta"] == "Public answer."
+    assert all("raw_provider_delta" not in payload for payload in payloads)
+    assert executor.last_result is not None
+    diagnostics = executor.last_result.structured_payload[
+        "model_gateway_diagnostics"
+    ]
+    assert diagnostics["failure_layer"] == "model_gateway"
+    assert (
+        diagnostics["private_details"]["private_events"][0]["type"]
+        == "raw_provider_delta"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_stream_provider_error_is_gateway_failure_private_diagnostics():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    chunks = []
+    async for chunk in executor.run_stream(
+        _turn_input(stream=True, tool_scope=[]),
+        _profile(),
+        llm_service=_StreamProviderErrorLLM(),
+    ):
+        chunks.append(chunk)
+
+    payloads = [json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: ")]
+    assert [payload["type"] for payload in payloads] == ["error", "done"]
+    public_error = payloads[0]["error"]
+    assert public_error == {
+        "message": "Model provider request failed.",
+        "type": "model_gateway_failed",
+        "code": "provider_stream_error",
+        "failure_layer": "model_gateway",
+    }
+    assert "provider stack trace" not in json.dumps(payloads, ensure_ascii=False)
+    assert "This must stay private." not in json.dumps(payloads, ensure_ascii=False)
+    assert executor.last_result is not None
+    assert executor.last_result.status == "failed"
+    assert executor.last_result.finish_reason == "upstream_error"
+    diagnostics = executor.last_result.structured_payload[
+        "model_gateway_diagnostics"
+    ]
+    assert diagnostics["failure_layer"] == "model_gateway"
+    assert diagnostics["failure_kind"] == "provider_stream_error"
+    assert "provider stack trace" in diagnostics["message"]
+    assert (
+        executor.last_result.structured_payload["output_inspection"]["classification"]
+        == "provider_schema_error"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_stream_parse_error_is_gateway_failure():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    chunks = []
+    async for chunk in executor.run_stream(
+        _turn_input(stream=True, tool_scope=[]),
+        _profile(),
+        llm_service=_StreamMalformedPayloadLLM(),
+    ):
+        chunks.append(chunk)
+
+    payloads = [json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: ")]
+    assert [payload["type"] for payload in payloads] == ["error", "done"]
+    public_error = payloads[0]["error"]
+    assert public_error["type"] == "model_gateway_failed"
+    assert public_error["code"] == "provider_stream_parse_error"
+    assert public_error["failure_layer"] == "model_gateway"
+    assert "Buffered before parse failure." not in json.dumps(
+        payloads, ensure_ascii=False
+    )
+    assert executor.last_result is not None
+    assert executor.last_result.status == "failed"
+    assert executor.last_result.finish_reason == "upstream_error"
+    diagnostics = executor.last_result.structured_payload[
+        "model_gateway_diagnostics"
+    ]
+    assert diagnostics["failure_kind"] == "provider_stream_parse_error"
+    assert (
+        executor.last_result.structured_payload["output_inspection"]["classification"]
+        == "provider_schema_error"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_stream_provider_error_can_expose_safe_summary():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    chunks = []
+    async for chunk in executor.run_stream(
+        _turn_input(stream=True, tool_scope=[]),
+        _profile(),
+        llm_service=_StreamSafeProviderErrorLLM(),
+    ):
+        chunks.append(chunk)
+
+    payloads = [json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: ")]
+    assert payloads[0]["type"] == "error"
+    assert payloads[0]["error"]["message"] == "upstream timeout"
+    assert payloads[0]["error"]["failure_layer"] == "model_gateway"
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_non_stream_provider_exception_is_gateway_failure():
+    tool_executor = _FakeToolExecutor()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(tool_scope=[]),
+        _profile(),
+        llm_service=_ProviderExceptionLLM(),
+    )
+
+    assert result.status == "failed"
+    assert result.finish_reason == "upstream_error"
+    assert result.error is not None
+    assert result.error["type"] == "model_gateway_failed"
+    assert result.error["failure_layer"] == "model_gateway"
+    diagnostics = result.structured_payload["model_gateway_diagnostics"]
+    assert diagnostics["failure_kind"] == "provider_request_error"
+    assert diagnostics["provider_error_type"] == "RuntimeError"
+    assert "provider schema explosion" in diagnostics["message"]
 
 
 @pytest.mark.asyncio

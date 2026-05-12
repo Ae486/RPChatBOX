@@ -433,6 +433,7 @@ def test_projection_refresh_service_dual_writes_formal_projection_store(
     assert outline_row.metadata_json["materialization_event"] == "projection_refresh"
     assert outline_row.metadata_json["maintenance_event"] == "bundle_refresh"
     assert outline_row.metadata_json["authoritative_mutation"] is False
+    assert outline_row.metadata_json["source_core_state_snapshot_id"] is None
     assert len(revisions) == 1
     assert revisions[0].refresh_source_kind == "bundle_refresh"
     assert (
@@ -503,6 +504,7 @@ def test_projection_refresh_service_records_freshness_metadata_and_dirty_targets
     assert outline_row.metadata_json["base_revision"] == 1
     assert outline_row.metadata_json["projection_dirty_state"] == "dirty"
     assert outline_row.metadata_json["source_authoritative_refs"][0]["revision"] == 1
+    assert outline_row.metadata_json["source_core_state_snapshot_id"] is None
     assert (
         outline_row.metadata_json["source_refs"][0]["source_type"] == "retrieval_card"
     )

@@ -120,6 +120,12 @@
     - `working_digest: SetupWorkingDigest | None`
     - `tool_outcomes: list[SetupToolOutcome]`
     - `compact_summary: SetupContextCompactSummary | None`
+- `SETUP_RUNTIME_STATE_DURABLE_FIELDS: tuple[str, ...]`
+  - allowed root fields for `SetupAgentRuntimeStateRecord.snapshot_json`
+- `SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS: tuple[str, ...]`
+  - forbidden root fields for durable runtime-governance snapshots
+- `SetupAgentRuntimeStateService.durable_snapshot_payload(snapshot: SetupCognitiveStateSnapshot) -> dict[str, object]`
+- `SetupAgentRuntimeStateService.validate_durable_snapshot_payload(payload: Mapping[str, object]) -> None`
 - `SetupRuntimeAdapter.build_turn_input(...)`
   - add optional inputs:
     - `governed_history: list[SetupAgentDialogueMessage] | None`
@@ -226,7 +232,24 @@
 - The runtime-private persistence surface stays unchanged at the storage layer:
   - no new setup runtime table
   - `SetupAgentRuntimeStateRecord.snapshot_json` remains the only persistence surface for digest / tool outcomes / compact summary
-- `context_report` must stay outside `SetupAgentRuntimeStateRecord.snapshot_json`
+- Durable runtime-governance snapshots are root-field allowlisted:
+  - allowed root fields are `SETUP_RUNTIME_STATE_DURABLE_FIELDS`
+  - the allowlist must match `SetupCognitiveStateSnapshot` durable root fields
+  - `SetupAgentRuntimeStateService.save_snapshot(...)` must write through `durable_snapshot_payload(...)`
+  - `durable_snapshot_payload(...)` must call `validate_durable_snapshot_payload(...)` before writing `snapshot_json`
+- Turn-transient, transcript, provider, and debug/eval result surfaces must stay outside `SetupAgentRuntimeStateRecord.snapshot_json`:
+  - `context_report`
+  - `loop_trace`
+  - `continue_reason`
+  - `finish_reason`
+  - `output_inspection`
+  - `event_sink`
+  - `model_gateway_diagnostics`
+  - `latest_response`
+  - raw provider deltas
+  - private diagnostics/details/events
+  - debug payloads
+- The durable snapshot guard is root-field scoped. It must not recursively reject ordinary nested business payload keys inside user draft content, truth-write payloads, or stage data.
 - `SetupContextGovernanceReport.summary_action` must distinguish:
   - `none`: no compact summary exists
   - `reused_existing`: full dropped prefix was already summarized
@@ -267,15 +290,20 @@
 - assistant question is merely topically similar but not an exact normalized repeat -> no special runtime block in this slice; rely on normal completion semantics and eval observation
 - `working_digest` would exceed its field caps -> truncate list fields before prompt injection
 - current-step compact summary exists but there is no dropped history anymore -> clear `compact_summary`
+- durable snapshot payload contains any root field from `SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS` -> reject before persistence with `setup_runtime_state_snapshot_forbidden_fields`
+- durable snapshot payload contains an unknown root field such as `structured_payload` -> reject before persistence with `setup_runtime_state_snapshot_forbidden_fields`
+- user edit deltas invalidate runtime cognition -> persisted runtime snapshot can mark invalidated / clear review readiness, but `SetupWorkspace` business truth and workspace version must not change
 
 ### 5. Good / Base / Bad Cases
 
 - Good: a long `foundation` discussion keeps the last 4 raw messages, carries earlier discussion through one validated compact prompt summary, preserves one unresolved `setup.truth.write` failure outcome, records `foundation:magic-law` as a draft ref with a recovery hint, and injects a thin digest that says what still blocks review.
 - Good: after an earlier compact summarized messages `0..3`, a later turn drops messages `0..5`; runtime keeps recent raw messages visible and updates the compact summary from previous summary plus newly compacted messages `4..5` instead of sending the whole `0..5` prefix to the compact prompt pass again.
 - Good: after compaction, the model needs the exact guild-law detail, calls `setup.read.draft_refs` with `refs=["foundation:magic-law"]`, and receives the current draft entry instead of relying on old raw chat text.
+- Good: runtime result payload contains `loop_trace`, `output_inspection`, and `model_gateway_diagnostics`, but the persisted runtime snapshot stores only durable cognition/governance fields.
+- Good: a user edit delta invalidates a stale truth-write candidate and clears review readiness without mutating the workspace draft itself.
 - Base: a short `story_config` turn with 2 prior messages keeps the full raw history, has no compact summary, and carries no retained outcomes.
 - Base: compact prompt provider is disabled or unavailable, so deterministic summary rebuilds the compact summary and `context_report.summary_strategy` records the fallback.
-- Bad: replaying the entire current-step transcript every turn, storing tool retry chains as prompt-visible history, using `working_digest` as if it were the stage compaction artifact, or making the compact prompt pass write draft truth directly.
+- Bad: replaying the entire current-step transcript every turn, storing tool retry chains as prompt-visible history, using `working_digest` as if it were the stage compaction artifact, making the compact prompt pass write draft truth directly, or merging `RpAgentTurnResult.structured_payload` into `snapshot_json`.
 
 ### 6. Tests Required
 
@@ -295,6 +323,10 @@
   - assert `persist_turn_governance(...)` stores digest / tool outcomes / compact summary in the existing snapshot
   - assert `summarize_for_prompt(...)` exposes those governance artifacts
   - assert transient `context_report` is not written into the snapshot
+  - assert the durable root-field allowlist matches `SetupCognitiveStateSnapshot`
+  - assert transient fields such as `loop_trace`, `continue_reason`, `output_inspection`, `event_sink`, `model_gateway_diagnostics`, raw provider deltas, and debug/private payloads cannot enter `snapshot_json`
+  - assert accidental `structured_payload` root merges are rejected before persistence
+  - assert user edit reconciliation invalidates runtime cognition without changing `SetupWorkspace.version`
 - `backend/rp/tests/test_setup_agent_runtime_executor.py`
   - assert runtime structured payload exposes `working_digest`, `tool_outcomes`, and `compact_summary`
   - assert latest tool results merge into retained tool outcomes without carrying raw retry process
@@ -313,11 +345,13 @@
 - Treat `digest` as the same thing as `compact_summary`.
 - Keep raw tool retries, argument-fix attempts, and tool execution process as cross-turn prompt context.
 - Persist `context_report` as if it were durable stage cognition.
+- Persist runtime result/debug/eval/transcript surfaces as durable setup cognition.
 - Add a second durable state layer just to remember setup-stage conversation.
 - Introduce semantic "similar-question" or "stall-intent" classifiers without eval evidence and without a mature reference pattern.
 - Let the compact prompt pass call setup tools, write drafts, decide commit readiness, or reconstruct previous-stage raw discussion.
 - Copy CC's full coding-agent compact schema into RP setup even though RP setup truth is already recoverable through drafts.
 - Store all draft details inside `compact_summary` instead of storing refs and using `setup.read.draft_refs` for recovery.
+- Reject nested user draft payload fields just because a nested business object happens to use a word such as `trace` or `debug`.
 
 #### Correct
 
@@ -325,6 +359,8 @@
 - Keep only final tool outcomes across turns, then drop the process trace.
 - Compact only older current-step raw history, keep recent raw turns visible, and persist everything inside the existing runtime snapshot.
 - Keep compact decision reporting transient and observable without turning it into durable setup memory.
+- Guard durable snapshot root fields with an allowlist plus transient/debug denylist.
+- Keep the durable snapshot guard root-field scoped so business draft payloads are not accidentally rejected.
 - Keep the current no-progress guard narrow: exact normalized repeat-question and repeated failure signature only; leave broader stall policy to later eval-driven work.
 - Run compact as pre-model context engineering: pressure check, raw-window retention, outcome pruning, optional compact prompt summary, runtime overlay assembly.
 - Use `setup.read.draft_refs` as the stage-local detail recovery tool after compaction.

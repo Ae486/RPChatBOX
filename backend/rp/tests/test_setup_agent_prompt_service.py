@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from rp.agent_runtime.contracts import SetupCapabilityGuidanceFragment
+from rp.agent_runtime.profiles import (
+    SETUP_AGENT_CANDIDATE_EXCLUDED_TOOLS,
+    SETUP_AGENT_VISIBLE_TOOLS,
+    build_setup_agent_capability_plan,
+)
 from rp.models.setup_handoff import SetupContextPacket
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
@@ -26,6 +32,11 @@ def _packet(
 CHARACTER_DESIGN_LEGACY_OVERLAY_PROSE = (
     "Focus on stable character, relationship, group, and role facts."
 )
+PROMPT_TOOL_NAME_CANDIDATES = {
+    *SETUP_AGENT_VISIBLE_TOOLS,
+    *SETUP_AGENT_CANDIDATE_EXCLUDED_TOOLS,
+    "proposal.submit",
+}
 
 
 def test_character_design_stage_loads_skill_pack_into_system_prompt():
@@ -91,24 +102,21 @@ def test_character_design_stage_keeps_single_setup_agent_identity_declaration():
     assert "You are a senior dramatist" not in prompt
 
 
-def test_no_skill_pack_when_current_stage_is_none_matches_legacy_byte_for_byte():
+def test_no_skill_pack_when_current_stage_is_none_uses_capability_guidance():
     service = SetupAgentPromptService()
     packet = _packet(current_stage=None, current_step=SetupStepId.FOUNDATION)
 
-    actual = service.build_system_prompt(
-        mode=StoryMode.LONGFORM,
-        current_step=SetupStepId.FOUNDATION,
-        current_stage=None,
-        context_packet=packet,
-    )
-    expected = _legacy_prompt(
+    prompt = service.build_system_prompt(
         mode=StoryMode.LONGFORM,
         current_step=SetupStepId.FOUNDATION,
         current_stage=None,
         context_packet=packet,
     )
 
-    assert actual == expected
+    assert "[Stage Skill Pack" not in prompt
+    assert "Active capability guidance:" in prompt
+    assert "setup.patch.foundation_entry" in prompt
+    assert "proposal.submit" not in prompt
 
 
 @pytest.mark.parametrize(
@@ -150,13 +158,13 @@ def test_world_background_prompt_exposes_stage_truth_write_hint():
         context_packet=packet,
     )
 
-    assert "Current stage draft-write hint:" in prompt
+    assert "For canonical stage setup.truth.write calls" in prompt
     assert "Use the setup.world_background.* tools" not in prompt
     assert "setup.world_background.write_entry" not in prompt
     assert "setup.world_background.edit_entry" not in prompt
     assert "setup.world_background.delete_entry" not in prompt
     assert (
-        "- Preferred entry_type values for this stage: world_rule, location, faction, race, history."
+        "Preferred entry_type values for this stage: world_rule, location, faction, race, history."
         in prompt
     )
 
@@ -174,172 +182,105 @@ def test_world_background_prompt_exposes_stage_truth_write_hint():
         SetupStageId.TRPG_RULES,
     ],
 )
-def test_non_character_design_stage_prompt_matches_legacy_byte_for_byte(stage_id):
+def test_non_character_design_stage_prompt_has_no_skill_pack_residue(stage_id):
     service = SetupAgentPromptService()
     packet = _packet(current_stage=stage_id)
 
-    actual = service.build_system_prompt(
-        mode=StoryMode.LONGFORM,
-        current_step=SetupStepId.FOUNDATION,
-        current_stage=stage_id,
-        context_packet=packet,
-    )
-    expected = _legacy_prompt(
+    prompt = service.build_system_prompt(
         mode=StoryMode.LONGFORM,
         current_step=SetupStepId.FOUNDATION,
         current_stage=stage_id,
         context_packet=packet,
     )
 
-    assert actual == expected
+    assert "[Stage Skill Pack" not in prompt
+    assert "For this turn, you operate in the" not in prompt
+    assert "Active capability guidance:" in prompt
 
 
-def _legacy_stage_overlay(step_id: SetupStepId | SetupStageId) -> str:
-    """Mirror of the original `_stage_overlay` body before SkillPack short-circuit."""
-    if step_id == SetupStageId.WORLD_BACKGROUND:
-        return (
-            "- Focus on stable world background, rules, locations, history, factions, races, and other world facts.\n"
-            "- Keep entries structured and retrieval-addressable.\n"
-            "- Do not mix character-only details into this stage unless they define the world."
-        )
-    if step_id == SetupStageId.CHARACTER_DESIGN:
-        return (
-            "- Focus on stable character, relationship, group, and role facts.\n"
-            "- Use prior world handoffs as accepted context; do not replay old discussion.\n"
-            "- Keep character entries separate from world-background entries."
-        )
-    if step_id == SetupStageId.PLOT_BLUEPRINT:
-        return (
-            "- Focus on plot threads, foreshadowing, premise, conflict, arcs, and chapter plan.\n"
-            "- Use accepted world and character handoffs as constraints."
-        )
-    if step_id == SetupStageId.WRITER_CONFIG:
-        return (
-            "- Focus on POV, style, writing constraints, and task writing rules.\n"
-            "- Do not turn the draft into one giant prompt blob."
-        )
-    if step_id == SetupStageId.WORKER_CONFIG:
-        return (
-            "- Focus on worker policy, tool policy, and handoff rules.\n"
-            "- Keep runtime configuration concise and explicit."
-        )
-    if step_id in {SetupStageId.OVERVIEW, SetupStageId.ACTIVATE}:
-        return (
-            "- Focus on review and activation readiness.\n"
-            "- Do not add new foundation facts unless the user explicitly asks."
-        )
-    if step_id == SetupStepId.STORY_CONFIG:
-        return (
-            "- Focus on story configuration and runtime profile convergence.\n"
-            "- Do not modify mode.\n"
-            "- Prefer clarification over premature commit."
-        )
-    if step_id == SetupStepId.WRITING_CONTRACT:
-        return (
-            "- Focus on POV, style, and writing constraints.\n"
-            "- Do not turn the draft into one giant prompt blob."
-        )
-    if step_id == SetupStepId.FOUNDATION:
-        return (
-            "- Focus on stable world, character, and rule facts.\n"
-            "- Prefer concrete entries over vague lore summaries."
-        )
-    return (
-        "- Focus on longform blueprint convergence.\n"
-        "- Prefer enough structure to activate later, not perfect completeness."
+def test_prompt_mentions_only_active_capability_tools_for_world_background():
+    service = SetupAgentPromptService()
+    packet = _packet(current_stage=SetupStageId.WORLD_BACKGROUND)
+    plan = build_setup_agent_capability_plan(
+        SetupStepId.FOUNDATION.value,
+        current_stage=SetupStageId.WORLD_BACKGROUND.value,
     )
 
-
-def _legacy_prompt(
-    *,
-    mode: StoryMode,
-    current_step: SetupStepId,
-    current_stage: SetupStageId | None,
-    context_packet: SetupContextPacket,
-) -> str:
-    import json
-
-    stage_overlay = _legacy_stage_overlay(current_stage or current_step)
-    stage_truth_write_hint = ""
-    if current_stage is not None:
-        preferred_types = {
-            SetupStageId.WORLD_BACKGROUND: "world_rule, location, faction, race, history",
-            SetupStageId.CHARACTER_DESIGN: "character, relationship, group",
-            SetupStageId.PLOT_BLUEPRINT: "plot_thread, foreshadow, chapter_plan",
-            SetupStageId.WRITER_CONFIG: "style_rule, pov_rule, writing_constraint",
-            SetupStageId.WORKER_CONFIG: "worker_policy, tool_policy, handoff_rule",
-            SetupStageId.RP_INTERACTION_CONTRACT: "interaction_rule, player_agency_rule",
-            SetupStageId.TRPG_RULES: "rule, mechanic, table",
-        }.get(current_stage, "stage-specific types")
-        stage_truth_write_hint = (
-            "Current stage draft-write hint:\n"
-            "- Prefer one entry payload instead of a full stage block unless you are intentionally replacing or merging the whole block.\n"
-            "- Minimal entry fields: entry_id, entry_type, semantic_path, title.\n"
-            "- Optional fields: summary, sections.\n"
-            '- A text section must look like {"section_id":"summary","title":"Summary","kind":"text","content":{"text":"..."}}.\n'
-            f"- Preferred entry_type values for this stage: {preferred_types}.\n\n"
-        )
-    workspace_snapshot = json.dumps(
-        context_packet.model_dump(mode="json", exclude_none=True),
-        ensure_ascii=False,
-        sort_keys=True,
+    prompt = service.build_system_prompt(
+        mode=StoryMode.LONGFORM,
+        current_step=SetupStepId.FOUNDATION,
+        current_stage=SetupStageId.WORLD_BACKGROUND,
+        context_packet=packet,
+        capability_plan=plan,
     )
-    return (
-        "You are SetupAgent. You only work in prestory. "
-        "Your job is to help the user converge setup drafts and guide review/commit. "
-        "You do not generate active-story prose, you do not activate the story, "
-        "and you do not mutate Memory OS directly.\n\n"
-        "Core rules:\n"
-        "1. Start each turn by following the runtime-provided turn goal and working plan.\n"
-        "2. If the runtime provides a cognitive_state_summary, treat it as your current-step discussion map only.\n"
-        "3. If the runtime provides a working_digest, treat it as thin current-step control state, not as a full transcript.\n"
-        "4. If the runtime provides retained tool_outcomes, use the outcomes but do not reconstruct old tool-call process.\n"
-        "5. If the runtime provides a compact_summary, treat it as compact carry-forward context for trimmed older current-step discussion.\n"
-        "6. If compact_summary contains draft_refs or recovery_hints and exact draft detail is needed, call setup.read.draft_refs.\n"
-        "7. Use setup.discussion.update_state when the discussion map itself needs to be refreshed or reconciled.\n"
-        "8. Use setup.chunk.upsert when one concrete truth candidate is emerging from the discussion.\n"
-        "9. Use setup.truth.write when one chunk is stable enough to land in the current draft. "
-        "For canonical stages, prefer one entry payload over a full stage block unless you are intentionally replacing the whole block. "
-        "A minimal stage entry needs entry_id, entry_type, semantic_path, and title. "
-        "If you include a text section, its kind must be text and it must carry content.text.\n"
-        "10. If the current cognitive state is invalidated by user edits or rejection feedback, reconcile it before proposing commit.\n"
-        "11. If setup.truth.write fails, repair it from current context when possible; only ask the user when the missing information is truly user-exclusive.\n"
-        "12. Before calling setup.proposal.commit, self-check readiness; if the user explicitly asked to commit, carry unresolved issues as warnings instead of blocking.\n"
-        "13. Proposal rejection means return to discussion by default. Do not auto-re-propose commit.\n"
-        "14. Use setup private tools to update SetupWorkspace drafts. When a tool is needed, emit a real tool call; never print tool_code, default_api..., or other pseudo tool-call text in the visible reply.\n"
-        "15. Use read-only memory tools only when needed for clarification or archival lookup.\n"
-        "16. Ask clarifying questions when important fields are ambiguous.\n"
-        "17. Do not invent facts casually.\n"
-        "18. When the current step is sufficiently converged, tell the user it is ready for commit or call setup.proposal.commit if the user asked for it.\n"
-        "19. Never call proposal.submit or any memory write tool.\n"
-        "20. Keep replies user-facing and concise.\n"
-        "21. If a prior commit proposal for the current step was rejected, do not "
-        "re-propose commit unless the user explicitly asks. Refine the draft based "
-        "on the user's feedback first.\n"
-        "22. If a setup tool call fails, read the tool error carefully. "
-        "When the missing or invalid fields can be corrected from the current context, "
-        "retry with corrected arguments. Only ask the user a clarification question "
-        "when the required information is truly missing.\n"
-        "23. If the runtime says user-exclusive information is still missing, your next "
-        "visible reply must ask that question explicitly. Do not pretend the turn is complete.\n"
-        "24. Before calling setup.proposal.commit, self-check whether key open questions "
-        "or rejection feedback should be included as warnings.\n"
-        "25. Treat prior_stage_handoffs as the compact truth handoff from earlier setup stages. "
-        "Use their summaries, spotlights, chunk_descriptions, open_issues, retrieval_refs, and warnings as needed; "
-        "do not reconstruct or replay raw prior-stage discussion.\n\n"
-        f"Current mode: {mode.value}\n"
-        f"Current step: {current_step.value}\n"
-        f"Current stage: {current_stage.value if current_stage is not None else current_step.value}\n"
-        "Current stage objective:\n"
-        f"{stage_overlay}\n\n"
-        f"{stage_truth_write_hint}"
-        "Longform setup guidance:\n"
-        "- story_config: converge model/runtime choices and notes.\n"
-        "- writing_contract: converge POV, style, constraints, and task rules.\n"
-        "- foundation: converge stable world/character/rule facts.\n"
-        "- longform_blueprint: converge premise, conflict, arc, and chapter plan.\n\n"
-        "The workspace/context packet is below as JSON. "
-        "It contains the current-step draft, selected user edit deltas, and compact prior-stage handoffs. "
-        "Use it as the source of truth.\n"
-        f"{workspace_snapshot}\n"
+
+    mentioned_tools = {
+        tool_name for tool_name in PROMPT_TOOL_NAME_CANDIDATES if tool_name in prompt
+    }
+    assert mentioned_tools.issubset(set(plan.active_tool_names))
+    assert "setup.read.draft_refs" in mentioned_tools
+    assert "setup.truth.write" in mentioned_tools
+    assert "setup.world_background.write_entry" not in mentioned_tools
+    assert "proposal.submit" not in mentioned_tools
+
+
+def test_prompt_filters_inactive_guidance_from_supplied_capability_plan():
+    service = SetupAgentPromptService()
+    packet = _packet(current_stage=SetupStageId.WORLD_BACKGROUND)
+    plan = build_setup_agent_capability_plan(
+        SetupStepId.FOUNDATION.value,
+        current_stage=SetupStageId.WORLD_BACKGROUND.value,
     )
+    bad_plan = plan.model_copy(
+        update={
+            "prompt_guidance_fragments": [
+                *plan.prompt_guidance_fragments,
+                SetupCapabilityGuidanceFragment(
+                    fragment_id="bad.world_background",
+                    tool_names=["setup.world_background.write_entry"],
+                    text="Use setup.world_background.write_entry directly.",
+                ),
+            ]
+        },
+        deep=True,
+    )
+
+    prompt = service.build_system_prompt(
+        mode=StoryMode.LONGFORM,
+        current_step=SetupStepId.FOUNDATION,
+        current_stage=SetupStageId.WORLD_BACKGROUND,
+        context_packet=packet,
+        capability_plan=bad_plan,
+    )
+
+    assert "setup.world_background.write_entry" not in prompt
+
+
+def test_system_prompt_contains_only_stable_context_packet_not_runtime_artifact_data():
+    service = SetupAgentPromptService()
+    packet = _packet(current_stage=SetupStageId.WORLD_BACKGROUND)
+    plan = build_setup_agent_capability_plan(
+        SetupStepId.FOUNDATION.value,
+        current_stage=SetupStageId.WORLD_BACKGROUND.value,
+    )
+
+    prompt = service.build_system_prompt(
+        mode=StoryMode.LONGFORM,
+        current_step=SetupStepId.FOUNDATION,
+        current_stage=SetupStageId.WORLD_BACKGROUND,
+        context_packet=packet,
+        capability_plan=plan,
+    )
+
+    assert '"workspace_id": "ws-test"' in prompt
+    assert '"current_stage": "world_background"' in prompt
+    assert "context_report" not in prompt
+    assert "raw_history_limit" not in prompt
+    assert "history_count_threshold" not in prompt
+    assert "working_digest" not in prompt
+    assert "tool_outcomes" not in prompt
+    assert "source_fingerprint" not in prompt
+    assert "summary_lines" not in prompt
+    assert "loop_trace" not in prompt
+    assert "continue_reason" not in prompt
+    assert "raw_tool_retry_process" not in prompt

@@ -44,6 +44,32 @@
   - `upstream_error`
   - `runtime_execution_failed`
   - `runtime_failed`
+- `SetupOutputClassification`
+  - `real_tool_call`
+  - `normal_text`
+  - `pseudo_tool_text`
+  - `malformed_tool_call`
+  - `empty_output`
+  - `provider_schema_error`
+  - `mixed_text_and_tool_call`
+- `SetupOutputInspection`
+  - `classification: SetupOutputClassification`
+  - `public_text_candidate: str`
+  - `tool_calls: list[RuntimeToolCall]`
+  - `repair_observation: dict[str, Any] | None`
+  - `private_diagnostics: dict[str, Any]`
+  - `continue_reason_candidate: str | None`
+  - `finish_reason_candidate: str | None`
+- `SetupModelGatewayDiagnostics`
+  - `failure_layer: Literal["model_gateway"]`
+  - `failure_kind: str`
+  - `message: str`
+  - `provider_error_type: str | None`
+  - `private_details: dict[str, Any]`
+- `SetupEventSinkSnapshot`
+  - `public_event_types: list[str]`
+  - `private_event_surfaces: list[str]`
+  - `transcript_boundary: str`
 - `SetupReActTraceFrame`
   - `round_no: int`
   - `decision_site: Literal["inspect_model_output", "assess_progress", "reflect_if_needed", "finalize_success", "finalize_failure"]`
@@ -70,6 +96,8 @@
 - `RpAgentRunState`
   - add `continue_reason: str | None`
   - add `loop_trace: list[dict[str, Any]]`
+  - add `output_inspection: dict[str, Any] | None`
+  - add `model_gateway_diagnostics: dict[str, Any] | None`
 - `RpAgentTurnResult.structured_payload`
   - add `loop_trace: list[SetupReActTraceFrame]`
   - continue to expose:
@@ -84,6 +112,9 @@
     - `tool_outcomes`
     - `compact_summary`
     - `repair_route`
+    - `output_inspection`
+    - `event_sink`
+    - `model_gateway_diagnostics`
 - `RuntimeEvent`
   - keep current typed-SSE event names unchanged:
     - `thinking_delta`
@@ -209,7 +240,30 @@
   - generic fallback when the runtime cannot produce a stronger finish reason
 - Commit acceptance, stage handoff, activation success, or review-success labels do not belong in this turn-loop finish taxonomy. Those belong to outer harness or other runtime slices.
 
-#### 3.6 "No Tool Call" Is Only One Inspect/Assess Branch
+#### 3.6 OutputInspector Owns Model-Output Classification Before Transcript Visibility
+
+- `inspect_model_output` must first convert the normalized provider message into a typed `SetupOutputInspection`.
+- The inspector is the only boundary that decides whether raw assistant text is a public candidate or private invalid/mixed output.
+- Classification rules:
+  - `real_tool_call`: valid tool calls and no public assistant text.
+  - `mixed_text_and_tool_call`: valid tool calls plus any assistant text; the text remains private and tool calls drive routing.
+  - `pseudo_tool_text`: text that looks like a provider/tool-call transcript but contains no real tool call; it must not enter `assistant_text`.
+  - `malformed_tool_call`: provider supplied tool-call structure exists but has missing tool name, non-object arguments, or invalid JSON arguments; no malformed call executes.
+  - `empty_output`: no valid tool call and no non-blank text; it cannot finalize as success.
+  - `provider_schema_error`: upstream/provider failure already attributed during model call.
+  - `normal_text`: non-empty text with no tool calls or invalid-tool pattern; it still must pass completion guards before finalization.
+- `public_text_candidate` may populate `assistant_text` only for `normal_text`.
+- `tool_calls` may populate `pending_tool_calls` only for `real_tool_call` and `mixed_text_and_tool_call`.
+- `repair_observation` / `private_diagnostics` are debug/eval material. They must not be emitted as public assistant content.
+- Invalid output retry exhaustion must use active finish reasons:
+  - pseudo or malformed output exhaustion maps to `repair_obligation_unfulfilled`
+  - repeated recoverable tool failure maps to `tool_error_unrecoverable` with private details
+- Stream mode must follow the same boundary:
+  - pending text may be buffered before public emission
+  - once a real `tool_call` appears in the same provider response, all pending and later text from that response stays private
+  - typed `tool_call`, `tool_started`, `tool_result`, `tool_error`, `error`, and `done` event names stay unchanged
+
+#### 3.7 "No Tool Call" Is Only One Inspect/Assess Branch
 
 - The absence of tool calls must not be treated as a standalone product feature or success proof.
 - `inspect_model_output` without tool calls must always go through completion-guard semantics:
@@ -226,7 +280,7 @@
   - `completed_text`
   - `continue_discussion`
 
-#### 3.7 ReAct Trace Is Runtime-Authored, Not Hidden Reasoning
+#### 3.8 ReAct Trace Is Runtime-Authored, Not Hidden Reasoning
 
 - `loop_trace` is a thin runtime-authored decision trace, not chain-of-thought capture.
 - Every turn must produce trace frames at the decision sites that materially change loop routing:
@@ -252,9 +306,11 @@
   - `block_commit`
   - `unrecoverable`
 
-#### 3.8 Structured Payload, Runtime Debug, And Events Stay Additive
+#### 3.9 Structured Payload, Runtime Debug, And Events Stay Additive
 
 - Final structured payload must expose `loop_trace` additively alongside the current cognition fields.
+- Final structured payload may expose `output_inspection` additively for debug/eval attribution.
+- Final structured payload may expose `event_sink` and `model_gateway_diagnostics` for debug/eval attribution.
 - Setup runtime debug surfaces may mirror `loop_trace` and `continue_reason`, but must not require consumers to inspect raw LangGraph state transitions.
 - Setup runtime result/debug/eval surfaces may expose `context_report`, but it must remain a transient runtime explanation rather than durable setup truth.
 - `loop_trace` and `continue_reason` are turn-transient loop-semantics surfaces:
@@ -263,9 +319,29 @@
   - they may appear in eval / Langfuse / offline replay artifacts
   - they must not be added to `SetupAgentRuntimeStateRecord.snapshot_json`
   - they must not be written through `SetupAgentRuntimeStateService.persist_turn_governance(...)`
+- `output_inspection`, `event_sink`, and `model_gateway_diagnostics` are also turn-transient/debug surfaces and must not be persisted into `SetupAgentRuntimeStateRecord.snapshot_json`.
 - Existing typed-SSE/runtime event names remain stable. This slice may enrich final payload/debug/Langfuse metadata, but must not replace the current `tool_*`, `error`, `done`, or stream-delta surfaces with verbose trace events.
 
-#### 3.9 Boundary With Existing Context-Governance Slices Must Stay Clean
+#### 3.10 ModelGateway And EventSink Separate Provider Failure From Transcript Visibility
+
+- The runtime model-gateway boundary owns provider request errors, stream provider errors, stream exceptions, stream payload parse errors, streamed tool-call reconstruction, usage capture, and provider-facing diagnostics.
+- Provider/gateway failures must normalize to:
+  - `failure_layer = "model_gateway"`
+  - public error type `model_gateway_failed`
+  - terminal `finish_reason = "upstream_error"`
+  - `SetupOutputInspection.classification = "provider_schema_error"`
+- Provider/gateway failures must not be routed as setup business failures such as `tool_error_unrecoverable`, `tool_schema_validation_failed`, or `repair_obligation_unfulfilled`.
+- `SetupModelGatewayDiagnostics.private_details` may retain raw provider errors, malformed stream payload details, private stream events, and provider exception metadata for trace/eval/logging.
+- Public SSE must go through `SetupEventSink` / `TypedSseEventAdapter`. The event sink must:
+  - preserve typed event names listed in `RuntimeEvent`
+  - emit only allowlisted payload fields per event type
+  - keep `thinking_delta` public with only `delta`
+  - keep `text_delta` public with only `delta`
+  - keep `tool_call`, `tool_started`, `tool_result`, `tool_error`, `usage`, `error`, and `done` public with their stable public fields
+  - filter raw provider deltas, provider debug payloads, stack traces, private diagnostics, and gateway diagnostics from public SSE
+- Unknown provider stream event types are private by default. They may contribute to `model_gateway_diagnostics`, but must not produce user-visible typed SSE.
+
+#### 3.11 Boundary With Existing Context-Governance Slices Must Stay Clean
 
 - `working_digest`, `tool_outcomes`, and `compact_summary` remain governed by [RP Setup Agent Stage-Local Context Governance](./rp-setup-agent-stage-local-context-governance.md).
 - Prior-stage accepted truth still comes only from [RP Setup Agent Prior-Stage Handoff Context](./rp-setup-agent-prior-stage-handoff-context.md).
@@ -277,6 +353,10 @@
 ### 4. Validation & Error Matrix
 
 - `inspect_model_output` sees tool calls and no blocked commit proposal -> `continue_reason = "tool_call_batch_pending"`, `next_action = "execute_tools"`, `finish_reason = None`
+- `inspect_model_output` sees valid tool calls plus assistant text -> classify as `mixed_text_and_tool_call`, keep text private, set `continue_reason = "tool_call_batch_pending"`, `next_action = "execute_tools"`
+- `inspect_model_output` sees pseudo tool text with no real tool call -> classify as `pseudo_tool_text`, keep text private, set `continue_reason = "completion_guard_retry"`, `next_action = "reflect_if_needed"`; after bounded retry exhaustion, fail with `repair_obligation_unfulfilled`
+- `inspect_model_output` sees malformed tool-call arguments or missing tool name -> classify as `malformed_tool_call`, execute no tool, set `continue_reason = "completion_guard_retry"`, `next_action = "reflect_if_needed"`; after bounded retry exhaustion, fail with `repair_obligation_unfulfilled`
+- `inspect_model_output` sees empty output -> classify as `empty_output`, execute no tool, set `continue_reason = "completion_guard_retry"`, `next_action = "reflect_if_needed"`
 - `inspect_model_output` sees a blocked commit proposal -> clear pending tool calls, set reflection ticket, `continue_reason = "commit_reassess_reflection"`, `next_action = "reflect_if_needed"`
 - no tool calls, assistant text is a user-facing question, no blocking obligation -> `next_action = "finalize_success"`, `finish_reason = "awaiting_user_input"`
 - no tool calls, assistant text is ordinary text, no blocking obligation, current cognitive state is clean -> `next_action = "finalize_success"`, `finish_reason = "completed_text"`
@@ -290,19 +370,31 @@
 - reflection retry is required while a repair obligation remains unresolved and the repair retry budget is already exhausted -> `next_action = "finalize_failure"`, `finish_reason = "repair_obligation_unfulfilled"`
 - `round_no >= max_rounds` during repair or reflection routing -> `next_action = "finalize_failure"`, `finish_reason = "max_rounds_exceeded"`
 - upstream/provider stream error is already present after `call_model` -> `finish_reason = "upstream_error"`, `next_action = "finalize_failure"`
+- malformed provider stream JSON or non-object `data:` payload -> public error `model_gateway_failed`, code `provider_stream_parse_error`, `finish_reason = "upstream_error"`, private diagnostics retain parse details, and no buffered text is emitted publicly
+- provider request exception before any model output -> public error `model_gateway_failed`, code `provider_request_error`, `finish_reason = "upstream_error"`, private diagnostics retain provider exception type/message
+- unknown/raw provider stream event type -> public SSE emits nothing for that event, private diagnostics may record it under model-gateway private events
 - unexpected exception escapes `run_stream()` safety net -> final result `finish_reason = "runtime_execution_failed"`
 - `next_action` is outside the allowed node-label set -> treat as runtime bug, fail the turn with `finish_reason = "runtime_failed"` rather than silently routing to an undefined branch
 
 ### 5. Good / Base / Bad Cases
 
 - Good: the model emits one draft patch tool call, the tool succeeds, `assess_progress` records `continue_reason = "tool_result_follow_up"`, the next round updates the goal/plan with fresh observations, and the turn later ends with `finish_reason = "continue_discussion"` because the step is still open.
+- Good: a provider stream emits text before a real tool call; the text is buffered and then discarded from public SSE once the tool call arrives, while the typed tool events still appear.
+- Good: a provider stream emits malformed JSON after buffered text; the turn fails as `upstream_error`, public SSE emits a safe gateway error, and the buffered text stays private.
+- Base: a provider stream emits `thinking_delta`; public SSE keeps the event name and `delta`, while any raw/debug/private fields are stripped.
 - Base: the model emits one targeted clarification question with no tool call, `inspect_model_output` finalizes successfully, and the turn ends with `finish_reason = "awaiting_user_input"`.
-- Bad: treating any no-tool response as proof that the setup step is finished, or exposing raw `next_action = "derive_turn_goal"` as if it were the user/eval-facing semantic reason.
+- Bad: treating any no-tool response as proof that the setup step is finished, exposing pseudo tool text as assistant content, flushing mixed-output text to public SSE before `OutputInspector` can classify it, or leaking raw provider deltas through typed SSE.
 
 ### 6. Tests Required
 
 - `backend/rp/tests/test_setup_agent_runtime_executor.py`
   - assert the semantic loop-to-graph mapping remains intact for inspect -> execute-tools, inspect -> reflect, inspect -> finalize, assess -> derive-goal, assess -> reflect, and reflect -> derive-goal routes
+  - assert `SetupOutputInspection` classifies pseudo tool text, malformed tool calls, empty output, mixed text/tool output, and normal text
+  - assert pseudo tool text and mixed-output text never become public assistant text
+  - assert stream mixed text/tool output suppresses pre-tool-call pending `text_delta` while preserving typed tool events
+  - assert `SetupEventSink` preserves typed event names, including `thinking_delta`, while filtering raw/debug/private payload keys
+  - assert provider stream errors, malformed stream payloads, and provider request exceptions are classified as `model_gateway` / `upstream_error`
+  - assert model-gateway private diagnostics are present in structured payload but absent from public SSE
   - assert `loop_trace` is present in final structured payload and carries `continue_reason` / `finish_reason` without dropping existing cognition fields
   - assert typed-SSE event names remain unchanged and trace is additive rather than replacing current event types
   - assert an initial text-only repeated question is blocked at `inspect_model_output`, reflected, and finalized with an explicit failure when the round budget is exhausted
@@ -325,6 +417,10 @@
 
 - Treat `next_action` as the semantic explanation consumed by users, eval, or future harness slices.
 - Treat "no tool call" as a standalone completion feature instead of one inspect/guard branch.
+- Treat regex pseudo-tool detection as the architecture owner instead of an implementation detail behind `SetupOutputInspection`.
+- Flush stream text publicly before knowing whether the same provider response also contains a real tool call.
+- Treat malformed provider stream payloads as empty assistant output or setup repair work.
+- Pass raw provider stream events, stack traces, or gateway diagnostics through public typed SSE.
 - Mix outer harness outcomes such as commit acceptance or stage handoff into per-turn loop finish reasons.
 - Emit verbose hidden-reasoning traces or replay raw retry process as if that were the ReAct trace.
 - Persist `loop_trace` or `continue_reason` into setup cognitive snapshots as if debug/eval trace were product truth.
@@ -333,6 +429,10 @@
 
 - Keep graph routing separate from semantic `continue_reason` and `finish_reason`.
 - Treat no-tool output as one branch that still passes through completion-guard semantics.
+- Put all normalized model output through `SetupOutputInspection` before tool execution or public transcript visibility.
+- Keep mixed-output text private and let real tool calls drive routing.
+- Normalize provider/gateway failures before setup business policy sees them, and terminate with `upstream_error`.
+- Keep `SetupEventSink` as the public transcript gate; expose raw provider/gateway diagnostics only through private result/debug/eval surfaces.
 - Keep turn-local finish reasons focused on the agent loop; leave commit/handoff/stage outcomes to outer setup-harness slices.
 - Emit a thin runtime-authored `loop_trace` that is useful for policy, debug, and eval without becoming chain-of-thought.
 - Keep loop-semantic trace surfaces transient; persist only the governed stage-local context artifacts defined by the context-governance slice.

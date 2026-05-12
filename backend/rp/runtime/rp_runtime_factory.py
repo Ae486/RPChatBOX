@@ -32,6 +32,7 @@ from rp.services.longform_chapter_runtime_service import (
     LongformChapterRuntimeService,
 )
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
+from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.draft_materialization_service import DraftMaterializationService
@@ -107,6 +108,7 @@ from rp.services.story_block_prompt_context_service import (
 from rp.services.story_block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
+from rp.services.story_brainstorm_service import StoryBrainstormService
 from rp.services.story_runtime_controller import StoryRuntimeController
 from rp.services.story_runtime_debug_query_service import (
     StoryRuntimeDebugQueryService,
@@ -123,6 +125,7 @@ from rp.services.story_turn_domain_service import StoryTurnDomainService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.version_history_read_service import VersionHistoryReadService
 from rp.services.worker_execution_service import WorkerExecutionService
+from rp.services.worker_memory_service import WorkerMemoryService
 from rp.services.worker_registry_service import WorkerRegistryService
 from rp.services.worker_scheduler_service import WorkerSchedulerService
 from rp.services.writing_packet_builder import WritingPacketBuilder
@@ -330,6 +333,10 @@ class RpRuntimeFactory:
         )
         core_state_dual_write_service = self._build_core_state_dual_write_service()
         core_state_store_repository = CoreStateStoreRepository(self._session)
+        core_state_as_of_resolver = CoreStateAsOfResolver(
+            session=self._session,
+            repository=core_state_store_repository,
+        )
         store_read_enabled = self._use_core_state_store_read()
         store_write_switch_enabled = self._use_core_state_store_write_switch()
         core_state_adapter = StorySessionCoreStateAdapter(story_session_service)
@@ -361,6 +368,7 @@ class RpRuntimeFactory:
             core_state_dual_write_service=core_state_dual_write_service,
             core_state_store_write_switch_enabled=store_write_switch_enabled,
             authoritative_compatibility_mirror_service=authoritative_mirror_service,
+            core_state_as_of_resolver=core_state_as_of_resolver,
         )
         proposal_workflow_service = ProposalWorkflowService(
             proposal_repository=proposal_repository,
@@ -477,6 +485,7 @@ class RpRuntimeFactory:
         runtime_read_manifest_service = RuntimeReadManifestService(
             session=self._session,
             runtime_workspace_material_service=runtime_workspace_material_service,
+            core_state_as_of_resolver=core_state_as_of_resolver,
         )
         longform_chapter_runtime_service = LongformChapterRuntimeService(
             story_session_service=story_session_service,
@@ -504,6 +513,7 @@ class RpRuntimeFactory:
         post_write_governance_service = PostWriteGovernanceService(
             runtime_workflow_job_service=runtime_workflow_job_service,
             projection_refresh_service=projection_refresh_service,
+            core_state_as_of_resolver=core_state_as_of_resolver,
             proposal_workflow_service=proposal_workflow_service,
             legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
         )
@@ -571,6 +581,10 @@ class RpRuntimeFactory:
             story_session_service=story_session_service
         )
         core_state_store_repository = CoreStateStoreRepository(self._session)
+        core_state_as_of_resolver = CoreStateAsOfResolver(
+            session=self._session,
+            repository=core_state_store_repository,
+        )
         core_state_dual_write_service = self._build_core_state_dual_write_service()
         store_read_enabled = self._use_core_state_store_read()
         store_write_switch_enabled = self._use_core_state_store_write_switch()
@@ -619,6 +633,7 @@ class RpRuntimeFactory:
             core_state_dual_write_service=core_state_dual_write_service,
             core_state_store_write_switch_enabled=store_write_switch_enabled,
             authoritative_compatibility_mirror_service=authoritative_mirror_service,
+            core_state_as_of_resolver=core_state_as_of_resolver,
         )
         proposal_workflow_service = ProposalWorkflowService(
             proposal_repository=proposal_repository,
@@ -662,6 +677,7 @@ class RpRuntimeFactory:
         runtime_read_manifest_service = RuntimeReadManifestService(
             session=self._session,
             runtime_workspace_material_service=runtime_workspace_material_service,
+            core_state_as_of_resolver=core_state_as_of_resolver,
         )
         memory_trace_read_service = MemoryTraceReadService(
             session=self._session,
@@ -681,6 +697,19 @@ class RpRuntimeFactory:
             debug_query_service=story_runtime_debug_query_service,
         )
         runtime_profile_snapshot_service = RuntimeProfileSnapshotService(self._session)
+        worker_registry_service = WorkerRegistryService(
+            self._session,
+            runtime_profile_snapshot_service=runtime_profile_snapshot_service,
+        )
+        story_brainstorm_service = StoryBrainstormService(
+            story_session_service=story_session_service,
+            runtime_workspace_material_service=runtime_workspace_material_service,
+            proposal_workflow_service=proposal_workflow_service,
+            rp_block_read_service=rp_block_read_service,
+            worker_registry_service=worker_registry_service,
+            worker_memory_service=WorkerMemoryService(session=self._session),
+            core_state_as_of_resolver=core_state_as_of_resolver,
+        )
         return StoryRuntimeController(
             story_session_service=story_session_service,
             story_activation_service=story_activation_service,
@@ -708,6 +737,7 @@ class RpRuntimeFactory:
                 workspace_material_service=runtime_workspace_material_service,
                 session=self._session,
             ),
+            story_brainstorm_service=story_brainstorm_service,
         )
 
     def build_story_graph_runner(self) -> StoryGraphRunner:

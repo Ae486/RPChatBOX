@@ -19,6 +19,13 @@ from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import MemoryBlockProposalSubmitRequest
 from rp.models.memory_inspection import RecallReviewCommand
 from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
+from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.story_brainstorm import (
+    BrainstormApplyRequest,
+    BrainstormItemUpdateRequest,
+    BrainstormSessionStartRequest,
+    BrainstormSummarizeRequest,
+)
 from rp.models.story_runtime import ChapterWorkspaceSnapshot
 from rp.models.story_runtime import LongformTurnRequest
 from rp.services.runtime_config_control_service import (
@@ -36,6 +43,7 @@ from rp.services.story_runtime_controller import (
     MemoryBlockHistoryUnsupportedError,
     StoryRuntimeController,
 )
+from rp.services.story_brainstorm_service import StoryBrainstormServiceError
 from rp.services.story_runtime_debug_query_service import (
     StoryRuntimeDebugQueryServiceError,
 )
@@ -223,6 +231,24 @@ def _memory_inspection_invalid(exc: Exception, *, code: str) -> HTTPException:
             "error": {
                 "message": str(exc),
                 "code": code,
+            }
+        },
+    )
+
+
+def _brainstorm_invalid(exc: Exception) -> HTTPException:
+    error_code = getattr(exc, "code", None) or "story_brainstorm_invalid"
+    status_code = 404 if error_code in {
+        "story_session_not_found",
+        "brainstorm_session_not_found",
+        "brainstorm_item_not_found",
+    } else 400
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": error_code,
             }
         },
     )
@@ -855,6 +881,138 @@ async def get_story_memory_inspection(
         ) from exc
 
 
+@router.post("/api/rp/story-sessions/{session_id}/brainstorm/sessions")
+async def start_story_brainstorm_session(
+    session_id: str,
+    payload: BrainstormSessionStartRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        session = controller.start_brainstorm_session(
+            session_id=session_id,
+            request=payload,
+        )
+        return _brainstorm_session_response(session_id=session_id, session=session)
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
+@router.get(
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}"
+)
+async def get_story_brainstorm_session(
+    session_id: str,
+    brainstorm_id: str,
+    story_id: str,
+    branch_head_id: str,
+    turn_id: str,
+    runtime_profile_snapshot_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    identity = MemoryRuntimeIdentity(
+        story_id=story_id,
+        session_id=session_id,
+        branch_head_id=branch_head_id,
+        turn_id=turn_id,
+        runtime_profile_snapshot_id=runtime_profile_snapshot_id,
+    )
+    try:
+        session = controller.read_brainstorm_session(
+            session_id=session_id,
+            identity=identity,
+            brainstorm_id=brainstorm_id,
+        )
+        return _brainstorm_session_response(session_id=session_id, session=session)
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/summarize"
+)
+async def summarize_story_brainstorm_session(
+    session_id: str,
+    brainstorm_id: str,
+    payload: BrainstormSummarizeRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        session = await controller.summarize_brainstorm_session(
+            session_id=session_id,
+            brainstorm_id=brainstorm_id,
+            request=payload,
+        )
+        return _brainstorm_session_response(session_id=session_id, session=session)
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
+@router.patch(
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/items/{item_id}"
+)
+async def update_story_brainstorm_item(
+    session_id: str,
+    brainstorm_id: str,
+    item_id: str,
+    payload: BrainstormItemUpdateRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        session = controller.update_brainstorm_item(
+            session_id=session_id,
+            brainstorm_id=brainstorm_id,
+            item_id=item_id,
+            request=payload,
+        )
+        return _brainstorm_session_response(session_id=session_id, session=session)
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/apply"
+)
+async def apply_story_brainstorm_session(
+    session_id: str,
+    brainstorm_id: str,
+    payload: BrainstormApplyRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        receipt = await controller.apply_brainstorm_session(
+            session_id=session_id,
+            brainstorm_id=brainstorm_id,
+            request=payload,
+        )
+        return {
+            "session_id": session_id,
+            "receipt": receipt.model_dump(mode="json"),
+            "action_metadata": {
+                "schema_version": "rp.brainstorm.apply_receipt.v1",
+                "action": "brainstorm_summary_apply",
+                "origin_kind": "brainstorm_summary_apply",
+                "identity": payload.identity.model_dump(mode="json"),
+                "brainstorm_id": brainstorm_id,
+                "source_item_ids": [
+                    item.source_item_id for item in receipt.dispatch_receipts
+                ],
+                "affected_refs": _unique_memory_action_refs(
+                    [
+                        str(item.target_ref or "")
+                        for item in receipt.dispatch_receipts
+                    ]
+                    + [
+                        str(item.proposal_id or "")
+                        for item in receipt.dispatch_receipts
+                    ]
+                ),
+            },
+            "refresh": receipt.refresh,
+        }
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
 @router.post("/api/rp/story-sessions/{session_id}/memory/core/direct-edit")
 async def direct_edit_story_core_memory(
     session_id: str,
@@ -866,7 +1024,18 @@ async def direct_edit_story_core_memory(
             session_id=session_id,
             payload=payload,
         )
-        return {"session_id": session_id, "item": item}
+        return _memory_action_response(
+            session_id=session_id,
+            item=item,
+            identity=payload.identity,
+            layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+            action="direct_core_edit",
+            governed_by="StoryBlockMutationService.direct_edit_block",
+            affected_refs=[
+                f"core:{payload.domain.value}:{payload.domain_path or payload.domain.value}",
+                str(item.get("proposal_id") or ""),
+            ],
+        )
     except ValueError as exc:
         if str(exc).startswith("StorySession not found:"):
             raise HTTPException(
@@ -895,7 +1064,19 @@ async def review_story_recall_memory(
             session_id=session_id,
             command=payload,
         )
-        return {"session_id": session_id, "item": item}
+        return _memory_action_response(
+            session_id=session_id,
+            item=item,
+            identity=payload.identity,
+            layer=Layer.RECALL.value,
+            action=f"review_recall:{payload.action.value}",
+            governed_by="RecallLifecycleService",
+            affected_refs=[
+                *payload.material_refs,
+                *list(item.get("touched_material_refs") or []),
+                str(item.get("event_id") or ""),
+            ],
+        )
     except ValueError as exc:
         if str(exc).startswith("StorySession not found:"):
             raise HTTPException(
@@ -924,7 +1105,22 @@ async def evolve_story_archival_memory(
             session_id=session_id,
             request=payload,
         )
-        return {"session_id": session_id, "item": item}
+        return _memory_action_response(
+            session_id=session_id,
+            item=item,
+            identity=payload.identity,
+            layer=Layer.ARCHIVAL.value,
+            action="evolve_archival",
+            governed_by="ArchivalEvolutionService.evolve_source",
+            affected_refs=[
+                str(item.get("source_asset_id") or ""),
+                str(item.get("superseded_source_asset_id") or ""),
+                str(item.get("root_source_asset_id") or ""),
+                *list(item.get("replacement_chunk_ids") or []),
+                *list(item.get("reindex_job_ids") or []),
+                *list(item.get("event_ids") or []),
+            ],
+        )
     except ValueError as exc:
         if str(exc).startswith("StorySession not found:"):
             raise HTTPException(
@@ -940,6 +1136,91 @@ async def evolve_story_archival_memory(
             exc,
             code="memory_archival_evolution_invalid",
         ) from exc
+
+
+def _memory_action_response(
+    *,
+    session_id: str,
+    item: dict,
+    identity: MemoryRuntimeIdentity,
+    layer: str,
+    action: str,
+    governed_by: str,
+    affected_refs: list[str],
+) -> dict[str, object]:
+    """Attach stable refresh entrypoints to governed memory action receipts."""
+
+    return {
+        "session_id": session_id,
+        "item": item,
+        "action_metadata": {
+            "schema_version": "rp.memory.action_receipt.v1",
+            "action": action,
+            "layer": layer,
+            "governed_by": governed_by,
+            "identity": identity.model_dump(mode="json"),
+            "affected_refs": _unique_memory_action_refs(affected_refs),
+        },
+        "refresh": {
+            "memory_inspection": {
+                "method": "GET",
+                "path_template": (
+                    "/api/rp/story-sessions/{session_id}/memory/inspection"
+                ),
+                "query_params": {
+                    "branch_head_id": identity.branch_head_id,
+                    "turn_id": identity.turn_id,
+                    "runtime_profile_snapshot_id": (
+                        identity.runtime_profile_snapshot_id
+                    ),
+                },
+            },
+            "runtime_inspect": {
+                "method": "GET",
+                "path_template": (
+                    "/api/rp/story-sessions/{session_id}/runtime/inspect"
+                ),
+                "query_params": {
+                    "branch_head_id": identity.branch_head_id,
+                    "turn_id": identity.turn_id,
+                },
+            },
+        },
+    }
+
+
+def _brainstorm_session_response(*, session_id: str, session) -> dict[str, object]:
+    return {
+        "session_id": session_id,
+        "item": session.model_dump(mode="json"),
+        "runtime_workspace_semantics": {
+            "material_kind": RuntimeWorkspaceMaterialKind.BRAINSTORM_SESSION.value,
+            "temporary": True,
+            "source_of_truth": False,
+            "core_state_truth": False,
+            "recall_truth": False,
+            "archival_truth": False,
+        },
+        "allowed_actions": [
+            "summarize",
+            "edit_item",
+            "reject_item",
+            "confirm_item",
+            "apply_confirmed",
+        ],
+    }
+
+
+def _unique_memory_action_refs(values: list[str]) -> list[str]:
+    refs: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        ref = str(value or "").strip()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        refs.append(ref)
+    return refs
 
 
 @router.get("/api/rp/story-sessions/{session_id}/memory/blocks")

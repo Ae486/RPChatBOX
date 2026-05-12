@@ -1203,6 +1203,79 @@ async def test_runtime_owned_retrieval_fails_closed_when_branch_scope_unresolved
 
 
 @pytest.mark.asyncio
+async def test_runtime_owned_retrieval_scope_failure_creates_trace_without_store_trace(
+    retrieval_session,
+):
+    session_service = StorySessionService(retrieval_session)
+    story_session = session_service.create_session(
+        story_id="story-runtime-branch-scope-missing-no-trace",
+        source_workspace_id="workspace-runtime-branch-scope-missing-no-trace",
+        mode=StoryMode.LONGFORM.value,
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={},
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    snapshot = RuntimeProfileSnapshotService(retrieval_session).ensure_active_snapshot(
+        session_id=story_session.session_id,
+        created_from="test.runtime_branch_scope_missing.no_trace",
+    )
+    retrieval_session.commit()
+    identity = MemoryRuntimeIdentity(
+        story_id=story_session.story_id,
+        session_id=story_session.session_id,
+        branch_head_id="missing-branch-head-no-trace",
+        turn_id="missing-turn-no-trace",
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+
+    class StubRetrievalService:
+        async def search_chunks(self, query: RetrievalQuery) -> RetrievalSearchResult:
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[
+                    RetrievalHit(
+                        hit_id="hit-would-leak-without-scope-no-trace",
+                        query_id=query.query_id,
+                        layer="recall",
+                        domain=Domain.CHAPTER,
+                        domain_path="recall.scope_missing_no_trace",
+                        excerpt_text="This hit must be omitted without a store trace.",
+                        score=0.9,
+                        rank=1,
+                        metadata={"visibility_scope": "story_global"},
+                    )
+                ],
+                trace=None,
+            )
+
+    result = await RetrievalBroker(
+        default_story_id=story_session.story_id,
+        runtime_identity=identity,
+        retrieval_service_factory=lambda _session: StubRetrievalService(),
+    ).search_recall(
+        MemorySearchRecallInput(
+            query="runtime branch scope missing without trace",
+            domains=[Domain.CHAPTER],
+            scope="story",
+            top_k=5,
+        )
+    )
+
+    assert result.hits == []
+    assert result.trace is not None
+    assert result.trace.route == "retrieval.runtime_branch_visibility"
+    assert result.trace.candidate_count == 1
+    assert result.trace.returned_count == 0
+    assert result.trace.details["branch_visibility"]["status"] == (
+        "omitted_fail_closed"
+    )
+    assert result.trace.details["branch_visibility"]["identity"] == (
+        identity.model_dump(mode="json")
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_owned_recall_search_uses_identity_metadata_for_branch_cutoff(
     retrieval_session,
 ):

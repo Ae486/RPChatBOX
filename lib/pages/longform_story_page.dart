@@ -12,6 +12,7 @@ import '../models/story_runtime.dart';
 import '../pages/rp_model_config_page.dart';
 import '../services/backend_story_service.dart';
 import '../widgets/story_session_drawer.dart';
+import '../widgets/story_memory_panel.dart';
 import '../widgets/story_runtime_inspection_sheet.dart';
 
 class LongformStoryPage extends StatefulWidget {
@@ -33,10 +34,7 @@ enum _RevisionReviewMode {
   const _RevisionReviewMode(this.wireName);
 }
 
-enum _SegmentBranchAction {
-  createBranch,
-  rollback,
-}
+enum _SegmentBranchAction { createBranch, rollback }
 
 class _LongformStoryPageState extends State<LongformStoryPage> {
   final _service = BackendStoryService();
@@ -233,6 +231,31 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     );
   }
 
+  Future<void> _openMemoryPanel() async {
+    final snapshot = _snapshot;
+    final sessionId = _currentSessionId;
+    if (snapshot == null || sessionId == null) return;
+    final anchorArtifact = _runtimeInspectionAnchorArtifact(snapshot);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => StoryMemoryPanel(
+        service: _service,
+        sessionId: sessionId,
+        chapterIndex: snapshot.chapter.chapterIndex,
+        mode: snapshot.session.mode,
+        preferredBranchHeadId:
+            anchorArtifact?.runtimeBranchHeadId ??
+            snapshot.session.activeBranchHeadId,
+        preferredTurnId: anchorArtifact?.runtimeTurnId,
+        preferredRuntimeProfileSnapshotId:
+            anchorArtifact?.runtimeProfileSnapshotId ??
+            snapshot.session.activeRuntimeProfileSnapshotId,
+      ),
+    );
+  }
+
   String? _normalizedText(Object? value) {
     final normalized = value?.toString().trim() ?? '';
     return normalized.isEmpty ? null : normalized;
@@ -248,7 +271,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   RpRuntimeInspection? _inspectionForSnapshot(RpChapterSnapshot snapshot) {
     final inspection = _branchInspection;
     if (inspection == null) return null;
-    final inspectionSessionId = _normalizedText(inspection.session['session_id']);
+    final inspectionSessionId = _normalizedText(
+      inspection.session['session_id'],
+    );
     if (inspectionSessionId != snapshot.session.sessionId) return null;
     final activeBranchId = snapshot.session.activeBranchHeadId;
     if (inspection.activeBranchHeadId != activeBranchId) return null;
@@ -267,7 +292,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       }
     }
     final selectedBranch = inspection.selectedBranch;
-    if (_normalizedText(selectedBranch?['branch_head_id']) == normalizedBranchId) {
+    if (_normalizedText(selectedBranch?['branch_head_id']) ==
+        normalizedBranchId) {
       return selectedBranch;
     }
     return null;
@@ -287,9 +313,14 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     return tail.length <= 8 ? tail : tail.substring(0, 8);
   }
 
-  String _branchDisplayNameById(RpChapterSnapshot snapshot, String? branchHeadId) {
+  String _branchDisplayNameById(
+    RpChapterSnapshot snapshot,
+    String? branchHeadId,
+  ) {
     final inspection = _inspectionForSnapshot(snapshot);
-    final branch = inspection == null ? null : _branchById(inspection, branchHeadId);
+    final branch = inspection == null
+        ? null
+        : _branchById(inspection, branchHeadId);
     return _normalizedText(branch?['branch_name']) ??
         _branchShortLabel(branchHeadId);
   }
@@ -509,7 +540,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     return result ?? false;
   }
 
-  Future<RpRuntimeInspection?> _rollbackToArtifact(RpStoryArtifact artifact) async {
+  Future<RpRuntimeInspection?> _rollbackToArtifact(
+    RpStoryArtifact artifact,
+  ) async {
     final sessionId = _currentSessionId;
     final targetTurnId = artifact.runtimeTurnId;
     if (sessionId == null || targetTurnId == null || _isSending) return null;
@@ -616,18 +649,14 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                               children: [
                                 Text(
                                   '分支面板',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleLarge,
+                                  style: Theme.of(context).textTheme.titleLarge,
                                 ),
                                 SizedBox(height: context.owuiSpacing.xs),
                                 Text(
                                   '查看 / 切换 / 删除当前 session 的分支。这里只做产品控制，不读取 LangGraph fork 作为真相。',
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(
-                                        color: context
-                                            .owuiColors
-                                            .textSecondary,
+                                        color: context.owuiColors.textSecondary,
                                       ),
                                 ),
                               ],
@@ -643,12 +672,12 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                       SizedBox(height: context.owuiSpacing.md),
                       if (isWorking)
                         const LinearProgressIndicator(minHeight: 2),
-                      if (isWorking)
-                        SizedBox(height: context.owuiSpacing.md),
+                      if (isWorking) SizedBox(height: context.owuiSpacing.md),
                       Expanded(
                         child: ListView(
                           children: [
-                            for (final branch in currentInspection.availableBranches)
+                            for (final branch
+                                in currentInspection.availableBranches)
                               Padding(
                                 padding: EdgeInsets.only(
                                   bottom: context.owuiSpacing.md,
@@ -1519,6 +1548,11 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                     label: const Text('分支'),
                   ),
                   OutlinedButton.icon(
+                    onPressed: _openMemoryPanel,
+                    icon: const Icon(Icons.account_tree_outlined),
+                    label: const Text('Memory'),
+                  ),
+                  OutlinedButton.icon(
                     onPressed: _openRuntimeInspectionPanel,
                     icon: const Icon(Icons.visibility_outlined),
                     label: const Text('运行态'),
@@ -1586,11 +1620,14 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     final branchName =
         _normalizedText(activeBranch?['branch_name']) ??
         _branchShortLabel(activeBranchId);
-    final parentBranchId = _normalizedText(activeBranch?['parent_branch_head_id']);
-    final forkOriginTurnId = _normalizedText(activeBranch?['fork_origin_turn_id']);
+    final parentBranchId = _normalizedText(
+      activeBranch?['parent_branch_head_id'],
+    );
+    final forkOriginTurnId = _normalizedText(
+      activeBranch?['fork_origin_turn_id'],
+    );
     final forkBaseTurnId = _normalizedText(activeBranch?['fork_base_turn_id']);
-    final detailText =
-        parentBranchId == null && forkOriginTurnId == null
+    final detailText = parentBranchId == null && forkOriginTurnId == null
         ? '当前正文只展示这条 active branch 的线性历史。'
         : '来自 ${_branchDisplayNameById(snapshot, parentBranchId)} · origin ${_turnShortLabel(forkOriginTurnId)} · base ${_turnShortLabel(forkBaseTurnId)}';
 
@@ -1735,7 +1772,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     final spacing = context.owuiSpacing;
     final receipt = _latestBranchCreatedReceiptForSnapshot(snapshot);
     final widgets = <Widget>[];
-    if (receipt != null && _normalizedText(receipt['fork_base_turn_id']) == null) {
+    if (receipt != null &&
+        _normalizedText(receipt['fork_base_turn_id']) == null) {
       widgets.add(_buildBranchForkNotice(snapshot, receipt: receipt));
       widgets.add(SizedBox(height: spacing.md));
     }
@@ -2581,7 +2619,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   }) {
     final spacing = context.owuiSpacing;
     final colors = context.owuiColors;
-    final canShowBranchActions = showBranchActions && artifact.runtimeTurnId != null;
+    final canShowBranchActions =
+        showBranchActions && artifact.runtimeTurnId != null;
     return Container(
       padding: EdgeInsets.all(spacing.lg),
       decoration: BoxDecoration(
@@ -2679,7 +2718,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     final isCurrent = branchHeadId == snapshot.session.activeBranchHeadId;
     final isDefault =
         branchHeadId == 'branch:${snapshot.session.sessionId}:main';
-    final visibilityState = _normalizedText(branch['visibility_state']) ?? 'visible';
+    final visibilityState =
+        _normalizedText(branch['visibility_state']) ?? 'visible';
     final status = _normalizedText(branch['status']) ?? 'active';
     final branchName =
         _normalizedText(branch['branch_name']) ??
@@ -2689,9 +2729,13 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     final originLabel = parentBranchId == null
         ? '故事起点'
         : _branchDisplayNameById(snapshot, parentBranchId);
-    final canSwitch = !isCurrent && visibilityState == 'visible' && status == 'active';
+    final canSwitch =
+        !isCurrent && visibilityState == 'visible' && status == 'active';
     final canDelete =
-        !isCurrent && !isDefault && visibilityState != 'deleted' && status == 'active';
+        !isCurrent &&
+        !isDefault &&
+        visibilityState != 'deleted' &&
+        status == 'active';
     final receiptSummary = latestReceipt == null
         ? '当前不可用'
         : '${_normalizedText(latestReceipt['control_kind']) ?? 'unknown'} · ${_turnShortLabel(_normalizedText(latestReceipt['target_turn_id']) ?? _normalizedText(latestReceipt['fork_origin_turn_id']))}';
@@ -2722,11 +2766,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                       children: [
                         Text(
                           branchName,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -2742,11 +2783,8 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
                           ),
                           child: Text(
                             _branchShortLabel(branchHeadId),
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodySmall?.copyWith(
-                              color: colors.textSecondary,
-                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.textSecondary),
                           ),
                         ),
                         if (isCurrent)
@@ -2793,9 +2831,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           SizedBox(height: spacing.sm),
           Text(
             '最近回执: $receiptSummary',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
           ),
           SizedBox(height: spacing.md),
           Wrap(

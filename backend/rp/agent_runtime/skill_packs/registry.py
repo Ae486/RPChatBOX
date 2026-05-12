@@ -98,10 +98,11 @@ def _parse_frontmatter(block: str) -> dict[str, str]:
                     block_indent = indent
                     block_lines.append(stripped)
                     continue
-            if indent >= block_indent:
-                block_lines.append(raw_line[block_indent:])
-                continue
-            _flush_block()
+            if current_key is not None:
+                if block_indent is not None and indent >= block_indent:
+                    block_lines.append(raw_line[block_indent:])
+                    continue
+                _flush_block()
 
         line = raw_line.rstrip()
         if not line.strip():

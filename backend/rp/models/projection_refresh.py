@@ -30,6 +30,7 @@ class ProjectionRefreshRequest(BaseModel):
     refresh_reason: str = "bundle_refresh"
     refresh_source_kind: str = "bundle_refresh"
     refresh_source_ref: str | None = None
+    source_core_state_snapshot_id: str | None = None
     base_revision: int | None = None
     projection_dirty_state: str = "dirty"
     source_authoritative_refs: list[ObjectRef] = Field(default_factory=list)
@@ -57,6 +58,20 @@ class ProjectionRefreshRequest(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("refresh_source_ref must be non-empty when provided")
+        return normalized
+
+    @field_validator("source_core_state_snapshot_id")
+    @classmethod
+    def _normalize_source_core_state_snapshot_id(
+        cls, value: str | None
+    ) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(
+                "source_core_state_snapshot_id must be non-empty when provided"
+            )
         return normalized
 
     @field_validator("base_revision")

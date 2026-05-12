@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal, cast
 
 from models.chat import ChatCompletionRequest
 from rp.agent_runtime.adapters import SetupRuntimeAdapter
@@ -368,10 +368,18 @@ class SetupAgentExecutionService:
         existing_summary: SetupContextCompactSummary | None,
     ) -> SetupContextGovernanceReport:
         raw_history_chars = sum(len(item.content or "") for item in request.history)
-        summary_strategy = str(governance_metadata.get("summary_strategy") or "none")
-        summary_action = str(governance_metadata.get("summary_action") or "none")
+        summary_strategy = cast(
+            Literal["none", "deterministic_prefix_summary", "compact_prompt_summary"],
+            governance_metadata.get("summary_strategy") or "none",
+        )
+        summary_action = cast(
+            Literal["none", "reused_existing", "updated_existing", "rebuilt"],
+            governance_metadata.get("summary_action") or "none",
+        )
         return SetupContextGovernanceReport(
-            context_profile=str(context_packet.context_profile),
+            context_profile=cast(
+                Literal["standard", "compact"], context_packet.context_profile
+            ),
             profile_reasons=SetupAgentExecutionService._context_profile_reasons(
                 request,
                 estimated_input_tokens=governance_metadata.get(
@@ -640,6 +648,7 @@ class SetupAgentExecutionService:
 
         return {
             "skill_pack_name": prepared.turn_input.metadata.get("skill_pack_name"),
+            "context_pipeline": prepared.turn_input.metadata.get("context_pipeline"),
         }
 
     async def _build_runtime_v2_turn_input(

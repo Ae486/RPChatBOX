@@ -1026,10 +1026,10 @@ E1 当前工作树的关键新增/收口点：
 
 - `[x]` V0. Product Evidence Lock
 - `[x]` V1. Branch-aware Memory Resolver And Writer Context
-- `[ ]` V2. Backend Memory Product Contract
-- `[ ]` V3. Frontend Memory Product Surface
-- `[ ]` V4. Writer Brainstorm Apply
-- `[ ]` V5. Post-write Memory Maintenance Minimum Closure
+- `[x]` V2. Backend Memory Product Contract
+- `[x]` V3. Frontend Memory Product Surface
+- `[x]` V4. Writer Brainstorm Apply
+- `[>]` V5. Post-write Memory Maintenance Minimum Closure
 - `[ ]` V6. Product Acceptance
 
 V0/V1 implementation evidence:
@@ -1079,6 +1079,117 @@ Validation limitation:
 - The earlier combined three-file pytest command timed out locally after 184
   seconds. V1 closure therefore uses focused contract nodeids plus ruff/mypy
   instead of full related-file pytest completion.
+
+V2 implementation evidence:
+
+- `/memory/inspection` remains the backend-owned canonical envelope producer for
+  Core, Projection, Runtime Workspace, Recall, and Archival visible layers. V2
+  tests now explicitly cover Projection canonical block metadata in addition to
+  Core/Workspace/Recall/Archival canonical action metadata.
+- `/memory/core/direct-edit`, `/memory/recall/actions`, and
+  `/memory/archival/evolution` preserve their governed receipts and now attach
+  additive `rp.memory.action_receipt.v1` action metadata plus explicit refresh
+  entrypoints for `/memory/inspection` and `/runtime/inspect`.
+- Core direct edit remains routed through
+  `StoryBlockMutationService.direct_edit_block` / shared mutation kernel with
+  identity/base-ref validation and stale-base rejection.
+- Recall actions remain routed through `RecallLifecycleService` and fail closed
+  for cross-story or non-visible refs.
+- Archival evolution remains routed through
+  `ArchivalEvolutionService.evolve_source`, creates version/reindex receipts,
+  and defaults runtime-authored evolution to current-branch visibility.
+
+V2 focused verification:
+
+- `python -m pytest backend\rp\tests\test_memory_inspection_service.py backend\rp\tests\test_recall_lifecycle_service.py backend\rp\tests\test_archival_evolution_service.py -q --tb=short`:
+  `19 passed`
+- `python -m pytest backend\tests\test_rp_story_api.py::test_story_memory_inspection_route_uses_memory_family_and_identity_scope backend\tests\test_rp_story_api.py::test_story_memory_action_routes_return_refreshable_receipts -q --tb=short`:
+  `2 passed`
+- `python -m pytest backend\rp\tests\test_story_runtime_controller_memory_read_side.py::test_story_runtime_controller_direct_edit_routes_through_shared_kernel backend\rp\tests\test_story_runtime_controller_memory_read_side.py::test_story_runtime_controller_direct_edit_rejects_stale_base_revision -q --tb=short`:
+  `2 passed`
+- `python -m pytest backend\rp\tests\test_story_runtime_product_acceptance.py::test_q1_story_evolution_visibility_excludes_hidden_and_superseded_chunks -q --tb=short`:
+  `1 passed`
+- `ruff check backend\api\rp_story.py backend\rp\tests\test_memory_inspection_service.py backend\tests\test_rp_story_api.py backend\rp\services\memory_inspection_service.py backend\rp\models\memory_inspection.py backend\rp\models\core_mutation.py backend\rp\models\archival_evolution.py backend\rp\services\recall_lifecycle_service.py backend\rp\services\archival_evolution_service.py`:
+  passed
+- `mypy --follow-imports=skip --check-untyped-defs backend\api\rp_story.py backend\rp\services\memory_inspection_service.py backend\rp\models\memory_inspection.py backend\rp\models\core_mutation.py backend\rp\models\archival_evolution.py backend\rp\services\recall_lifecycle_service.py backend\rp\services\archival_evolution_service.py`:
+  passed
+
+V3 implementation evidence:
+
+- Longform story product surface now exposes a first-class `Memory` entrypoint
+  beside branch/runtime inspect controls.
+- Frontend reads backend `/memory/inspection` directly through thin
+  `RpMemoryInspection` / block / entry wrappers that preserve the backend
+  `canonical_envelope`, `blocks`, `entries`, `layers`, `entrypoints`,
+  visibility, revision/base revision, lifecycle, source refs, validation,
+  conflict, and allowed-action fields without inventing a second Memory UI DTO.
+- `StoryMemoryPanel` renders Core, Projection, Runtime Workspace, Recall, and
+  Archival blocks from the canonical envelope, with layer/domain filters and
+  current branch / cutoff turn / snapshot identity visible at the top.
+- Allowed actions drive the minimal product controls:
+  - Core `direct_core_edit` sends base refs and patch operations built from the
+    selected canonical entry;
+  - Recall `recompute` / `invalidate` / `supersede` posts governed review
+    actions using canonical material refs;
+  - Archival `evolve_archival` posts replacement sections with expected source
+    version from the canonical entry/base revision.
+- Action responses consume V2 `action_metadata` and `refresh` directly. After a
+  governed action, the panel refreshes Memory inspection and runtime inspect
+  using the response-provided refresh query params.
+
+V3 focused verification:
+
+- `flutter analyze lib\models\story_runtime.dart lib\services\backend_story_service.dart lib\pages\longform_story_page.dart lib\widgets\story_memory_panel.dart test\unit\models\story_memory_surface_test.dart`:
+  passed
+- `flutter test test\unit\models\story_memory_surface_test.dart`:
+  `2 passed`
+- Backend smoke reused the V2 route contract:
+  `python -m pytest backend\tests\test_rp_story_api.py::test_story_memory_inspection_route_uses_memory_family_and_identity_scope backend\tests\test_rp_story_api.py::test_story_memory_action_routes_return_refreshable_receipts -q --tb=short`:
+  `2 passed`
+
+V4 implementation evidence:
+
+- Writer Brainstorm Apply now treats brainstorm as Runtime Workspace temporary
+  material, not Memory truth. `BrainstormSession` and `BrainstormItem` remain
+  traceable, branch/turn scoped scratch state; user-confirmed items are the only
+  inputs to apply.
+- `BrainstormItem` stays memory-layer agnostic. Worker-routing fields such as
+  `target_layer`, `target_domain`, `operation_kind`, and `intent_labels` are
+  rejected by the model contract instead of being accepted silently.
+- Core-oriented V4 apply routes confirmed items through
+  `BrainstormCoreFieldChange` and shared `CoreMutationEnvelope` with
+  `origin_kind=brainstorm_summary_apply`; non-Core wishes stay in
+  review/redirect instead of being treated as Recall or Archival edits.
+- Core target reads use `CoreStateAsOfResolver.ensure_manifest_for_identity(...)`
+  and `resolve_object_revision(...)`, so branch-from-turn apply sees the Core
+  state of that branch/turn, not main-branch future state.
+- `ProposalApplyService` now overlays as-of Core revisions for
+  `before_snapshot` and base-revision validation in V4 core mutation paths, then
+  records a branch/turn Core snapshot manifest for changed revisions.
+- V4 core mutation apply fails closed if a runtime identity requires as-of Core
+  semantics but apply cannot obtain a `CoreStateAsOfResolver` or derive one from
+  the dual-write service.
+- Worker permission now reuses `WorkerMemoryService.authorize_operation(...)`
+  and fails closed for missing registry, disabled worker, forbidden
+  operation/domain/layer, or permission profile mismatch.
+- API/controller/factory wiring exposes brainstorm session start/read/summarize,
+  item update, and apply routes without creating a second mutation path.
+- Independent `gpt-5.5 xhigh` V4 re-check fixed the missing-resolver
+  fail-closed gap and found no remaining blocker.
+
+V4 focused verification:
+
+- `python -m pytest backend\rp\tests\test_story_brainstorm_service.py -q --tb=short`:
+  `10 passed`
+- `python -m pytest backend\rp\tests\test_runtime_workspace_material_service.py::test_material_kind_and_lifecycle_enums_match_spec backend\tests\test_rp_story_api.py::test_story_brainstorm_routes_return_workspace_and_apply_receipts -q --tb=short`:
+  `2 passed`
+- `python -m pytest backend\rp\tests\test_worker_memory_service.py::test_worker_memory_service_rejects_disabled_worker backend\rp\tests\test_worker_memory_service.py::test_worker_memory_service_rejects_forbidden_operation_kind -q --tb=short`:
+  `2 passed`
+- `python -m ruff check` on V4 touched backend files:
+  passed
+- `python -m mypy --follow-imports=skip --check-untyped-defs` on V4 touched
+  source files:
+  passed
 
 并行规则：
 

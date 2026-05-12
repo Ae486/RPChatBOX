@@ -11,13 +11,15 @@ from rp.agent_runtime.contracts import (
     RuntimeProfile,
     SetupContextCompactSummary,
     SetupContextGovernanceReport,
+    SetupContextPipelineSnapshot,
     SetupCognitiveStateSnapshot,
     SetupCognitiveStateSummary,
+    SetupPromptAssemblySnapshot,
     SetupToolOutcome,
     SetupWorkingDigest,
 )
 from rp.agent_runtime.profiles import (
-    build_setup_agent_tool_scope,
+    build_setup_agent_capability_plan,
     build_setup_agent_profile,
 )
 from rp.agent_runtime.skill_packs import get_skill_pack_for_stage
@@ -75,11 +77,21 @@ class SetupRuntimeAdapter:
                 else None
             )
         )
+        current_stage_value = (
+            selected_stage.value
+            if selected_stage is not None
+            else (current_stage.value if current_stage is not None else None)
+        )
+        capability_plan = build_setup_agent_capability_plan(
+            current_step.value,
+            current_stage=selected_stage.value if selected_stage is not None else None,
+        )
         system_prompt = self._prompt_service.build_system_prompt(
             mode=workspace.mode,
             current_step=current_step,
             current_stage=selected_stage,
             context_packet=context_packet,
+            capability_plan=capability_plan,
         )
         open_questions = [
             question
@@ -109,10 +121,15 @@ class SetupRuntimeAdapter:
             ),
             None,
         )
-        tool_scope_key = (
-            selected_stage.value if selected_stage is not None else current_step.value
-        )
         skill_pack = get_skill_pack_for_stage(selected_stage)
+        context_pipeline = SetupContextPipelineSnapshot(
+            context_profile=context_packet.context_profile,
+            prompt_assembly=SetupPromptAssemblySnapshot(
+                active_skill_pack_name=(
+                    skill_pack.name if skill_pack is not None else None
+                )
+            ),
+        )
         return RpAgentTurnInput(
             profile_id="setup_agent",
             run_kind="interactive_agent_turn",
@@ -137,9 +154,7 @@ class SetupRuntimeAdapter:
                 ),
                 "mode": workspace.mode.value,
                 "current_step": current_step.value,
-                "current_stage": current_stage.value
-                if current_stage is not None
-                else None,
+                "current_stage": current_stage_value,
                 "step_state": (
                     step_state.model_dump(mode="json", exclude_none=True)
                     if step_state is not None
@@ -154,8 +169,8 @@ class SetupRuntimeAdapter:
                     current_step.value
                 ),
                 "stage_readiness": (
-                    workspace.readiness_status.step_readiness.get(current_stage.value)
-                    if current_stage is not None
+                    workspace.readiness_status.step_readiness.get(current_stage_value)
+                    if current_stage_value is not None
                     else None
                 ),
                 "open_question_count": len(open_questions),
@@ -220,18 +235,24 @@ class SetupRuntimeAdapter:
                     else None
                 ),
                 "governance_metadata": dict(governance_metadata or {}),
+            },
+            tool_scope=list(capability_plan.runtime_allowlist),
+            metadata={
+                "model_name": model_name,
+                "provider": provider.model_dump(mode="json", exclude_none=True),
+                "capability_plan": capability_plan.model_dump(
+                    mode="json", exclude_none=True
+                ),
+                "skill_pack_name": (
+                    skill_pack.name if skill_pack is not None else None
+                ),
                 "context_report": (
                     context_report.model_dump(mode="json", exclude_none=True)
                     if context_report is not None
                     else None
                 ),
-            },
-            tool_scope=build_setup_agent_tool_scope(tool_scope_key),
-            metadata={
-                "model_name": model_name,
-                "provider": provider.model_dump(mode="json", exclude_none=True),
-                "skill_pack_name": (
-                    skill_pack.name if skill_pack is not None else None
+                "context_pipeline": context_pipeline.model_dump(
+                    mode="json", exclude_none=True
                 ),
             },
         )

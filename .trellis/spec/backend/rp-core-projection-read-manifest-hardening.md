@@ -26,6 +26,10 @@ class RuntimeReadManifest(BaseModel):
     manifest_id: str
     identity: MemoryRuntimeIdentity
     active_branch_lineage: list[str]
+    branch_scope: dict[str, Any] = Field(default_factory=dict)
+    core_state_snapshot_id: str | None = None
+    core_state_revision_map: dict[str, str] = Field(default_factory=dict)
+    projection_source_manifest_id: str | None = None
     runtime_profile_snapshot_id: str
     policy_versions: dict[str, str]
     visible_refs: list[dict[str, Any]]
@@ -73,6 +77,9 @@ projection_refresh_identity_required
 
 - `Core State.authoritative_state` is the only current truth layer.
 - `Core State.derived_projection` is a derived current view.
+- Runtime-owned Core truth is selected by Core State as-of manifest and object
+  revision map. Latest current object rows are caches/compatibility views, not
+  selected-turn truth.
 - Runtime-owned projection refresh is maintenance over view state only.
 - Runtime-owned reads and packet assembly must not treat:
   - compatibility mirrors
@@ -97,12 +104,33 @@ as authoritative fact by default.
 - Every writer/scheduler packet build must be able to persist or reconstruct a deterministic read manifest.
 - The manifest must answer:
   - what was visible to this runtime turn;
+  - which Core State snapshot manifest and object revisions defined the
+    selected-turn authoritative state;
   - what was selected into the packet;
   - what was omitted and why;
   - which revisions/hashes/refs backed the packet;
   - which retrieval cards/expansions/usages participated.
 - The manifest is a read/trace contract, not a new LLM orchestration layer.
 - `WritingPacketBuilder` remains the packet builder; the manifest is the deterministic input/trace contract around it.
+- If a projection section is derived from a different Core manifest/revision set
+  than the selected runtime turn, the manifest must mark it stale/omitted or
+  trigger refresh. It must not silently substitute latest-session projection.
+
+#### Core as-of read contract
+
+- Runtime-owned Core reads must resolve:
+  - `branch_scope`;
+  - `core_state_snapshot_id`;
+  - `core_state_revision_map`.
+- A manifest's `core_state_revision_map` maps stable object ref ids to exact
+  object revision ids or `object_id@revision` refs.
+- Writer context and Memory inspection must use the same Core as-of manifest for
+  the selected branch/turn.
+- Compatibility fallback to `StorySession.current_state_json` or latest current
+  row is allowed only on explicit legacy/admin paths and must be visible in
+  warnings/metadata. It must not feed runtime writer context.
+- Projection slots must record their source Core manifest id or source revision
+  map so freshness can be checked deterministically.
 
 #### Visible vs selected contract
 
@@ -150,6 +178,8 @@ as authoritative fact by default.
 | Runtime-owned packet build lacks branch scope | Reject with `runtime_read_manifest_branch_scope_missing` |
 | Runtime-owned projection refresh is attempted without identity | Reject with `projection_refresh_identity_required` |
 | Same identity + same store state + same profile snapshot | Same read manifest content is produced |
+| Core manifest is selected for turn N | Manifest records `core_state_snapshot_id` and exact object revision refs |
+| Projection source manifest differs from selected Core manifest | Projection is refreshed or omitted with `core_projection_source_manifest_mismatch` |
 | Ref is visible but trimmed by budget | Appears in `omitted_refs` with deterministic reason |
 | Retrieval card enters packet | Appears in manifest retrieval refs, but not as Core truth |
 | Compatibility mirror read is used | Manifest still records route/source version metadata |
@@ -159,11 +189,15 @@ as authoritative fact by default.
 ### 5. Good / Base / Bad Cases
 
 - Good: a writer packet shows which Core refs, Projection slots, Runtime Workspace refs, and retrieval cards were selected for that exact turn.
+- Good: a writer packet built after branching from turn 2 records the turn 2
+  Core manifest and excludes later Core current-row values.
 - Good: the same turn can be debugged later without exposing hidden chain-of-thought, only deterministic selection metadata.
 - Good: projection refresh remains derived-view maintenance with identity and freshness guards.
 - Good: `mode_sidecar.rule_card` is discoverable in debug/read views through `metadata.section_family` and `source_ref_ids`, even if its display label changes.
 - Base: legacy compatibility routes can remain during transition if the manifest records their route/source metadata.
 - Bad: assembling packet context through ad hoc service calls with no reproducible visible/selected/omitted ref contract.
+- Bad: recording only latest current Core row metadata in a runtime manifest when
+  the selected turn should read an older manifest.
 - Bad: letting runtime-owned projection refresh keep omitting identity indefinitely.
 - Bad: treating retrieval hits selected into the packet as if they were already Core truth.
 - Bad: treating a section as a TRPG/rule sidecar because its label contains "rule" while the manifest lacks a stable section classifier.
@@ -172,6 +206,9 @@ as authoritative fact by default.
 
 - Manifest tests cover:
   - deterministic output for same identity/state/profile;
+  - `core_state_snapshot_id` and `core_state_revision_map` for runtime-owned
+    writer turns;
+  - projection source manifest mismatch produces refresh or omitted reason;
   - visible vs selected vs omitted separation;
   - packet section source/revision/hash metadata;
   - packet section family classification through stable fields, not labels;
@@ -184,6 +221,40 @@ as authoritative fact by default.
 - Focused lint/type checks must include the new manifest contract and projection-path changes/tests.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+manifest = RuntimeReadManifest(
+    identity=identity,
+    active_branch_lineage=[identity.branch_head_id],
+    visible_refs=[],
+    selected_refs=[],
+    omitted_refs=[],
+)
+```
+
+This records branch identity but not the Core State snapshot/revision set that
+made the packet's authoritative state reproducible.
+
+#### Correct
+
+```python
+manifest = RuntimeReadManifest(
+    identity=identity,
+    active_branch_lineage=scope.visible_branch_head_ids,
+    branch_scope=scope.model_dump(mode="json"),
+    core_state_snapshot_id=core_manifest.snapshot_id,
+    core_state_revision_map=core_manifest.effective_revision_map,
+    projection_source_manifest_id=projection.source_manifest_id,
+    visible_refs=visible_refs,
+    selected_refs=selected_refs,
+    omitted_refs=omitted_refs,
+)
+```
+
+The packet can be reproduced against the selected branch/turn Core truth, and
+stale projection sources can be detected deterministically.
 
 #### Wrong
 

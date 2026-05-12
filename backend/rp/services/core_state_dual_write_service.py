@@ -10,6 +10,7 @@ from models.rp_core_state_store import (
     CoreStateAuthoritativeRevisionRecord,
 )
 from rp.models.dsl import Layer, ObjectRef
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.projection_refresh import (
     ProjectionRefreshRequest,
     ProjectionRefreshServiceError,
@@ -30,6 +31,10 @@ class CoreStateDualWriteService:
 
     def __init__(self, *, repository: CoreStateStoreRepository) -> None:
         self._repository = repository
+
+    @property
+    def repository(self) -> CoreStateStoreRepository:
+        return self._repository
 
     def seed_activation_state(
         self,
@@ -194,6 +199,7 @@ class CoreStateDualWriteService:
         revision_after: dict[str, int],
         apply_id: str,
         proposal_id: str,
+        runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> dict[
         str,
         tuple[CoreStateAuthoritativeObjectRecord, CoreStateAuthoritativeRevisionRecord],
@@ -253,7 +259,28 @@ class CoreStateDualWriteService:
                 revision_source_kind="proposal_apply",
                 source_apply_id=apply_id,
                 source_proposal_id=proposal_id,
-                metadata_json={"dual_write_source": "proposal_apply"},
+                owning_branch_head_id=(
+                    None if runtime_identity is None else runtime_identity.branch_head_id
+                ),
+                origin_turn_id=None if runtime_identity is None else runtime_identity.turn_id,
+                runtime_profile_snapshot_id=(
+                    None
+                    if runtime_identity is None
+                    else runtime_identity.runtime_profile_snapshot_id
+                ),
+                visibility_scope=(
+                    "story_global" if runtime_identity is None else "branch_scoped"
+                ),
+                visibility_state="active",
+                base_revision=desired_revision - 1 if desired_revision > 1 else None,
+                metadata_json={
+                    "dual_write_source": "proposal_apply",
+                    "runtime_identity": (
+                        None
+                        if runtime_identity is None
+                        else runtime_identity.model_dump(mode="json")
+                    ),
+                },
             )
             written[binding.object_id] = (current_record, revision_record)
         return written
@@ -404,6 +431,7 @@ class CoreStateDualWriteService:
             "refresh_reason": request.refresh_reason,
             "base_revision": request.base_revision,
             "projection_dirty_state": request.projection_dirty_state,
+            "source_core_state_snapshot_id": request.source_core_state_snapshot_id,
             "source_authoritative_refs": [
                 ref.model_dump(mode="json") for ref in request.source_authoritative_refs
             ],

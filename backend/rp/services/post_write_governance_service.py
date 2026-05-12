@@ -20,6 +20,7 @@ from rp.models.runtime_workflow_job import (
 from rp.models.story_runtime import ChapterWorkspace, SpecialistResultBundle, StorySession
 from rp.models.worker_memory import WorkerProposalGovernanceMetadata
 from rp.models.worker_runtime_contracts import WorkerExecutionPlan, WorkerResult
+from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
 from rp.services.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
@@ -44,12 +45,14 @@ class PostWriteGovernanceService:
         *,
         runtime_workflow_job_service: RuntimeWorkflowJobService,
         projection_refresh_service: ProjectionRefreshService,
+        core_state_as_of_resolver: CoreStateAsOfResolver | None = None,
         proposal_workflow_service: ProposalWorkflowService | None = None,
         legacy_state_patch_proposal_builder: LegacyStatePatchProposalBuilder
         | None = None,
     ) -> None:
         self._runtime_workflow_job_service = runtime_workflow_job_service
         self._projection_refresh_service = projection_refresh_service
+        self._core_state_as_of_resolver = core_state_as_of_resolver
         self._proposal_workflow_service = proposal_workflow_service
         self._legacy_state_patch_proposal_builder = (
             legacy_state_patch_proposal_builder or LegacyStatePatchProposalBuilder()
@@ -150,6 +153,13 @@ class PostWriteGovernanceService:
             ]
         )
         first_result = refresh_results[0]
+        source_core_state_snapshot_id = None
+        if self._core_state_as_of_resolver is not None:
+            source_core_state_snapshot_id = (
+                self._core_state_as_of_resolver.ensure_manifest_for_identity(
+                    identity=identity
+                ).snapshot_id
+            )
         refresh_request = ProjectionRefreshRequest(
             identity=identity,
             refresh_actor=f"worker.{first_result.worker_id}",
@@ -159,6 +169,7 @@ class PostWriteGovernanceService:
                 identity=identity,
                 result=first_result,
             ),
+            source_core_state_snapshot_id=source_core_state_snapshot_id,
             source_refs=source_refs,
             projection_dirty_state="dirty",
         )

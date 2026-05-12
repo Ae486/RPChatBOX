@@ -142,7 +142,7 @@ A2 CapabilityPlan: one source for tools, prompt guidance, provider schema, execu
 A3 ContextPipeline: handoff, draft, compact, working digest, SkillPack assembly
 A4 ModelGateway + OutputInspector + EventSink hardening
 A5 RuntimeStateStore / trace / visible transcript separation
-B  Draft CRUD migration
+B  Tool module integration protocol / canonical draft-write path
 C  Setup lightweight retrieval roadmap
 D  SkillPack governance
 ```

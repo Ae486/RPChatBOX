@@ -18,6 +18,9 @@ from .contracts import (
     RuntimeProfile,
     SetupActionExpectation,
     SetupContextCompactSummary,
+    SetupEventSinkSnapshot,
+    SetupModelGatewayDiagnostics,
+    SetupOutputInspection,
     RuntimeToolCall,
     RuntimeToolResult,
     SetupCognitiveStateSnapshot,
@@ -47,6 +50,7 @@ from rp.services.setup_context_governor import SetupContextGovernorService
 
 SETUP_TRUTH_WRITE_QUALIFIED_TOOL_NAME = "rp_setup__setup.truth.write"
 SETUP_TRUTH_WRITE_RAW_TOOL_NAME = "setup.truth.write"
+SETUP_TRUTH_WRITE_RUNTIME_SCHEMA_MODE = "setup_truth_write_runtime_adapted"
 SETUP_TRUTH_WRITE_STAGE_BLOCK_TYPE = "stage_draft"
 SETUP_TRUTH_WRITE_BLOCK_TYPE_BY_STEP = {
     "story_config": "story_config",
@@ -56,6 +60,10 @@ SETUP_TRUTH_WRITE_BLOCK_TYPE_BY_STEP = {
 }
 
 _SENTINEL = object()
+
+
+class _ProviderStreamPayloadError(ValueError):
+    """Provider stream emitted a malformed typed-SSE payload."""
 
 
 class RpAgentRuntimeExecutor:
@@ -104,7 +112,9 @@ class RpAgentRuntimeExecutor:
             profile=profile,
         )
         async for event in driver.run_stream(turn_input):
-            yield self._event_adapter.to_sse_line(event)
+            line = self._event_adapter.to_sse_line(event)
+            if line is not None:
+                yield line
         self._last_result = driver.last_result
 
 
@@ -241,6 +251,7 @@ class _RuntimeRunDriver:
             "turn_input": turn_input.model_dump(mode="json", exclude_none=True),
             "normalized_messages": [],
             "tool_definitions": [],
+            "output_inspection": None,
             "pending_tool_calls": [],
             "tool_invocations": [],
             "tool_results": [],
@@ -268,6 +279,7 @@ class _RuntimeRunDriver:
             "repair_route": None,
             "continue_reason": None,
             "loop_trace": [],
+            "model_gateway_diagnostics": None,
             "next_action": "build_model_request",
             "schema_retry_count": 0,
             "pseudo_tool_retry_count": 0,
@@ -585,6 +597,15 @@ class _RuntimeRunDriver:
             return tool
         if function.get("name") != SETUP_TRUTH_WRITE_QUALIFIED_TOOL_NAME:
             return tool
+        if (
+            self._model_schema_mode(
+                turn_input,
+                SETUP_TRUTH_WRITE_RAW_TOOL_NAME,
+                SETUP_TRUTH_WRITE_QUALIFIED_TOOL_NAME,
+            )
+            != SETUP_TRUTH_WRITE_RUNTIME_SCHEMA_MODE
+        ):
+            return tool
         if not self._truth_write_runtime_defaults(turn_input):
             return tool
 
@@ -603,6 +624,26 @@ class _RuntimeRunDriver:
         ).strip()
         adapted["function"] = adapted_function
         return adapted
+
+    @staticmethod
+    def _model_schema_mode(
+        turn_input: RpAgentTurnInput,
+        raw_tool_name: str,
+        qualified_tool_name: str,
+    ) -> str:
+        capability_plan = turn_input.metadata.get("capability_plan")
+        if not isinstance(capability_plan, dict):
+            return SETUP_TRUTH_WRITE_RUNTIME_SCHEMA_MODE
+        schema_modes = capability_plan.get("model_schema_modes")
+        if not isinstance(schema_modes, dict):
+            return "provider_default"
+        raw_mode = schema_modes.get(raw_tool_name)
+        if raw_mode is not None:
+            return str(raw_mode)
+        qualified_mode = schema_modes.get(qualified_tool_name)
+        if qualified_mode is not None:
+            return str(qualified_mode)
+        return "provider_default"
 
     def _truth_write_stage_payload_hint(self, turn_input: RpAgentTurnInput) -> str:
         defaults = self._truth_write_runtime_defaults(turn_input)
@@ -765,29 +806,38 @@ class _RuntimeRunDriver:
         self,
         request: ChatCompletionRequest,
     ) -> RpAgentRunState:
-        with self._langfuse.start_as_current_observation(
-            name="rp.runtime.model_call",
-            as_type="generation",
-            model=request.model,
-            input={
-                "messages": request.model_dump(mode="json").get("messages", []),
-                "tool_count": len(request.tools or []),
-                "stream": False,
-            },
-            model_parameters={
-                "stream": False,
-                "tool_choice": request.tool_choice,
-            },
-        ) as generation:
-            response = self._coerce_response_dict(
-                await self._llm_service.chat_completion(request)
-            )
-            usage_payload = response.get("usage")
-            generation.update(
-                output=self._extract_message_payload(response),
-                usage_details=(
-                    dict(usage_payload) if isinstance(usage_payload, dict) else None
-                ),
+        try:
+            with self._langfuse.start_as_current_observation(
+                name="rp.runtime.model_call",
+                as_type="generation",
+                model=request.model,
+                input={
+                    "messages": request.model_dump(mode="json").get("messages", []),
+                    "tool_count": len(request.tools or []),
+                    "stream": False,
+                },
+                model_parameters={
+                    "stream": False,
+                    "tool_choice": request.tool_choice,
+                },
+            ) as generation:
+                response = self._coerce_response_dict(
+                    await self._llm_service.chat_completion(request)
+                )
+                usage_payload = response.get("usage")
+                generation.update(
+                    output=self._extract_message_payload(response),
+                    usage_details=(
+                        dict(usage_payload)
+                        if isinstance(usage_payload, dict)
+                        else None
+                    ),
+                )
+        except Exception as exc:
+            return self._model_gateway_failure_update(
+                failure_kind="provider_request_error",
+                message=str(exc),
+                provider_error_type=type(exc).__name__,
             )
         return {
             "status": "model_called",
@@ -804,6 +854,7 @@ class _RuntimeRunDriver:
         pending_text_chunks: list[str] = []
         suppress_pending_text = False
         error_payload: dict[str, Any] | None = None
+        model_gateway_diagnostics: dict[str, Any] | None = None
         usage_details: dict[str, int] | None = None
         run_id = str(state["run_id"])
 
@@ -834,71 +885,117 @@ class _RuntimeRunDriver:
                 "tool_choice": request.tool_choice,
             },
         ) as generation:
-            async for line in self._llm_service.chat_completion_stream(request):
-                payload = self._parse_sse_payload(line)
-                if payload is None:
-                    continue
+            try:
+                async for line in self._llm_service.chat_completion_stream(request):
+                    payload = self._parse_sse_payload(line)
+                    if payload is None:
+                        continue
 
-                event_type = str(payload.get("type") or "")
-                if event_type == "done":
-                    await _flush_pending_text()
-                    break
-                if event_type in {"thinking_delta", "text_delta"}:
-                    delta = str(payload.get("delta") or "")
-                    if event_type == "text_delta":
-                        accumulated_text += delta
-                        pending_text_chunks.append(delta)
-                        if self._looks_like_pseudo_tool_call_text(
-                            "".join(pending_text_chunks)
-                        ):
-                            suppress_pending_text = True
-                            pending_text_chunks = []
-                    else:
+                    event_type = str(payload.get("type") or "")
+                    if event_type == "done":
+                        await _flush_pending_text()
+                        break
+                    if event_type in {"thinking_delta", "text_delta"}:
+                        delta = str(payload.get("delta") or "")
+                        if event_type == "thinking_delta":
+                            await self._emit_event(
+                                run_id=run_id,
+                                event_type="thinking_delta",
+                                payload={"delta": delta},
+                            )
+                            continue
+                        if event_type == "text_delta":
+                            accumulated_text += delta
+                            if accumulated_tool_calls:
+                                suppress_pending_text = True
+                                pending_text_chunks = []
+                                continue
+                            pending_text_chunks.append(delta)
+                            if self._looks_like_pseudo_tool_call_text(
+                                "".join(pending_text_chunks)
+                            ):
+                                suppress_pending_text = True
+                                pending_text_chunks = []
+                        continue
+                    if event_type == "tool_call":
+                        # A stream can deliver ordinary-looking text before the
+                        # provider emits a real tool call. Once the output is mixed
+                        # text+tool, the full buffered text remains private and
+                        # OutputInspector owns the final classification.
+                        suppress_pending_text = True
+                        pending_text_chunks = []
+                        raw_calls = payload.get("tool_calls", [])
+                        self._merge_stream_tool_calls(
+                            accumulated_tool_calls, raw_calls
+                        )
                         await self._emit_event(
                             run_id=run_id,
-                            event_type=event_type,
-                            payload={"delta": delta},
+                            event_type="tool_call",
+                            payload={
+                                "tool_calls": raw_calls
+                                if isinstance(raw_calls, list)
+                                else []
+                            },
                         )
-                    continue
-                if event_type == "tool_call":
-                    await _flush_pending_text()
-                    raw_calls = payload.get("tool_calls", [])
-                    self._merge_stream_tool_calls(accumulated_tool_calls, raw_calls)
-                    await self._emit_event(
-                        run_id=run_id,
-                        event_type="tool_call",
-                        payload={
-                            "tool_calls": raw_calls
-                            if isinstance(raw_calls, list)
-                            else []
+                        continue
+                    if event_type == "error":
+                        suppress_pending_text = True
+                        pending_text_chunks = []
+                        error_payload, model_gateway_diagnostics = (
+                            self._model_gateway_error_payload(
+                                failure_kind="provider_stream_error",
+                                raw_error=payload.get("error"),
+                            )
+                        )
+                        await self._emit_event(
+                            run_id=run_id,
+                            event_type="error",
+                            payload={"error": error_payload},
+                        )
+                        break
+                    if event_type == "usage":
+                        usage_details = {
+                            "prompt_tokens": int(payload.get("prompt_tokens") or 0),
+                            "completion_tokens": int(
+                                payload.get("completion_tokens") or 0
+                            ),
+                            "total_tokens": int(payload.get("total_tokens") or 0),
+                        }
+                        await self._emit_event(
+                            run_id=run_id,
+                            event_type="usage",
+                            payload=usage_details,
+                        )
+                        continue
+
+                    model_gateway_diagnostics = (
+                        self._merge_model_gateway_private_event(
+                            model_gateway_diagnostics,
+                            event_type=event_type or "unknown",
+                            payload=payload,
+                        )
+                    )
+            except Exception as exc:
+                suppress_pending_text = True
+                pending_text_chunks = []
+                failure_kind = (
+                    "provider_stream_parse_error"
+                    if isinstance(exc, _ProviderStreamPayloadError)
+                    else "provider_stream_exception"
+                )
+                error_payload, model_gateway_diagnostics = (
+                    self._model_gateway_error_payload(
+                        failure_kind=failure_kind,
+                        raw_error={
+                            "message": str(exc),
+                            "type": type(exc).__name__,
                         },
                     )
-                    continue
-                if event_type == "error":
-                    await _flush_pending_text()
-                    error_payload = payload.get("error") or {
-                        "message": "model_stream_failed",
-                        "type": "model_stream_failed",
-                    }
-                    await self._emit_event(
-                        run_id=run_id,
-                        event_type="error",
-                        payload={"error": error_payload},
-                    )
-                    break
-                if event_type == "usage":
-                    usage_details = {
-                        "prompt_tokens": int(payload.get("prompt_tokens") or 0),
-                        "completion_tokens": int(payload.get("completion_tokens") or 0),
-                        "total_tokens": int(payload.get("total_tokens") or 0),
-                    }
-
-                passthrough_payload = dict(payload)
-                passthrough_payload.pop("type", None)
+                )
                 await self._emit_event(
                     run_id=run_id,
-                    event_type=event_type,
-                    payload=passthrough_payload,
+                    event_type="error",
+                    payload={"error": error_payload},
                 )
 
             generation.update(
@@ -908,6 +1005,7 @@ class _RuntimeRunDriver:
                         accumulated_tool_calls
                     ),
                     "error": error_payload,
+                    "model_gateway_diagnostics": model_gateway_diagnostics,
                 },
                 usage_details=usage_details,
             )
@@ -928,33 +1026,19 @@ class _RuntimeRunDriver:
             update["error"] = error_payload
             update["finish_reason"] = "upstream_error"
             update["error_event_emitted"] = True
+        if model_gateway_diagnostics is not None:
+            update["model_gateway_diagnostics"] = model_gateway_diagnostics
         return update
 
     def _inspect_model_output(self, state: RpAgentRunState) -> RpAgentRunState:
         message_payload = self._extract_message_payload(
             state.get("latest_response") or {}
         )
-        assistant_text = str(message_payload.get("content") or "")
-        runtime_tool_calls = [
-            RuntimeToolCall(
-                call_id=self._tool_call_id(call),
-                tool_name=self._tool_name(call),
-                arguments=self._tool_arguments(call),
-                source_round=int(state.get("round_no") or 0),
-            )
-            # Some OpenAI-compatible providers serialize a plain assistant reply as
-            # ``tool_calls: null`` rather than omitting the field. Treat that as no
-            # tool call so text-only turn completion can finalize normally.
-            for call in (message_payload.get("tool_calls") or [])
-            if isinstance(call, dict)
-        ]
-        pseudo_tool_text = (
-            bool(assistant_text)
-            and not runtime_tool_calls
-            and (self._looks_like_pseudo_tool_call_text(assistant_text))
-        )
+        inspection = self._inspect_output_payload(state, message_payload)
+        assistant_text = inspection.public_text_candidate
+        runtime_tool_calls = list(inspection.tool_calls)
         normalized_messages = list(state.get("normalized_messages", []))
-        if assistant_text and not runtime_tool_calls and not pseudo_tool_text:
+        if assistant_text and not runtime_tool_calls:
             normalized_messages.append(
                 ChatMessage(role="assistant", content=assistant_text).model_dump(
                     mode="json",
@@ -963,7 +1047,8 @@ class _RuntimeRunDriver:
             )
         update: RpAgentRunState = {
             "status": "model_inspected",
-            "assistant_text": "" if pseudo_tool_text else assistant_text,
+            "assistant_text": assistant_text,
+            "output_inspection": inspection.model_dump(mode="json", exclude_none=True),
             "normalized_messages": normalized_messages,
             "pending_tool_calls": [
                 call.model_dump(mode="json", exclude_none=True)
@@ -981,27 +1066,37 @@ class _RuntimeRunDriver:
                 tool_names=[call.tool_name for call in runtime_tool_calls],
             )
             return update
-        if pseudo_tool_text:
+        if inspection.classification in {"pseudo_tool_text", "malformed_tool_call"}:
             pseudo_tool_retry_count = int(state.get("pseudo_tool_retry_count") or 0)
             warnings = list(state.get("warnings", []))
-            if "pseudo_tool_call_text_filtered" not in warnings:
-                warnings.append("pseudo_tool_call_text_filtered")
+            warning = (
+                "pseudo_tool_call_text_filtered"
+                if inspection.classification == "pseudo_tool_text"
+                else "malformed_tool_call_filtered"
+            )
+            if warning not in warnings:
+                warnings.append(warning)
             update["warnings"] = warnings
             update["completion_guard"] = {
                 "allow_finalize": False,
-                "reason": "pseudo_tool_call_text_emitted",
-                "required_action": "execute_tools",
+                "reason": (
+                    "pseudo_tool_call_text_emitted"
+                    if inspection.classification == "pseudo_tool_text"
+                    else "malformed_tool_call_emitted"
+                ),
+                "required_action": "retry",
             }
             update["pseudo_tool_retry_count"] = pseudo_tool_retry_count + 1
             if pseudo_tool_retry_count >= 1:
                 update["status"] = "failed"
-                update["finish_reason"] = "invalid_tool_output_retry_budget_exhausted"
+                update["finish_reason"] = "repair_obligation_unfulfilled"
                 update["error"] = {
                     "message": (
-                        "The assistant repeatedly emitted pseudo tool-call text "
+                        "The assistant repeatedly emitted invalid tool output "
                         "instead of a real tool call."
                     ),
-                    "type": "invalid_tool_output_retry_budget_exhausted",
+                    "type": "repair_obligation_unfulfilled",
+                    "details": inspection.private_diagnostics,
                 }
                 update["next_action"] = "finalize_failure"
                 update["loop_trace"] = self._append_loop_trace(
@@ -1013,7 +1108,7 @@ class _RuntimeRunDriver:
             update["reflection_ticket"] = SetupReflectionTicket(
                 trigger="tool_failure",
                 summary=(
-                    "The assistant emitted pseudo tool-call text instead of a real "
+                    "The assistant emitted invalid tool output instead of a real "
                     "tool call. Issue the setup tool call directly."
                 ),
                 required_decision="retry",
@@ -1719,9 +1814,15 @@ class _RuntimeRunDriver:
                         "cognitive_state_invalidated"
                     ),
                 },
-                "context_report": context_bundle.get("context_report"),
+                "context_report": turn_input.metadata.get("context_report"),
+                "context_pipeline": turn_input.metadata.get("context_pipeline"),
+                "event_sink": SetupEventSinkSnapshot().model_dump(mode="json"),
+                "model_gateway_diagnostics": state.get(
+                    "model_gateway_diagnostics"
+                ),
                 "latest_tool_batch": list(state.get("latest_tool_batch", [])),
                 "latest_response": state.get("latest_response") or {},
+                "output_inspection": state.get("output_inspection"),
                 "turn_goal": state.get("turn_goal"),
                 "working_plan": state.get("working_plan"),
                 "pending_obligation": state.get("pending_obligation"),
@@ -1752,7 +1853,9 @@ class _RuntimeRunDriver:
         return RpAgentTurnInput.model_validate(state["turn_input"])
 
     def _visible_tool_names(self, turn_input: RpAgentTurnInput) -> list[str]:
-        return list(turn_input.tool_scope or self._profile.visible_tool_names)
+        if "tool_scope" in turn_input.model_fields_set:
+            return list(turn_input.tool_scope)
+        return list(self._profile.visible_tool_names)
 
     def _build_request_messages(self, state: RpAgentRunState) -> list[ChatMessage]:
         base_messages = [
@@ -2230,6 +2333,122 @@ class _RuntimeRunDriver:
             },
         )
 
+    def _inspect_output_payload(
+        self,
+        state: RpAgentRunState,
+        message_payload: dict[str, Any],
+    ) -> SetupOutputInspection:
+        if state.get("error"):
+            return SetupOutputInspection(
+                classification="provider_schema_error",
+                public_text_candidate="",
+                repair_observation={"reason": "upstream_error"},
+                private_diagnostics={
+                    "error": state.get("error"),
+                    "finish_reason": state.get("finish_reason"),
+                    "model_gateway_diagnostics": state.get(
+                        "model_gateway_diagnostics"
+                    ),
+                },
+                finish_reason_candidate=str(
+                    state.get("finish_reason") or "upstream_error"
+                ),
+            )
+
+        raw_content = message_payload.get("content")
+        assistant_text = raw_content if isinstance(raw_content, str) else ""
+        raw_tool_calls = [
+            call
+            # Some OpenAI-compatible providers serialize a plain assistant reply as
+            # ``tool_calls: null`` rather than omitting the field. Treat that as no
+            # tool call so text-only turn completion can finalize normally.
+            for call in (message_payload.get("tool_calls") or [])
+            if isinstance(call, dict)
+        ]
+
+        runtime_tool_calls: list[RuntimeToolCall] = []
+        malformed_calls: list[dict[str, Any]] = []
+        for position, call in enumerate(raw_tool_calls):
+            tool_name = self._tool_name(call).strip()
+            arguments, argument_error = self._parse_tool_arguments(call)
+            if not tool_name or argument_error is not None:
+                malformed_calls.append(
+                    {
+                        "position": position,
+                        "tool_name": tool_name or None,
+                        "error": argument_error or "missing_tool_name",
+                    }
+                )
+                continue
+            runtime_tool_calls.append(
+                RuntimeToolCall(
+                    call_id=self._tool_call_id(call),
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    source_round=int(state.get("round_no") or 0),
+                )
+            )
+
+        if malformed_calls:
+            return SetupOutputInspection(
+                classification="malformed_tool_call",
+                public_text_candidate="",
+                repair_observation={
+                    "reason": "malformed_tool_call",
+                    "malformed_calls": malformed_calls,
+                },
+                private_diagnostics={
+                    "malformed_calls": malformed_calls,
+                    "raw_tool_call_count": len(raw_tool_calls),
+                },
+                continue_reason_candidate="completion_guard_retry",
+                finish_reason_candidate="repair_obligation_unfulfilled",
+            )
+
+        if runtime_tool_calls:
+            classification: Literal["mixed_text_and_tool_call", "real_tool_call"] = (
+                "mixed_text_and_tool_call"
+                if assistant_text.strip()
+                else "real_tool_call"
+            )
+            return SetupOutputInspection(
+                classification=classification,
+                public_text_candidate="",
+                tool_calls=runtime_tool_calls,
+                private_diagnostics={
+                    "raw_text_present": bool(assistant_text.strip()),
+                    "tool_call_count": len(runtime_tool_calls),
+                },
+                continue_reason_candidate="tool_call_batch_pending",
+            )
+
+        if assistant_text and self._looks_like_pseudo_tool_call_text(assistant_text):
+            return SetupOutputInspection(
+                classification="pseudo_tool_text",
+                public_text_candidate="",
+                repair_observation={"reason": "pseudo_tool_call_text_emitted"},
+                private_diagnostics={
+                    "raw_text_length": len(assistant_text),
+                    "detector": "pseudo_tool_call_text",
+                },
+                continue_reason_candidate="completion_guard_retry",
+                finish_reason_candidate="repair_obligation_unfulfilled",
+            )
+
+        if not assistant_text.strip():
+            return SetupOutputInspection(
+                classification="empty_output",
+                public_text_candidate="",
+                repair_observation={"reason": "assistant_output_empty"},
+                private_diagnostics={"raw_text_length": len(assistant_text)},
+                continue_reason_candidate="completion_guard_retry",
+            )
+
+        return SetupOutputInspection(
+            classification="normal_text",
+            public_text_candidate=assistant_text,
+        )
+
     def _graph_invoke_config(self) -> dict[str, Any]:
         # One semantic round can traverse multiple LangGraph nodes
         # (derive/plan/request/call/inspect plus optional tool/apply/assess/reflect),
@@ -2352,6 +2571,108 @@ class _RuntimeRunDriver:
             f"Unsupported chat completion response type: {type(response)!r}"
         )
 
+    def _model_gateway_failure_update(
+        self,
+        *,
+        failure_kind: str,
+        message: str,
+        provider_error_type: str | None = None,
+        private_details: dict[str, Any] | None = None,
+    ) -> RpAgentRunState:
+        public_error, diagnostics = self._model_gateway_error_payload(
+            failure_kind=failure_kind,
+            raw_error={
+                "message": message,
+                "type": provider_error_type or failure_kind,
+                "private_details": dict(private_details or {}),
+            },
+        )
+        return {
+            "status": "model_gateway_failed",
+            "latest_response": {"message": {"content": "", "tool_calls": []}},
+            "assistant_text": "",
+            "error": public_error,
+            "finish_reason": "upstream_error",
+            "model_gateway_diagnostics": diagnostics,
+        }
+
+    @staticmethod
+    def _model_gateway_error_payload(
+        *,
+        failure_kind: str,
+        raw_error: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        raw_error_payload = raw_error if isinstance(raw_error, dict) else {}
+        raw_message = str(
+            raw_error_payload.get("message")
+            or raw_error_payload.get("detail")
+            or "model_gateway_failed"
+        )
+        provider_error_type = (
+            str(raw_error_payload.get("type"))
+            if raw_error_payload.get("type") is not None
+            else None
+        )
+        diagnostics = SetupModelGatewayDiagnostics(
+            failure_kind=failure_kind,
+            message=raw_message,
+            provider_error_type=provider_error_type,
+            private_details={
+                "raw_error": raw_error,
+            },
+        ).model_dump(mode="json", exclude_none=True)
+        public_error = {
+            "message": _RuntimeRunDriver._public_model_gateway_error_message(
+                raw_message
+            ),
+            "type": "model_gateway_failed",
+            "code": failure_kind,
+            "failure_layer": "model_gateway",
+        }
+        return public_error, diagnostics
+
+    @staticmethod
+    def _public_model_gateway_error_message(message: str) -> str:
+        raw_message = str(message or "").strip()
+        if not raw_message:
+            return "Model provider request failed."
+        lowered = raw_message.lower()
+        private_markers = (
+            "api_key",
+            "authorization",
+            "bearer ",
+            "private",
+            "raw_provider_delta",
+            "sk-",
+            "stack",
+            "stacktrace",
+            "token",
+            "trace",
+            "traceback",
+        )
+        if any(marker in lowered for marker in private_markers):
+            return "Model provider request failed."
+        return raw_message[:240]
+
+    @staticmethod
+    def _merge_model_gateway_private_event(
+        diagnostics: dict[str, Any] | None,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if diagnostics is None:
+            diagnostics = SetupModelGatewayDiagnostics(
+                failure_kind="private_stream_event",
+                message="private provider stream events were filtered",
+                private_details={"private_events": []},
+            ).model_dump(mode="json", exclude_none=True)
+        private_details = diagnostics.setdefault("private_details", {})
+        private_events = private_details.setdefault("private_events", [])
+        if isinstance(private_events, list):
+            private_events.append({"type": event_type, "payload": dict(payload)})
+        return diagnostics
+
     @staticmethod
     def _extract_message_payload(response: dict[str, Any]) -> dict[str, Any]:
         message = response.get("message")
@@ -2451,19 +2772,26 @@ class _RuntimeRunDriver:
 
     @staticmethod
     def _tool_arguments(call: dict[str, Any]) -> dict[str, Any]:
+        arguments, _error = _RuntimeRunDriver._parse_tool_arguments(call)
+        return arguments
+
+    @staticmethod
+    def _parse_tool_arguments(call: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
         function = call.get("function")
         raw_args = (
             function.get("arguments", "{}") if isinstance(function, dict) else "{}"
         )
         if isinstance(raw_args, dict):
-            return raw_args
+            return raw_args, None
         if not isinstance(raw_args, str):
-            return {}
+            return {}, "arguments_not_string_or_object"
         try:
             parsed = json.loads(raw_args)
         except json.JSONDecodeError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
+            return {}, "arguments_json_decode_error"
+        if not isinstance(parsed, dict):
+            return {}, "arguments_not_object"
+        return parsed, None
 
     @staticmethod
     def _parse_sse_payload(line: str) -> dict[str, Any] | None:
@@ -2473,6 +2801,13 @@ class _RuntimeRunDriver:
         if not data_str or data_str == "[DONE]":
             return None
         try:
-            return json.loads(data_str)
+            payload = json.loads(data_str)
         except json.JSONDecodeError:
-            return None
+            raise _ProviderStreamPayloadError(
+                "Provider stream payload was invalid JSON."
+            ) from None
+        if not isinstance(payload, dict):
+            raise _ProviderStreamPayloadError(
+                "Provider stream payload was not an object."
+            )
+        return payload

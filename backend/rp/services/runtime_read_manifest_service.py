@@ -408,6 +408,7 @@ class RuntimeReadManifestService:
         branch_visibility_resolver: BranchVisibilityResolver | None = None,
         runtime_workspace_material_service: RuntimeWorkspaceMaterialService
         | None = None,
+        core_state_as_of_resolver=None,
     ) -> None:
         self._session = session
         self._branch_visibility_resolver = (
@@ -417,6 +418,7 @@ class RuntimeReadManifestService:
             runtime_workspace_material_service
             or RuntimeWorkspaceMaterialService(session=session)
         )
+        self._core_state_as_of_resolver = core_state_as_of_resolver
 
     def build_branch_scope(
         self,
@@ -451,6 +453,21 @@ class RuntimeReadManifestService:
                 "runtime_read_manifest_branch_scope_missing",
                 identity.branch_head_id,
             )
+        core_manifest = None
+        if self._core_state_as_of_resolver is not None:
+            core_manifest = self._core_state_as_of_resolver.resolve_manifest(
+                scope=scope
+            )
+        (
+            scoped_packet_sections,
+            projection_omitted_refs,
+            projection_source_manifest_id,
+        ) = self._filter_projection_sections_for_core_manifest(
+            packet_sections=packet_sections or [],
+            core_state_snapshot_id=(
+                None if core_manifest is None else core_manifest.snapshot_id
+            ),
+        )
         material_records = self._runtime_workspace_material_service.list_materials(
             identity=identity,
         )
@@ -462,7 +479,7 @@ class RuntimeReadManifestService:
         ]
         visible_refs = self._build_visible_refs(
             identity=identity,
-            packet_sections=packet_sections or [],
+            packet_sections=scoped_packet_sections,
             material_records=packet_visible_material_records,
         )
         selected = self._select_refs(
@@ -473,16 +490,26 @@ class RuntimeReadManifestService:
             visible_refs=visible_refs,
             selected_refs=selected,
         )
+        omitted.extend(projection_omitted_refs)
         manifest_id = uuid5(
             NAMESPACE_URL,
             self._manifest_seed(
                 identity=identity,
                 packet_kind=packet_kind,
                 branch_scope=scope.model_dump(mode="json"),
+                core_state_snapshot_id=(
+                    None if core_manifest is None else core_manifest.snapshot_id
+                ),
+                core_state_revision_map=(
+                    {}
+                    if core_manifest is None
+                    else dict(core_manifest.effective_revision_map)
+                ),
+                projection_source_manifest_id=projection_source_manifest_id,
                 visible_refs=visible_refs,
                 selected_refs=selected,
                 omitted_refs=omitted,
-                packet_sections=packet_sections or [],
+                packet_sections=scoped_packet_sections,
             ),
         ).hex
         retrieval_card_refs = self._material_refs(
@@ -509,18 +536,76 @@ class RuntimeReadManifestService:
             identity=identity,
             active_branch_lineage=list(scope.visible_branch_head_ids),
             branch_scope=scope.model_dump(mode="json"),
+            core_state_snapshot_id=(
+                None if core_manifest is None else core_manifest.snapshot_id
+            ),
+            core_state_revision_map=(
+                {}
+                if core_manifest is None
+                else dict(core_manifest.effective_revision_map)
+            ),
+            projection_source_manifest_id=projection_source_manifest_id,
             runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
             policy_versions=dict(policy_versions or {"packet_kind": packet_kind}),
             visible_refs=visible_refs,
             selected_refs=selected,
             omitted_refs=omitted,
-            packet_sections=[deepcopy(item) for item in (packet_sections or [])],
+            packet_sections=[deepcopy(item) for item in scoped_packet_sections],
             retrieval_card_refs=retrieval_card_refs,
             expanded_chunk_refs=expanded_chunk_refs,
             retrieval_miss_refs=retrieval_miss_refs,
             writer_usage_refs=writer_usage_refs,
             token_usage_metadata=token_usage_metadata,
         )
+
+    @staticmethod
+    def _filter_projection_sections_for_core_manifest(
+        *,
+        packet_sections: list[dict[str, Any]],
+        core_state_snapshot_id: str | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
+        if core_state_snapshot_id is None:
+            return [deepcopy(item) for item in packet_sections], [], None
+        selected_sections: list[dict[str, Any]] = []
+        omitted_refs: list[dict[str, Any]] = []
+        projection_source_manifest_id: str | None = None
+        for order, section in enumerate(packet_sections):
+            metadata = dict(section.get("metadata_json") or section.get("metadata") or {})
+            source_manifest_id = str(
+                metadata.get("source_core_state_snapshot_id")
+                or metadata.get("core_state_snapshot_id")
+                or metadata.get("source_core_manifest_id")
+                or metadata.get("source_manifest_id")
+                or ""
+            ).strip()
+            if source_manifest_id and projection_source_manifest_id is None:
+                projection_source_manifest_id = source_manifest_id
+            source_kind = str(section.get("source_kind") or "").strip()
+            is_projection = (
+                source_kind == "core_projection_view"
+                or str(metadata.get("layer_family") or "").strip()
+                == "core_state.derived_projection"
+            )
+            if (
+                is_projection
+                and source_manifest_id
+                and source_manifest_id != core_state_snapshot_id
+            ):
+                label = str(section.get("label") or "").strip()
+                section_id = str(section.get("section_id") or "").strip()
+                omitted_refs.append(
+                    {
+                        "ref_id": section_id or f"packet_section:{label or order}",
+                        "ref_kind": "packet_section",
+                        "packet_section_label": label or None,
+                        "reason": "core_projection_source_manifest_mismatch",
+                        "projection_source_manifest_id": source_manifest_id,
+                        "core_state_snapshot_id": core_state_snapshot_id,
+                    }
+                )
+                continue
+            selected_sections.append(deepcopy(section))
+        return selected_sections, omitted_refs, projection_source_manifest_id
 
     def _build_visible_refs(
         self,
@@ -690,6 +775,9 @@ class RuntimeReadManifestService:
         identity: MemoryRuntimeIdentity,
         packet_kind: str,
         branch_scope: dict[str, Any],
+        core_state_snapshot_id: str | None,
+        core_state_revision_map: dict[str, str],
+        projection_source_manifest_id: str | None,
         visible_refs: list[dict[str, Any]],
         selected_refs: list[dict[str, Any]],
         omitted_refs: list[dict[str, Any]],
@@ -700,6 +788,9 @@ class RuntimeReadManifestService:
                 "identity": identity.model_dump(mode="json"),
                 "packet_kind": packet_kind,
                 "branch_scope": branch_scope,
+                "core_state_snapshot_id": core_state_snapshot_id,
+                "core_state_revision_map": core_state_revision_map,
+                "projection_source_manifest_id": projection_source_manifest_id,
                 "visible_refs": visible_refs,
                 "selected_refs": selected_refs,
                 "omitted_refs": omitted_refs,

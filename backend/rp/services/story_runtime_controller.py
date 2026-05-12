@@ -36,6 +36,14 @@ from rp.models.story_runtime import (
     StoryActivationResult,
     StorySession,
 )
+from rp.models.story_brainstorm import (
+    BrainstormApplyReceipt,
+    BrainstormApplyRequest,
+    BrainstormItemUpdateRequest,
+    BrainstormSession,
+    BrainstormSessionStartRequest,
+    BrainstormSummarizeRequest,
+)
 from .memory_inspection_read_service import MemoryInspectionReadService
 from .memory_inspection_service import MemoryInspectionService
 from .projection_read_service import ProjectionReadService
@@ -57,6 +65,7 @@ from .story_block_mutation_service import (
     MemoryBlockProposalNotFoundError,
     StoryBlockMutationService,
 )
+from .story_brainstorm_service import StoryBrainstormService
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
 from .story_activation_service import StoryActivationService
 from .story_session_service import StorySessionService
@@ -94,6 +103,7 @@ class StoryRuntimeController:
         runtime_config_control_service: RuntimeConfigControlService | None = None,
         draft_materialization_service: DraftMaterializationService | None = None,
         revision_overlay_service: RevisionOverlayService | None = None,
+        story_brainstorm_service: StoryBrainstormService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._story_activation_service = story_activation_service
@@ -115,6 +125,7 @@ class StoryRuntimeController:
         self._runtime_config_control_service = runtime_config_control_service
         self._draft_materialization_service = draft_materialization_service
         self._revision_overlay_service = revision_overlay_service
+        self._story_brainstorm_service = story_brainstorm_service
 
     def activate_workspace(self, *, workspace_id: str) -> StoryActivationResult:
         return self._story_activation_service.activate_workspace(
@@ -890,6 +901,97 @@ class StoryRuntimeController:
         self._story_session_service.commit()
         return receipt.model_dump(mode="json")
 
+    def start_brainstorm_session(
+        self,
+        *,
+        session_id: str,
+        request: BrainstormSessionStartRequest,
+    ) -> BrainstormSession:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        result = self._require_story_brainstorm_service().start_session(request)
+        self._story_session_service.commit()
+        return result
+
+    def read_brainstorm_session(
+        self,
+        *,
+        session_id: str,
+        identity: MemoryRuntimeIdentity,
+        brainstorm_id: str,
+    ) -> BrainstormSession:
+        session = self._require_session(session_id)
+        if identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        return self._require_story_brainstorm_service().get_session(
+            identity=identity,
+            brainstorm_id=brainstorm_id,
+        )
+
+    async def summarize_brainstorm_session(
+        self,
+        *,
+        session_id: str,
+        brainstorm_id: str,
+        request: BrainstormSummarizeRequest,
+    ) -> BrainstormSession:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        result = await self._require_story_brainstorm_service().summarize_session(
+            brainstorm_id=brainstorm_id,
+            request=request,
+        )
+        self._story_session_service.commit()
+        return result
+
+    def update_brainstorm_item(
+        self,
+        *,
+        session_id: str,
+        brainstorm_id: str,
+        item_id: str,
+        request: BrainstormItemUpdateRequest,
+    ) -> BrainstormSession:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        result = self._require_story_brainstorm_service().update_item(
+            brainstorm_id=brainstorm_id,
+            item_id=item_id,
+            request=request,
+        )
+        self._story_session_service.commit()
+        return result
+
+    async def apply_brainstorm_session(
+        self,
+        *,
+        session_id: str,
+        brainstorm_id: str,
+        request: BrainstormApplyRequest,
+    ) -> BrainstormApplyReceipt:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        receipt = await self._require_story_brainstorm_service().apply_session(
+            brainstorm_id=brainstorm_id,
+            request=request,
+        )
+        self._story_session_service.commit()
+        return receipt
+
     def apply_memory_block_proposal(
         self,
         *,
@@ -1088,6 +1190,11 @@ class StoryRuntimeController:
         if self._revision_overlay_service is None:
             raise RuntimeError("revision_overlay_service_not_configured")
         return self._revision_overlay_service
+
+    def _require_story_brainstorm_service(self) -> StoryBrainstormService:
+        if self._story_brainstorm_service is None:
+            raise RuntimeError("story_brainstorm_service_not_configured")
+        return self._story_brainstorm_service
 
     def _require_story_runtime_identity_service(self) -> StoryRuntimeIdentityService:
         if self._story_runtime_identity_service is None:

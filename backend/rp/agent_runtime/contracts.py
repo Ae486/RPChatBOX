@@ -25,6 +25,223 @@ class RuntimeProfile(BaseModel):
     finish_policy: str = "default"
 
 
+class SetupCapabilityGuidanceFragment(BaseModel):
+    """Prompt guidance tied to the active setup capability plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fragment_id: str
+    tool_names: list[str] = Field(default_factory=list)
+    text: str
+
+
+class SetupCapabilityPlan(BaseModel):
+    """Single turn-level contract for SetupAgent tool exposure."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage_id: str | None = None
+    step_id: str | None = None
+    active_tool_names: list[str] = Field(default_factory=list)
+    model_schema_modes: dict[str, str] = Field(default_factory=dict)
+    runtime_allowlist: list[str] = Field(default_factory=list)
+    prompt_guidance_fragments: list[SetupCapabilityGuidanceFragment] = Field(
+        default_factory=list
+    )
+    candidate_exclusions: list[str] = Field(default_factory=list)
+    snapshot_expectations: dict[str, Any] = Field(default_factory=dict)
+
+
+SETUP_CONTEXT_PIPELINE_LAYERS: tuple[str, ...] = (
+    "context_packet",
+    "stage_local_context_governance",
+    "runtime_adapter_bundle",
+    "runtime_request_assembly",
+)
+SETUP_FINAL_REQUEST_MESSAGE_ORDER: tuple[str, ...] = (
+    "stable_system_prompt",
+    "runtime_overlay_system_message",
+    "governed_history",
+    "current_user",
+)
+SETUP_STABLE_SYSTEM_PROMPT_INPUTS: tuple[str, ...] = (
+    "context_packet",
+    "capability_plan",
+    "skill_pack_prompt_layer",
+)
+SETUP_RUNTIME_OVERLAY_INPUTS: tuple[str, ...] = (
+    "turn_goal",
+    "working_plan",
+    "pending_obligation",
+    "last_failure",
+    "reflection_ticket",
+    "cognitive_state_summary",
+    "working_digest",
+    "tool_outcomes",
+    "compact_summary",
+    "action_expectation",
+)
+SETUP_CONTEXT_PACKET_EXCLUDED_FIELDS: tuple[str, ...] = (
+    "raw_history",
+    "working_digest",
+    "tool_outcomes",
+    "compact_summary",
+    "turn_goal",
+    "working_plan",
+    "loop_trace",
+    "continue_reason",
+    "latest_tool_results",
+)
+SETUP_RUNTIME_STATE_DURABLE_FIELDS: tuple[str, ...] = (
+    "workspace_id",
+    "current_step",
+    "state_version",
+    "discussion_state",
+    "chunk_candidates",
+    "active_truth_write",
+    "working_digest",
+    "tool_outcomes",
+    "compact_summary",
+    "invalidated",
+    "invalidation_reasons",
+    "source_basis",
+)
+SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS: tuple[str, ...] = (
+    "context_report",
+    "loop_trace",
+    "continue_reason",
+    "finish_reason",
+    "output_inspection",
+    "event_sink",
+    "model_gateway_diagnostics",
+    "latest_response",
+    "raw_provider_delta",
+    "raw_provider_deltas",
+    "provider_delta",
+    "raw_delta",
+    "raw",
+    "private_event",
+    "private_events",
+    "private_diagnostics",
+    "private_details",
+    "debug",
+    "debug_payload",
+    "provider_debug",
+    "exception",
+    "stack",
+    "stacktrace",
+    "trace",
+)
+SETUP_DURABLE_STATE_EXCLUDED_FIELDS = SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS
+SETUP_PUBLIC_EVENT_TYPES: tuple[str, ...] = (
+    "thinking_delta",
+    "text_delta",
+    "tool_call",
+    "tool_started",
+    "tool_result",
+    "tool_error",
+    "usage",
+    "error",
+    "done",
+)
+SETUP_PRIVATE_EVENT_SURFACES: tuple[str, ...] = (
+    "raw_provider_delta",
+    "provider_delta",
+    "debug",
+    "private_diagnostics",
+    "model_gateway_diagnostics",
+)
+
+
+class SetupPromptAssemblySnapshot(BaseModel):
+    """Debug/eval contract for stable setup prompt assembly inputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stable_system_prompt_inputs: list[str] = Field(
+        default_factory=lambda: list(SETUP_STABLE_SYSTEM_PROMPT_INPUTS)
+    )
+    stable_system_prompt_excluded_inputs: list[str] = Field(
+        default_factory=lambda: [
+            "governed_history",
+            "context_report",
+            "working_digest",
+            "tool_outcomes",
+            "compact_summary",
+            "loop_trace",
+            "continue_reason",
+            "raw_tool_retry_process",
+        ]
+    )
+    capability_guidance_source: str = (
+        "SetupCapabilityPlan.prompt_guidance_fragments"
+    )
+    skill_pack_boundary: str = "prompt_only_does_not_change_tool_scope"
+    active_skill_pack_name: str | None = None
+
+
+class SetupContextPipelineSnapshot(BaseModel):
+    """Debug/eval contract for setup pre-model context assembly."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pipeline_name: str = "setup_context_pipeline"
+    layers: list[str] = Field(
+        default_factory=lambda: list(SETUP_CONTEXT_PIPELINE_LAYERS)
+    )
+    final_request_message_order: list[str] = Field(
+        default_factory=lambda: list(SETUP_FINAL_REQUEST_MESSAGE_ORDER)
+    )
+    governed_history_source: str = "SetupContextGovernorService.govern_history"
+    context_packet_excluded_fields: list[str] = Field(
+        default_factory=lambda: list(SETUP_CONTEXT_PACKET_EXCLUDED_FIELDS)
+    )
+    runtime_overlay_inputs: list[str] = Field(
+        default_factory=lambda: list(SETUP_RUNTIME_OVERLAY_INPUTS)
+    )
+    metadata_only_surfaces: list[str] = Field(
+        default_factory=lambda: [
+            "context_report",
+            "capability_plan",
+            "skill_pack_name",
+            "context_pipeline",
+        ]
+    )
+    durable_state_excluded_fields: list[str] = Field(
+        default_factory=lambda: list(SETUP_DURABLE_STATE_EXCLUDED_FIELDS)
+    )
+    prompt_assembly: SetupPromptAssemblySnapshot = Field(
+        default_factory=SetupPromptAssemblySnapshot
+    )
+    context_profile: Literal["standard", "compact"] | None = None
+
+
+class SetupModelGatewayDiagnostics(BaseModel):
+    """Private normalized provider/gateway failure diagnostics for one turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    failure_layer: Literal["model_gateway"] = "model_gateway"
+    failure_kind: str
+    message: str
+    provider_error_type: str | None = None
+    private_details: dict[str, Any] = Field(default_factory=dict)
+
+
+class SetupEventSinkSnapshot(BaseModel):
+    """Debug/eval contract for setup runtime event visibility."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    public_event_types: list[str] = Field(
+        default_factory=lambda: list(SETUP_PUBLIC_EVENT_TYPES)
+    )
+    private_event_surfaces: list[str] = Field(
+        default_factory=lambda: list(SETUP_PRIVATE_EVENT_SURFACES)
+    )
+    transcript_boundary: str = "TypedSseEventAdapter"
+
+
 class RpAgentTurnInput(BaseModel):
     """Unified runtime input after project-specific adapter mapping."""
 
@@ -67,6 +284,31 @@ class RuntimeToolResult(BaseModel):
     content_text: str
     error_code: str | None = None
     structured_payload: dict[str, Any] | None = None
+
+
+SetupOutputClassification = Literal[
+    "real_tool_call",
+    "normal_text",
+    "pseudo_tool_text",
+    "malformed_tool_call",
+    "empty_output",
+    "provider_schema_error",
+    "mixed_text_and_tool_call",
+]
+
+
+class SetupOutputInspection(BaseModel):
+    """Typed boundary between normalized model output and loop routing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    classification: SetupOutputClassification
+    public_text_candidate: str = ""
+    tool_calls: list[RuntimeToolCall] = Field(default_factory=list)
+    repair_observation: dict[str, Any] | None = None
+    private_diagnostics: dict[str, Any] = Field(default_factory=dict)
+    continue_reason_candidate: str | None = None
+    finish_reason_candidate: str | None = None
 
 
 class RuntimeWorkingNote(BaseModel):

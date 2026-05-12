@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 from .core_state_backfill_service import CoreStateBackfillService
+from .core_state_as_of_resolver import (
+    CoreStateAsOfResolver,
+    CoreStateAsOfResolverError,
+)
 from .core_state_store_repository import CoreStateStoreRepository
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import (
@@ -38,6 +43,7 @@ class CoreStateReadService:
         store_read_enabled: bool = False,
         core_state_backfill_service: CoreStateBackfillService | None = None,
         runtime_identity: MemoryRuntimeIdentity | None = None,
+        core_state_as_of_resolver: CoreStateAsOfResolver | None = None,
     ) -> None:
         self._adapter = adapter
         self._version_history_read_service = version_history_read_service
@@ -46,6 +52,7 @@ class CoreStateReadService:
         self._store_read_enabled = store_read_enabled
         self._core_state_backfill_service = core_state_backfill_service
         self._runtime_identity = runtime_identity
+        self._core_state_as_of_resolver = core_state_as_of_resolver
 
     async def get_state(self, input_model: MemoryGetStateInput) -> StateReadResult:
         refs = input_model.refs or [
@@ -63,6 +70,17 @@ class CoreStateReadService:
         if session is None:
             top_level_warnings.append("phase_e_story_context_missing")
         authoritative_store_hydrated = False
+        runtime_owned_read = self._runtime_identity is not None
+        core_manifest = None
+        if runtime_owned_read and self._core_state_as_of_resolver is not None:
+            core_manifest = self._core_state_as_of_resolver.ensure_manifest_for_identity(
+                identity=self._runtime_identity
+            )
+            compatibility_warning = str(
+                core_manifest.metadata.get("compatibility_warning") or ""
+            ).strip()
+            if compatibility_warning:
+                top_level_warnings.append(compatibility_warning)
 
         for raw_ref in refs:
             ref = normalize_authoritative_ref(raw_ref)
@@ -72,7 +90,7 @@ class CoreStateReadService:
                 session_id=session.session_id if session is not None else None,
             )
             effective_ref = ref.model_copy(update={"revision": current_revision})
-            data = {}
+            data: dict[str, Any] = {}
             warnings: list[str] = []
             if session is None:
                 warnings.append("phase_e_story_context_missing")
@@ -87,44 +105,72 @@ class CoreStateReadService:
                     and self._core_state_store_repository is not None
                     and session is not None
                 ):
-                    row = self._core_state_store_repository.get_authoritative_object(
-                        session_id=session.session_id,
-                        layer=ref.layer.value,
-                        scope=ref.scope or "story",
-                        object_id=ref.object_id,
-                    )
-                    if (
-                        row is None
-                        and not authoritative_store_hydrated
-                        and self._core_state_backfill_service is not None
-                    ):
-                        self._core_state_backfill_service.backfill_authoritative_for_session(
-                            session_id=session.session_id
+                    if core_manifest is not None:
+                        try:
+                            if self._core_state_as_of_resolver is None:
+                                raise CoreStateAsOfResolverError(
+                                    "core_state_as_of_resolver_missing",
+                                    ref.object_id,
+                                )
+                            revision_row = (
+                                self._core_state_as_of_resolver.resolve_object_revision(
+                                    manifest=core_manifest,
+                                    object_ref=ref,
+                                )
+                            )
+                            data = self._clone_state_payload(revision_row.data_json)
+                            effective_ref = ref.model_copy(
+                                update={"revision": revision_row.revision}
+                            )
+                            has_store_value = True
+                        except CoreStateAsOfResolverError as exc:
+                            warnings.append(exc.code)
+                    elif runtime_owned_read:
+                        warnings.append(
+                            "core_state_as_of_manifest_missing_runtime_read_forbidden"
                         )
-                        authoritative_store_hydrated = True
-                        row = (
-                            self._core_state_store_repository.get_authoritative_object(
+                    else:
+                        row = self._core_state_store_repository.get_authoritative_object(
+                            session_id=session.session_id,
+                            layer=ref.layer.value,
+                            scope=ref.scope or "story",
+                            object_id=ref.object_id,
+                        )
+                        if (
+                            row is None
+                            and not authoritative_store_hydrated
+                            and self._core_state_backfill_service is not None
+                        ):
+                            self._core_state_backfill_service.backfill_authoritative_for_session(
+                                session_id=session.session_id
+                            )
+                            authoritative_store_hydrated = True
+                            row = self._core_state_store_repository.get_authoritative_object(
                                 session_id=session.session_id,
                                 layer=ref.layer.value,
                                 scope=ref.scope or "story",
                                 object_id=ref.object_id,
                             )
-                        )
-                    if row is not None:
-                        data = deepcopy(row.data_json)
-                        has_store_value = True
-                    else:
-                        warnings.append(
-                            f"phase_g_store_row_missing_fallback:{effective_ref.object_id}"
-                        )
-                if not has_store_value:
+                        if row is not None:
+                            data = self._clone_state_payload(row.data_json)
+                            has_store_value = True
+                        else:
+                            warnings.append(
+                                "phase_g_store_row_missing_fallback:"
+                                f"{effective_ref.object_id}"
+                            )
+                if not has_store_value and not runtime_owned_read:
                     value = payload.get(binding.backend_field)
                     if value is None:
                         warnings.append(
                             f"phase_e_authoritative_value_missing:{binding.backend_field}"
                         )
                     else:
-                        data = deepcopy(value)
+                        data = self._clone_state_payload(value)
+                elif not has_store_value and runtime_owned_read:
+                    warnings.append(
+                        "core_state_runtime_current_row_and_session_mirror_fallback_blocked"
+                    )
             items.append(
                 StateReadResultItem(
                     object_ref=effective_ref, data=data, warnings=warnings
@@ -192,3 +238,14 @@ class CoreStateReadService:
         if self._runtime_identity is None:
             return None
         return self._runtime_identity.session_id
+
+    @staticmethod
+    def _clone_state_payload(value: Any) -> dict[str, Any]:
+        cloned = deepcopy(value)
+        if isinstance(cloned, dict):
+            return cloned
+        if isinstance(cloned, list):
+            return {"items": cloned}
+        if cloned is None:
+            return {}
+        return {"value": cloned}

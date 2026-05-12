@@ -58,12 +58,17 @@ Likely backend files:
 - `backend/rp/services/story_session_service.py`
 - `backend/rp/services/story_turn_domain_service.py`
 - `backend/rp/services/retrieval_broker.py`
+- `backend/rp/services/core_state_read_service.py`
+- new or existing Core State as-of resolver / snapshot manifest service files
 - `backend/rp/models/memory_contract_registry.py`
 - `backend/rp/models/story_runtime.py`
+- `backend/models/rp_core_state_store.py`
+- `backend/models/rp_story_store.py`
 
 Likely tests:
 
 - `backend/rp/tests/test_memory_lineage_services.py`
+- new or existing Core State as-of manifest tests
 - `backend/rp/tests/test_story_runtime_controller_memory_read_side.py`
 - `backend/rp/tests/test_story_runtime_product_wiring_writer_constraints.py`
 - `backend/rp/tests/test_projection_builder_services.py`
@@ -79,11 +84,24 @@ Completion criteria:
   reads;
 - `current_state_digest` / `recent_segment_digest` / projection-like packet
   fields are branch-scoped or explicitly omitted with reason;
+- Core State runtime reads use turn-bound snapshot manifests and object
+  revisions rather than latest current rows:
+  - turn 0 / activation creates an initial manifest;
+  - turns without Core mutation reuse the previous manifest;
+  - Core-mutating turns create complete changed-object revisions plus a new
+    manifest;
+  - branch from turn `N` inherits turn `N`'s manifest;
+  - branch-local Core mutation creates branch-scoped revisions and a new
+    branch-local manifest;
+  - old sessions without turn-bound Core history are marked compatibility-only
+    for historical as-of reads instead of receiving fabricated history;
 - runtime product reads reject `accepted_segment_ids_json`, legacy artifact
   metadata, and output-ref reverse lookup as truth fallbacks; exact
   `runtime_turn_id` / `runtime_branch_head_id` ownership remains mandatory for
   runtime-produced story artifacts;
-- tests prove no hidden future memory leaks into writer packet/read manifest.
+- tests prove no hidden future memory leaks into writer packet/read manifest;
+- tests prove a branch from turn 2 after a turn 3 Core change reads the turn 2
+  Core manifest, not the latest Core current row.
 
 ### V2. Backend Memory Product Contract
 
@@ -161,15 +179,30 @@ Likely frontend files:
 Contract sketch:
 
 ```python
+class BrainstormSession(BaseModel):
+    brainstorm_id: str
+    identity: MemoryRuntimeIdentity
+    status: Literal["open", "summarized", "reviewing", "dispatched", "closed"]
+    items: list[BrainstormItem] = Field(default_factory=list)
+
+
 class BrainstormItem(BaseModel):
     item_id: str
-    target_layer: Literal["core", "recall", "archival"]
-    target_domain: str
-    suggested_operation: str
     summary_text: str
-    proposed_payload: dict[str, Any] = Field(default_factory=dict)
-    source_refs: list[MemorySourceRef] = Field(default_factory=list)
-    status: Literal["proposed", "edited", "rejected", "confirmed"]
+    evidence_text_refs: list[str] = Field(default_factory=list)
+    uncertainty: str | None = None
+    user_edited: bool = False
+    status: Literal[
+        "proposed",
+        "edited",
+        "rejected",
+        "confirmed",
+        "dispatched",
+        "applied",
+        "pending_review",
+        "conflict",
+        "failed",
+    ]
 
 
 class BrainstormApplyRequest(BaseModel):
@@ -179,13 +212,96 @@ class BrainstormApplyRequest(BaseModel):
     reason: str | None = None
 ```
 
+`BrainstormItem` must not contain `target_layer`, `target_domain`,
+`operation_kind`, `intent_labels`, or other governed routing fields.
+Brainstorm is responsible for summarizing what the user may want to change.
+The scheduler/dispatcher is responsible for classifying items and planning
+memory-layer work.
+
+Brainstorm summary creation should use the common Context Engineering /
+Compact-Summary operation contract once that common module is extracted by the
+setup agent dev session. Until then, V4 may implement only the story runtime
+adapter contract and must not create a second generic compact engine under
+story runtime.
+
+The scheduler output may carry layer/domain/operation routing:
+
+```python
+class BrainstormDispatchPlanItem(BaseModel):
+    source_item_id: str
+    target_layer: Literal["core"]
+    target_domain: str
+    operation_kind: str
+    worker_id: str
+    worker_input: dict[str, Any] = Field(default_factory=dict)
+```
+
+V4 first version is Core-oriented. Scheduler routing is still kept in the
+dispatch layer because the scheduler owns worker/domain planning, but this
+brainstorm path must only dispatch Core-oriented work. Non-Core wishes should
+return review/redirect material instead of becoming brainstorm edits. Recall
+changes normally remain lifecycle review actions, and Archival changes go
+through Story Evolution / version / reindex governance.
+
+The Core worker result should use the minimum field-level executable structure:
+
+```python
+class BrainstormCoreFieldChange(BaseModel):
+    source_item_id: str
+    target_ref: str
+    base_revision: str
+    operation: Literal["replace_field", "set_field", "delete_field"]
+    field_path: str
+    new_value: Any
+    reason: str | None = None
+    source_refs: list[MemorySourceRef] = Field(default_factory=list)
+```
+
+Rules:
+
+- `source_item_id` is required and points to a confirmed `BrainstormItem`;
+- `target_ref`, `base_revision`, `operation`, `field_path`, and `new_value` are
+  required because apply / proposal / conflict checks need executable data;
+- `old_value` is not produced by the LLM; backend fills it deterministically
+  from `base_revision + field_path`;
+- `reason` is optional and should not be generated by default unless user text
+  already contains a short reason, review/proposal UI needs it, conflict/refusal
+  reporting needs it, or debug/eval mode requests it;
+- full `source_refs` are optional until brainstorm discussion message ids /
+  transcript anchors are stable.
+
+Lifecycle:
+
+- `BrainstormSession` starts when the user sends the first brainstorm prompt;
+- ordinary discussion keeps the session open and does not create items;
+- if the user returns to writing without changes, close the session as no-op;
+- explicit summarize/apply action runs a dedicated `brainstorm_summarize`
+  structured prompt over the session discussion;
+- generated items are user-editable before dispatch;
+- only confirmed items enter scheduler / worker execution.
+
 Completion criteria:
 
 - brainstorm discussion produces structured items, not direct memory writes;
+- brainstorm session and item state are persisted with Runtime Workspace
+  semantics, not as Core / Recall / Archival truth;
+- brainstorm items stay memory-layer agnostic and do not decide Core / Recall /
+  Archival routing;
+- brainstorm summary output is produced by an explicit summary/apply action,
+  not by automatic hidden judgment during ordinary writer discussion;
 - user can edit/reject/confirm items;
-- confirmed Core items apply with `origin_kind=brainstorm_summary_apply`;
-- Recall/Archival items route through lifecycle/evolution services;
-- receipts are inspectable and traceable back to the brainstorm source refs.
+- confirmed items go to scheduler/dispatcher for classification;
+- scheduler/dispatcher routes Core-classified work to the appropriate Core
+  memory-domain worker and does not dispatch Recall/Archival brainstorm edits;
+- non-Core wishes produce review/redirect receipts rather than memory mutation
+  through V4 brainstorm;
+- worker-produced Core operations use minimal executable field changes and
+  apply with `origin_kind=brainstorm_summary_apply`;
+- backend fills `old_value` from base revision and rejects stale-base /
+  conflict cases before apply;
+- worker permission decides auto-apply / proposal / review receipt behavior;
+- receipts are inspectable and traceable back to `brainstorm_id` and
+  `source_item_id`.
 
 ### V5. Post-write Memory Maintenance Minimum Closure
 
@@ -259,6 +375,7 @@ visible behavior, not just API availability.
 | Failure | Classification | Route |
 |---|---|---|
 | Writer sees source-branch future memory after fork | V1 bug | Fix resolver/context scoping |
+| Branch from turn N sees later-turn Core field values | V1 bug | Fix Core State as-of manifest/revision read |
 | Memory panel edits wrong branch | V1/V3 blocker | Fix branch scope before UI acceptance |
 | Core edit bypasses event/dirty/projection path | V2 bug | Fix mutation kernel routing |
 | Recall action deletes raw chunks | V2 bug | Route through lifecycle service |
@@ -282,7 +399,6 @@ Known draft-v1 position:
 
 - no grill blocker before V0/V1;
 - no grill blocker before V2 backend contract hardening;
-- V4 has one deferred grill candidate: whether `BrainstormItem` first version
-  should use a small closed enum taxonomy or an extensible label/action
-  taxonomy. Resolve this before V4 DTO implementation if existing docs and
-  references cannot determine the safer contract.
+- V4 no longer has a `BrainstormItem` taxonomy grill: brainstorm summary items
+  are memory-layer agnostic by contract. If implementation needs a taxonomy
+  decision, it belongs to scheduler/dispatcher output, not the brainstorm item.

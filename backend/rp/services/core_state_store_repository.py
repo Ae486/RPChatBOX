@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from sqlalchemy import asc
 from sqlmodel import Session, select
 
 from models.rp_core_state_store import (
     CoreStateAuthoritativeObjectRecord,
     CoreStateAuthoritativeRevisionRecord,
+    CoreStateSnapshotManifestRecord,
     CoreStateProjectionSlotRecord,
     CoreStateProjectionSlotRevisionRecord,
 )
@@ -24,6 +26,10 @@ class CoreStateStoreRepository:
 
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
 
     def upsert_authoritative_object(
         self,
@@ -113,6 +119,13 @@ class CoreStateStoreRepository:
         revision_source_kind: str,
         source_apply_id: str | None = None,
         source_proposal_id: str | None = None,
+        owning_branch_head_id: str | None = None,
+        origin_turn_id: str | None = None,
+        runtime_profile_snapshot_id: str | None = None,
+        visibility_scope: str = "story_global",
+        visibility_state: str = "active",
+        base_revision: int | None = None,
+        source_event_id: str | None = None,
         metadata_json: dict | None = None,
     ) -> CoreStateAuthoritativeRevisionRecord:
         record = self.get_authoritative_revision(
@@ -138,6 +151,13 @@ class CoreStateStoreRepository:
                 revision_source_kind=revision_source_kind,
                 source_apply_id=source_apply_id,
                 source_proposal_id=source_proposal_id,
+                owning_branch_head_id=owning_branch_head_id,
+                origin_turn_id=origin_turn_id,
+                runtime_profile_snapshot_id=runtime_profile_snapshot_id,
+                visibility_scope=visibility_scope,
+                visibility_state=visibility_state,
+                base_revision=base_revision,
+                source_event_id=source_event_id,
                 metadata_json=dict(metadata_json or {}),
             )
             self._session.add(record)
@@ -152,6 +172,13 @@ class CoreStateStoreRepository:
         record.revision_source_kind = revision_source_kind
         record.source_apply_id = source_apply_id
         record.source_proposal_id = source_proposal_id
+        record.owning_branch_head_id = owning_branch_head_id
+        record.origin_turn_id = origin_turn_id
+        record.runtime_profile_snapshot_id = runtime_profile_snapshot_id
+        record.visibility_scope = visibility_scope
+        record.visibility_state = visibility_state
+        record.base_revision = base_revision
+        record.source_event_id = source_event_id
         record.metadata_json = dict(metadata_json or {})
         self._session.add(record)
         self._session.flush()
@@ -176,6 +203,15 @@ class CoreStateStoreRepository:
         )
         return self._session.exec(stmt).first()
 
+    def get_authoritative_revision_by_id(
+        self,
+        authoritative_revision_id: str,
+    ) -> CoreStateAuthoritativeRevisionRecord | None:
+        return self._session.get(
+            CoreStateAuthoritativeRevisionRecord,
+            authoritative_revision_id,
+        )
+
     def list_authoritative_revisions(
         self,
         *,
@@ -186,7 +222,20 @@ class CoreStateStoreRepository:
             select(CoreStateAuthoritativeRevisionRecord)
             .where(CoreStateAuthoritativeRevisionRecord.session_id == session_id)
             .where(CoreStateAuthoritativeRevisionRecord.object_id == object_id)
-            .order_by(CoreStateAuthoritativeRevisionRecord.revision.asc())
+            .order_by(asc(CoreStateAuthoritativeRevisionRecord.revision))
+        )
+        return list(self._session.exec(stmt).all())
+
+    def list_authoritative_revisions_for_session(
+        self,
+        *,
+        session_id: str,
+    ) -> list[CoreStateAuthoritativeRevisionRecord]:
+        stmt = (
+            select(CoreStateAuthoritativeRevisionRecord)
+            .where(CoreStateAuthoritativeRevisionRecord.session_id == session_id)
+            .order_by(asc(CoreStateAuthoritativeRevisionRecord.object_id))
+            .order_by(asc(CoreStateAuthoritativeRevisionRecord.revision))
         )
         return list(self._session.exec(stmt).all())
 
@@ -198,7 +247,74 @@ class CoreStateStoreRepository:
         stmt = (
             select(CoreStateAuthoritativeObjectRecord)
             .where(CoreStateAuthoritativeObjectRecord.session_id == session_id)
-            .order_by(CoreStateAuthoritativeObjectRecord.object_id.asc())
+            .order_by(asc(CoreStateAuthoritativeObjectRecord.object_id))
+        )
+        return list(self._session.exec(stmt).all())
+
+    def create_core_state_snapshot_manifest(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        branch_head_id: str,
+        turn_id: str,
+        runtime_profile_snapshot_id: str,
+        effective_revision_map: dict[str, str],
+        parent_snapshot_id: str | None = None,
+        changed_ref_ids: list[str] | None = None,
+        source_event_ids: list[str] | None = None,
+        manifest_kind: str = "runtime",
+        metadata_json: dict | None = None,
+    ) -> CoreStateSnapshotManifestRecord:
+        record = CoreStateSnapshotManifestRecord(
+            snapshot_id=f"core_snap_{uuid4().hex[:12]}",
+            parent_snapshot_id=parent_snapshot_id,
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            runtime_profile_snapshot_id=runtime_profile_snapshot_id,
+            effective_revision_map_json=dict(effective_revision_map),
+            changed_ref_ids_json=list(changed_ref_ids or []),
+            source_event_ids_json=list(source_event_ids or []),
+            manifest_kind=manifest_kind,
+            metadata_json=dict(metadata_json or {}),
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get_core_state_snapshot_manifest(
+        self,
+        snapshot_id: str,
+    ) -> CoreStateSnapshotManifestRecord | None:
+        return self._session.get(CoreStateSnapshotManifestRecord, snapshot_id)
+
+    def list_core_state_snapshot_manifests_for_branch(
+        self,
+        *,
+        session_id: str,
+        branch_head_id: str,
+    ) -> list[CoreStateSnapshotManifestRecord]:
+        stmt = (
+            select(CoreStateSnapshotManifestRecord)
+            .where(CoreStateSnapshotManifestRecord.session_id == session_id)
+            .where(CoreStateSnapshotManifestRecord.branch_head_id == branch_head_id)
+            .order_by(asc(CoreStateSnapshotManifestRecord.created_at))
+            .order_by(asc(CoreStateSnapshotManifestRecord.snapshot_id))
+        )
+        return list(self._session.exec(stmt).all())
+
+    def list_core_state_snapshot_manifests_for_session(
+        self,
+        *,
+        session_id: str,
+    ) -> list[CoreStateSnapshotManifestRecord]:
+        stmt = (
+            select(CoreStateSnapshotManifestRecord)
+            .where(CoreStateSnapshotManifestRecord.session_id == session_id)
+            .order_by(asc(CoreStateSnapshotManifestRecord.created_at))
+            .order_by(asc(CoreStateSnapshotManifestRecord.snapshot_id))
         )
         return list(self._session.exec(stmt).all())
 
@@ -364,7 +480,7 @@ class CoreStateStoreRepository:
             select(CoreStateProjectionSlotRevisionRecord)
             .where(CoreStateProjectionSlotRevisionRecord.chapter_workspace_id == chapter_workspace_id)
             .where(CoreStateProjectionSlotRevisionRecord.summary_id == summary_id)
-            .order_by(CoreStateProjectionSlotRevisionRecord.revision.asc())
+            .order_by(asc(CoreStateProjectionSlotRevisionRecord.revision))
         )
         return list(self._session.exec(stmt).all())
 
@@ -376,7 +492,7 @@ class CoreStateStoreRepository:
         stmt = (
             select(CoreStateProjectionSlotRecord)
             .where(CoreStateProjectionSlotRecord.chapter_workspace_id == chapter_workspace_id)
-            .order_by(CoreStateProjectionSlotRecord.slot_name.asc())
+            .order_by(asc(CoreStateProjectionSlotRecord.slot_name))
         )
         return list(self._session.exec(stmt).all())
 

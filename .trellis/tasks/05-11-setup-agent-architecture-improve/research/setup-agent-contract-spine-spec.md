@@ -131,6 +131,136 @@ Tests/checks:
 - compacted history and runtime overlay do not erase required draft refs
 - prompt text does not mention tools absent from the active capability plan
 
+## 4D. Contract C2D: SkillPack Governance
+
+Owner:
+
+- `SetupContextPipeline`
+- `SetupAgentPromptService`
+- `backend/rp/agent_runtime/skill_packs/registry.py`
+
+Owns:
+
+- deterministic stage-keyed SkillPack lookup from resolved `SetupStageId`
+- stable prompt-layer Specialist hat prose
+- prompt assembly audit metadata
+- transient `skill_pack_name` observability metadata
+
+Must not own:
+
+- `SetupCapabilityPlan`
+- model-visible tool permission
+- runtime allowlist / `tool_scope`
+- provider schema compatibility
+- `setup.truth.write` runtime-owned argument injection
+- `SetupWorkspace` business truth
+- runtime overlay content
+- `context_bundle`
+- durable runtime cognition/state
+
+Pipeline:
+
+```text
+resolved SetupStageId
+  -> get_skill_pack_for_stage(...)
+  -> SetupAgentPromptService stable system prompt
+  -> SetupRuntimeAdapter metadata.skill_pack_name
+  -> RpAgentTurnResult.structured_payload.skill_pack_name
+  -> eval trace root attributes.skill_pack_name
+```
+
+Invariants:
+
+- Selection is server-side and stage-keyed. No LLM self-selection, heuristic
+  matching, per-mode override, or user-visible pack chooser participates in this
+  slice.
+- SkillPack content may shape prose and facilitation style only inside the
+  stable prompt layer.
+- Hard-unload is achieved by rebuilding the next prompt from the newly resolved
+  stage. There is no former-pack carry-forward outside prior-stage handoff
+  truth.
+- `skill_pack_name` is metadata only. Behavior, tool scope, truth-write
+  injection, and durable state must not depend on it.
+- Capability guidance continues to come from
+  `SetupCapabilityPlan.prompt_guidance_fragments`; SkillPack prose cannot open
+  or imply inactive tools.
+
+Tests/checks:
+
+- `test_skill_packs_registry.py` proves registry shape, deterministic parsing,
+  and no tool-authority fields.
+- `test_setup_agent_prompt_service.py` proves SkillPack prompt insertion,
+  hard-unload for other stages, and CapabilityPlan prompt filtering.
+- `test_setup_agent_tool_scope.py` proves character-design SkillPack activation
+  does not alter tool scope.
+- `test_setup_agent_execution_service_v2.py` proves metadata stays outside
+  `context_bundle` and capability plan / tool scope stay unchanged.
+- `test_eval_trace_capture.py` and `test_eval_diagnostics.py` prove
+  `skill_pack_name` is consumed only from runtime-owned trace metadata.
+
+## 4A. Contract C2A: SetupLightweightReadback
+
+Owner:
+
+- `SetupContextPipeline`
+- `SetupToolRuntime`
+- `SetupToolProvider`
+- `SetupTruthIndexService`
+
+Owns:
+
+- exact current editable setup draft ref recovery
+- compact-summary recovery hint readback
+- prior-stage handoff ref use
+- lexical/path/filter search over accepted setup truth
+- bounded exact reads from accepted setup truth refs
+
+Accepted surfaces:
+
+- `setup.read.draft_refs`
+- `setup.truth_index.search`
+- `setup.truth_index.read_refs`
+- `SetupTruthIndexService`
+
+Must not own:
+
+- semantic/vector retrieval
+- hybrid search and reranking
+- Recall / Memory OS retrieval
+- active-story runtime retrieval policy
+- retrieval-core chunk/index/embedding storage
+
+Boundary:
+
+```text
+current editable setup draft
+  -> setup.read.draft_refs
+
+accepted setup commit snapshot
+  -> SetupTruthIndexService
+  -> setup.truth_index.search / setup.truth_index.read_refs
+
+accepted setup commit snapshot
+  -> deterministic retrieval seed materialization
+  -> retrieval-core chunk/index/embedding/hybrid/rerank/runtime retrieval
+```
+
+Invariants:
+
+- Setup draft truth is recovered through setup-owned readback, not Memory OS or retrieval-core.
+- Committed setup truth lookup is deterministic lexical/path/filter search plus exact read, not semantic retrieval.
+- Search returns candidate refs and previews; read returns bounded exact payload only after refs are selected.
+- Retrieval-core starts after accepted setup truth is materialized into seed sections.
+- Retrieval materialization readiness is not a setup-stage commit gate.
+- The agent never writes retrieval index rows directly.
+
+Tests/checks:
+
+- `setup.read.draft_refs` remains visible where context governance requires draft recovery.
+- `setup.truth_index.search` and `setup.truth_index.read_refs` remain read-only setup tools.
+- truth-index reads ignore uncommitted draft changes and raw setup discussion.
+- retrieval seed materialization preserves setup anchors but does not feed back into editable setup draft readback.
+
 ## 5. Contract C3: SetupCapabilityPlan
 
 Owner:
@@ -184,7 +314,7 @@ Invariants:
 - prompt mentions without schema exposure are invalid
 - schema exposure without runtime allowlist is invalid
 - provider-registered candidate tools remain hidden unless explicitly accepted by a slice
-- `setup.world_background.*` stays candidate-only until Phase B or later says otherwise
+- `setup.world_background.*` stays candidate-only until a separate product/tool slice explicitly accepts it
 - accepted active-spec tools remain visible unless a slice explicitly changes that spec-backed contract:
   - shared setup-private tools such as `setup.truth.write`, `setup.question.raise`, `setup.proposal.commit`, `setup.read.workspace`, and `setup.read.step_context`
   - stage-local recovery/read tools required by context governance, including `setup.read.draft_refs`

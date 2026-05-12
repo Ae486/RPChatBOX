@@ -4,7 +4,7 @@
 >
 > Purpose: 作为 story runtime 模块化开发规格书的总入口，统一术语、模块边界、依赖顺序、并行开发约束和真相源。
 >
-> Status: draft-v1
+> Status: draft-v1.1
 
 ## 1. 文档定位
 
@@ -252,6 +252,33 @@ story runtime 的技术调研目标，不是继续找一个更大的框架，而
 
 只有同时满足“减少工作量”和“不破坏主链边界”，才允许进入第一阶段实现清单。
 
+## 4.6 Cross-runtime Context Engineering / Compact-Summary
+
+Context Engineering / Compact-Summary 是跨 runtime 的通用基础能力，不是
+story runtime 私有模块。
+
+规格入口：
+
+- [context-engineering-compact-summary-module-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/context-engineering-compact-summary-module-spec.md)
+
+当前工程口径：
+
+- setup agent 作为首个落地点，负责抽象层和 setup 运行层，因为 setup
+  已有 `SetupContextBuilder`、`SetupContextGovernorService`、
+  `SetupContextCompactionService`、`context_report`、fingerprint/reuse/fallback
+  等成熟雏形；
+- story runtime 在当前 task 中只定义依赖契约、接入点和业务 policy；
+- story runtime 的 `ContextOrchestrationService` 是 policy / adapter 层，
+  不应重复实现一套通用 compact engine；
+- writer / brainstorm / chapter bridge 后续按该抽象接入；
+- compact / summary result 是 pre-model context artifact、Runtime Workspace
+  sidecar 或 user-confirmed dispatch input，不直接拥有 adoption，也不直接
+  改变 canonical truth。
+
+该能力插队进入当前 story runtime task 的原因是：writer brainstorm、chapter
+summary、writer packet budget、setup stage-local compact 都暴露出相同的
+上下文工程问题。先冻结通用边界，可以避免每个模块各写一套 summary 逻辑。
+
 ## 5. 模块规格书清单
 
 ## 5.1 公共合同层
@@ -280,6 +307,7 @@ story runtime 的技术调研目标，不是继续找一个更大的框架，而
 22. [story-runtime-longform-outline-progress-chapter-summary-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-outline-progress-chapter-summary-development-spec.md)
 23. [story-runtime-branch-rollback-productization-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-productization-spec.md)
 24. [story-runtime-branch-rollback-productization-development-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-rollback-productization-development-spec.md)
+25. [context-engineering-compact-summary-module-spec.md](H:/chatboxapp/.trellis/tasks/04-28-runtime-story-dev-task/research/context-engineering-compact-summary-module-spec.md)
 
 公共合同层前三份必须先冻结，再允许其他模块并行扩散。
 

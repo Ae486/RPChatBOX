@@ -349,6 +349,34 @@ business truth packet
 
 This preserves existing work while making ownership reviewable.
 
+### 5.4D SkillPack Governance Belongs To Context Packaging
+
+SkillPack should be treated as context packaging, not as a second capability or
+business-policy system. The useful pi-mono lesson is the explicit context
+transform boundary: selected context is prepared before model input and does
+not become loop state, tool authority, or durable truth. The useful Claude Code
+lesson is mature skill/context injection with clear activation and observability
+surfaces: skills can shape prompt behavior, but tool permissions remain owned by
+the active tool/capability pool.
+
+For SetupAgent this means:
+
+```text
+resolved SetupStageId
+  -> stage-keyed SkillPack prompt prose
+  -> stable system prompt
+  -> metadata-only skill_pack_name for trace/eval correlation
+
+SetupCapabilityPlan
+  -> tool schemas / runtime allowlist / prompt guidance
+```
+
+Do not copy Claude Code's full skill ecosystem, filesystem permission semantics,
+or user-invoked skill marketplace. The adapted pattern is narrower: prompt-only
+stage-local facilitation voice, hard-unloaded on stage change, observable by
+metadata, and explicitly decoupled from `SetupCapabilityPlan`, `tool_scope`,
+runtime overlay, `context_bundle`, `SetupWorkspace`, and durable runtime state.
+
 ### 5.5 Implementation Slices Should Follow Risk
 
 Recommended order remains:
@@ -359,10 +387,43 @@ A2 CapabilityPlan as the one source for tool surface
 A3 ContextPipeline contract consolidation
 A4 ModelGateway + EventSink hardening
 A5 RuntimeStateStore / trace / visible transcript separation
-B  Draft CRUD migration
+B  Tool module integration protocol / canonical draft-write path
+C  Setup lightweight retrieval roadmap
+D  SkillPack governance
 ```
 
 The user's latest clarification strengthens A2's importance, but it does not move A2 before A1. A1 still closes the failure class from the old handoff: pseudo tool output, bounded repair, and deterministic stop before recursion-limit failure.
+
+The later B slice should not be treated as a decision to build or expose a
+particular CRUD tool family. Both pi-mono and Claude Code point to the same
+architectural rule: tools are external capability modules selected into the
+current agent context/tool pool. For SetupAgent, the important B contract is
+that new or removed setup tools enter through `SetupCapabilityPlan`,
+provider/tool registration, prompt guidance, runtime allowlist, and focused
+tests. The concrete draft-write surface may stay on the existing
+`setup.truth.write` stage-draft path until a separate product slice accepts a
+stage-local CRUD family.
+
+The later C slice should likewise avoid turning a setup readback need into a
+new generic retrieval subsystem. pi-mono's relevant lesson is that context and
+tools are selected into the loop explicitly; Claude Code's relevant lesson is
+that memory/context readback and tool-result reinjection are bounded surfaces,
+not raw hidden state that the agent can freely mix with every store. For
+SetupAgent, that means:
+
+```text
+setup-owned readback
+  = editable draft refs, compact recovery hints, prior-stage handoff refs,
+    committed setup truth lexical/path/filter search, exact committed reads
+
+retrieval-core
+  = post-commit seed materialization, chunking, embedding/indexing,
+    hybrid/rerank, Recall/Archival search, active-story retrieval policy
+```
+
+The bridge is accepted setup truth materialization after commit. SetupAgent
+should not call Memory OS / retrieval-core to recover editable draft truth, and
+it should not gain semantic/vector retrieval merely because C exists.
 
 ## 6. Reference-To-SetupAgent Mapping
 

@@ -291,6 +291,7 @@ class StoryTurnRecord(SQLModel, table=True):  # type: ignore[call-arg]
     failure_reason: str | None = None
     visible_output_ref: str | None = Field(default=None, index=True)
     selected_output_ref: str | None = Field(default=None, index=True)
+    core_state_snapshot_id: str | None = Field(default=None, index=True)
     visibility_state: str = Field(default="active", index=True)
     hidden_by_control_receipt_id: str | None = Field(default=None, index=True)
     hidden_after_turn_id: str | None = Field(default=None, index=True)
@@ -431,6 +432,12 @@ def ensure_story_store_compatible_schema(engine: Engine) -> None:
             engine,
             "rp_story_turns",
             "selected_output_ref",
+            "VARCHAR",
+        )
+        _ensure_column(
+            engine,
+            "rp_story_turns",
+            "core_state_snapshot_id",
             "VARCHAR",
         )
         _ensure_column(

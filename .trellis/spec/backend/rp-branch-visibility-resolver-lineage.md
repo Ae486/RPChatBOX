@@ -33,6 +33,38 @@ class RuntimeBranchReadScope(BaseModel):
     include_story_global: bool = True
 ```
 
+Core State as-of manifest contract:
+
+```python
+class CoreStateSnapshotManifest(BaseModel):
+    snapshot_id: str
+    parent_snapshot_id: str | None = None
+    story_id: str
+    session_id: str
+    branch_head_id: str
+    turn_id: str
+    runtime_profile_snapshot_id: str
+    effective_revision_map: dict[str, str]
+    changed_ref_ids: list[str] = Field(default_factory=list)
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class CoreStateAsOfResolver:
+    def resolve_manifest(
+        self,
+        *,
+        scope: RuntimeBranchReadScope,
+        selected_turn_id: str | None = None,
+    ) -> CoreStateSnapshotManifest: ...
+
+    def resolve_object_revision(
+        self,
+        *,
+        manifest: CoreStateSnapshotManifest,
+        object_ref: ObjectRef,
+    ) -> CoreStateAuthoritativeRevisionRecord: ...
+```
+
 Visibility marker vocabulary:
 
 ```text
@@ -116,6 +148,9 @@ These fields are required because draft/rewrite candidates may exist without bei
 - `Core State` runtime revisions are branch-aware after activation.
   - pre-fork settled facts remain visible through lineage;
   - post-fork writes belong to the producing branch.
+- Core State runtime reads must resolve an as-of manifest before reading object
+  payloads. A current/latest authoritative object row is a cache or compatibility
+  view, not the runtime branch truth.
 - `Projection/View` follows Core visibility because it is strictly derived from Core facts.
 - `Runtime Workspace` is branch-aware and turn-scoped.
   - it must never leak across branch switches.
@@ -137,6 +172,43 @@ These fields are required because draft/rewrite candidates may exist without bei
   - derived retrieval/index visibility follows the source content visibility.
 - Rollback should create durable branch-head transition/event/visibility records.
 - Rollback must not fake historical Core fact rewrites as if later writes never happened.
+- Rollback and branch creation must select the Core State manifest bound to the
+  target turn. Later Core revisions remain audit-visible, but default runtime
+  reads must not select them until the active branch reaches or creates a turn
+  whose manifest points at those revisions.
+
+#### Core State as-of manifest contract
+
+- Core State branch reads use copy-on-write snapshot manifests:
+  - turn `0` / activation creates the initial Core State manifest;
+  - turns without Core mutation reuse the previous visible manifest;
+  - a turn with Core mutation creates complete object revision rows for changed
+    objects and a new manifest that points unchanged refs at inherited revisions
+    and changed refs at new revisions;
+  - branch creation from turn `N` inherits the manifest visible at turn `N`;
+  - the first Core mutation on the new branch creates branch-scoped revisions
+    and a new branch-local manifest.
+- `CoreStateAuthoritativeRevisionRecord.data_json` or its replacement must hold
+  the complete object payload for that revision. Patch/delta/event rows are for
+  audit, diff, dirty-target, and projection refresh; runtime as-of reads must not
+  depend on replaying a long delta chain.
+- A Core revision created by runtime work must carry or be joinable to:
+  - `story_id`;
+  - `session_id`;
+  - `owning_branch_head_id` / runtime branch head;
+  - `origin_turn_id` / runtime turn;
+  - `runtime_profile_snapshot_id`;
+  - `visibility_scope`;
+  - `visibility_state`;
+  - `base_revision` or equivalent base ref;
+  - `source_event_id` / apply receipt / proposal refs when available.
+- Runtime-owned Core reads must fail closed or return an explicit compatibility
+  warning when no turn-bound Core manifest can be resolved. They must not silently
+  fall back to `StorySession.current_state_json` or a latest current object row
+  for writer context.
+- Old sessions that lack turn-bound Core revision history may be migrated only
+  as compatibility snapshots. The migration must mark historical as-of reads as
+  unavailable before the migration anchor instead of fabricating false history.
 
 #### Retrieval visibility contract
 
@@ -159,6 +231,9 @@ These fields are required because draft/rewrite candidates may exist without bei
 | Branch A writes post-fork Workspace/Recall material | Branch B runtime reads do not see it |
 | Runtime read/search omits explicit branch filter | Active branch visibility still applies |
 | Rollback to turn N occurs | Turn N+1 runtime materials become hidden from default runtime reads |
+| Core changes at turn 3 after turn 1/2 were unchanged | Turn 1/2 manifests still point at the pre-change Core revisions |
+| Branch is created from turn 2 after Core changed at turn 3 | New branch inherits the turn 2 manifest and does not read turn 3 Core values |
+| New branch mutates a Core object | It creates a branch-scoped object revision and manifest without changing the parent branch manifest |
 | Rollback hides a later draft/rewrite candidate | The candidate artifact is absent from active branch snapshots |
 | `pending_segment_artifact_id` points to a hidden artifact | Snapshot returns no pending segment pointer |
 | Archival seed content exists | Visible as `story_global` unless later branch-local evolution explicitly changes visibility |
@@ -168,12 +243,18 @@ These fields are required because draft/rewrite candidates may exist without bei
 ### 5. Good / Base / Bad Cases
 
 - Good: branch creation adds metadata and lineage, but does not clone all Core/Recall/Workspace rows.
+- Good: turn 1 and turn 2 both reuse the turn 0 Core manifest when Core State
+  does not change, while turn 3 creates a new manifest only for changed object
+  revision pointers.
 - Good: Runtime Workspace cards created on branch A stay invisible on branch B.
 - Good: Recall summaries created after a rollback point are hidden from default runtime retrieval for that branch.
 - Good: rewrite candidates produced after a rollback cutoff are hidden even if they were never selected/visible outputs.
 - Good: chapter pending pointers are cleared in the returned snapshot when they target hidden artifacts.
 - Base: physical purge remains later work; boot behavior relies on visibility-state filtering first.
 - Bad: copying all retrieval chunks and embeddings into a new branch at branch creation time.
+- Bad: reading `rp_core_state_authoritative_objects.data_json` as runtime truth
+  after branching from an earlier turn, because that row represents latest cache
+  state rather than selected-turn Core truth.
 - Bad: treating LangGraph checkpoint replay as sufficient branch visibility enforcement.
 - Bad: allowing a runtime read to bypass active branch visibility because it omitted a branch filter.
 
@@ -190,6 +271,15 @@ These fields are required because draft/rewrite candidates may exist without bei
 - Integration tests cover:
   - Core / Projection / Runtime Workspace / Recall / RetrievalBroker runtime reads all respect active visibility;
   - optional `branch_ids` style filters do not bypass active visibility for runtime paths.
+- Core as-of tests cover:
+  - turn 0 creates an initial manifest;
+  - turn 1/2 without Core mutation reuse that manifest;
+  - turn 3 Core mutation creates a new object revision and new manifest;
+  - branch from turn 2 reads the turn 2 manifest, not the latest current row;
+  - branch-local mutation creates a branch-scoped revision and does not change
+    the parent branch manifest;
+  - rollback to turn 2 selects the turn 2 manifest while later revisions remain
+    audit-visible but runtime-hidden.
 - Snapshot tests cover:
   - `story_segment` visibility uses exact `runtime_turn_id` / `runtime_branch_head_id` metadata and fails closed when either key is missing or mismatched;
   - output-ref reverse lookup is absent from runtime product read paths and reserved for explicit migration/repair;
@@ -197,6 +287,39 @@ These fields are required because draft/rewrite candidates may exist without bei
 - Focused lint/type checks must include the resolver contract and tests.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+row = core_state_store.get_authoritative_object(
+    session_id=identity.session_id,
+    layer=ref.layer.value,
+    scope=ref.scope,
+    object_id=ref.object_id,
+)
+return row.data_json
+```
+
+This reads the latest session cache. If a branch is created from turn 2 after the
+same Core object changed at turn 5, the new branch can see turn 5 truth.
+
+#### Correct
+
+```python
+scope = branch_visibility_resolver.build_runtime_scope(
+    identity=identity,
+    selected_turn_id=identity.turn_id,
+)
+manifest = core_state_as_of_resolver.resolve_manifest(scope=scope)
+revision = core_state_as_of_resolver.resolve_object_revision(
+    manifest=manifest,
+    object_ref=ref,
+)
+return revision.data_json
+```
+
+Runtime-owned Core reads select the exact object revision visible at the
+selected branch/turn. Latest current rows remain caches or compatibility views.
 
 #### Wrong
 

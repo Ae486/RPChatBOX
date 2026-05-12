@@ -10,7 +10,7 @@
 - Source:
   - Existing eval architecture already provides `EvalCase`, `EvalExpected`, deterministic path assertions, setup diagnostics scoring, setup root-span attributes, and setup artifacts.
   - F1/F2 already made canonical `target_stage` and effective `setup_stage` visible in setup request handling, runtime metadata, and setup traces.
-  - Current repo does not yet implement runtime-owned SkillPack truth such as `skill_pack_name`, pack marker metadata, or pack-driven tool-scope metadata.
+  - Earlier F4 planning reserved SkillPack assertions until runtime-owned pack truth existed. The current runtime now exposes `skill_pack_name` as metadata-only truth; pack-driven tool-scope metadata remains out of scope.
 
 ## 2. Signatures
 
@@ -25,8 +25,9 @@
 - F4 additive `EvalExpected` fields:
   - `expected_target_stage: str | None = None`
   - `expected_effective_stage: str | None = None`
-  - future-only optional fields, not required in this slice:
+  - optional SkillPack field, enabled only because runtime now owns trace truth:
     - `expected_skill_pack_name: str | None = None`
+  - future-only optional fields, not required in this slice:
     - `expected_skill_pack_markers: list[str] = []`
     - `expected_stage_tool_scope_contains: list[str] = []`
     - `expected_stage_tool_scope_excludes: list[str] = []`

@@ -329,6 +329,11 @@ class SetupToolProvider:
             "setup.read.draft_refs": SetupDraftRefReadInput,
             "setup.truth_index.search": SetupTruthIndexSearchInput,
             "setup.truth_index.read_refs": SetupTruthIndexReadInput,
+            "setup.world_background.list_entries": SetupWorldBackgroundListEntriesInput,
+            "setup.world_background.read_entry": SetupWorldBackgroundReadEntryInput,
+            "setup.world_background.write_entry": SetupWorldBackgroundWriteEntryInput,
+            "setup.world_background.edit_entry": SetupWorldBackgroundEditEntryInput,
+            "setup.world_background.delete_entry": SetupWorldBackgroundDeleteEntryInput,
         }
 
     def list_tools(self) -> list[McpToolInfo]:
@@ -415,6 +420,31 @@ class SetupToolProvider:
                     "setup.truth_index.read_refs",
                     "Read exact accepted setup truth by foundation:<stage_id>, foundation:<stage_id>:<entry_id>, foundation:<stage_id>:<entry_id>:<section_id>, or stage:<stage_id>:<entry_id> aliases. Use for exact committed truth lookup, not editable draft recovery. Target object: SetupTruthIndexReadInput. Important field: refs.",
                     SetupTruthIndexReadInput,
+                ),
+                (
+                    "setup.world_background.list_entries",
+                    "Candidate stage-local world_background tool. List editable world-background draft entries from the provider registry without making this tool model-visible unless SetupCapabilityPlan exposes it.",
+                    SetupWorldBackgroundListEntriesInput,
+                ),
+                (
+                    "setup.world_background.read_entry",
+                    "Candidate stage-local world_background tool. Read one editable world-background draft entry by stage ref. Keep hidden from SetupAgent model scope until a product/tool slice accepts it.",
+                    SetupWorldBackgroundReadEntryInput,
+                ),
+                (
+                    "setup.world_background.write_entry",
+                    "Candidate stage-local world_background tool. Create one editable world-background draft entry through the provider registry. Registration alone must not expose it to the model.",
+                    SetupWorldBackgroundWriteEntryInput,
+                ),
+                (
+                    "setup.world_background.edit_entry",
+                    "Candidate stage-local world_background tool. Edit one editable world-background draft entry through the provider registry. Keep hidden from SetupAgent model scope until explicitly accepted.",
+                    SetupWorldBackgroundEditEntryInput,
+                ),
+                (
+                    "setup.world_background.delete_entry",
+                    "Candidate stage-local world_background tool. Delete one editable world-background draft entry through the provider registry. Keep hidden from SetupAgent model scope until explicitly accepted.",
+                    SetupWorldBackgroundDeleteEntryInput,
                 ),
             )
         ]
@@ -684,6 +714,16 @@ class SetupToolProvider:
                 max_chars=input_model.max_chars,
                 commit_id=input_model.commit_id,
             )
+        if tool_name == "setup.world_background.list_entries":
+            return self._world_background_list_entries(input_model=input_model)
+        if tool_name == "setup.world_background.read_entry":
+            return self._world_background_read_entry(input_model=input_model)
+        if tool_name == "setup.world_background.write_entry":
+            return self._world_background_write_entry(input_model=input_model)
+        if tool_name == "setup.world_background.edit_entry":
+            return self._world_background_edit_entry(input_model=input_model)
+        if tool_name == "setup.world_background.delete_entry":
+            return self._world_background_delete_entry(input_model=input_model)
         raise ValueError(f"Unknown setup tool: {tool_name}")
 
     def _read_draft_refs(

@@ -52,6 +52,7 @@ def create_db_and_tables() -> None:
     from models.rp_core_state_store import (
         CoreStateAuthoritativeObjectRecord,
         CoreStateAuthoritativeRevisionRecord,
+        CoreStateSnapshotManifestRecord,
         CoreStateProjectionSlotRecord,
         CoreStateProjectionSlotRevisionRecord,
         ensure_core_state_store_compatible_schema,
@@ -142,6 +143,7 @@ def create_db_and_tables() -> None:
         MemoryChangeEventRecord,
         CoreStateAuthoritativeObjectRecord,
         CoreStateAuthoritativeRevisionRecord,
+        CoreStateSnapshotManifestRecord,
         CoreStateProjectionSlotRecord,
         CoreStateProjectionSlotRevisionRecord,
         KnowledgeCollectionRecord,

@@ -101,6 +101,116 @@ class BackendStoryService {
     );
   }
 
+  Future<RpMemoryInspection> getMemoryInspection({
+    required String sessionId,
+    required String branchHeadId,
+    required String turnId,
+    required String runtimeProfileSnapshotId,
+    List<String>? layers,
+    List<String>? domains,
+    bool includeHiddenAudit = false,
+  }) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/memory/inspection',
+      queryParameters: {
+        'branch_head_id': branchHeadId,
+        'turn_id': turnId,
+        'runtime_profile_snapshot_id': runtimeProfileSnapshotId,
+        if (layers != null && layers.isNotEmpty) 'layers': layers,
+        if (domains != null && domains.isNotEmpty) 'domains': domains,
+        if (includeHiddenAudit) 'include_hidden_audit': includeHiddenAudit,
+      },
+    );
+    _ensureSuccess(response, action: 'get story memory inspection');
+    return RpMemoryInspection.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpMemoryActionResponse> directEditCoreMemory({
+    required String sessionId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    required String domain,
+    String? domainPath,
+    required List<Map<String, dynamic>> operations,
+    required List<Map<String, dynamic>> baseRefs,
+    List<Map<String, dynamic>> sourceRefs = const [],
+    String? reason,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/memory/core/direct-edit',
+      data: {
+        'identity': identity,
+        'actor': actor,
+        'domain': domain,
+        if (domainPath != null && domainPath.isNotEmpty)
+          'domain_path': domainPath,
+        'operations': operations,
+        'base_refs': baseRefs,
+        if (sourceRefs.isNotEmpty) 'source_refs': sourceRefs,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      },
+    );
+    _ensureSuccess(response, action: 'direct edit core memory');
+    return RpMemoryActionResponse.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpMemoryActionResponse> reviewRecallMemory({
+    required String sessionId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    required String action,
+    required List<String> materialRefs,
+    String? reason,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/memory/recall/actions',
+      data: {
+        'identity': identity,
+        'actor': actor,
+        'action': action,
+        'material_refs': materialRefs,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      },
+    );
+    _ensureSuccess(response, action: 'review recall memory');
+    return RpMemoryActionResponse.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
+  Future<RpMemoryActionResponse> evolveArchivalMemory({
+    required String sessionId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    required String sourceAssetId,
+    int? expectedSourceVersion,
+    required List<Map<String, dynamic>> replacementSections,
+    List<Map<String, dynamic>> sourceRefs = const [],
+    String? reason,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/memory/archival/evolution',
+      data: {
+        'identity': identity,
+        'actor': actor,
+        'source_asset_id': sourceAssetId,
+        if (expectedSourceVersion != null)
+          'expected_source_version': expectedSourceVersion,
+        'replacement_sections': replacementSections,
+        if (sourceRefs.isNotEmpty) 'source_refs': sourceRefs,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      },
+    );
+    _ensureSuccess(response, action: 'evolve archival memory');
+    return RpMemoryActionResponse.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
   Future<RpRuntimeDebugSurface> getRuntimeDebug({
     required String sessionId,
   }) async {

@@ -550,6 +550,83 @@ Out of scope:
 - changing setup product semantics merely to match a reference project.
 - dropping active shared/read tools such as `setup.truth.write`, question/commit/read helpers, or `setup.read.draft_refs` without first changing the authoritative backend spec.
 
+### C: Setup Lightweight Retrieval Roadmap
+
+C should freeze ownership, not add RAG to SetupAgent.
+
+In scope:
+
+- setup-owned exact readback for current editable draft refs through `setup.read.draft_refs`;
+- compact-summary recovery hints that point to setup draft refs instead of carrying full draft detail in prompt context;
+- prior-stage handoff refs as setup-owned accepted-truth pointers;
+- committed setup truth lookup through `SetupTruthIndexService`;
+- lexical/path/filter candidate search through `setup.truth_index.search`;
+- bounded exact committed-truth reads through `setup.truth_index.read_refs`;
+- deterministic post-commit handoff from accepted setup truth into retrieval seed sections.
+
+Out of scope:
+
+- semantic/vector retrieval inside SetupAgent;
+- Memory OS / Recall retrieval as a draft-recovery mechanism;
+- hybrid search, reranking, active-story retrieval policy, or runtime story retrieval;
+- new model-visible retrieval tools that bypass `SetupCapabilityPlan`;
+- making retrieval-core readiness block setup stage commit/progression.
+
+Architecture boundary:
+
+```text
+SetupAgent prestory editing
+  owns draft refs, compact recovery, handoff refs, truth-index search/read
+
+Accepted setup commit
+  is deterministically materialized into seed sections
+
+Retrieval-core
+  owns chunking, indexing, embeddings, hybrid/rerank, Recall/Archival search,
+  and active-story runtime retrieval after materialization
+```
+
+This follows the reference direction without copying extra feature breadth:
+
+- pi-mono keeps context and tools as selected loop inputs instead of folding every external store into the core loop.
+- Claude Code treats context engineering, memory/readback, active tool pools, and tool-result reinjection as explicit boundaries.
+- SetupAgent adapts those patterns to the project-specific rule that editable setup draft truth is setup-owned and semantic/runtime retrieval starts after accepted setup truth is materialized.
+
+### D: SkillPack Governance
+
+D closes the remaining prompt-pack boundary after A2 CapabilityPlan and A3
+ContextPipeline are already explicit.
+
+In scope:
+
+- treat SkillPack as stage-keyed prompt/context packaging inside
+  `SetupContextPipeline` stable prompt assembly;
+- select a pack deterministically from the resolved `SetupStageId`;
+- hard-unload by rebuilding the next turn prompt from the newly resolved stage;
+- surface `skill_pack_name` only as transient observability metadata on turn
+  input, runtime result structured payload, observation metadata, and eval trace
+  root attributes;
+- keep tests proving prompt changes do not change `SetupCapabilityPlan`,
+  `tool_scope`, runtime allowlist, or `setup.truth.write` injection.
+
+Out of scope:
+
+- LLM-selected or heuristic SkillPack activation;
+- SkillPack-owned tool permission, business validation, setup truth, runtime
+  overlay, `context_bundle`, durable runtime state, or stage CRUD semantics;
+- expanding the SkillPack content library as part of architecture governance.
+
+Reference rationale:
+
+- pi-mono supports this by keeping context transformation explicit before model
+  input assembly instead of letting prompt-pack material leak into loop state.
+- Claude Code supports this by making context/skill/memory injection observable
+  and bounded, while keeping tool permission semantics on the active tool pool
+  side rather than inside skill prose.
+- SetupAgent adapts those patterns narrowly: the pack may shape facilitation
+  voice and stage-local prose, but capability and business truth remain owned by
+  the existing setup contracts.
+
 ## 18. Acceptance Questions For Later Specs
 
 The contract spine and implementation slices should be judged by these questions:
@@ -562,6 +639,11 @@ The contract spine and implementation slices should be judged by these questions
 6. If a turn ends, can we distinguish natural final text, ask-user, repair-exhausted, provider failure, and business completion?
 7. If runtime cognition drifts, can it be rebuilt without corrupting `SetupWorkspace`?
 8. If LangGraph routing changes, does the architecture language still make sense?
+9. If setup needs exact detail after compaction, does it use setup-owned readback rather than retrieval-core?
+10. If accepted setup truth enters retrieval, is the bridge deterministic post-commit materialization rather than an agent-authored rewrite?
+11. If a SkillPack is active, can tests prove it changed only stable prompt
+    packaging and observability metadata, not capability, tool scope, truth
+    write injection, runtime overlay, context bundle, or durable setup truth?
 
 ## 19. Open Design Questions
 
@@ -572,7 +654,7 @@ Future legitimate questions:
 1. Should `SetupCapabilityPlan` become an explicit code object in A2, or first be consolidated behind existing `profiles.py` / adapter boundaries?
 2. What is the smallest A1 code slice that proves the state-machine boundary without premature file reorganization?
 3. Which existing policy classes become small transition rules, and which should be removed as patch artifacts?
-4. Which tool families remain candidate-only until Phase B?
+4. Which tool families remain candidate-only until a separate product/tool slice explicitly accepts them?
 5. Which provider-specific schema/tool-call details require OpenAI / Anthropic primary-doc confirmation before implementation?
 
 Reference adoption guard:

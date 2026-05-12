@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from rp.agent_runtime.profiles import build_setup_agent_tool_scope
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import StoryMode
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
@@ -24,6 +25,19 @@ def _provider(retrieval_session):
             runtime_state_service=SetupAgentRuntimeStateService(retrieval_session),
         ),
     )
+
+
+def test_world_background_provider_registration_does_not_make_tool_model_visible(
+    retrieval_session,
+):
+    _, provider = _provider(retrieval_session)
+
+    provider_tool_names = {tool.name for tool in provider.list_tools()}
+    setup_scope = set(build_setup_agent_tool_scope("world_background"))
+
+    assert "setup.world_background.write_entry" in provider_tool_names
+    assert "setup.world_background.write_entry" not in setup_scope
+    assert "setup.truth.write" in setup_scope
 
 
 @pytest.mark.asyncio

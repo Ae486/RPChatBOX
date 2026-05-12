@@ -18,3 +18,4 @@
 {"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/research/setup-agent-implementation-slices.md", "reason": "Check rollout slices preserve scope boundaries, forbidden scope, and check cadence."}
 {"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/research/setup-agent-question-queue.md", "reason": "Check open questions and recommended defaults match confirmed user decisions and do not block A1."}
 {"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/research/setup-agent-a1-loop-output-boundary-development-spec.md", "reason": "Check A1 implementation against explicit loop/output/repair/event/persistence scope, forbidden scope, and finish-reason taxonomy rules."}
+{"file": ".trellis/tasks/05-11-setup-agent-architecture-improve/research/setup-agent-architecture-completion-handoff.md", "reason": "Task-level check of A/B/C/D completion summary and next-task pre-reading handoff accuracy."}

@@ -78,7 +78,7 @@ Required cases:
 | prompt mentions unavailable tool | test fails |
 | schema exposes tool not in allowlist | test fails |
 | provider registers candidate tool | hidden from model and runtime unless plan exposes it |
-| `setup.world_background.*` candidate tools | remain hidden until Phase B accepts them |
+| `setup.world_background.*` candidate tools | remain hidden until a separate product/tool slice accepts them |
 | accepted shared/read tools | `setup.truth.write`, setup question/commit/read helpers, and `setup.read.draft_refs` remain visible where active specs require them |
 
 Likely test files:
@@ -160,7 +160,76 @@ Likely test files:
 - runtime state service tests
 - eval diagnostics tests
 
-## 8. Offline Eval Plan
+## 8. C Test Plan: Setup Lightweight Readback Boundary
+
+Target contracts:
+
+- `SetupLightweightReadback`
+- `SetupTruthIndexService`
+- setup-owned draft/committed truth readback
+- retrieval-core materialization boundary
+
+Required cases:
+
+| Case | Expected assertion |
+| --- | --- |
+| compact recovery needs draft detail | agent-visible read surface is `setup.read.draft_refs`, not Memory OS / retrieval-core |
+| committed truth search | `setup.truth_index.search` returns small lexical/path/filter candidate refs and previews |
+| committed truth exact read | `setup.truth_index.read_refs` returns bounded exact payload slices after refs are selected |
+| editable draft changed after commit | truth-index search/read ignores uncommitted draft changes |
+| accepted setup truth materializes to retrieval | retrieval seed sections preserve setup anchors without becoming setup draft readback |
+| retrieval materialization pending/fails | setup stage progression is not blocked and no SetupAgent retrieval tool becomes visible |
+
+Likely test files:
+
+- `backend/rp/tests/test_setup_tool_provider.py`
+- `backend/rp/tests/test_setup_truth_index_service.py`
+- `backend/rp/tests/test_minimal_retrieval_ingestion_service.py`
+- capability/tool-scope tests if a future readback tool becomes model-visible
+
+Current C conclusion:
+
+- No new backend test was required for this roadmap slice because the accepted surfaces already exist and active specs already require their behavior.
+- Future code changes in this area must prove they keep setup-owned exact readback separate from retrieval-core semantic/runtime retrieval.
+
+## 9. D Test Plan: SkillPack Governance
+
+Target contracts:
+
+- SkillPack prompt/context packaging
+- hard-unload on stage change
+- metadata-only `skill_pack_name`
+- CapabilityPlan / tool-scope decoupling
+
+Required cases:
+
+| Case | Expected assertion |
+| --- | --- |
+| registered stage pack | character_design prompt contains the pack marker and specialist preamble |
+| other stage / no stage | no pack marker, no preamble, and no pack residue |
+| pack active | `metadata.skill_pack_name` and trace root `skill_pack_name` match the runtime-owned value |
+| pack unloaded | `skill_pack_name` is `None`; no inference from stage id or assistant prose |
+| pack active with tool scope | `SetupCapabilityPlan`, `tool_scope`, runtime allowlist, and `setup.truth.write` injection are unchanged |
+| prompt guidance | tool guidance remains sourced from CapabilityPlan and filters inactive tool references |
+| context boundaries | `skill_pack_name` and `context_pipeline` remain metadata/debug surfaces and do not enter `context_bundle` or durable setup truth |
+
+Likely test files:
+
+- `backend/rp/tests/test_skill_packs_registry.py`
+- `backend/rp/tests/test_setup_agent_prompt_service.py`
+- `backend/rp/tests/test_setup_agent_tool_scope.py`
+- `backend/rp/tests/test_setup_agent_execution_service_v2.py`
+- `backend/rp/tests/test_eval_trace_capture.py`
+- `backend/rp/tests/test_eval_diagnostics.py`
+
+Current D conclusion:
+
+- Existing code/tests already satisfy the governance boundary; this slice only
+  records the architecture status and closes D.
+- Future SkillPack additions must be content-only unless a separate product/tool
+  slice explicitly changes CapabilityPlan or business contracts.
+
+## 10. Offline Eval Plan
 
 Use offline evals only after contract tests prove boundaries.
 
@@ -184,7 +253,7 @@ Expected reporting should separate:
 
 This separation is required so compatibility failures are not misreported as architecture success/failure.
 
-## 9. Optional Live Model Smoke
+## 11. Optional Live Model Smoke
 
 Live model smoke is opt-in and should not gate A0.
 
@@ -198,7 +267,7 @@ When used later:
 
 Do not use live model smoke as the only proof. Contract tests remain primary.
 
-## 10. Quality Gate Per Slice
+## 12. Quality Gate Per Slice
 
 Each implementation slice should report:
 

@@ -1,6 +1,7 @@
 """Runtime-private cross-turn cognitive state storage for SetupAgent."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -13,6 +14,8 @@ from rp.agent_runtime.contracts import (
     ChunkCandidate,
     DiscussionState,
     DraftTruthWrite,
+    SETUP_RUNTIME_STATE_DURABLE_FIELDS,
+    SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS,
     SetupContextCompactSummary,
     SetupCognitiveSourceBasis,
     SetupCognitiveStateSnapshot,
@@ -56,7 +59,7 @@ class SetupAgentRuntimeStateService:
             step_id=step_id,
         )
         now = _utcnow()
-        payload = snapshot.model_dump(mode="json", exclude_none=True)
+        payload = self.durable_snapshot_payload(snapshot)
         if record is None:
             record = SetupAgentRuntimeStateRecord(
                 runtime_state_id=uuid4().hex,
@@ -74,6 +77,36 @@ class SetupAgentRuntimeStateService:
         self._session.add(record)
         self._session.commit()
         return SetupCognitiveStateSnapshot.model_validate(record.snapshot_json)
+
+    @staticmethod
+    def durable_snapshot_payload(
+        snapshot: SetupCognitiveStateSnapshot,
+    ) -> dict[str, object]:
+        """Return the only JSON shape allowed for durable runtime governance."""
+
+        payload = snapshot.model_dump(mode="json", exclude_none=True)
+        SetupAgentRuntimeStateService.validate_durable_snapshot_payload(payload)
+        return payload
+
+    @staticmethod
+    def validate_durable_snapshot_payload(payload: Mapping[str, object]) -> None:
+        """Fail closed if turn-transient or unknown root fields reach persistence."""
+
+        keys = set(payload)
+        forbidden = sorted(
+            keys.intersection(SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS)
+        )
+        unknown = sorted(keys.difference(SETUP_RUNTIME_STATE_DURABLE_FIELDS))
+        if not forbidden and not unknown:
+            return
+        details: list[str] = []
+        if forbidden:
+            details.append("forbidden=" + ",".join(forbidden))
+        if unknown:
+            details.append("unknown=" + ",".join(unknown))
+        raise ValueError(
+            "setup_runtime_state_snapshot_forbidden_fields:" + ";".join(details)
+        )
 
     def replace_discussion_state(
         self,

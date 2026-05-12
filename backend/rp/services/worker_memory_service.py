@@ -226,6 +226,29 @@ class WorkerMemoryService:
         if request.refresh_source_ref is None:
             request.refresh_source_ref = f"worker_memory:{ctx.worker_id}:{ctx.phase}"
 
+    def authorize_operation(
+        self,
+        *,
+        ctx: WorkerMemoryContext,
+        operation_kind: str,
+        domains: list[str],
+        layers: list[str],
+    ) -> WorkerPermissionDecision:
+        """Expose the shared snapshot-derived permission guard to adapters.
+
+        Some runtime flows already have their own proposal/apply orchestration
+        but must still reuse the same worker permission contract. This method is
+        intentionally a thin wrapper over the internal guard so callers cannot
+        bypass snapshot, domain, layer, operation, or phase checks.
+        """
+
+        return self._authorize(
+            ctx=ctx,
+            operation_kind=operation_kind,
+            domains=domains,
+            layers=layers,
+        )
+
     def _authorize(
         self,
         *,

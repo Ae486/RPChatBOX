@@ -70,6 +70,17 @@
   - setup materialization must not semantically rewrite or summarize oversized text.
 - Legacy foundation entries without `sections` keep the existing entry-level fallback behavior.
 - Retrieval materialization status remains asynchronous and non-blocking for setup stage progression and commit warnings.
+- This contract is the bridge out of setup-owned lightweight readback:
+  - setup readback before and during prestory editing stays on
+    `setup.read.draft_refs`, `setup.truth_index.search`, and
+    `setup.truth_index.read_refs`;
+  - retrieval-core consumes accepted setup seed sections after commit and then
+    owns chunking, indexing, embeddings, hybrid/rerank, Recall/Archival search,
+    and active-story runtime retrieval policy;
+  - retrieval-core must not be used to recover current editable setup draft
+    truth;
+  - the agent must not write retrieval index rows or rewrite accepted setup JSON
+    into retrieval chunks directly.
 
 ## 4. Validation & Error Matrix
 

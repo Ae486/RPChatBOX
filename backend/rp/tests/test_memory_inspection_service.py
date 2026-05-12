@@ -64,17 +64,31 @@ class _FakeReadService:
 
 class _FakeBlockReadService:
     def __init__(self) -> None:
-        self.block = RpBlockView(
-            block_id="block.chapter.current",
-            label="chapter.current",
-            layer=Layer.CORE_STATE_AUTHORITATIVE,
-            domain=Domain.CHAPTER,
-            domain_path="chapter.current",
-            scope="story",
-            revision=3,
-            source="core_state_store",
-            data_json={"title": "Visible Core"},
-        )
+        self.blocks = [
+            RpBlockView(
+                block_id="block.chapter.current",
+                label="chapter.current",
+                layer=Layer.CORE_STATE_AUTHORITATIVE,
+                domain=Domain.CHAPTER,
+                domain_path="chapter.current",
+                scope="story",
+                revision=3,
+                source="core_state_store",
+                data_json={"title": "Visible Core"},
+            ),
+            RpBlockView(
+                block_id="projection.current_outline",
+                label="projection.current_outline",
+                layer=Layer.CORE_STATE_PROJECTION,
+                domain=Domain.CHAPTER,
+                domain_path="projection.current_outline",
+                scope="chapter",
+                revision=2,
+                source="core_state_store",
+                items_json=["Visible projection"],
+                metadata={"last_refresh_kind": "test_projection_refresh"},
+            ),
+        ]
 
     def list_blocks(
         self,
@@ -82,9 +96,9 @@ class _FakeBlockReadService:
         session_id: str,
         layer: Layer | None = None,
     ) -> list[RpBlockView]:
-        if layer is not None and layer != self.block.layer:
-            return []
-        return [self.block]
+        if layer is not None:
+            return [block for block in self.blocks if block.layer == layer]
+        return list(self.blocks)
 
 
 class _FakeBlockMutationService:
@@ -446,6 +460,28 @@ def test_inspection_filters_visible_layers_and_keeps_hidden_audit_explicit(
     assert core_block["entries"][0]["entry_id"] == "block.chapter.current:current"
     assert core_block["entries"][0]["base_revision"] == 3
     assert core_block["entries"][0]["conflict_state"] == "none"
+
+    projection_block = blocks_by_layer[Layer.CORE_STATE_PROJECTION.value]
+    assert projection_block["block_id"] == "projection.current_outline"
+    assert projection_block["permission_level"]["refresh_projection"] is True
+    assert projection_block["editable_fields"] == []
+    assert projection_block["allowed_actions"] == [
+        "inspect",
+        "request_projection_refresh",
+    ]
+    assert projection_block["entrypoints"] == {
+        "inspection": {
+            "method": "GET",
+            "path_template": (
+                "/api/rp/story-sessions/{session_id}/memory/inspection"
+            ),
+        }
+    }
+    assert projection_block["entries"][0]["entry_type"] == (
+        "core_state_projection_slot"
+    )
+    assert projection_block["entries"][0]["base_revision"] == 2
+    assert projection_block["entries"][0]["editable_fields"] == []
 
     workspace_block = blocks_by_layer[Layer.RUNTIME_WORKSPACE.value]
     assert workspace_block["block_id"] == (

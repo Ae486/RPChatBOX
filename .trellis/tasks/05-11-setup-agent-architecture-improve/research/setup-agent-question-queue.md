@@ -27,6 +27,7 @@ The user has confirmed the key口径:
 | Tool failure repair | Recoverable structured errors become observations and bounded retry before user-visible terminal failure | user example + current tool repair specs |
 | Tool exposure | CapabilityPlan owns exposure; ToolProvider owns execution | grill decisions + Claude Code active tool filtering |
 | Prompt guidance | Derived from capability package; not permission source | grill decisions |
+| SkillPack governance | Prompt/context packaging only; stage-keyed activation and metadata-only observability | D governance closeout + active SkillPack spec |
 | Output leakage | OutputInspector classifies before tool/runtime/transcript | HLD + Claude Code output separation |
 | Event transcript | EventSink owns public/private visibility | HLD + typed SSE project contract |
 | LangGraph | Keep as substrate, not architecture vocabulary | PRD + audit |
@@ -93,17 +94,21 @@ Trigger:
 Recommended default:
 
 ```text
-Not in A1/A2 unless a separate product decision accepts stage-local CRUD migration. Keep provider-side candidate code hidden by CapabilityPlan snapshots.
+Do not expose it in the B tool-protocol slice by default. Keep provider-side
+candidate code hidden by CapabilityPlan snapshots until a separate
+product/tool feature slice explicitly accepts a stage-local CRUD family.
 ```
 
 Source:
 
 - current architecture audit candidate register
 - tool-scope tests
+- pi-mono `AgentContext.tools`: current tools are selected into context rather than hardwired into the loop
+- Claude Code tool pool filtering / fail-closed defaults
 
 Trigger:
 
-- A2 capability snapshots encounter provider-registered world_background tools.
+- a future product slice explicitly wants `setup.world_background.*` or another stage-local CRUD family to become model-visible.
 
 ### Q5. Which provider docs must be checked?
 
@@ -140,6 +145,31 @@ Trigger:
 
 - A1/A2 extraction starts creating package-level modules outside setup-specific runtime.
 
+### Q7. Should SetupAgent call retrieval-core / Memory OS to recover setup draft truth?
+
+Recommended default:
+
+```text
+No. SetupAgent uses setup-owned readback for prestory editing:
+setup.read.draft_refs for current editable draft refs, and
+setup.truth_index.search/read_refs for accepted committed setup truth.
+Retrieval-core starts after accepted setup truth is materialized into seed
+sections and then owns chunking, embeddings, hybrid/rerank, Recall/Archival
+search, and active-story runtime retrieval.
+```
+
+Source:
+
+- active `rp-setup-agent-stage-local-context-governance` spec
+- active `rp-setup-truth-index-foundation` spec
+- active `rp-setup-retrieval-seed-materialization` spec
+- pi-mono selected context/tools boundary
+- Claude Code context engineering and explicit readback/tool-result separation
+
+Trigger:
+
+- a future product slice wants semantic search during setup editing, wants a new model-visible setup retrieval tool, or wants retrieval readiness to affect setup commit/stage progression.
+
 ## 4. Non-Questions
 
 Do not ask these again unless new evidence contradicts the current docs:
@@ -151,6 +181,14 @@ Do not ask these again unless new evidence contradicts the current docs:
 - Whether `SetupWorkspace` remains business truth: yes.
 - Whether runtime trace/cognition becomes product truth by default: no.
 - Whether A1 should add subagents: no.
+- Whether C adds RAG/embedding to SetupAgent by default: no.
+- Whether Memory OS / retrieval-core should recover current editable setup draft truth by default: no.
+- Whether SkillPack can control tools, business state, runtime overlay,
+  `context_bundle`, or durable runtime state: no. SkillPack is stable
+  prompt/context packaging plus metadata-only observability.
+- Whether SkillPack activation needs another `$grill-me` question in D: no.
+  The current docs/code/pi-mono/Claude Code rationale converge on deterministic
+  stage-keyed activation and hard-unload.
 
 ## 5. Question Handling Rule
 

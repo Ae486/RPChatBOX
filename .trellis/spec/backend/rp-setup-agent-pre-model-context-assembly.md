@@ -54,6 +54,23 @@
   - `summary_action: Literal["none", "reused_existing", "updated_existing", "rebuilt"]`
   - `summary_line_count: int`
   - `fallback_reason: str | None`
+- `SetupPromptAssemblySnapshot`
+  - `stable_system_prompt_inputs: list[str]`
+  - `stable_system_prompt_excluded_inputs: list[str]`
+  - `capability_guidance_source: str`
+  - `skill_pack_boundary: str`
+  - `active_skill_pack_name: str | None`
+- `SetupContextPipelineSnapshot`
+  - `pipeline_name: str`
+  - `layers: list[str]`
+  - `final_request_message_order: list[str]`
+  - `governed_history_source: str`
+  - `context_packet_excluded_fields: list[str]`
+  - `runtime_overlay_inputs: list[str]`
+  - `metadata_only_surfaces: list[str]`
+  - `durable_state_excluded_fields: list[str]`
+  - `prompt_assembly: SetupPromptAssemblySnapshot`
+  - `context_profile: Literal["standard", "compact"] | None`
 - `SetupContextGovernorService.govern_history(...) -> tuple[list[SetupAgentDialogueMessage], SetupContextCompactSummary | None, dict[str, int]]`
   - `governance_metadata` required keys:
     - `raw_history_limit: int`
@@ -102,7 +119,12 @@
     - `tool_outcomes`
     - `compact_summary`
     - `governance_metadata`
+- `RpAgentTurnInput.metadata`
+  - setup debug/eval/result keys:
     - `context_report`
+    - `capability_plan`
+    - `skill_pack_name`
+    - `context_pipeline`
 - `_prepare_input(...) -> RpAgentRunState`
   - normalizes message order before any runtime overlay insertion
 - `_build_request_messages(...) -> list[ChatMessage]`
@@ -125,7 +147,8 @@
   - performs pressure assessment, raw-window retention, tool-outcome retention, deterministic or compact-prompt summary, and draft-ref recovery hint preparation
   - returns governed raw history, `compact_summary`, and `governance_metadata`
 - Layer 3: `SetupRuntimeAdapter.build_turn_input(...)`
-  - joins context packet, stage-local governance artifacts, context-decision report, step readiness facts, proposal status, and runtime-private cognition into `RpAgentTurnInput.context_bundle`
+  - joins context packet, stage-local governance artifacts, step readiness facts, proposal status, and runtime-private cognition into `RpAgentTurnInput.context_bundle`
+  - writes metadata-only debug/eval surfaces such as `context_report`, `capability_plan`, `skill_pack_name`, and `context_pipeline` into `RpAgentTurnInput.metadata`
 - Layer 4: runtime request assembly inside `RpAgentRuntimeExecutor`
   - `_prepare_input(...)` normalizes the base message list
   - `_build_request_messages(...)` inserts runtime overlay after the stable system prompt
@@ -174,8 +197,11 @@
   - stage objective
   - durable setup rules
   - serialized `context_packet` JSON
+  - `SetupCapabilityPlan.prompt_guidance_fragments`
+  - SkillPack prompt layer text
 - The system prompt must not embed:
   - governed raw history
+  - `context_report`
   - `compact_summary`
   - retained `tool_outcomes`
   - `loop_trace`
@@ -238,13 +264,17 @@
   - whether the strategy was deterministic or compact-prompt, and why fallback happened if any
   - how many retained tool outcomes and prior-stage handoffs participated in the turn
 - `context_report` may be exposed in:
-  - `RpAgentTurnInput.context_bundle`
+  - `RpAgentTurnInput.metadata`
   - runtime structured result payload
+  - runtime observation metadata
   - debug/eval/trace artifacts
 - `context_report` must not be injected into:
+  - `RpAgentTurnInput.context_bundle`
   - the stable system prompt
   - the runtime overlay prompt message
   - durable setup cognition snapshots
+- `context_pipeline` is also metadata/debug only. It may name `context_report` as a metadata-only surface, but must not embed the full `context_report` object inside the pipeline snapshot.
+- `SetupPromptAssemblySnapshot` exists to make prompt assembly auditable without turning prompt assembly inputs into another runtime truth layer.
 
 #### 3.9 Durable Versus Transient Boundaries Must Stay Clean
 
@@ -257,6 +287,7 @@
   - runtime overlay
   - `governance_metadata`
   - `context_report`
+  - `context_pipeline`
   - model request message ordering
   - latest same-turn tool result messages
 - This slice must not widen persistence by writing request-assembly artifacts into durable setup cognition records.
@@ -273,6 +304,8 @@
 - runtime overlay payload is empty -> `_build_request_messages(...)` must not insert a second system message
 - retained tool outcomes exist from previous turns -> they may appear in runtime overlay, but not inside `SetupContextPacket`
 - latest same-turn tool batch exists -> raw tool result messages may be visible to the next same-turn round, but they must not be copied into persistent stage-local snapshot fields by this slice
+- `context_report` exists for a turn -> it is available through `turn_input.metadata`, runtime observation metadata, and runtime structured result payload, but not through `turn_input.context_bundle`
+- `context_pipeline` exists for a turn -> it records layer order, final message order, prompt-assembly inputs/exclusions, and metadata-only surfaces without embedding `context_report`
 - compact summary is present and equals the existing dropped-prefix fingerprint -> `context_report.summary_action = "reused_existing"`
 - compact summary is present and extends an existing valid prefix summary -> `context_report.summary_action = "updated_existing"`
 - compact summary is present but cannot reuse an existing prefix -> `context_report.summary_action = "rebuilt"`
@@ -298,17 +331,21 @@
   - assert observed usage pressure is scoped by `workspace_id + current_step` and does not cross-contaminate unrelated workspaces or setup steps
   - assert runtime-v2 turn input uses governed history instead of raw full history when compaction is required
   - assert `context_packet.context_profile` and `governance_metadata.raw_history_limit` stay aligned
-  - assert `context_report` explains profile reasons and summary action without entering prompt-visible runtime overlay
+  - assert `context_report` explains profile reasons and summary action through metadata without entering `context_bundle` or prompt-visible runtime overlay
+  - assert `context_pipeline` metadata records final request message order, prompt assembly boundaries, and metadata-only surfaces
 - `backend/rp/tests/test_setup_context_governor.py`
   - assert `governance_metadata` keys stay stable and deterministic
   - assert compacted history count reflects dropped raw history only
+- `backend/rp/tests/test_setup_agent_prompt_service.py`
+  - assert stable prompt assembly can consume `SetupCapabilityPlan` guidance and SkillPack prompt layer text
+  - assert `context_report`, governed history, working digest, retained tool outcomes, compact summary, loop trace, continue reason, and raw tool retry process remain excluded from the stable prompt
 - `backend/rp/tests/test_setup_agent_runtime_executor.py`
   - assert final request message order is `system prompt -> runtime overlay -> governed history -> current user`
   - assert runtime overlay contains thin turn-local control state and does not duplicate full `context_packet`
   - assert historical tool retry process is not replayed into later-round prompt messages
-  - assert runtime structured payload exposes `context_report`
+  - assert runtime structured payload exposes `context_report` and `context_pipeline`
 - `backend/rp/tests/test_setup_agent_runtime_state_service.py`
-  - assert request-assembly artifacts such as `context_report` are not persisted as durable stage-local snapshot truth
+  - assert request-assembly artifacts such as `context_report` and `context_pipeline` are not persisted as durable stage-local snapshot truth
 
 ### 7. Wrong vs Correct
 
@@ -319,6 +356,7 @@
 - Duplicate the full context packet in both the stable system prompt and the runtime overlay.
 - Keep historical tool retry/process traces in prompt-visible context because they happened "recently".
 - Treat `context_report` as another prompt-injection surface instead of a debug/eval/result surface.
+- Put `context_report` back into `RpAgentTurnInput.context_bundle` because it is convenient to inspect there.
 - Let pre-model context assembly quietly widen durable setup persistence.
 - Let compact prompt become another tool-using agent loop inside pre-model assembly.
 - Treat response-side token usage as enough to protect the next pre-model request without any pre-call estimate.
@@ -330,6 +368,7 @@
 - Keep `SetupContextPacket` truth-oriented and keep runtime overlay turn-oriented.
 - Keep only the latest same-turn raw tool observations plus bounded retained tool outcomes.
 - Keep `governance_metadata` as raw counts and keep the richer context-decision explanation in transient `context_report`.
+- Keep `context_report` and `context_pipeline` in metadata/debug/eval/result surfaces, not context bundle, stable prompt, runtime overlay, or durable runtime state.
 - Keep request-assembly artifacts transient and outside durable setup cognition snapshots.
 - Scope observed previous usage to the same workspace and setup step before it can influence context-profile selection.
 - Keep compact prompt as a no-tools JSON summarizer inside stage-local context engineering, with deterministic fallback.

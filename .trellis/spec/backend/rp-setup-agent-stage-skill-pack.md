@@ -107,7 +107,7 @@
 - The runtime executor must copy `turn_input.metadata["skill_pack_name"]` into `RpAgentTurnResult.structured_payload["skill_pack_name"]` (default `None`). This is the single propagation hop downstream of the adapter; no other site may compute or override it.
 - `SetupAgentExecutionService._run_turn_v2` and `_run_turn_stream_v2` must call `observation.update(metadata=self._runtime_v2_observation_metadata(prepared))` once per turn, after the prepared turn input is built and before runtime execution. The shared `_runtime_v2_observation_metadata(prepared)` helper is the single-source shaper for runtime-v2 observation metadata; both paths must reuse it so future SkillPack-related metadata extensions stay drift-free.
 - `eval/trace_capture.build_setup_trace(...)` must include `skill_pack_name` in the root setup span `attributes`, sourced from `runtime_result.structured_payload["skill_pack_name"]` via the shared `_structured_payload_value` helper. Eval must not infer the value from the request, the prompt, or the assistant text.
-- This propagation surface is observability only. Eval assertions that pin SkillPack identity should consume this field once eval `EvalExpected` exposes a corresponding optional field (deferred to the eval-modernization slice; see `rp-eval-setup-stage-skillpack-assertion-contract.md` §3.3).
+- This propagation surface is observability only. Eval assertions that pin SkillPack identity consume this field through `EvalExpected.expected_skill_pack_name` and `rp-eval-expected-extensions.md`; they must not infer pack activation from prompt text, assistant text, or stage id alone.
 
 #### 3.8 Recommended Content Skeleton Stays Prose, Not Schema
 

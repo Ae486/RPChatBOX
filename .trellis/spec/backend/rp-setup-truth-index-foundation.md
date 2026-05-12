@@ -84,6 +84,16 @@
   - `payload`
   - `truncated`
 - The index is rebuildable from accepted snapshots; no persisted table is required for this MVP slice.
+- In the SetupAgent architecture roadmap, this service is part of setup-owned
+  lightweight readback, not retrieval-core:
+  - it supports prestory editing by locating accepted setup truth refs exactly;
+  - it complements `setup.read.draft_refs`, which reads current editable draft
+    refs for compact recovery;
+  - it does not call Memory OS, Recall, embeddings, hybrid search, reranking, or
+    active-story retrieval policy;
+  - it may provide stable anchors that retrieval materialization can later point
+    back to, but retrieval-core output must not become the way SetupAgent
+    recovers editable draft truth.
 
 ## 4. Validation & Error Matrix
 

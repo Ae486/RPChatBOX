@@ -149,6 +149,58 @@ Rules:
   as truth fallback. Exact `runtime_turn_id` / `runtime_branch_head_id` remains
   the ownership boundary for runtime-produced story artifacts.
 
+V1 also owns Core State as-of closure. Branch filtering over materials is not
+enough because the same Core object may have different values at different
+turns. Runtime Core reads must resolve the selected branch/turn's Core State
+manifest and object revisions before reading payloads.
+
+Minimum contract:
+
+```python
+class CoreStateSnapshotManifest(BaseModel):
+    snapshot_id: str
+    parent_snapshot_id: str | None = None
+    story_id: str
+    session_id: str
+    branch_head_id: str
+    turn_id: str
+    runtime_profile_snapshot_id: str
+    effective_revision_map: dict[str, str]
+    changed_ref_ids: list[str] = Field(default_factory=list)
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class CoreStateAsOfResolver:
+    def resolve_manifest(
+        self,
+        *,
+        scope: RuntimeBranchMemoryReadScope,
+        selected_turn_id: str | None = None,
+    ) -> CoreStateSnapshotManifest: ...
+
+    def resolve_object_revision(
+        self,
+        *,
+        manifest: CoreStateSnapshotManifest,
+        object_ref: ObjectRef,
+    ) -> CoreStateAuthoritativeRevisionRecord: ...
+```
+
+Rules:
+
+- turn `0` / activation creates the initial Core State manifest;
+- turns with no Core mutation reuse the previous visible manifest;
+- a Core-mutating turn creates complete object revisions for changed objects and
+  a new manifest that inherits unchanged object revision pointers;
+- branch creation from turn `N` inherits the manifest visible at turn `N`;
+- first Core mutation on a branch creates branch-scoped object revisions and a
+  new branch-local manifest;
+- current/latest Core object rows are cache/compatibility views only for
+  runtime-owned reads and must not feed writer context as truth;
+- old sessions without turn-bound Core history may receive a compatibility
+  snapshot, but historical as-of reads before the migration anchor must be
+  marked unavailable instead of fabricated.
+
 ### V2. Memory Inspection/Edit Backend Product Contract
 
 Harden the backend product surface so the frontend can call one coherent
@@ -191,24 +243,96 @@ envelopes and action entrypoints.
 
 ### V4. Writer Brainstorm Apply
 
-Add the product path that turns writer brainstorm discussion into governed
-memory changes.
+Add the product path that turns writer brainstorm discussion into governed Core
+State change candidates.
+
+Writer brainstorm is not a memory worker and not a memory editor. It is the
+writer's discussion persona / mode: it sees the writer-visible context plus the
+user's brainstorm prompt, discusses with the user, and later summarizes the
+discussion into user-editable intent items. It must not know Memory OS layer
+details or Core field paths.
 
 Minimum flow:
 
 1. user starts brainstorm from the story runtime discussion area;
-2. writer/brainstorm worker returns structured summary items, not raw memory
-   mutations;
-3. user can edit, reject, or confirm each item;
-4. confirmed items are planned into memory operations;
-5. Core-affecting items use `brainstorm_summary_apply` through the shared Core
-   mutation kernel;
-6. Recall/Archival-affecting items route through lifecycle/evolution services;
-7. result receipts are visible in Memory inspection and runtime inspect.
+2. backend creates a branch/turn-scoped `BrainstormSession` with Runtime
+   Workspace semantics;
+3. writer brainstorm mode uses the writer packet plus the user's brainstorm
+   prompt and discussion transcript;
+4. ordinary discussion does not create memory items or write memory;
+5. if the user decides nothing should change, the session closes as no-op and
+   the user returns to writing;
+6. if the user explicitly clicks/runs "summarize as change items" or equivalent,
+   a dedicated `brainstorm_summarize` prompt reads this brainstorm session and
+   outputs structured `BrainstormItem[]`;
+7. user can edit, reject, or confirm each item;
+8. confirmed items are sent to the scheduler / dispatcher;
+9. the scheduler classifies Core domain / worker ownership for each confirmed
+   item;
+10. the corresponding Core worker reads branch-aware as-of Core State and base
+    revision, then produces minimal field-level executable changes;
+11. backend fills deterministic old values, performs base revision / conflict
+    checks, and applies worker permission policy;
+12. Core-affecting worker outputs use `brainstorm_summary_apply` through the
+    shared Core mutation kernel;
+13. result receipts are visible in Memory inspection and runtime inspect.
 
-Brainstorm remains separate from revision comments. Revision comments guide
-rewrite of prose; brainstorm can change story memory/foundation only after
-user confirmation and governed apply.
+Brainstorm remains separate from revision comments and Story Evolution.
+Revision comments guide rewrite of prose. Writer brainstorm is a Core State
+discussion-to-intent path. Recall is historical memory and is not normally
+edited by brainstorm. Archival changes go through Story Evolution / version /
+reindex governance, not through V4 brainstorm.
+
+Brainstorm summary items must stay memory-layer agnostic. They may preserve
+user intent, low-cost evidence handles, and uncertainty, but they must not claim
+`target_layer`, `target_domain`, `operation_kind`, `intent_labels`, or a
+governed operation. Those fields are owned by the scheduler/dispatcher and
+memory workers.
+
+Brainstorm summary creation is a context-engineering operation, not ordinary
+writer chat and not memory mutation. It should use the shared Context
+Engineering / Compact-Summary contract described in
+`context-engineering-compact-summary-module-spec.md`: brainstorm sees the
+writer-visible context plus the user's brainstorm prompt, produces typed
+summary items, then waits for user edit/reject/confirm before scheduler
+dispatch.
+
+The first version uses explicit summarization only. Brainstorm must not decide
+by itself when to summarize, must not incrementally write temporary items after
+each chat turn, and must not silently dispatch changes. This avoids extra LLM
+judgment calls, premature summaries, and hidden token/latency cost.
+
+Minimum persistence semantics:
+
+- `BrainstormSession` represents one discussion/summarization task and has
+  Runtime Workspace material semantics: branch/turn scoped, temporary,
+  traceable, cleanable, and not truth.
+- `BrainstormItem` is the per-item unit users can edit / reject / confirm /
+  dispatch.
+- `source_item_id` in downstream worker output points to the confirmed
+  `BrainstormItem`, not directly to an arbitrary discussion message.
+- full conversation `source_refs` are optional and may be added after
+  discussion message ids / transcript anchors are stable.
+
+Minimum context scope:
+
+- default brainstorm input uses writer-visible context, branch-aware Core
+  projection, current discussion thread, user brainstorm prompt, and a small
+  recent prose / turn summary if needed;
+- it does not proactively pull Recall, Archival, or retrieval results;
+- retrieval/search is only allowed when the user explicitly asks to check prior
+  text/material before discussing the change.
+
+Resource principle:
+
+- brainstorm summarizes intent only;
+- scheduler classifies only confirmed items;
+- V4 workers process only confirmed Core-oriented items;
+- non-Core wishes are returned as review/redirect material, such as Story
+  Evolution for Archival changes, instead of being dispatched as Recall or
+  Archival brainstorm edits;
+- worker result fields stay minimal and executable;
+- deterministic backend code fills fields that do not require LLM judgment.
 
 ### V5. Post-write Memory Maintenance Minimum Closure
 
@@ -260,6 +384,11 @@ uses `BranchHead + Turn + MemoryChangeEvent + revision/provenance` as the
 application-level commit model, with branch-scoped writes after divergence and
 lineage reads for shared ancestors.
 
+For Core State, the copy-on-write unit is a turn-bound snapshot manifest plus
+complete object revisions for changed objects. The manifest is the branch/turn
+read anchor; object revisions are payload truth; MemoryChangeEvent/apply receipt
+records are audit, diff, dirty-target, and projection-refresh evidence.
+
 ### Layer-specific edit semantics
 
 Readable + editable does not mean one generic CRUD API:
@@ -277,11 +406,21 @@ Brainstorm output is structured discussion summary. It becomes memory change
 only after user confirmation and governed apply. This prevents a discussion
 feature from becoming a hidden truth-write shortcut.
 
+### Brainstorm does not classify Memory layers
+
+The discussion worker is not a Memory OS router. It should not know or decide
+whether an item belongs to Core, Recall, or Archival. Its job is to summarize
+what the user wants to change in plain structured items. The scheduler /
+dispatcher and memory-domain workers own classification, routing, and governed
+operation planning.
+
 ## 5. Validation Matrix
 
 | Condition | Expected behavior |
 |---|---|
 | Branch created from turn N | New branch reads pre-fork memory and excludes source-branch post-N memory |
+| Core changes at turn 3 while turn 1/2 had no Core change | Turn 1/2 reuse the previous Core manifest; turn 3 creates a new manifest |
+| Branch created from turn 2 after Core changed at turn 3 | New branch reads the turn 2 Core manifest, not the latest current Core row |
 | Writer continues on new branch | Writer packet/read manifest uses active branch memory scope, not latest session projection |
 | Rollback hides later turn | Workspace, Recall, retrieval hits, and derived projections after cutoff are hidden from default runtime reads |
 | User inspects Memory OS | Canonical blocks/entries include layer, domain, revision, visibility, allowed actions, and entrypoints |
@@ -292,6 +431,38 @@ feature from becoming a hidden truth-write shortcut.
 | Post-write maintenance is incomplete | Next writer turn either sees completed memory materialization or an explicit omitted/deferred reason |
 
 ## 6. Wrong vs Correct
+
+### Wrong
+
+```python
+data = core_state_store.get_authoritative_object(
+    session_id=identity.session_id,
+    layer=ref.layer.value,
+    scope=ref.scope,
+    object_id=ref.object_id,
+).data_json
+```
+
+This reads latest session cache and leaks future Core values into branches
+created from earlier turns.
+
+### Correct
+
+```python
+scope = branch_memory_read_resolver.build_scope(
+    identity=identity,
+    selected_turn_id=identity.turn_id,
+)
+manifest = core_state_as_of_resolver.resolve_manifest(scope=scope)
+revision = core_state_as_of_resolver.resolve_object_revision(
+    manifest=manifest,
+    object_ref=ref,
+)
+data = revision.data_json
+```
+
+Runtime-owned Core reads use selected branch/turn manifest resolution. Latest
+current rows remain cache or explicit compatibility views.
 
 ### Wrong
 
@@ -364,9 +535,9 @@ truth mutation path.
 No blocker grill is known for draft-v1.
 
 The only known deferred grill is before V4 implementation: whether
-`BrainstormItem` should start with a small closed enum taxonomy or an
-extensible label/action taxonomy. This does not block V0/V1/V2, but it affects
-the stability of the brainstorm apply DTO.
+the scheduler/dispatcher output taxonomy should start with a small closed enum
+or an extensible label/action taxonomy. `BrainstormItem` itself is confirmed to
+remain memory-layer agnostic and does not need this grill.
 
 If implementation finds that task/spec docs do not decide a product semantic,
 the escalation order is:

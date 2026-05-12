@@ -48,6 +48,7 @@ def test_material_kind_and_lifecycle_enums_match_spec():
         "rule_card",
         "rule_state_card",
         "review_overlay",
+        "brainstorm_session",
         "worker_candidate",
         "worker_evidence_bundle",
         "post_write_trace",

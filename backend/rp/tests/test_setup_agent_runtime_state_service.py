@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from models.rp_setup_store import SetupPendingUserEditDeltaRecord
 
 from rp.agent_runtime.contracts import (
     ChunkCandidate,
     DiscussionState,
     DraftTruthWrite,
+    SETUP_RUNTIME_STATE_DURABLE_FIELDS,
+    SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS,
     SetupContextCompactSummary,
     SetupToolOutcome,
     SetupWorkingDigest,
@@ -250,9 +254,80 @@ def test_runtime_state_service_turn_governance_snapshot_excludes_loop_trace_fiel
     )
 
     assert raw_record is not None
-    assert "loop_trace" not in raw_record.snapshot_json
-    assert "continue_reason" not in raw_record.snapshot_json
-    assert "context_report" not in raw_record.snapshot_json
+    required_transient_fields = {
+        "loop_trace",
+        "continue_reason",
+        "context_report",
+        "output_inspection",
+        "event_sink",
+        "model_gateway_diagnostics",
+        "raw_provider_delta",
+        "raw_provider_deltas",
+        "private_events",
+        "private_diagnostics",
+        "debug",
+    }
+    assert required_transient_fields.issubset(
+        set(SETUP_RUNTIME_STATE_TRANSIENT_EXCLUDED_FIELDS)
+    )
+    assert set(raw_record.snapshot_json).issubset(SETUP_RUNTIME_STATE_DURABLE_FIELDS)
+    for field in required_transient_fields:
+        assert field not in raw_record.snapshot_json
+    assert "working_digest" in raw_record.snapshot_json
+
+
+def test_runtime_state_service_rejects_accidental_structured_payload_merge(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+
+    workspace = workspace_service.create_workspace(
+        story_id="story-runtime-governance-3",
+        mode=StoryMode.LONGFORM,
+    )
+    context_packet = _build_context_packet(
+        context_builder=context_builder,
+        workspace_id=workspace.workspace_id,
+        step_id=SetupStepId.STORY_CONFIG,
+    )
+
+    snapshot = runtime_state_service.persist_turn_governance(
+        workspace=workspace,
+        context_packet=context_packet,
+        step_id=SetupStepId.STORY_CONFIG,
+        working_digest=SetupWorkingDigest(current_goal="Clarify story config"),
+        tool_outcomes=[],
+        compact_summary=None,
+    )
+
+    assert snapshot is not None
+    payload = runtime_state_service.durable_snapshot_payload(snapshot)
+    accidental_result_payload = {
+        **payload,
+        "loop_trace": [{"decision": {"continue_reason": "tool_result_follow_up"}}],
+        "continue_reason": "tool_result_follow_up",
+        "context_report": {"context_profile": "compact"},
+        "output_inspection": {"classification": "normal_text"},
+        "event_sink": {"public_event_types": ["text_delta"]},
+        "model_gateway_diagnostics": {"failure_layer": "model_gateway"},
+        "raw_provider_deltas": [{"token": "private"}],
+        "structured_payload": {"loop_trace": []},
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="setup_runtime_state_snapshot_forbidden_fields",
+    ) as exc_info:
+        runtime_state_service.validate_durable_snapshot_payload(
+            accidental_result_payload
+        )
+
+    message = str(exc_info.value)
+    assert "loop_trace" in message
+    assert "model_gateway_diagnostics" in message
+    assert "structured_payload" in message
 
 
 def test_runtime_state_service_invalidates_snapshot_after_user_edit_delta(
@@ -330,6 +405,7 @@ def test_runtime_state_service_invalidates_snapshot_after_user_edit_delta(
     retrieval_session.commit()
 
     refreshed_workspace = workspace_service.get_workspace(workspace.workspace_id)
+    workspace_version_before_reconcile = refreshed_workspace.version
     refreshed_context = _build_context_packet(
         context_builder=context_builder,
         workspace_id=workspace.workspace_id,
@@ -351,6 +427,8 @@ def test_runtime_state_service_invalidates_snapshot_after_user_edit_delta(
         "Latest draft changed after user edits."
         in reconciled.active_truth_write.remaining_open_issues
     )
+    workspace_after_reconcile = workspace_service.get_workspace(workspace.workspace_id)
+    assert workspace_after_reconcile.version == workspace_version_before_reconcile
 
 
 def test_runtime_state_service_keeps_unaffected_truth_candidates_stable(

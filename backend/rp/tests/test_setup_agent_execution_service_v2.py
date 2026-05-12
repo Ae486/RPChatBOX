@@ -8,11 +8,14 @@ from typing import Any
 import pytest
 
 from models.chat import ProviderConfig
-from rp.agent_runtime.profiles import build_setup_agent_tool_scope
 from rp.agent_runtime.contracts import (
     RpAgentTurnResult,
     RuntimeToolResult,
     SetupWorkingDigest,
+)
+from rp.agent_runtime.profiles import (
+    build_setup_agent_capability_plan,
+    build_setup_agent_tool_scope,
 )
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor
 from rp.agent_runtime.tools import RuntimeToolExecutor
@@ -428,29 +431,41 @@ async def test_setup_agent_execution_service_v2_builds_governed_history_for_comp
         turn_input.context_bundle["governance_metadata"]["compacted_history_count"] == 6
     )
     assert turn_input.context_bundle["compact_summary"] is not None
-    assert turn_input.context_bundle["context_report"] is not None
-    assert turn_input.context_bundle["context_report"]["context_profile"] == "compact"
+    assert "context_report" not in turn_input.context_bundle
+    assert turn_input.metadata["context_report"] is not None
+    assert turn_input.metadata["context_report"]["context_profile"] == "compact"
     assert (
         "history_count_threshold"
-        in turn_input.context_bundle["context_report"]["profile_reasons"]
+        in turn_input.metadata["context_report"]["profile_reasons"]
     )
     assert (
         "user_edit_threshold"
-        in turn_input.context_bundle["context_report"]["profile_reasons"]
+        in turn_input.metadata["context_report"]["profile_reasons"]
     )
+    assert turn_input.metadata["context_report"]["estimated_input_tokens"] is not None
+    assert turn_input.metadata["context_report"].get("previous_prompt_tokens") is None
     assert (
-        turn_input.context_bundle["context_report"]["estimated_input_tokens"]
-        is not None
-    )
-    assert (
-        turn_input.context_bundle["context_report"].get("previous_prompt_tokens")
-        is None
-    )
-    assert (
-        turn_input.context_bundle["context_report"]["summary_strategy"]
+        turn_input.metadata["context_report"]["summary_strategy"]
         == "compact_prompt_summary"
     )
-    assert turn_input.context_bundle["context_report"]["summary_action"] == "rebuilt"
+    assert turn_input.metadata["context_report"]["summary_action"] == "rebuilt"
+    assert turn_input.metadata["context_pipeline"]["final_request_message_order"] == [
+        "stable_system_prompt",
+        "runtime_overlay_system_message",
+        "governed_history",
+        "current_user",
+    ]
+    assert turn_input.metadata["context_pipeline"]["context_profile"] == "compact"
+    assert (
+        "context_report"
+        in turn_input.metadata["context_pipeline"]["metadata_only_surfaces"]
+    )
+    assert (
+        turn_input.metadata["context_pipeline"]["prompt_assembly"][
+            "capability_guidance_source"
+        ]
+        == "SetupCapabilityPlan.prompt_guidance_fragments"
+    )
 
 
 @pytest.mark.asyncio
@@ -645,7 +660,7 @@ async def test_setup_agent_execution_service_v2_surfaces_previous_usage_pressure
         ),
     )
 
-    report = turn_input.context_bundle["context_report"]
+    report = turn_input.metadata["context_report"]
     assert context_packet.context_profile == "compact"
     assert len(llm.requests) == 0
     assert "observed_usage_threshold" in report["profile_reasons"]
@@ -715,7 +730,7 @@ async def test_setup_agent_execution_service_v2_does_not_share_observed_usage_ac
         ),
     )
 
-    report = turn_input.context_bundle["context_report"]
+    report = turn_input.metadata["context_report"]
     assert context_packet.context_profile == "standard"
     assert "observed_usage_threshold" not in report["profile_reasons"]
     assert report.get("previous_prompt_tokens") is None
@@ -811,6 +826,14 @@ async def test_setup_agent_execution_service_v2_uses_current_stage_metadata(
     assert turn_input.context_bundle["current_step"] == "foundation"
     assert turn_input.context_bundle["current_stage"] == "world_background"
     assert turn_input.context_bundle["stage_state"]["stage_id"] == "world_background"
+    capability_plan = turn_input.metadata["capability_plan"]
+    assert capability_plan["stage_id"] == "world_background"
+    assert capability_plan["step_id"] == "foundation"
+    assert capability_plan["runtime_allowlist"] == turn_input.tool_scope
+    assert "capability_plan" not in turn_input.context_bundle
+    assert "skill_pack_name" not in turn_input.context_bundle
+    assert "context_pipeline" not in turn_input.context_bundle
+    assert "Active capability guidance:" in turn_input.context_bundle["system_prompt"]
     assert "setup.world_background.write_entry" not in turn_input.tool_scope
     assert "setup.truth.write" in turn_input.tool_scope
     assert "setup.question.raise" in turn_input.tool_scope
@@ -877,6 +900,17 @@ async def test_setup_agent_execution_service_v2_uses_target_stage_override(
     assert turn_input.context_bundle["current_step"] == "foundation"
     assert turn_input.context_bundle["current_stage"] == "character_design"
     assert turn_input.context_bundle["stage_state"]["stage_id"] == "character_design"
+    assert turn_input.metadata["skill_pack_name"] == "character-design.v1"
+    assert (
+        turn_input.metadata["context_pipeline"]["prompt_assembly"][
+            "active_skill_pack_name"
+        ]
+        == "character-design.v1"
+    )
+    assert turn_input.metadata["capability_plan"] == build_setup_agent_capability_plan(
+        "foundation",
+        current_stage="character_design",
+    ).model_dump(mode="json", exclude_none=True)
     assert turn_input.tool_scope == build_setup_agent_tool_scope("character_design")
 
 
@@ -1105,6 +1139,14 @@ async def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stre
     assert "setup.patch.story_config" not in prepared.turn_input.tool_scope
     assert prepared.context_packet.workspace_id == workspace.workspace_id
     assert prepared.profile.profile_id == "setup_agent"
+    metadata = service._runtime_v2_observation_metadata(prepared)
+    assert metadata["context_pipeline"]["final_request_message_order"] == [
+        "stable_system_prompt",
+        "runtime_overlay_system_message",
+        "governed_history",
+        "current_user",
+    ]
+    assert "context_report" not in metadata["context_pipeline"]
 
 
 @pytest.mark.asyncio
@@ -1155,7 +1197,7 @@ async def test_setup_agent_execution_service_v2_falls_back_when_compact_prompt_f
         ),
     )
 
-    report = turn_input.context_bundle["context_report"]
+    report = turn_input.metadata["context_report"]
     compact_summary = turn_input.context_bundle["compact_summary"]
     assert context_packet.context_profile == "compact"
     assert len(llm.requests) == 1

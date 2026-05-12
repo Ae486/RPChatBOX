@@ -202,14 +202,11 @@ class RpStoryArtifact {
   bool get isDraft => status == 'draft';
   bool get isPendingSegment =>
       artifactKind == 'story_segment' && status == 'draft';
-  String? get runtimeStoryId =>
-      _stringOrNull(metadata['runtime_story_id']);
-  String? get runtimeSessionId =>
-      _stringOrNull(metadata['runtime_session_id']);
+  String? get runtimeStoryId => _stringOrNull(metadata['runtime_story_id']);
+  String? get runtimeSessionId => _stringOrNull(metadata['runtime_session_id']);
   String? get runtimeBranchHeadId =>
       _stringOrNull(metadata['runtime_branch_head_id']);
-  String? get runtimeTurnId =>
-      _stringOrNull(metadata['runtime_turn_id']);
+  String? get runtimeTurnId => _stringOrNull(metadata['runtime_turn_id']);
   String? get runtimeProfileSnapshotId =>
       _stringOrNull(metadata['runtime_profile_snapshot_id']);
 
@@ -282,13 +279,13 @@ class RpChapterSnapshot {
       .toList();
 
   List<RpStoryArtifact> get acceptedSegmentArtifacts {
-    final artifactById = {
-      for (final item in artifacts) item.artifactId: item,
-    };
+    final artifactById = {for (final item in artifacts) item.artifactId: item};
     return chapter.acceptedSegmentIds
         .map((artifactId) => artifactById[artifactId])
         .whereType<RpStoryArtifact>()
-        .where((item) => item.artifactKind == 'story_segment' && item.isAccepted)
+        .where(
+          (item) => item.artifactKind == 'story_segment' && item.isAccepted,
+        )
         .toList();
   }
 
@@ -344,10 +341,7 @@ class RpBranchControlResult {
   final RpChapterSnapshot snapshot;
   final Map<String, dynamic> receipt;
 
-  const RpBranchControlResult({
-    required this.snapshot,
-    required this.receipt,
-  });
+  const RpBranchControlResult({required this.snapshot, required this.receipt});
 
   String? get controlKind => _stringOrNull(receipt['control_kind']);
   String? get toBranchHeadId => _stringOrNull(receipt['to_branch_head_id']);
@@ -356,7 +350,9 @@ class RpBranchControlResult {
   factory RpBranchControlResult.fromJson(Map<String, dynamic> json) {
     final data = _mapOrEmpty(json['data']);
     return RpBranchControlResult(
-      snapshot: RpChapterSnapshot.fromJson(_mapOrEmpty(data['chapter_snapshot'])),
+      snapshot: RpChapterSnapshot.fromJson(
+        _mapOrEmpty(data['chapter_snapshot']),
+      ),
       receipt: _mapOrEmpty(json['receipt']),
     );
   }
@@ -608,6 +604,152 @@ class RpRuntimeInspection {
       boundaries: _stringList(json['boundaries']),
     );
   }
+}
+
+class RpMemoryInspection {
+  final Map<String, dynamic> raw;
+  final Map<String, dynamic> identity;
+  final Map<String, dynamic> branchScope;
+  final Map<String, dynamic> canonicalEnvelope;
+  final List<RpMemoryBlockEnvelope> blocks;
+  final Map<String, dynamic> layers;
+  final List<RpMemoryBlockEnvelope> hiddenAuditBlocks;
+  final List<String> boundaries;
+
+  const RpMemoryInspection({
+    required this.raw,
+    required this.identity,
+    required this.branchScope,
+    required this.canonicalEnvelope,
+    required this.blocks,
+    required this.layers,
+    required this.hiddenAuditBlocks,
+    required this.boundaries,
+  });
+
+  factory RpMemoryInspection.fromJson(Map<String, dynamic> json) {
+    return RpMemoryInspection(
+      raw: Map<String, dynamic>.from(json),
+      identity: _mapOrEmpty(json['identity']),
+      branchScope: _mapOrEmpty(json['branch_scope']),
+      canonicalEnvelope: _mapOrEmpty(json['canonical_envelope']),
+      blocks: _mapList(
+        json['blocks'],
+      ).map(RpMemoryBlockEnvelope.fromJson).toList(),
+      layers: _mapOrEmpty(json['layers']),
+      hiddenAuditBlocks: _mapList(
+        json['hidden_audit_blocks'],
+      ).map(RpMemoryBlockEnvelope.fromJson).toList(),
+      boundaries: _stringList(json['boundaries']),
+    );
+  }
+
+  String? get schemaVersion =>
+      _stringOrNull(canonicalEnvelope['schema_version']);
+  String? get activeBranchHeadId =>
+      _stringOrNull(identity['branch_head_id']) ??
+      _stringOrNull(branchScope['active_branch_head_id']);
+  String? get cutoffTurnId =>
+      _stringOrNull(identity['turn_id']) ??
+      _stringOrNull(branchScope['selected_turn_id']) ??
+      _stringOrNull(branchScope['active_turn_id']) ??
+      _stringOrNull(branchScope['cutoff_turn_id']);
+  String? get runtimeProfileSnapshotId =>
+      _stringOrNull(identity['runtime_profile_snapshot_id']);
+}
+
+class RpMemoryBlockEnvelope {
+  final Map<String, dynamic> raw;
+  final List<RpMemoryEntryEnvelope> entries;
+
+  const RpMemoryBlockEnvelope({required this.raw, required this.entries});
+
+  factory RpMemoryBlockEnvelope.fromJson(Map<String, dynamic> json) {
+    return RpMemoryBlockEnvelope(
+      raw: Map<String, dynamic>.from(json),
+      entries: _mapList(
+        json['entries'],
+      ).map(RpMemoryEntryEnvelope.fromJson).toList(),
+    );
+  }
+
+  String get blockId => _stringOrNull(raw['block_id']) ?? '';
+  String get domain => _stringOrNull(raw['domain']) ?? 'unknown';
+  String get layer => _stringOrNull(raw['layer']) ?? 'unknown';
+  String? get scope => _stringOrNull(raw['scope']);
+  int? get revision => (raw['revision'] as num?)?.toInt();
+  String? get lifecycleState => _stringOrNull(raw['lifecycle_state']);
+  Map<String, dynamic> get visibility => _mapOrEmpty(raw['visibility']);
+  Map<String, dynamic> get permissionLevel =>
+      _mapOrEmpty(raw['permission_level']);
+  Map<String, dynamic> get provenance => _mapOrEmpty(raw['provenance']);
+  Map<String, dynamic> get validationSummary =>
+      _mapOrEmpty(raw['validation_summary']);
+  Map<String, dynamic> get entrypoints => _mapOrEmpty(raw['entrypoints']);
+  List<Map<String, dynamic>> get sourceRefs => _mapList(raw['source_refs']);
+  List<String> get editableFields => _stringList(raw['editable_fields']);
+  List<String> get allowedActions => _stringList(raw['allowed_actions']);
+}
+
+class RpMemoryEntryEnvelope {
+  final Map<String, dynamic> raw;
+
+  const RpMemoryEntryEnvelope({required this.raw});
+
+  factory RpMemoryEntryEnvelope.fromJson(Map<String, dynamic> json) {
+    return RpMemoryEntryEnvelope(raw: Map<String, dynamic>.from(json));
+  }
+
+  String get entryId => _stringOrNull(raw['entry_id']) ?? '';
+  String get entryType => _stringOrNull(raw['entry_type']) ?? 'memory_entry';
+  String? get label => _stringOrNull(raw['label']);
+  Object? get currentValue => raw['current_value'];
+  int? get baseRevision => (raw['base_revision'] as num?)?.toInt();
+  String? get conflictState => _stringOrNull(raw['conflict_state']);
+  String? get lastModifiedActor => _stringOrNull(raw['last_modified_actor']);
+  String? get lastModifiedTurnOrEventId =>
+      _stringOrNull(raw['last_modified_turn_or_event_id']);
+  Map<String, dynamic> get fieldValidationRules =>
+      _mapOrEmpty(raw['field_validation_rules']);
+  Map<String, dynamic> get userEditMetadata =>
+      _mapOrEmpty(raw['user_edit_metadata']);
+  List<Map<String, dynamic>> get sourceRefs => _mapList(raw['source_refs']);
+  List<String> get editableFields => _stringList(raw['editable_fields']);
+  List<String> get validationErrors => _stringList(raw['validation_errors']);
+  List<String> get allowedActions => _stringList(raw['allowed_actions']);
+}
+
+class RpMemoryActionResponse {
+  final Map<String, dynamic> raw;
+  final Map<String, dynamic> item;
+  final Map<String, dynamic> actionMetadata;
+  final Map<String, dynamic> refresh;
+
+  const RpMemoryActionResponse({
+    required this.raw,
+    required this.item,
+    required this.actionMetadata,
+    required this.refresh,
+  });
+
+  factory RpMemoryActionResponse.fromJson(Map<String, dynamic> json) {
+    return RpMemoryActionResponse(
+      raw: Map<String, dynamic>.from(json),
+      item: _mapOrEmpty(json['item']),
+      actionMetadata: _mapOrEmpty(json['action_metadata']),
+      refresh: _mapOrEmpty(json['refresh']),
+    );
+  }
+
+  String? get schemaVersion => _stringOrNull(actionMetadata['schema_version']);
+  String? get action => _stringOrNull(actionMetadata['action']);
+  String? get governedBy => _stringOrNull(actionMetadata['governed_by']);
+  List<String> get affectedRefs => _stringList(actionMetadata['affected_refs']);
+
+  Map<String, dynamic> get memoryInspectionRefresh =>
+      _mapOrEmpty(refresh['memory_inspection']);
+  Map<String, dynamic> get runtimeInspectRefresh =>
+      _mapOrEmpty(refresh['runtime_inspect']);
 }
 
 class RpRuntimeDebugSurface {

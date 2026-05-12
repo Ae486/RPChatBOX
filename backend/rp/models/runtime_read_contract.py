@@ -90,6 +90,40 @@ class RuntimeBranchReadScope(BaseModel):
         return normalized
 
 
+class CoreStateSnapshotManifest(BaseModel):
+    """Runtime-facing Core State copy-on-write revision manifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_id: str
+    parent_snapshot_id: str | None = None
+    story_id: str
+    session_id: str
+    branch_head_id: str
+    turn_id: str
+    runtime_profile_snapshot_id: str
+    effective_revision_map: dict[str, str] = Field(default_factory=dict)
+    changed_ref_ids: list[str] = Field(default_factory=list)
+    source_event_ids: list[str] = Field(default_factory=list)
+    manifest_kind: str = "runtime"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "snapshot_id",
+        "story_id",
+        "session_id",
+        "branch_head_id",
+        "turn_id",
+        "runtime_profile_snapshot_id",
+        "manifest_kind",
+    )
+    @classmethod
+    def _normalize_required_manifest_text(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
+
 class RuntimeReadManifest(BaseModel):
     """Deterministic packet-visible read trace for one runtime-owned packet build."""
 
@@ -99,6 +133,9 @@ class RuntimeReadManifest(BaseModel):
     identity: MemoryRuntimeIdentity
     active_branch_lineage: list[str] = Field(default_factory=list)
     branch_scope: dict[str, Any] = Field(default_factory=dict)
+    core_state_snapshot_id: str | None = None
+    core_state_revision_map: dict[str, str] = Field(default_factory=dict)
+    projection_source_manifest_id: str | None = None
     runtime_profile_snapshot_id: str
     policy_versions: dict[str, str] = Field(default_factory=dict)
     visible_refs: list[dict[str, Any]] = Field(default_factory=list)

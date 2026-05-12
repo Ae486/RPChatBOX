@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from models.rp_core_state_store import CoreStateAuthoritativeRevisionRecord
 from rp.models.core_mutation import CoreMutationEnvelope
 from rp.models.dsl import ObjectRef
 from rp.models.memory_contract_registry import (
@@ -32,6 +33,7 @@ from .authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,
 )
 from .core_state_dual_write_service import CoreStateDualWriteService
+from .core_state_as_of_resolver import CoreStateAsOfResolver
 from .memory_change_event_service import MemoryChangeEventService
 from .memory_object_mapper import (
     normalize_authoritative_ref,
@@ -67,6 +69,7 @@ class ProposalApplyService:
         memory_change_event_service: MemoryChangeEventService | None = None,
         runtime_workspace_material_service: RuntimeWorkspaceMaterialService
         | None = None,
+        core_state_as_of_resolver: CoreStateAsOfResolver | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._proposal_repository = proposal_repository
@@ -85,6 +88,7 @@ class ProposalApplyService:
         )
         self._memory_change_event_service = memory_change_event_service
         self._runtime_workspace_material_service = runtime_workspace_material_service
+        self._core_state_as_of_resolver = core_state_as_of_resolver
 
     def apply_proposal(self, proposal_id: str) -> ProposalReceipt:
         proposal_record = self._proposal_repository.get_proposal_record(proposal_id)
@@ -113,15 +117,21 @@ class ProposalApplyService:
             # proposal status transition in one nested unit so failed receipt
             # persistence cannot leak a half-applied state update.
             with self._proposal_repository.session.begin_nested():
+                core_mutation = extract_core_mutation_envelope(
+                    dict(proposal_record.governance_metadata_json or {})
+                )
                 patch, target_refs = self._build_patch(input_model.operations)
                 before_snapshot = self._load_before_snapshot(
-                    session=session, target_refs=target_refs
+                    session=session,
+                    target_refs=target_refs,
+                    core_mutation=core_mutation,
                 )
                 current_revisions = self._validate_base_revisions(
                     session=session,
                     proposal_record=proposal_record,
                     input_model=input_model,
                     target_refs=target_refs,
+                    core_mutation=core_mutation,
                 )
                 after_snapshot = self._story_state_apply_service.apply(
                     state_map=before_snapshot,
@@ -173,6 +183,17 @@ class ProposalApplyService:
                         revision_after=revision_after,
                         apply_id=apply_receipt.apply_id,
                         proposal_id=proposal_id,
+                        runtime_identity=(
+                            None if core_mutation is None else core_mutation.identity
+                        ),
+                    )
+                    self._record_core_state_snapshot_manifest(
+                        core_mutation=core_mutation,
+                        changed_revision_records=[
+                            revision_record
+                            for _, revision_record in store_writes.values()
+                        ],
+                        source_event_ids=[apply_receipt.apply_id],
                     )
                     for object_id, (
                         current_record,
@@ -225,9 +246,14 @@ class ProposalApplyService:
         proposal_record,
         input_model: ProposalSubmitInput,
         target_refs: list[ObjectRef],
+        core_mutation: CoreMutationEnvelope | None = None,
     ) -> dict[str, int]:
         if not input_model.base_refs:
             return {}
+        as_of_revisions = self._as_of_revisions_by_object_id(
+            core_mutation=core_mutation,
+            target_refs=target_refs,
+        )
 
         base_refs_by_identity: dict[tuple[str, str, str, str, str], ObjectRef] = {}
         for base_ref in input_model.base_refs:
@@ -256,11 +282,16 @@ class ProposalApplyService:
                 target_ref=target_ref,
                 base_ref=base_ref,
             )
-            if current_revision != base_ref.revision:
+            visible_revision = (
+                int(as_of_revisions[target_ref.object_id].revision or 1)
+                if target_ref.object_id in as_of_revisions
+                else current_revision
+            )
+            if visible_revision != base_ref.revision:
                 raise ValueError(
                     "phase_e_apply_base_revision_conflict:"
                     f"{self._format_authoritative_ref_identity(target_ref)}:"
-                    f"current={current_revision}:base={base_ref.revision}"
+                    f"current={visible_revision}:base={base_ref.revision}"
                 )
             current_revisions[target_ref.object_id] = current_revision
         return current_revisions
@@ -273,8 +304,8 @@ class ProposalApplyService:
         target_ref: ObjectRef,
         base_ref: ObjectRef,
     ) -> int:
-        if self._use_store_primary_write():
-            dual_write_service = self._require_core_state_dual_write_service()
+        if self._core_state_dual_write_service is not None:
+            dual_write_service = self._core_state_dual_write_service
             return dual_write_service.current_authoritative_revision(
                 session_id=session_id,
                 target_ref=target_ref,
@@ -323,13 +354,29 @@ class ProposalApplyService:
             raise ValueError("phase_e_core_state_dual_write_service_missing")
         return self._core_state_dual_write_service
 
-    def _load_before_snapshot(self, *, session, target_refs: list) -> dict:
+    def _load_before_snapshot(
+        self,
+        *,
+        session,
+        target_refs: list,
+        core_mutation: CoreMutationEnvelope | None = None,
+    ) -> dict:
         mirror_snapshot = (
             self._authoritative_compatibility_mirror_service.read_mirror_state(
                 session=session
             )
         )
+        as_of_revisions = self._as_of_revisions_by_object_id(
+            core_mutation=core_mutation,
+            target_refs=target_refs,
+        )
         if not self._use_store_primary_write():
+            if as_of_revisions:
+                return self._overlay_as_of_revisions(
+                    snapshot=mirror_snapshot,
+                    target_refs=target_refs,
+                    revisions_by_object_id=as_of_revisions,
+                )
             return mirror_snapshot
         dual_write_service = self._require_core_state_dual_write_service()
         dual_write_service.ensure_authoritative_targets_seed(
@@ -337,10 +384,66 @@ class ProposalApplyService:
             snapshot=mirror_snapshot,
             target_refs=target_refs,
         )
-        return dual_write_service.materialize_authoritative_snapshot(
+        snapshot = dual_write_service.materialize_authoritative_snapshot(
             session=session,
             fallback_snapshot=mirror_snapshot,
         )
+        if as_of_revisions:
+            return self._overlay_as_of_revisions(
+                snapshot=snapshot,
+                target_refs=target_refs,
+                revisions_by_object_id=as_of_revisions,
+            )
+        return snapshot
+
+    def _as_of_revisions_by_object_id(
+        self,
+        *,
+        core_mutation: CoreMutationEnvelope | None,
+        target_refs: list[ObjectRef],
+    ) -> dict[str, CoreStateAuthoritativeRevisionRecord]:
+        if core_mutation is None or core_mutation.identity is None:
+            return {}
+        resolver = self._core_state_as_of_resolver
+        if resolver is None:
+            if self._core_state_dual_write_service is None:
+                raise ValueError(
+                    "phase_e_core_state_as_of_resolver_missing_for_core_mutation"
+                )
+            resolver = CoreStateAsOfResolver(
+                session=self._proposal_repository.session,
+                repository=self._core_state_dual_write_service.repository,
+            )
+            self._core_state_as_of_resolver = resolver
+        manifest = resolver.ensure_manifest_for_identity(
+            identity=core_mutation.identity,
+            selected_turn_id=core_mutation.identity.turn_id,
+        )
+        revisions: dict[str, CoreStateAuthoritativeRevisionRecord] = {}
+        for target_ref in target_refs:
+            revisions[target_ref.object_id] = resolver.resolve_object_revision(
+                manifest=manifest,
+                object_ref=target_ref,
+            )
+        return revisions
+
+    @staticmethod
+    def _overlay_as_of_revisions(
+        *,
+        snapshot: dict,
+        target_refs: list[ObjectRef],
+        revisions_by_object_id: dict[str, CoreStateAuthoritativeRevisionRecord],
+    ) -> dict:
+        overlaid = dict(snapshot)
+        for target_ref in target_refs:
+            revision = revisions_by_object_id.get(target_ref.object_id)
+            if revision is None:
+                continue
+            binding = resolve_authoritative_binding(target_ref)
+            if binding is None:
+                continue
+            overlaid[binding.backend_field] = revision.data_json
+        return overlaid
 
     def _next_revision_for_target(
         self,
@@ -349,8 +452,8 @@ class ProposalApplyService:
         target_ref,
         session_id: str,
     ) -> int:
-        if self._use_store_primary_write():
-            dual_write_service = self._require_core_state_dual_write_service()
+        if self._core_state_dual_write_service is not None:
+            dual_write_service = self._core_state_dual_write_service
             return (
                 dual_write_service.current_authoritative_revision(
                     session_id=session_id,
@@ -685,6 +788,32 @@ class ProposalApplyService:
                 memory_change_event_service=self._resolve_memory_change_event_service(),
             )
         return self._runtime_workspace_material_service
+
+    def _record_core_state_snapshot_manifest(
+        self,
+        *,
+        core_mutation: CoreMutationEnvelope | None,
+        changed_revision_records: list[CoreStateAuthoritativeRevisionRecord],
+        source_event_ids: list[str],
+    ) -> None:
+        if core_mutation is None or core_mutation.identity is None:
+            return
+        if not changed_revision_records:
+            return
+        resolver = self._core_state_as_of_resolver
+        if resolver is None:
+            if self._core_state_dual_write_service is None:
+                return
+            resolver = CoreStateAsOfResolver(
+                session=self._proposal_repository.session,
+                repository=self._core_state_dual_write_service.repository,
+            )
+            self._core_state_as_of_resolver = resolver
+        resolver.record_core_mutation(
+            identity=core_mutation.identity,
+            changed_revisions=changed_revision_records,
+            source_event_ids=source_event_ids,
+        )
 
 
 def _governance_warning_tokens(governance_metadata) -> list[str]:

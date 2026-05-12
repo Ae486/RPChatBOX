@@ -324,7 +324,7 @@ class RepairDecisionPolicy:
         if repeated_failure:
             return {
                 "action": "finalize_failure",
-                "finish_reason": "tool_recovery_budget_exhausted",
+                "finish_reason": "tool_error_unrecoverable",
                 "warning": "repeated_tool_failure",
                 "warnings": ["repeated_tool_failure"],
                 "last_failure": failure_state.model_dump(
@@ -333,9 +333,10 @@ class RepairDecisionPolicy:
                 ),
                 "error": {
                     "message": "Recoverable setup tool failure repeated without progress",
-                    "type": "tool_recovery_budget_exhausted",
+                    "type": "tool_error_unrecoverable",
                     "tool_name": failure.tool_name,
                     "error_code": failure.error_code,
+                    "details": {"reason": "repeated_tool_failure"},
                 },
             }
 

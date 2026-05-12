@@ -28,6 +28,7 @@ from rp.models.memory_crud import (
     RetrievalHit,
     RetrievalQuery,
     RetrievalSearchResult,
+    RetrievalTrace,
     StateReadResult,
     StateReadResultItem,
     SummaryEntry,
@@ -44,6 +45,7 @@ from rp.services.chapter_workspace_projection_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.core_state_backfill_service import CoreStateBackfillService
+from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state_read_service import CoreStateReadService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
@@ -412,6 +414,15 @@ class RetrievalBroker:
         store_read_enabled = bool(
             get_settings().rp_memory_core_state_store_read_enabled
         )
+        runtime_owned_read = self._runtime_identity is not None
+        core_state_as_of_resolver = (
+            CoreStateAsOfResolver(
+                session=session,
+                repository=core_state_store_repository,
+            )
+            if runtime_owned_read
+            else None
+        )
         backfill_service = CoreStateBackfillService(
             story_session_service=story_session_service,
             proposal_repository=proposal_repository,
@@ -432,9 +443,10 @@ class RetrievalBroker:
                 store_read_enabled=store_read_enabled,
             ),
             core_state_store_repository=core_state_store_repository,
-            store_read_enabled=store_read_enabled,
+            store_read_enabled=store_read_enabled or runtime_owned_read,
             core_state_backfill_service=backfill_service,
             runtime_identity=self._runtime_identity,
+            core_state_as_of_resolver=core_state_as_of_resolver,
         )
 
     def _build_projection_read_service(self, session: Session) -> ProjectionReadService:
@@ -906,25 +918,12 @@ class RetrievalBroker:
             scope = resolver.build_scope(identity=runtime_identity)
         except RuntimeReadManifestServiceError as exc:
             warnings.append(f"runtime_branch_scope_unresolved:{exc.code}")
-            trace = result.trace
-            if trace is not None:
-                details = dict(trace.details or {})
-                details["branch_visibility"] = {
-                    "status": "omitted_fail_closed",
-                    "reason": "runtime_branch_scope_unresolved",
-                    "error_code": exc.code,
-                    "identity": runtime_identity.model_dump(mode="json"),
-                }
-                trace = trace.model_copy(
-                    update={
-                        "returned_count": 0,
-                        "warnings": [
-                            *list(trace.warnings),
-                            "runtime_branch_scope_unresolved",
-                        ],
-                        "details": details,
-                    }
-                )
+            trace = self._runtime_branch_scope_unresolved_trace(
+                query=query,
+                result=result,
+                runtime_identity=runtime_identity,
+                error_code=exc.code,
+            )
             return result.model_copy(
                 update={
                     "hits": [],
@@ -983,6 +982,44 @@ class RetrievalBroker:
         if not isinstance(raw_keys, list):
             return []
         return [str(key) for key in raw_keys if str(key)]
+
+    @staticmethod
+    def _runtime_branch_scope_unresolved_trace(
+        *,
+        query: RetrievalQuery,
+        result: RetrievalSearchResult,
+        runtime_identity: MemoryRuntimeIdentity,
+        error_code: str,
+    ) -> RetrievalTrace:
+        details = {}
+        if result.trace is not None:
+            details = dict(result.trace.details or {})
+        details["branch_visibility"] = {
+            "status": "omitted_fail_closed",
+            "reason": "runtime_branch_scope_unresolved",
+            "error_code": error_code,
+            "identity": runtime_identity.model_dump(mode="json"),
+        }
+        warnings = ["runtime_branch_scope_unresolved"]
+        if result.trace is not None:
+            warnings = [*list(result.trace.warnings), *warnings]
+            return result.trace.model_copy(
+                update={
+                    "returned_count": 0,
+                    "warnings": warnings,
+                    "details": details,
+                }
+            )
+        return RetrievalTrace(
+            trace_id=f"trace_{query.query_id}_branch_scope_unresolved",
+            query_id=query.query_id,
+            route="retrieval.runtime_branch_visibility",
+            result_kind="omitted_fail_closed",
+            candidate_count=len(result.hits),
+            returned_count=0,
+            warnings=warnings,
+            details=details,
+        )
 
     @staticmethod
     def _normalize_runtime_identity(

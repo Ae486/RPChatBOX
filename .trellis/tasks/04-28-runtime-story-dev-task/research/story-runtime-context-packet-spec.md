@@ -4,7 +4,7 @@
 >
 > Module: Context Orchestration / Packet
 >
-> Status: draft-v1
+> Status: draft-v1.1
 
 ## 1. 范围
 
@@ -22,6 +22,11 @@
 - writer 如何生成正文
 - retrieval card 的生成算法
 - post-write 的治理判断
+- 通用 Context Engineering / Compact-Summary 执行内核
+
+通用 Context Engineering / Compact-Summary 规格见
+`context-engineering-compact-summary-module-spec.md`。本文件只定义 story
+runtime 的 packet policy 和 adapter 责任。
 
 ## 2. 设计目标
 
@@ -32,6 +37,8 @@
 3. 哪些内容能进 writer packet，哪些绝对不能进
 4. 如何让 token 裁剪和实际 usage 统计不混线
 5. 如何在后续 mode 扩展时不改 packet 主骨架
+6. 如何把 compact / summary 作为 pre-model context engineering 能力接入，
+   而不是让它变成新的 story truth 或第二套 memory 写入路径
 
 ## 3. 当前实现判断
 
@@ -53,6 +60,8 @@
 
 - 现有 builder 和 packet 可作为实现素材
 - 但规格书必须先把新 packet 合同冻结，再决定 adapter 还是重写
+- `ContextOrchestrationService` 是 story runtime policy / adapter 层；
+  它可以调用通用 Context Engineering 能力，但不拥有通用 compact 引擎
 
 ## 4. 文件落位建议
 
@@ -221,6 +230,8 @@ worker packet 不与 writer packet 混用。
 2. 不决定本轮启用哪些 worker
 3. 不把 retrieval 结果直接写成 truth
 4. 不接收自由文本 reasoning 再二次猜测内容用途
+5. 不直接实现跨 runtime 的 compact / summary 执行内核
+6. 不把 compact summary 当成 Core / Recall / Archival / Runtime Workspace truth
 
 ## 7.3 输入
 
@@ -329,6 +340,42 @@ worker packet 不与 writer packet 混用。
 - 为了省 token 把近几轮原文全删掉，只剩视图
 - 为了省 token 让 Runtime Workspace 日志替代 structured summary
 
+## 8.6 Compact / Summary 接入规则
+
+Story runtime 可以在组包前或组包过程中调用通用 Context Engineering
+module，但必须遵守：
+
+- branch-aware read scope 必须先于 compact 执行；compact 不能把当前分支
+  不可见的 source item 压进 summary；
+- recent raw turn / recent accepted prose window 必须按 packet policy 保留，
+  不能被 summary 完全替代；
+- summary result 是 packet assembly artifact 或 Runtime Workspace sidecar，
+  不是 memory truth；
+- `ContextOrchestrationService` 只提供 story runtime adapter policy：
+  source item 选择、窗口保留、schema 选择、section 落位；
+- 通用执行内核负责 fingerprint、budget、LLM summary 调用、结构化校验、
+  fallback、usage / trace；
+- writer packet 只接收已经通过 schema 校验和 branch scope 校验的 summary
+  section；
+- read manifest 必须记录 summary section 的 source refs、fingerprint、
+  selected / omitted / hidden refs。
+
+适用场景：
+
+- writer packet 老上下文压缩；
+- writer brainstorm summary；
+- chapter bridge summary；
+- chapter/session review material。
+
+不适用场景：
+
+- Core direct edit；
+- Recall lifecycle action；
+- Archival evolution；
+- worker proposal apply。
+
+这些是业务 mutation / governance path，不是 compact path。
+
 ## 9. Token usage 规则
 
 冻结口径：
@@ -416,9 +463,14 @@ def build_worker_context_packet(identity, worker_id, phase, context_requirements
 4. retrieval cards 使用 short ids，而非随机 hit ids 暴露给 writer
 5. usage metadata 回写后，packet summary 可读到实际消耗
 6. branch switch 后，writer packet 只读当前 active branch 的可见内容
+7. compact 前已经执行 branch-aware scope，summary 不包含隐藏 future memory
+8. compact summary section 进入 packet 时带 source refs / fingerprint / trace
+9. compact summary 无法通过结构化校验时不进入 writer packet
 
 ## 12. 已知风险
 
 1. 当前 `writing_runtime.py` 的 `WritingPacket` 太薄，后续要注意是扩展还是新建更正式的 contract 模型文件
 2. 如果 dev 继续把 builder 当作纯 longform 组件，不上提为 context orchestration，后续 rp/trpg 会再次分叉
 3. packet section 若无统一 `source_ref_ids`，后续 debug/eval 很难准确定位组包来源
+4. 若 story runtime 自己再实现一套 compact engine，会和 setup agent 的 context
+   governance 演化出两套规则；应复用 common module，通过 story adapter 注入业务 policy

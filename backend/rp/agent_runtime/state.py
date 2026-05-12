@@ -17,6 +17,7 @@ class RpAgentRunState(TypedDict, total=False):
     tool_definitions: list[dict[str, Any]]
     latest_request: dict[str, Any]
     latest_response: dict[str, Any]
+    output_inspection: dict[str, Any] | None
     pending_tool_calls: list[dict[str, Any]]
     tool_invocations: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
@@ -40,6 +41,7 @@ class RpAgentRunState(TypedDict, total=False):
     repair_route: str | None
     continue_reason: str | None
     loop_trace: list[dict[str, Any]]
+    model_gateway_diagnostics: dict[str, Any] | None
     next_action: str
     schema_retry_count: int
     pseudo_tool_retry_count: int

@@ -49,6 +49,7 @@ class RuntimeWorkspaceMaterialKind(StrEnum):
     RULE_CARD = "rule_card"
     RULE_STATE_CARD = "rule_state_card"
     REVIEW_OVERLAY = "review_overlay"
+    BRAINSTORM_SESSION = "brainstorm_session"
     WORKER_CANDIDATE = "worker_candidate"
     WORKER_EVIDENCE_BUNDLE = "worker_evidence_bundle"
     POST_WRITE_TRACE = "post_write_trace"

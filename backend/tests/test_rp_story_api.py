@@ -10,6 +10,7 @@ from typing import Any
 from sqlmodel import select
 from sqlmodel import Session as SqlSession
 
+from api.rp_story import _story_controller
 from config import get_settings
 from models.rp_story_store import BranchHeadRecord, StorySessionRecord, StoryTurnRecord
 from rp.graphs.story_graph_runner import StoryGraphRunner
@@ -41,6 +42,12 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
+)
+from rp.models.story_brainstorm import (
+    BrainstormApplyReceipt,
+    BrainstormDispatchReceipt,
+    BrainstormItem,
+    BrainstormSession,
 )
 from rp.models.story_runtime import (
     LongformChapterPhase,
@@ -3881,6 +3888,374 @@ def test_story_memory_inspection_route_uses_memory_family_and_identity_scope(
     assert workspace_block["entries"][0]["entry_id"] == (
         "api.memory.inspection.overlay"
     )
+    projection_block = next(
+        block
+        for block in payload["blocks"]
+        if block["layer"] == Layer.CORE_STATE_PROJECTION.value
+    )
+    assert projection_block["allowed_actions"] == [
+        "inspect",
+        "request_projection_refresh",
+    ]
+    assert projection_block["permission_level"]["refresh_projection"] is True
+    assert projection_block["entries"][0]["base_revision"] == projection_block[
+        "revision"
+    ]
+
+
+def test_story_memory_action_routes_return_refreshable_receipts(client):
+    seeded = _seed_formal_memory_block_session()
+    identity = _seed_memory_inspection_identity(seeded["session_id"])
+
+    class _FakeMemoryActionController:
+        async def direct_edit_core_memory(self, *, session_id: str, payload):
+            assert session_id == seeded["session_id"]
+            return {
+                "proposal_id": "proposal.api.direct",
+                "status": "applied",
+                "mode": "longform",
+                "domain": Domain.CHAPTER.value,
+                "domain_path": payload.domain_path,
+                "operation_kinds": [operation.kind for operation in payload.operations],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        def review_recall_memory(self, *, session_id: str, command):
+            assert session_id == seeded["session_id"]
+            return {
+                "action": command.action.value,
+                "identity": command.identity.model_dump(mode="json"),
+                "actor": command.actor,
+                "material_refs": list(command.material_refs),
+                "touched_material_refs": ["recall.api.visible"],
+                "event_id": command.event_id,
+                "routed_through": "RecallLifecycleService",
+                "reason": command.reason,
+            }
+
+        def evolve_archival_memory(self, *, session_id: str, request):
+            assert session_id == seeded["session_id"]
+            return {
+                "evolution_id": "evolution.api.archival",
+                "source_asset_id": "archival.api.visible__v2",
+                "superseded_source_asset_id": request.source_asset_id,
+                "root_source_asset_id": request.source_asset_id,
+                "new_source_version": 2,
+                "superseded_source_version": request.expected_source_version,
+                "visibility_scope": request.visibility_scope.value,
+                "selected_branch_head_ids": [request.identity.branch_head_id],
+                "replacement_chunk_ids": ["chunk.api.archival.v2"],
+                "reindex_job_ids": ["job.api.reindex"],
+                "event_ids": ["event.api.archival"],
+                "source_refs": [],
+                "warnings": [],
+            }
+
+    controller = _FakeMemoryActionController()
+    client.app.dependency_overrides[_story_controller] = lambda: controller
+    try:
+        base_ref = {
+            "object_id": "chapter.current",
+            "layer": Layer.CORE_STATE_AUTHORITATIVE.value,
+            "domain": Domain.CHAPTER.value,
+            "domain_path": "chapter.current",
+            "scope": "story",
+            "revision": 5,
+        }
+        direct_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                "/memory/core/direct-edit"
+            ),
+            json={
+                "identity": identity,
+                "actor": "user.memory_editor",
+                "domain": Domain.CHAPTER.value,
+                "domain_path": "chapter.current",
+                "operations": [
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": base_ref,
+                        "field_patch": {"title": "API refreshable direct edit"},
+                    }
+                ],
+                "base_refs": [base_ref],
+                "reason": "api refreshable direct edit",
+            },
+        )
+        recall_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                "/memory/recall/actions"
+            ),
+            json={
+                "identity": identity,
+                "actor": "user.memory_editor",
+                "action": "invalidate",
+                "material_refs": ["recall.api.visible"],
+                "reason": "api refreshable recall review",
+                "event_id": "event.api.recall",
+            },
+        )
+        archival_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                "/memory/archival/evolution"
+            ),
+            json={
+                "identity": identity,
+                "actor": "user.memory_editor",
+                "source_asset_id": "archival.api.visible",
+                "expected_source_version": 1,
+                "replacement_sections": [
+                    {
+                        "text": "API refreshable archival correction.",
+                        "metadata": {"domain": Domain.WORLD_RULE.value},
+                    }
+                ],
+                "reason": "api refreshable archival evolution",
+            },
+        )
+    finally:
+        client.app.dependency_overrides.pop(_story_controller, None)
+
+    assert direct_response.status_code == 200
+    direct_payload = direct_response.json()
+    assert direct_payload["item"]["proposal_id"] == "proposal.api.direct"
+    assert direct_payload["action_metadata"]["schema_version"] == (
+        "rp.memory.action_receipt.v1"
+    )
+    assert direct_payload["action_metadata"]["action"] == "direct_core_edit"
+    assert direct_payload["action_metadata"]["identity"]["turn_id"] == (
+        identity["turn_id"]
+    )
+    assert "proposal.api.direct" in direct_payload["action_metadata"]["affected_refs"]
+    assert direct_payload["refresh"]["memory_inspection"]["query_params"] == {
+        "branch_head_id": identity["branch_head_id"],
+        "turn_id": identity["turn_id"],
+        "runtime_profile_snapshot_id": identity["runtime_profile_snapshot_id"],
+    }
+    assert direct_payload["refresh"]["runtime_inspect"]["path_template"].endswith(
+        "/runtime/inspect"
+    )
+
+    assert recall_response.status_code == 200
+    recall_payload = recall_response.json()
+    assert recall_payload["action_metadata"]["action"] == "review_recall:invalidate"
+    assert recall_payload["action_metadata"]["governed_by"] == "RecallLifecycleService"
+    assert {
+        "recall.api.visible",
+        "event.api.recall",
+    } <= set(recall_payload["action_metadata"]["affected_refs"])
+
+    assert archival_response.status_code == 200
+    archival_payload = archival_response.json()
+    assert archival_payload["action_metadata"]["action"] == "evolve_archival"
+    assert archival_payload["action_metadata"]["governed_by"] == (
+        "ArchivalEvolutionService.evolve_source"
+    )
+    assert {
+        "archival.api.visible__v2",
+        "job.api.reindex",
+        "event.api.archival",
+    } <= set(archival_payload["action_metadata"]["affected_refs"])
+
+
+def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
+    seeded = _seed_formal_memory_block_session()
+    identity = _seed_memory_inspection_identity(seeded["session_id"])
+    identity_model = MemoryRuntimeIdentity(**identity)
+    brainstorm_id = "brainstorm.api"
+    item_id = f"{brainstorm_id}:item:1"
+
+    def _session(items: list[BrainstormItem] | None = None) -> BrainstormSession:
+        return BrainstormSession(
+            brainstorm_id=brainstorm_id,
+            identity=identity_model,
+            prompt="Brainstorm chapter memory updates.",
+            created_by="writer",
+            updated_by="writer",
+            items=items or [],
+        )
+
+    class _FakeBrainstormController:
+        def start_brainstorm_session(self, *, session_id: str, request):
+            assert session_id == seeded["session_id"]
+            assert request.identity == identity_model
+            return _session()
+
+        async def summarize_brainstorm_session(
+            self,
+            *,
+            session_id: str,
+            brainstorm_id: str,
+            request,
+        ):
+            assert session_id == seeded["session_id"]
+            assert brainstorm_id == "brainstorm.api"
+            assert request.identity == identity_model
+            return _session(
+                [
+                    BrainstormItem(
+                        item_id=item_id,
+                        summary_text="Rename chapter to API Storm Gate.",
+                    )
+                ]
+            )
+
+        def update_brainstorm_item(
+            self,
+            *,
+            session_id: str,
+            brainstorm_id: str,
+            item_id: str,
+            request,
+        ):
+            assert session_id == seeded["session_id"]
+            assert brainstorm_id == "brainstorm.api"
+            assert item_id.endswith(":item:1")
+            assert request.status == "confirmed"
+            return _session(
+                [
+                    BrainstormItem(
+                        item_id=item_id,
+                        summary_text="Rename chapter to API Storm Gate.",
+                        status="confirmed",
+                    )
+                ]
+            )
+
+        async def apply_brainstorm_session(
+            self,
+            *,
+            session_id: str,
+            brainstorm_id: str,
+            request,
+        ):
+            assert session_id == seeded["session_id"]
+            assert brainstorm_id == "brainstorm.api"
+            assert request.core_field_changes[0].source_item_id == item_id
+            return BrainstormApplyReceipt(
+                brainstorm_id=brainstorm_id,
+                identity=identity_model,
+                status="applied",
+                dispatch_receipts=[
+                    BrainstormDispatchReceipt(
+                        source_item_id=item_id,
+                        status="applied",
+                        target_ref="chapter.current",
+                        proposal_id="proposal.api.brainstorm",
+                        operation="set_field",
+                        field_path="title",
+                        base_revision="5",
+                        old_value="Formal API Chapter",
+                        new_value="API Storm Gate",
+                    )
+                ],
+                refresh={
+                    "memory_inspection": {
+                        "query_params": {
+                            "branch_head_id": identity["branch_head_id"],
+                            "turn_id": identity["turn_id"],
+                            "runtime_profile_snapshot_id": identity[
+                                "runtime_profile_snapshot_id"
+                            ],
+                        }
+                    }
+                },
+            )
+
+    controller = _FakeBrainstormController()
+    client.app.dependency_overrides[_story_controller] = lambda: controller
+    try:
+        start_response = client.post(
+            f"/api/rp/story-sessions/{seeded['session_id']}/brainstorm/sessions",
+            json={
+                "identity": identity,
+                "actor": "writer",
+                "prompt": "Brainstorm chapter memory updates.",
+            },
+        )
+        summarize_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                f"/brainstorm/sessions/{brainstorm_id}/summarize"
+            ),
+            json={
+                "identity": identity,
+                "actor": "writer",
+                "dry_run_items": [
+                    {"summary_text": "Rename chapter to API Storm Gate."}
+                ],
+            },
+        )
+        update_response = client.patch(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                f"/brainstorm/sessions/{brainstorm_id}/items/{item_id}"
+            ),
+            json={
+                "identity": identity,
+                "actor": "writer",
+                "status": "confirmed",
+            },
+        )
+        apply_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                f"/brainstorm/sessions/{brainstorm_id}/apply"
+            ),
+            json={
+                "identity": identity,
+                "actor": "writer",
+                "item_ids": [item_id],
+                "core_field_changes": [
+                    {
+                        "source_item_id": item_id,
+                        "target_ref": "chapter.current",
+                        "base_revision": "5",
+                        "operation": "set_field",
+                        "field_path": "title",
+                        "new_value": "API Storm Gate",
+                    }
+                ],
+            },
+        )
+    finally:
+        client.app.dependency_overrides.pop(_story_controller, None)
+
+    assert start_response.status_code == 200
+    start_payload = start_response.json()
+    assert start_payload["runtime_workspace_semantics"] == {
+        "material_kind": RuntimeWorkspaceMaterialKind.BRAINSTORM_SESSION.value,
+        "temporary": True,
+        "source_of_truth": False,
+        "core_state_truth": False,
+        "recall_truth": False,
+        "archival_truth": False,
+    }
+    assert "apply_confirmed" in start_payload["allowed_actions"]
+
+    assert summarize_response.status_code == 200
+    assert summarize_response.json()["item"]["items"][0]["item_id"] == item_id
+
+    assert update_response.status_code == 200
+    assert update_response.json()["item"]["items"][0]["status"] == "confirmed"
+
+    assert apply_response.status_code == 200
+    apply_payload = apply_response.json()
+    assert apply_payload["action_metadata"]["origin_kind"] == (
+        "brainstorm_summary_apply"
+    )
+    assert "proposal.api.brainstorm" in apply_payload["action_metadata"][
+        "affected_refs"
+    ]
+    assert apply_payload["receipt"]["dispatch_receipts"][0]["old_value"] == (
+        "Formal API Chapter"
+    )
+    assert apply_payload["refresh"]["memory_inspection"]["query_params"][
+        "branch_head_id"
+    ] == identity["branch_head_id"]
 
 
 def test_story_memory_block_proposal_submission_is_governed(client, monkeypatch):

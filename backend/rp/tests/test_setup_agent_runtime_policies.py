@@ -579,5 +579,6 @@ def test_repair_decision_policy_repeated_recoverable_failure_exhausts_budget():
     )
 
     assert decision["action"] == "finalize_failure"
-    assert decision["finish_reason"] == "tool_recovery_budget_exhausted"
-    assert decision["error"]["type"] == "tool_recovery_budget_exhausted"
+    assert decision["finish_reason"] == "tool_error_unrecoverable"
+    assert decision["error"]["type"] == "tool_error_unrecoverable"
+    assert decision["error"]["details"]["reason"] == "repeated_tool_failure"
