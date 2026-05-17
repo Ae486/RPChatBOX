@@ -1,8 +1,0 @@
-{"file": ".trellis/tasks/05-13-setup-agent-memory-system/prd.md", "reason": "Current task scope, acceptance criteria, and confirmed boundaries for SetupAgent session memory"}
-{"file": ".trellis/tasks/05-13-setup-agent-memory-system/research/confirmed-setup-agent-memory-implementation-plan.md", "reason": "Confirmed implementation plan and module boundaries for the implement slice"}
-{"file": ".trellis/spec/backend/rp-setup-agent-pre-model-context-assembly.md", "reason": "SetupAgent context pipeline boundaries that memory must not collapse"}
-{"file": ".trellis/spec/backend/rp-setup-agent-stage-local-context-governance.md", "reason": "Compaction and draft-ref recovery contracts that memory must complement"}
-{"file": ".trellis/spec/backend/rp-setup-agent-stage-aware-tool-scope.md", "reason": "SetupCapabilityPlan/tool-scope contract for exposing memory tools"}
-{"file": ".trellis/spec/backend/rp-setup-truth-index-foundation.md", "reason": "Accepted setup truth index boundary reused by session memory"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer data-flow checklist for service/tool/runtime integration"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing readback/scoring conventions and avoid unnecessary dependencies"}

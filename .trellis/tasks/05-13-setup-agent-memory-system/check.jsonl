@@ -1,8 +1,0 @@
-{"file": ".trellis/tasks/05-13-setup-agent-memory-system/prd.md", "reason": "Check implementation against accepted task scope and boundaries"}
-{"file": ".trellis/tasks/05-13-setup-agent-memory-system/research/confirmed-setup-agent-memory-implementation-plan.md", "reason": "Check modularity, tool/interface design, and MVP slice criteria"}
-{"file": ".trellis/spec/backend/rp-setup-agent-pre-model-context-assembly.md", "reason": "Verify context/truth/runtime boundaries remain intact"}
-{"file": ".trellis/spec/backend/rp-setup-agent-stage-local-context-governance.md", "reason": "Verify compact recovery and draft-ref behavior are not regressed"}
-{"file": ".trellis/spec/backend/rp-setup-agent-stage-aware-tool-scope.md", "reason": "Verify memory tools are exposed through capability plan correctly"}
-{"file": ".trellis/spec/backend/rp-setup-truth-index-foundation.md", "reason": "Verify accepted truth reads stay separate from editable draft reads"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check data-flow and boundary correctness"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check reuse, dependency, and duplication discipline"}

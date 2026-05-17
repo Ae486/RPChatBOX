@@ -125,6 +125,16 @@ coverage/
 
 # Local AI/agent config
 .claude/settings.local.json
+.codex/
+.agents/
+
+# Local Trellis execution state and task logs.
+# Keep .trellis/scripts, .trellis/spec, workflow, and config in Git; task/session
+# records are local collaboration history rather than product source.
+.trellis/tasks/
+.trellis/workspace/
+.trellis/.session-tasks/
+.trellis/.developer
 
 # Trellis task-local generated artifacts.
 # Keep task PRDs/specs/research in Git. Treat artifacts as local scratch output;
