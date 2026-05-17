@@ -218,7 +218,7 @@
   - retained `tool_outcomes`
   - `compact_summary`
 - The runtime overlay must stay additive and terse. It must not re-serialize the full `context_packet` JSON again.
-- The runtime overlay may mention that `setup.read.draft_refs` should be used when `compact_summary.recovery_hints` points to a draft ref whose details are needed.
+- The runtime overlay may mention that `setup.memory.open` should be used when a visible index ref or `compact_summary.recovery_hints` points to setup details whose full content is needed. Compatibility `setup.memory.read_refs` may remain an internal fallback, but prompt guidance must prefer `setup.memory.search` + `setup.memory.open`.
 
 #### 3.5 Final Request Message Order Is Fixed
 
@@ -317,7 +317,7 @@
 ### 5. Good / Base / Bad Cases
 
 - Good: a large `foundation` turn selects `compact`, keeps only the last few raw messages, carries older discussion through `compact_summary`, injects one thin runtime overlay, and keeps prior-stage truth visible only through committed handoff packets.
-- Good: a compacted turn preserves `compact_summary.recovery_hints` and the model can use `setup.read.draft_refs` for exact current-draft details rather than relying on stale raw discussion.
+- Good: a compacted turn preserves `compact_summary.recovery_hints` and the model can use `setup.memory.open` for exact current-draft details rather than relying on stale raw discussion.
 - Good: a `foundation` turn can use previous `foundation` usage from the same workspace as calibration, while a separate workspace's large previous turn does not force this turn into `compact`.
 - Base: a small `story_config` turn stays `standard`, keeps the short raw history, has no `compact_summary`, and still inserts runtime overlay after the stable system prompt.
 - Bad: stuffing runtime control state into `SetupContextPacket`, duplicating the full packet again inside the runtime overlay, replaying old tool retry process as if it were reusable context, or letting compact prompt output mutate business truth.
@@ -372,4 +372,4 @@
 - Keep request-assembly artifacts transient and outside durable setup cognition snapshots.
 - Scope observed previous usage to the same workspace and setup step before it can influence context-profile selection.
 - Keep compact prompt as a no-tools JSON summarizer inside stage-local context engineering, with deterministic fallback.
-- Use draft refs plus `setup.read.draft_refs` for detail recovery instead of stuffing all draft details into prompt context.
+- Use draft refs plus `setup.memory.open` for agent-facing detail recovery instead of stuffing all draft details into prompt context; keep `setup.memory.read_refs` as a compatibility/internal path only where still required.

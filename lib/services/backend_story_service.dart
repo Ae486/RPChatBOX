@@ -158,6 +158,172 @@ class BackendStoryService {
     );
   }
 
+  Future<RpBrainstormSession> startBrainstormSession({
+    required String sessionId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    Map<String, dynamic> metadata = const {},
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions',
+      data: {
+        'identity': identity,
+        'actor': actor,
+        if (metadata.isNotEmpty) 'metadata': metadata,
+      },
+    );
+    _ensureSuccess(response, action: 'start story brainstorm session');
+    return RpBrainstormSession.fromJson(
+      _mapOrEmpty((response.data as Map)['item']),
+    );
+  }
+
+  Future<RpBrainstormSession> readBrainstormSession({
+    required String sessionId,
+    required String brainstormId,
+    required Map<String, dynamic> identity,
+  }) async {
+    final response = await _controlDio.get(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions/$brainstormId',
+      queryParameters: {
+        'story_id': identity['story_id'],
+        'branch_head_id': identity['branch_head_id'],
+        'turn_id': identity['turn_id'],
+        'runtime_profile_snapshot_id': identity['runtime_profile_snapshot_id'],
+      },
+    );
+    _ensureSuccess(response, action: 'read story brainstorm session');
+    return RpBrainstormSession.fromJson(
+      _mapOrEmpty((response.data as Map)['item']),
+    );
+  }
+
+  Future<RpBrainstormSession> sendBrainstormMessage({
+    required String sessionId,
+    required String brainstormId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    required String prompt,
+    required String modelId,
+    String? providerId,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions/$brainstormId/messages',
+      data: {
+        'identity': identity,
+        'actor': actor,
+        'prompt': prompt,
+        'model_id': modelId,
+        if (providerId != null && providerId.isNotEmpty)
+          'provider_id': providerId,
+      },
+    );
+    _ensureSuccess(response, action: 'send story brainstorm message');
+    return RpBrainstormSession.fromJson(
+      _mapOrEmpty((response.data as Map)['item']),
+    );
+  }
+
+  Future<RpBrainstormSession> summarizeBrainstormSession({
+    required String sessionId,
+    required String brainstormId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    required String modelId,
+    String? providerId,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions/$brainstormId/summarize',
+      data: {
+        'identity': identity,
+        'actor': actor,
+        'model_id': modelId,
+        if (providerId != null && providerId.isNotEmpty)
+          'provider_id': providerId,
+      },
+    );
+    _ensureSuccess(response, action: 'summarize story brainstorm session');
+    return RpBrainstormSession.fromJson(
+      _mapOrEmpty((response.data as Map)['item']),
+    );
+  }
+
+  Future<RpBrainstormSession> continueBrainstormWriting({
+    required String sessionId,
+    required String brainstormId,
+    required Map<String, dynamic> identity,
+    required String actor,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions/$brainstormId/continue-writing',
+      data: {'identity': identity, 'actor': actor},
+    );
+    _ensureSuccess(response, action: 'continue story brainstorm writing');
+    return RpBrainstormSession.fromJson(
+      _mapOrEmpty((response.data as Map)['item']),
+    );
+  }
+
+  Future<RpBrainstormSession> addBrainstormBatchItem({
+    required String sessionId,
+    required String brainstormId,
+    required String batchId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    required String text,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions/$brainstormId/batches/$batchId/items',
+      data: {'identity': identity, 'actor': actor, 'text': text},
+    );
+    _ensureSuccess(response, action: 'add story brainstorm item');
+    return RpBrainstormSession.fromJson(
+      _mapOrEmpty((response.data as Map)['item']),
+    );
+  }
+
+  Future<RpBrainstormSession> updateBrainstormItem({
+    required String sessionId,
+    required String brainstormId,
+    required String batchId,
+    required String itemId,
+    required Map<String, dynamic> identity,
+    required String actor,
+    String? text,
+    String? status,
+  }) async {
+    final response = await _controlDio.patch(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions/$brainstormId/batches/$batchId/items/$itemId',
+      data: {
+        'identity': identity,
+        'actor': actor,
+        if (text != null && text.isNotEmpty) 'text': text,
+        if (status != null && status.isNotEmpty) 'status': status,
+      },
+    );
+    _ensureSuccess(response, action: 'update story brainstorm item');
+    return RpBrainstormSession.fromJson(
+      _mapOrEmpty((response.data as Map)['item']),
+    );
+  }
+
+  Future<RpBrainstormBatchSubmitResponse> submitBrainstormBatch({
+    required String sessionId,
+    required String brainstormId,
+    required String batchId,
+    required Map<String, dynamic> identity,
+    required String actor,
+  }) async {
+    final response = await _controlDio.post(
+      '$_baseUrl/api/rp/story-sessions/$sessionId/brainstorm/sessions/$brainstormId/batches/$batchId/submit',
+      data: {'identity': identity, 'actor': actor},
+    );
+    _ensureSuccess(response, action: 'submit story brainstorm batch');
+    return RpBrainstormBatchSubmitResponse.fromJson(
+      Map<String, dynamic>.from(response.data as Map),
+    );
+  }
+
   Future<RpMemoryActionResponse> reviewRecallMemory({
     required String sessionId,
     required Map<String, dynamic> identity,
@@ -560,4 +726,12 @@ class BackendStoryService {
     }
     throw Exception('Backend $action failed: $statusCode');
   }
+}
+
+Map<String, dynamic> _mapOrEmpty(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    return value.map((key, nested) => MapEntry(key.toString(), nested));
+  }
+  return const {};
 }

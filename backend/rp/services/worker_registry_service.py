@@ -388,6 +388,7 @@ _BOOTSTRAP_RUNTIME_WORKERS: tuple[_BootstrapRuntimeWorkerSpec, ...] = (
         applicable_modes=("longform",),
         owned_domains=(
             "chapter",
+            "character",
             "narrative_progress",
             "plot_thread",
             "foreshadow",

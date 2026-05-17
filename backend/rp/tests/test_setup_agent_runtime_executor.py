@@ -82,7 +82,7 @@ def _turn_input(
         conversation_messages=list(conversation_messages or []),
         context_bundle=runtime_context,
         tool_scope=(
-            tool_scope if tool_scope is not None else ["setup.patch.story_config"]
+            tool_scope if tool_scope is not None else ["setup.stage_entry.write"]
         ),
         metadata={
             "model_name": "gpt-4o-mini",
@@ -99,7 +99,7 @@ def _turn_input(
 def _profile() -> RuntimeProfile:
     return RuntimeProfile(
         profile_id="setup_agent",
-        visible_tool_names=["setup.patch.story_config"],
+        visible_tool_names=["setup.stage_entry.write"],
         max_rounds=8,
         allow_stream=True,
         recovery_policy="setup_agent_v1",
@@ -117,16 +117,56 @@ def test_runtime_executor_respects_explicit_empty_tool_scope():
     assert driver._visible_tool_names(_turn_input(tool_scope=[])) == []
 
 
+def test_runtime_executor_uses_tool_scope_without_removed_agent_tools():
+    driver = _RuntimeRunDriver(
+        llm_service=object(),
+        profile=_profile(),
+        tool_executor=_FakeToolExecutor(),
+    )
+    removed_tools = {
+        "setup.proposal.commit",
+        "setup.question.raise",
+        "setup.discussion.update_state",
+        "setup.chunk.upsert",
+        "setup.truth.write",
+        "setup.patch.story_config",
+        "setup.patch.writing_contract",
+        "setup.patch.foundation_entry",
+        "setup.patch.longform_blueprint",
+        "memory.get_state",
+        "memory.get_summary",
+        "memory.search_recall",
+        "memory.search_archival",
+        "memory.list_versions",
+        "memory.read_provenance",
+        "setup.read.workspace",
+        "setup.read.step_context",
+        "setup.read.draft_refs",
+        "setup.truth_index.search",
+        "setup.truth_index.read_refs",
+    }
+    turn_input = _turn_input(
+        tool_scope=[
+            "setup.stage_entry.write",
+            "setup.memory.search",
+            "setup.memory.open",
+            "setup.memory.read_refs",
+        ]
+    )
+
+    assert removed_tools.isdisjoint(driver._visible_tool_names(turn_input))
+
+
 def _compact_exact_detail_context() -> dict[str, Any]:
     return {
         "compact_summary": {
             "source_fingerprint": "fp-compact",
             "source_message_count": 8,
             "summary_lines": ["Older foundation discussion was compacted."],
-            "draft_refs": ["foundation:magic-law"],
+            "draft_refs": ["stage:world_background:magic-law:summary"],
             "recovery_hints": [
                 {
-                    "ref": "foundation:magic-law",
+                    "ref": "stage:world_background:magic-law:summary",
                     "reason": "Exact magic-law detail lives in the draft.",
                 }
             ],
@@ -134,58 +174,118 @@ def _compact_exact_detail_context() -> dict[str, Any]:
     }
 
 
-def _draft_ref_read_result() -> RuntimeToolResult:
+def _compact_exact_detail_context_without_refs() -> dict[str, Any]:
+    return {
+        "compact_summary": {
+            "source_fingerprint": "fp-compact-no-refs",
+            "source_message_count": 12,
+            "summary_lines": [
+                "Violet Harbor and Mira's contact mechanism were established earlier."
+            ],
+            "draft_refs": [],
+            "recovery_hints": [],
+        },
+    }
+
+
+def _memory_search_result() -> RuntimeToolResult:
     return RuntimeToolResult(
-        call_id="call_read",
-        tool_name="rp_setup__setup.read.draft_refs",
+        call_id="call_search",
+        tool_name="rp_setup__setup.memory.search",
         success=True,
         content_text=json.dumps(
             {
                 "success": True,
                 "items": [
                     {
-                        "ref": "foundation:magic-law",
-                        "found": True,
-                        "payload": {
-                            "content": "Public spellcasting is regulated by guild permits."
-                        },
+                        "ref": "stage:character_design:mira-contact:signal",
+                        "title": "Signal",
+                        "path": "character_design / contact / mira / signal",
+                        "scope": "section",
+                        "navigation_summary": "Exact contact signal and hidden object.",
+                        "message": (
+                            "这是搜索候选，不是事实正文。需要使用该设定时，请 open 此 ref。"
+                        ),
                     }
                 ],
-                "missing_refs": [],
             }
         ),
         structured_payload={
             "content_payload": {
                 "items": [
                     {
-                        "ref": "foundation:magic-law",
-                        "found": True,
+                        "ref": "stage:character_design:mira-contact:signal",
+                        "title": "Signal",
                     }
-                ],
-                "missing_refs": [],
+                ]
+            }
+        },
+    )
+
+
+def _memory_open_result() -> RuntimeToolResult:
+    return RuntimeToolResult(
+        call_id="call_open",
+        tool_name="rp_setup__setup.memory.open",
+        success=True,
+        content_text=json.dumps(
+            {
+                "success": True,
+                "result_type": "content",
+                "opened_ref": "stage:character_design:mira-contact:signal",
+                "opened_path": "character_design / contact / mira / signal",
+                "message": "当前打开的是四级内容节点，以下内容可作为回答或写入草稿的事实依据。",
+                "content": {
+                    "type": "key_value",
+                    "title": "Signal",
+                    "values": {
+                        "signal": "blue lanterns unlock the tidewall lattice",
+                        "object": "copper astrolabe named Lumen Key",
+                    },
+                },
+            }
+        ),
+        structured_payload={
+            "content_payload": {
+                "success": True,
+                "result_type": "content",
+                "opened_ref": "stage:character_design:mira-contact:signal",
+            }
+        },
+    )
+
+
+def _draft_ref_open_result() -> RuntimeToolResult:
+    return RuntimeToolResult(
+        call_id="call_open",
+        tool_name="rp_setup__setup.memory.open",
+        success=True,
+        content_text=json.dumps(
+            {
+                "success": True,
+                "result_type": "content",
+                "opened_ref": "stage:world_background:magic-law:summary",
+                "opened_path": "world_background / rule / magic-law / summary",
+                "message": "当前打开的是四级内容节点，以下内容可作为回答或写入草稿的事实依据。",
+                "content": {
+                    "type": "text",
+                    "title": "Summary",
+                    "text": "Public spellcasting is regulated by guild permits.",
+                },
+            }
+        ),
+        structured_payload={
+            "content_payload": {
+                "success": True,
+                "result_type": "content",
+                "opened_ref": "stage:world_background:magic-law:summary",
             }
         },
     )
 
 
 def _tool_definition(name: str) -> dict[str, Any]:
-    if name.endswith("setup.truth.write"):
-        parameters = {
-            "type": "object",
-            "properties": {
-                "workspace_id": {"type": "string"},
-                "step_id": {"type": "string"},
-                "truth_write": {
-                    "type": "object",
-                    "properties": {
-                        "block_type": {"type": "string"},
-                        "payload": {"type": "object"},
-                    },
-                },
-            },
-        }
-    else:
-        parameters = {"type": "object", "properties": {}}
+    parameters = {"type": "object", "properties": {}}
     return {
         "type": "function",
         "function": {
@@ -249,7 +349,7 @@ def _driver_for_inspection() -> _RuntimeRunDriver:
 
 def _inspection_state(message: dict[str, Any]) -> RpAgentRunState:
     driver = _driver_for_inspection()
-    state = driver._initial_state(_turn_input(tool_scope=["setup.patch.story_config"]))
+    state = driver._initial_state(_turn_input(tool_scope=["setup.stage_entry.write"]))
     state["latest_response"] = {"message": message}
     return state
 
@@ -260,8 +360,8 @@ def test_output_inspector_classifies_pseudo_tool_text_without_public_text():
         {
             "role": "assistant",
             "content": (
-                "tool_code print(default_api.rp_setup__setup.patch.story_config("
-                '{"patch":{"style_rules":["tight"]}}))'
+                "tool_code print(default_api.rp_setup__setup.stage_entry.write("
+                '{"entry_type":"rule","title":"Magic Law","sections":[]}))'
             ),
         }
     )
@@ -281,8 +381,8 @@ def test_output_inspector_routes_repeated_invalid_tool_output_to_active_taxonomy
         {
             "role": "assistant",
             "content": (
-                "tool_code print(default_api.rp_setup__setup.patch.story_config("
-                '{"patch":{"style_rules":["tight"]}}))'
+                "tool_code print(default_api.rp_setup__setup.stage_entry.write("
+                '{"entry_type":"rule","title":"Magic Law","sections":[]}))'
             ),
         }
     )
@@ -301,13 +401,13 @@ def test_output_inspector_mixed_text_and_tool_call_keeps_text_private():
     state = _inspection_state(
         {
             "role": "assistant",
-            "content": "tool_code print(default_api.rp_setup__setup.patch.story_config(...))",
+            "content": "tool_code print(default_api.rp_setup__setup.stage_entry.write(...))",
             "tool_calls": [
                 {
                     "id": "call_patch",
                     "function": {
-                        "name": "rp_setup__setup.patch.story_config",
-                        "arguments": '{"workspace_id":"workspace-1","patch":{"style_rules":["tight"]}}',
+                        "name": "rp_setup__setup.stage_entry.write",
+                        "arguments": '{"workspace_id":"workspace-1","entry_type":"rule","title":"Magic Law","sections":[]}',
                     },
                 }
             ],
@@ -321,7 +421,7 @@ def test_output_inspector_mixed_text_and_tool_call_keeps_text_private():
     assert update["continue_reason"] == "tool_call_batch_pending"
     assert update["output_inspection"]["classification"] == "mixed_text_and_tool_call"
     assert update["pending_tool_calls"][0]["tool_name"] == (
-        "rp_setup__setup.patch.story_config"
+        "rp_setup__setup.stage_entry.write"
     )
 
 
@@ -335,7 +435,7 @@ def test_output_inspector_malformed_tool_call_enters_repair_route():
                 {
                     "id": "call_bad",
                     "function": {
-                        "name": "rp_setup__setup.patch.story_config",
+                        "name": "rp_setup__setup.stage_entry.write",
                         "arguments": "{not valid json",
                     },
                 }
@@ -447,7 +547,7 @@ class _RecordingTextOnlyLLM:
         }
 
 
-class _CompactExactDetailTextThenReadLLM:
+class _CompactExactDetailTextThenOpenLLM:
     def __init__(self) -> None:
         self.round = 0
 
@@ -473,16 +573,14 @@ class _CompactExactDetailTextThenReadLLM:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_read",
+                                    "id": "call_open",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "name": "rp_setup__setup.memory.open",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": "workspace-1",
-                                                "step_id": "foundation",
-                                                "refs": ["foundation:magic-law"],
-                                                "detail": "full",
+                                                "ref": "stage:world_background:magic-law:summary",
                                             }
                                         ),
                                     },
@@ -519,16 +617,14 @@ class _CompactExactDetailReadThenTextLLM:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_read",
+                                    "id": "call_open",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "name": "rp_setup__setup.memory.open",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": "workspace-1",
-                                                "step_id": "foundation",
-                                                "refs": ["foundation:magic-law"],
-                                                "detail": "full",
+                                                "ref": "stage:world_background:magic-law:summary",
                                             }
                                         ),
                                     },
@@ -550,7 +646,7 @@ class _CompactExactDetailReadThenTextLLM:
         }
 
 
-class _CompactExactDetailMutateThenReadLLM:
+class _CompactExactDetailMutateThenOpenLLM:
     def __init__(self) -> None:
         self.round = 0
 
@@ -568,21 +664,13 @@ class _CompactExactDetailMutateThenReadLLM:
                                     "id": "call_write",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.truth.write",
+                                        "name": "rp_setup__setup.stage_entry.write",
                                         "arguments": json.dumps(
                                             {
-                                                "truth_write": {
-                                                    "write_id": "write-1",
-                                                    "target_ref": "foundation:magic-law",
-                                                    "operation": "merge",
-                                                    "payload_json": json.dumps(
-                                                        {
-                                                            "notes": "guessed from compact"
-                                                        }
-                                                    ),
-                                                    "remaining_open_issues": [],
-                                                    "ready_for_review": True,
-                                                }
+                                                "entry_type": "rule",
+                                                "title": "Magic Law",
+                                                "summary": "Guessed from compact.",
+                                                "sections": [],
                                             }
                                         ),
                                     },
@@ -601,16 +689,14 @@ class _CompactExactDetailMutateThenReadLLM:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_read",
+                                    "id": "call_open",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "name": "rp_setup__setup.memory.open",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": "workspace-1",
-                                                "step_id": "foundation",
-                                                "refs": ["foundation:magic-law"],
-                                                "detail": "full",
+                                                "ref": "stage:world_background:magic-law:summary",
                                             }
                                         ),
                                     },
@@ -632,7 +718,7 @@ class _CompactExactDetailMutateThenReadLLM:
         }
 
 
-class _CompactExactDetailMixedReadMutationThenReadLLM:
+class _CompactExactDetailMixedOpenMutationLLM:
     def __init__(self) -> None:
         self.round = 0
 
@@ -647,16 +733,14 @@ class _CompactExactDetailMixedReadMutationThenReadLLM:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_read_mixed",
+                                    "id": "call_open_mixed",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "name": "rp_setup__setup.memory.open",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": "workspace-1",
-                                                "step_id": "foundation",
-                                                "refs": ["foundation:magic-law"],
-                                                "detail": "full",
+                                                "ref": "stage:world_background:magic-law:summary",
                                             }
                                         ),
                                     },
@@ -665,19 +749,13 @@ class _CompactExactDetailMixedReadMutationThenReadLLM:
                                     "id": "call_write_mixed",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.truth.write",
+                                        "name": "rp_setup__setup.stage_entry.write",
                                         "arguments": json.dumps(
                                             {
-                                                "truth_write": {
-                                                    "write_id": "write-1",
-                                                    "target_ref": "foundation:magic-law",
-                                                    "operation": "merge",
-                                                    "payload_json": json.dumps(
-                                                        {"notes": "mixed batch"}
-                                                    ),
-                                                    "remaining_open_issues": [],
-                                                    "ready_for_review": True,
-                                                }
+                                                "entry_type": "rule",
+                                                "title": "Magic Law",
+                                                "summary": "Mixed batch.",
+                                                "sections": [],
                                             }
                                         ),
                                     },
@@ -693,19 +771,63 @@ class _CompactExactDetailMixedReadMutationThenReadLLM:
                     {
                         "message": {
                             "role": "assistant",
+                            "content": "I received the opened draft detail and wrote the update.",
+                        }
+                    }
+                ]
+            }
+
+
+class _ExactSessionDetailSearchThenOpenLLM:
+    def __init__(self) -> None:
+        self.round = 0
+
+    async def chat_completion(self, request):
+        self.round += 1
+        if self.round == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_read",
+                                    "id": "call_search",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.read.draft_refs",
+                                        "name": "rp_setup__setup.memory.search",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": "workspace-1",
-                                                "step_id": "foundation",
-                                                "refs": ["foundation:magic-law"],
-                                                "detail": "full",
+                                                "query": "Mira Violet Harbor 确切暗号 物件",
+                                                "limit": 5,
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        if self.round == 2:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_open",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup.memory.open",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": "workspace-1",
+                                                "ref": "stage:character_design:mira-contact:signal",
                                             }
                                         ),
                                     },
@@ -720,7 +842,10 @@ class _CompactExactDetailMixedReadMutationThenReadLLM:
                 {
                     "message": {
                         "role": "assistant",
-                        "content": "I separated read observation from mutation.",
+                        "content": (
+                            "暗号是 blue lanterns unlock the tidewall lattice，"
+                            "藏在 copper astrolabe named Lumen Key 里。"
+                        ),
                     }
                 }
             ]
@@ -742,14 +867,16 @@ class _ToolThenTextLLM:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_patch",
+                                    "id": "call_stage_entry",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.patch.story_config",
+                                        "name": "rp_setup__setup.stage_entry.write",
                                         "arguments": json.dumps(
                                             {
-                                                "workspace_id": "workspace-1",
-                                                "patch": {"style_rules": ["tight"]},
+                                                "entry_type": "rule",
+                                                "title": "Magic Law",
+                                                "summary": "Public spellcasting requires permits.",
+                                                "sections": [],
                                             }
                                         ),
                                     },
@@ -771,110 +898,6 @@ class _ToolThenTextLLM:
         }
 
 
-class _SlimTruthWriteThenTextLLM:
-    def __init__(self) -> None:
-        self.round = 0
-        self.requests: list[Any] = []
-
-    async def chat_completion(self, request):
-        self.requests.append(request)
-        self.round += 1
-        if self.round == 1:
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_truth_write",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "rp_setup__setup.truth.write",
-                                        "arguments": json.dumps(
-                                            {
-                                                "truth_write": {
-                                                    "write_id": "write-1",
-                                                    "target_ref": "",
-                                                    "operation": "merge",
-                                                    "payload_json": json.dumps(
-                                                        {"notes": "draft notes"}
-                                                    ),
-                                                    "remaining_open_issues": [],
-                                                    "ready_for_review": True,
-                                                }
-                                            }
-                                        ),
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ]
-            }
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "Wrote draft truth.",
-                    }
-                }
-            ]
-        }
-
-
-class _InvalidPayloadJsonTruthWriteLLM:
-    def __init__(self) -> None:
-        self.round = 0
-
-    async def chat_completion(self, request):
-        self.round += 1
-        if self.round == 1:
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_truth_write",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "rp_setup__setup.truth.write",
-                                        "arguments": json.dumps(
-                                            {
-                                                "truth_write": {
-                                                    "write_id": "write-1",
-                                                    "target_ref": "",
-                                                    "operation": "merge",
-                                                    "payload_json": "{not valid json",
-                                                    "remaining_open_issues": [],
-                                                    "ready_for_review": True,
-                                                }
-                                            }
-                                        ),
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ]
-            }
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "I need to repair the malformed payload JSON.",
-                    }
-                }
-            ]
-        }
-
-
 class _SchemaRepairLLM:
     def __init__(self) -> None:
         self.round = 0
@@ -886,8 +909,10 @@ class _SchemaRepairLLM:
             arguments = {"workspace_id": "workspace-1"}
         elif self.round == 2:
             arguments = {
-                "workspace_id": "workspace-1",
-                "patch": {"style_rules": ["tight"]},
+                "entry_type": "rule",
+                "title": "Magic Law",
+                "summary": "Public spellcasting requires permits.",
+                "sections": [],
             }
         else:
             return {
@@ -911,7 +936,7 @@ class _SchemaRepairLLM:
                                 "id": f"call_{self.round}",
                                 "type": "function",
                                 "function": {
-                                    "name": "rp_setup__setup.patch.story_config",
+                                    "name": "rp_setup__setup.stage_entry.write",
                                     "arguments": json.dumps(arguments),
                                 },
                             }
@@ -966,7 +991,7 @@ class _AskUserAfterFailureLLM:
                                     "id": "call_ask_user",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.patch.story_config",
+                                        "name": "rp_setup__setup.stage_entry.write",
                                         "arguments": json.dumps(
                                             {"workspace_id": "workspace-1"}
                                         ),
@@ -1007,7 +1032,7 @@ class _ExplainInsteadOfRepairLLM:
                                     "id": "call_bad_patch",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.patch.story_config",
+                                        "name": "rp_setup__setup.stage_entry.write",
                                         "arguments": json.dumps(
                                             {"workspace_id": "workspace-1"}
                                         ),
@@ -1044,7 +1069,7 @@ class _RepeatedQuestionLLM:
         }
 
 
-class _CommitTooEarlyThenQuestionLLM:
+class _StageEntryFailureThenDiscussionLLM:
     def __init__(self) -> None:
         self.round = 0
 
@@ -1059,68 +1084,16 @@ class _CommitTooEarlyThenQuestionLLM:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_commit",
+                                    "id": "call_stage_entry",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.proposal.commit",
+                                        "name": "rp_setup__setup.stage_entry.write",
                                         "arguments": json.dumps(
                                             {
-                                                "workspace_id": "workspace-1",
-                                                "step_id": "story_config",
-                                                "target_draft_refs": [
-                                                    "draft:story_config"
-                                                ],
-                                            }
-                                        ),
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ]
-            }
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "We still have unresolved setup questions before commit. Which runtime preset do you want to use?",
-                    }
-                }
-            ]
-        }
-
-
-class _TruthWriteFailureThenDiscussionLLM:
-    def __init__(self) -> None:
-        self.round = 0
-
-    async def chat_completion(self, request):
-        self.round += 1
-        if self.round == 1:
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_truth_write",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "rp_setup__setup.truth.write",
-                                        "arguments": json.dumps(
-                                            {
-                                                "workspace_id": "workspace-1",
-                                                "step_id": "story_config",
-                                                "truth_write": {
-                                                    "write_id": "write-1",
-                                                    "current_step": "story_config",
-                                                    "block_type": "story_config",
-                                                    "operation": "merge",
-                                                    "payload": {"notes": "draft notes"},
-                                                },
+                                                "entry_type": "rule",
+                                                "title": "Magic Law",
+                                                "summary": "Draft notes.",
+                                                "sections": [],
                                             }
                                         ),
                                     },
@@ -1151,7 +1124,7 @@ class _StreamToolLLM:
         if self.round == 1:
             yield 'data: {"type":"text_delta","delta":"Checking draft."}\n\n'
             yield (
-                'data: {"type":"tool_call","tool_calls":[{"id":"call_patch","function":{"name":"rp_setup__setup.patch.story_config","arguments":"{\\"workspace_id\\":\\"workspace-1\\",\\"patch\\":{\\"style_rules\\":[\\"tight\\"]}}"}}]}\n\n'
+                'data: {"type":"tool_call","tool_calls":[{"id":"call_stage_entry","function":{"name":"rp_setup__setup.stage_entry.write","arguments":"{\\"entry_type\\":\\"rule\\",\\"title\\":\\"Magic Law\\",\\"sections\\":[]}"}}]}\n\n'
             )
             yield 'data: {"type":"done"}\n\n'
             return
@@ -1209,8 +1182,8 @@ class _PseudoToolCodeTextLLM:
                     "message": {
                         "role": "assistant",
                         "content": (
-                            "tool_code print(default_api.rp_setup__setup.truth.write("
-                            '{"truth_write":{"write_id":"write-1"}}))'
+                            "tool_code print(default_api.rp_setup__setup.stage_entry.write("
+                            '{"entry_type":"rule","title":"Magic Law"}))'
                         ),
                     }
                 }
@@ -1226,7 +1199,7 @@ class _PseudoToolCodeStreamLLM:
         self.round += 1
         yield 'data: {"type":"text_delta","delta":"tool_code print(default_api."}\n\n'
         yield (
-            'data: {"type":"text_delta","delta":"rp_setup__setup.truth.write({\\"truth_write\\":{\\"write_id\\":\\"write-1\\"}}))"}\n\n'
+            'data: {"type":"text_delta","delta":"rp_setup__setup.stage_entry.write({\\"entry_type\\":\\"rule\\",\\"title\\":\\"Magic Law\\"}))"}\n\n'
         )
         yield 'data: {"type":"done"}\n\n'
 
@@ -1282,7 +1255,7 @@ async def test_runtime_executor_places_runtime_overlay_after_system_prompt():
             },
             "tool_outcomes": [
                 {
-                    "tool_name": "rp_setup__setup.read.step_context",
+                    "tool_name": "rp_setup__setup.memory.open",
                     "success": True,
                     "summary": "Read current story config draft",
                     "updated_refs": ["draft:story_config"],
@@ -1349,7 +1322,7 @@ async def test_runtime_executor_places_runtime_overlay_after_system_prompt():
     assert messages[0].content == "You are SetupAgent."
     assert messages[1].role == "system"
     assert "Runtime turn state follows as JSON." in messages[1].content
-    assert "setup.read.draft_refs" in messages[1].content
+    assert "setup.memory.open" in messages[1].content
     assert "context_packet" not in messages[1].content
     assert "context_report" not in messages[1].content
     assert messages[2].role == "user"
@@ -1370,41 +1343,35 @@ async def test_runtime_executor_places_runtime_overlay_after_system_prompt():
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_guards_text_until_compact_draft_ref_is_read():
-    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
-    llm = _CompactExactDetailTextThenReadLLM()
+async def test_runtime_executor_does_not_guard_text_for_memory_recall():
+    tool_executor = _FakeToolExecutor()
+    llm = _CompactExactDetailTextThenOpenLLM()
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
     result = await executor.run(
         _turn_input(
             user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
             context_bundle=_compact_exact_detail_context(),
-            tool_scope=["setup.read.draft_refs"],
+            tool_scope=["setup.memory.open"],
         ),
         _profile(),
         llm_service=llm,
     )
 
     assert result.status == "completed"
-    assert llm.round == 3
-    assert result.assistant_text == (
-        "Read result says the exact magic-law content is guild permits."
+    assert llm.round == 1
+    assert result.assistant_text == "The exact magic-law content is permits only."
+    assert tool_executor.calls == []
+    assert "action_expectation" not in result.structured_payload
+    assert result.structured_payload["completion_guard"]["reason"] == (
+        "terminal_output_allowed"
     )
-    assert len(tool_executor.calls) == 1
-    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup.read.draft_refs"
-    assert result.structured_payload["action_expectation"] is None
-    trace = result.structured_payload["loop_trace"]
-    assert any(
-        item["decision"].get("continue_reason") == "completion_guard_retry"
-        and item["decision"].get("action_expectation", {}).get("expectation_type")
-        == "read_draft_refs"
-        for item in trace
-    )
+    assert "required_draft_ref_read_missing" not in result.warnings
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_clears_compact_expectation_after_read_observation():
-    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
+async def test_runtime_executor_allows_voluntary_memory_open_observation():
+    tool_executor = _FakeToolExecutor(results=[_draft_ref_open_result()])
     llm = _CompactExactDetailReadThenTextLLM()
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
@@ -1412,7 +1379,7 @@ async def test_runtime_executor_clears_compact_expectation_after_read_observatio
         _turn_input(
             user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
             context_bundle=_compact_exact_detail_context(),
-            tool_scope=["setup.read.draft_refs"],
+            tool_scope=["setup.memory.open"],
         ),
         _profile(),
         llm_service=llm,
@@ -1421,76 +1388,111 @@ async def test_runtime_executor_clears_compact_expectation_after_read_observatio
     assert result.status == "completed"
     assert llm.round == 2
     assert len(tool_executor.calls) == 1
-    assert result.structured_payload["action_expectation"] is None
+    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup.memory.open"
+    assert "action_expectation" not in result.structured_payload
     assert "required_draft_ref_read_missing" not in result.warnings
     trace = result.structured_payload["loop_trace"]
-    assert any(
-        item["decision"].get("action_expectation", {}).get("expectation_type")
-        == "read_draft_refs"
-        for item in trace
-    )
-    assert trace[-1]["decision"].get("action_expectation") is None
+    assert all("action_expectation" not in item["decision"] for item in trace)
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_blocks_mutation_before_compact_draft_ref_read():
-    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
-    llm = _CompactExactDetailMutateThenReadLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
-            context_bundle=_compact_exact_detail_context(),
-            tool_scope=["setup.truth.write", "setup.read.draft_refs"],
-        ),
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    assert llm.round == 3
-    executed_tool_names = [call.tool_name for call, _ in tool_executor.calls]
-    assert executed_tool_names == ["rp_setup__setup.read.draft_refs"]
-    assert "required_draft_ref_read_missing" in result.warnings
-    trace = result.structured_payload["loop_trace"]
-    assert any(
-        item["decision"].get("continue_reason") == "completion_guard_retry"
-        and item["action"].get("tool_names") == ["rp_setup__setup.truth.write"]
-        for item in trace
-    )
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_blocks_mixed_read_and_mutation_batch_before_observation():
-    tool_executor = _FakeToolExecutor(results=[_draft_ref_read_result()])
-    llm = _CompactExactDetailMixedReadMutationThenReadLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
-            context_bundle=_compact_exact_detail_context(),
-            tool_scope=["setup.truth.write", "setup.read.draft_refs"],
-        ),
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    assert llm.round == 3
-    executed_tool_names = [call.tool_name for call, _ in tool_executor.calls]
-    assert executed_tool_names == ["rp_setup__setup.read.draft_refs"]
-    trace = result.structured_payload["loop_trace"]
-    assert any(
-        item["decision"].get("continue_reason") == "completion_guard_retry"
-        and item["action"].get("tool_names")
-        == [
-            "rp_setup__setup.read.draft_refs",
-            "rp_setup__setup.truth.write",
+async def test_runtime_executor_does_not_block_mutation_for_memory_expectation():
+    tool_executor = _FakeToolExecutor(
+        results=[
+            RuntimeToolResult(
+                call_id="call_write",
+                tool_name="rp_setup__setup.stage_entry.write",
+                success=True,
+                content_text='{"success": true}',
+                error_code=None,
+            ),
+            _draft_ref_open_result(),
         ]
-        for item in trace
     )
+    llm = _CompactExactDetailMutateThenOpenLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+            context_bundle=_compact_exact_detail_context(),
+            tool_scope=["setup.stage_entry.write", "setup.memory.open"],
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.round == 3
+    executed_tool_names = [call.tool_name for call, _ in tool_executor.calls]
+    assert executed_tool_names == [
+        "rp_setup__setup.stage_entry.write",
+        "rp_setup__setup.memory.open",
+    ]
+    assert "required_draft_ref_read_missing" not in result.warnings
+    trace = result.structured_payload["loop_trace"]
+    assert all("action_expectation" not in item["decision"] for item in trace)
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_does_not_block_mixed_memory_open_and_mutation_batch():
+    tool_executor = _FakeToolExecutor(results=[_draft_ref_open_result()])
+    llm = _CompactExactDetailMixedOpenMutationLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="之前写入草稿的 magic-law 完整内容是什么？",
+            context_bundle=_compact_exact_detail_context(),
+            tool_scope=["setup.stage_entry.write", "setup.memory.open"],
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.round == 2
+    executed_tool_names = [call.tool_name for call, _ in tool_executor.calls]
+    assert executed_tool_names == [
+        "rp_setup__setup.memory.open",
+        "rp_setup__setup.stage_entry.write",
+    ]
+    trace = result.structured_payload["loop_trace"]
+    assert all("action_expectation" not in item["decision"] for item in trace)
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_allows_voluntary_search_then_open_for_exact_session_detail():
+    tool_executor = _FakeToolExecutor(
+        results=[_memory_search_result(), _memory_open_result()]
+    )
+    llm = _ExactSessionDetailSearchThenOpenLLM()
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        _turn_input(
+            user_prompt="Mira 与 Violet Harbor 接头时的确切暗号是什么？她把暗号藏在哪个物件里？",
+            context_bundle=_compact_exact_detail_context_without_refs(),
+            tool_scope=["setup.memory.search", "setup.memory.open"],
+        ),
+        _profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert llm.round == 3
+    assert result.assistant_text == (
+        "暗号是 blue lanterns unlock the tidewall lattice，"
+        "藏在 copper astrolabe named Lumen Key 里。"
+    )
+    executed_tool_names = [call.tool_name for call, _ in tool_executor.calls]
+    assert executed_tool_names == [
+        "rp_setup__setup.memory.search",
+        "rp_setup__setup.memory.open",
+    ]
+    trace = result.structured_payload["loop_trace"]
+    assert all("action_expectation" not in item["decision"] for item in trace)
+    assert "action_expectation" not in result.structured_payload
 
 
 @pytest.mark.asyncio
@@ -1502,8 +1504,8 @@ async def test_runtime_executor_only_sends_tool_schemas_from_turn_scope():
     result = await executor.run(
         _turn_input(
             tool_scope=[
-                "setup.read.workspace",
-                "setup.patch.story_config",
+                "setup.memory.search",
+                "setup.stage_entry.write",
             ]
         ),
         _profile(),
@@ -1514,13 +1516,13 @@ async def test_runtime_executor_only_sends_tool_schemas_from_turn_scope():
     assert llm.requests
     tool_names = [item["function"]["name"] for item in (llm.requests[0].tools or [])]
     assert tool_names == [
-        "rp_setup__setup.read.workspace",
-        "rp_setup__setup.patch.story_config",
+        "rp_setup__setup.memory.search",
+        "rp_setup__setup.stage_entry.write",
     ]
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_exposes_slim_strict_truth_write_schema_only_for_strict_enabled_model():
+async def test_runtime_executor_does_not_send_removed_draft_tool_schemas():
     tool_executor = _FakeToolExecutor()
     llm = _RecordingTextOnlyLLM()
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
@@ -1528,8 +1530,8 @@ async def test_runtime_executor_exposes_slim_strict_truth_write_schema_only_for_
     result = await executor.run(
         _turn_input(
             tool_scope=[
-                "setup.truth.write",
-                "setup.patch.story_config",
+                "setup.stage_entry.write",
+                "setup.memory.search",
             ]
         ),
         _profile(),
@@ -1537,100 +1539,13 @@ async def test_runtime_executor_exposes_slim_strict_truth_write_schema_only_for_
     )
 
     assert result.status == "completed"
-    tools = {
-        item["function"]["name"]: item["function"]
-        for item in (llm.requests[0].tools or [])
+    tool_names = {item["function"]["name"] for item in (llm.requests[0].tools or [])}
+    assert tool_names == {
+        "rp_setup__setup.stage_entry.write",
+        "rp_setup__setup.memory.search",
     }
-    truth_write = tools["rp_setup__setup.truth.write"]
-    patch_story_config = tools["rp_setup__setup.patch.story_config"]
-
-    assert truth_write["strict"] is True
-    parameters = truth_write["parameters"]
-    assert parameters["additionalProperties"] is False
-    assert parameters["required"] == ["truth_write"]
-    assert set(parameters["properties"]) == {"truth_write"}
-    nested = parameters["properties"]["truth_write"]
-    assert nested["additionalProperties"] is False
-    assert "payload_json" in nested["required"]
-    assert "payload_json" in nested["properties"]
-    assert nested["properties"]["target_ref"]["type"] == "string"
-    assert "current_step" not in nested["properties"]
-    assert "block_type" not in nested["properties"]
-    assert "workspace_id" not in parameters["properties"]
-    assert "step_id" not in parameters["properties"]
-    assert "strict" not in patch_story_config
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_exposes_slim_truth_write_schema_without_strict_for_other_models():
-    tool_executor = _FakeToolExecutor()
-    llm = _RecordingTextOnlyLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-    turn_input = _turn_input(tool_scope=["setup.truth.write"])
-    turn_input.metadata["model_name"] = "glm-5"
-
-    result = await executor.run(
-        turn_input,
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    function = (llm.requests[0].tools or [])[0]["function"]
-    parameters = function["parameters"]
-    assert "strict" not in function
-    assert parameters["additionalProperties"] is False
-    assert parameters["required"] == ["truth_write"]
-    assert set(parameters["properties"]) == {"truth_write"}
-    truth_write = parameters["properties"]["truth_write"]
-    assert truth_write["additionalProperties"] is False
-    assert "payload_json" in truth_write["required"]
-    assert "payload_json" in truth_write["properties"]
-    assert truth_write["properties"]["target_ref"]["type"] == "string"
-    assert "current_step" not in truth_write["properties"]
-    assert "block_type" not in truth_write["properties"]
-    assert "workspace_id" not in parameters["properties"]
-    assert "step_id" not in parameters["properties"]
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_appends_stage_specific_truth_write_hint_to_tool_description():
-    tool_executor = _FakeToolExecutor()
-    llm = _RecordingTextOnlyLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            tool_scope=["setup.truth.write"],
-            context_bundle={
-                "current_step": "foundation",
-                "current_stage": "world_background",
-                "context_packet": {
-                    "workspace_id": "workspace-1",
-                    "current_step": "foundation",
-                    "current_stage": "world_background",
-                    "current_draft_snapshot": {},
-                },
-            },
-        ),
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    truth_write = {
-        item["function"]["name"]: item["function"]
-        for item in (llm.requests[0].tools or [])
-    }["rp_setup__setup.truth.write"]
-    description = truth_write["description"]
-    assert (
-        "Minimal single-entry keys inside payload_json: entry_id, entry_type, semantic_path, title."
-        in description
-    )
-    assert (
-        "Preferred entry_type values for this stage: world_rule, location, faction, race, history."
-        in description
-    )
+    assert "rp_setup__setup.truth.write" not in tool_names
+    assert "rp_setup__setup.patch.story_config" not in tool_names
 
 
 @pytest.mark.asyncio
@@ -1642,9 +1557,9 @@ async def test_runtime_executor_removes_inherited_strict_for_non_strict_models()
         tool_executor=tool_executor,
         profile=_profile(),
     )
-    turn_input = _turn_input(tool_scope=["setup.truth.write"])
+    turn_input = _turn_input(tool_scope=["setup.stage_entry.write"])
     turn_input.metadata["model_name"] = "gemini-2.5-flash"
-    inherited_strict_tool = _tool_definition("rp_setup__setup.truth.write")
+    inherited_strict_tool = _tool_definition("rp_setup__setup.stage_entry.write")
     inherited_strict_tool["function"]["strict"] = True
 
     tools = driver._model_facing_tool_definitions(
@@ -1653,12 +1568,11 @@ async def test_runtime_executor_removes_inherited_strict_for_non_strict_models()
     )
 
     function = tools[0]["function"]
-    assert "strict" not in function
-    assert function["parameters"]["required"] == ["truth_write"]
+    assert function["strict"] is True
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_uses_capability_plan_for_truth_write_schema_mode():
+async def test_runtime_executor_ignores_removed_truth_write_schema_mode():
     tool_executor = _FakeToolExecutor()
     llm = _RecordingTextOnlyLLM()
     driver = _RuntimeRunDriver(
@@ -1666,11 +1580,11 @@ async def test_runtime_executor_uses_capability_plan_for_truth_write_schema_mode
         tool_executor=tool_executor,
         profile=_profile(),
     )
-    turn_input = _turn_input(tool_scope=["setup.truth.write"])
+    turn_input = _turn_input(tool_scope=["setup.stage_entry.write"])
     turn_input.metadata["capability_plan"] = {
         "model_schema_modes": {"setup.truth.write": "provider_default"}
     }
-    inherited_tool = _tool_definition("rp_setup__setup.truth.write")
+    inherited_tool = _tool_definition("rp_setup__setup.stage_entry.write")
     inherited_parameters = inherited_tool["function"]["parameters"]
 
     tools = driver._model_facing_tool_definitions(
@@ -1690,7 +1604,7 @@ async def test_runtime_executor_filters_pseudo_tool_code_text_from_final_answer(
 
     result = await executor.run(
         _turn_input(
-            tool_scope=["setup.truth.write"],
+            tool_scope=["setup.stage_entry.write"],
             context_bundle={
                 "current_step": "foundation",
                 "current_stage": "world_background",
@@ -1730,7 +1644,7 @@ async def test_runtime_executor_stream_filters_pseudo_tool_code_text_from_typed_
     async for chunk in executor.run_stream(
         _turn_input(
             stream=True,
-            tool_scope=["setup.truth.write"],
+            tool_scope=["setup.stage_entry.write"],
             context_bundle={
                 "current_step": "foundation",
                 "current_stage": "world_background",
@@ -1756,167 +1670,12 @@ async def test_runtime_executor_stream_filters_pseudo_tool_code_text_from_typed_
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_falls_back_to_full_truth_write_schema_without_runtime_defaults():
-    tool_executor = _FakeToolExecutor()
-    llm = _RecordingTextOnlyLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-    turn_input = _turn_input(
-        tool_scope=["setup.truth.write"],
-        context_bundle={
-            "current_step": "unknown_step",
-            "context_packet": {
-                "current_step": "unknown_step",
-            },
-        },
-    )
-
-    result = await executor.run(
-        turn_input,
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    function = (llm.requests[0].tools or [])[0]["function"]
-    parameters = function["parameters"]
-    assert "strict" not in function
-    assert "workspace_id" in parameters["properties"]
-    assert "step_id" in parameters["properties"]
-    truth_write = parameters["properties"]["truth_write"]
-    assert "block_type" in truth_write["properties"]
-    assert "payload_json" not in truth_write["properties"]
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_rehydrates_slim_truth_write_arguments_before_execution():
-    tool_executor = _FakeToolExecutor()
-    llm = _SlimTruthWriteThenTextLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(tool_scope=["setup.truth.write"]),
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    assert tool_executor.calls
-    call, _visible_tool_names = tool_executor.calls[0]
-    assert call.tool_name == "rp_setup__setup.truth.write"
-    assert call.arguments["workspace_id"] == "workspace-1"
-    assert call.arguments["step_id"] == "story_config"
-    assert call.arguments["user_edit_delta_ids"] == []
-    truth_write = call.arguments["truth_write"]
-    assert truth_write["current_step"] == "story_config"
-    assert truth_write["block_type"] == "story_config"
-    assert truth_write["payload"] == {"notes": "draft notes"}
-    assert "payload_json" not in truth_write
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_rehydrates_stage_truth_write_arguments_before_execution():
-    tool_executor = _FakeToolExecutor()
-    llm = _SlimTruthWriteThenTextLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            tool_scope=["setup.truth.write"],
-            context_bundle={
-                "current_step": "foundation",
-                "current_stage": "world_background",
-                "context_packet": {
-                    "workspace_id": "workspace-1",
-                    "current_step": "foundation",
-                    "current_stage": "world_background",
-                    "current_draft_snapshot": {},
-                    "user_edit_deltas": [{"delta_id": "delta-stage-1"}],
-                },
-            },
-        ),
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    assert tool_executor.calls
-    truth_write = tool_executor.calls[0][0].arguments["truth_write"]
-    assert tool_executor.calls[0][0].arguments["step_id"] == "foundation"
-    assert tool_executor.calls[0][0].arguments["user_edit_delta_ids"] == [
-        "delta-stage-1"
-    ]
-    assert truth_write["current_step"] == "world_background"
-    assert truth_write["block_type"] == "stage_draft"
-    assert truth_write["stage_id"] == "world_background"
-    assert truth_write["payload"] == {"notes": "draft notes"}
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_normalizes_empty_slim_truth_write_target_ref_to_none():
-    tool_executor = _FakeToolExecutor()
-    llm = _SlimTruthWriteThenTextLLM()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(tool_scope=["setup.truth.write"]),
-        _profile(),
-        llm_service=llm,
-    )
-
-    assert result.status == "completed"
-    truth_write = tool_executor.calls[0][0].arguments["truth_write"]
-    assert truth_write["target_ref"] is None
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_keeps_invalid_payload_json_as_tool_failure():
-    tool_executor = _FakeToolExecutor(
-        results=[
-            RuntimeToolResult(
-                call_id="call_truth_write",
-                tool_name="rp_setup__setup.truth.write",
-                success=False,
-                content_text=json.dumps(
-                    {
-                        "code": "schema_validation_failed",
-                        "details": {
-                            "errors": [
-                                {
-                                    "type": "extra_forbidden",
-                                    "loc": ["truth_write", "payload_json"],
-                                }
-                            ]
-                        },
-                    }
-                ),
-                error_code="SCHEMA_VALIDATION_FAILED",
-            )
-        ]
-    )
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(tool_scope=["setup.truth.write"]),
-        _profile(),
-        llm_service=_InvalidPayloadJsonTruthWriteLLM(),
-    )
-
-    assert result.status == "failed"
-    assert tool_executor.calls
-    truth_write = tool_executor.calls[0][0].arguments["truth_write"]
-    assert truth_write["payload_json"] == "{not valid json"
-    assert "payload" not in truth_write
-    assert result.tool_results[0].success is False
-    assert result.tool_results[0].error_code == "SCHEMA_VALIDATION_FAILED"
-
-
-@pytest.mark.asyncio
 async def test_runtime_executor_executes_tool_and_continues():
     tool_executor = _FakeToolExecutor(
         results=[
             RuntimeToolResult(
-                call_id="call_patch",
-                tool_name="rp_setup__setup.patch.story_config",
+                call_id="call_stage_entry",
+                tool_name="rp_setup__setup.stage_entry.write",
                 success=True,
                 content_text='{"success": true}',
                 error_code=None,
@@ -1933,9 +1692,9 @@ async def test_runtime_executor_executes_tool_and_continues():
     assert result.assistant_text == "Tool succeeded and I finished the answer."
     assert len(result.tool_invocations) == 1
     assert len(result.tool_results) == 1
-    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup.patch.story_config"
+    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup.stage_entry.write"
     assert result.structured_payload["tool_outcomes"][0]["tool_name"] == (
-        "rp_setup__setup.patch.story_config"
+        "rp_setup__setup.stage_entry.write"
     )
     assert result.structured_payload["tool_outcomes"][0]["success"] is True
     continue_reasons = [
@@ -1952,14 +1711,14 @@ async def test_runtime_executor_allows_one_schema_repair_retry():
         results=[
             RuntimeToolResult(
                 call_id="call_1",
-                tool_name="rp_setup__setup.patch.story_config",
+                tool_name="rp_setup__setup.stage_entry.write",
                 success=False,
                 content_text='{"error":{"code":"schema_validation_failed"}}',
                 error_code="SCHEMA_VALIDATION_FAILED",
             ),
             RuntimeToolResult(
                 call_id="call_2",
-                tool_name="rp_setup__setup.patch.story_config",
+                tool_name="rp_setup__setup.stage_entry.write",
                 success=True,
                 content_text='{"success": true}',
                 error_code=None,
@@ -1984,7 +1743,7 @@ async def test_runtime_executor_switches_to_ask_user_when_failure_requires_user_
         results=[
             RuntimeToolResult(
                 call_id="call_ask_user",
-                tool_name="rp_setup__setup.patch.story_config",
+                tool_name="rp_setup__setup.stage_entry.write",
                 success=False,
                 content_text=json.dumps(
                     {
@@ -1992,7 +1751,7 @@ async def test_runtime_executor_switches_to_ask_user_when_failure_requires_user_
                         "message": "Need user-selected style rules before patching story config.",
                         "details": {
                             "ask_user": True,
-                            "errors": [{"type": "missing", "loc": ["patch"]}],
+                            "errors": [{"type": "missing", "loc": ["title"]}],
                         },
                     }
                 ),
@@ -2020,14 +1779,14 @@ async def test_runtime_executor_blocks_false_success_when_repair_obligation_is_u
         results=[
             RuntimeToolResult(
                 call_id="call_bad_patch",
-                tool_name="rp_setup__setup.patch.story_config",
+                tool_name="rp_setup__setup.stage_entry.write",
                 success=False,
                 content_text=json.dumps(
                     {
                         "code": "schema_validation_failed",
-                        "message": "Patch payload is missing.",
+                        "message": "Stage entry title is missing.",
                         "details": {
-                            "errors": [{"type": "missing", "loc": ["patch"]}],
+                            "errors": [{"type": "missing", "loc": ["title"]}],
                         },
                     }
                 ),
@@ -2133,159 +1892,17 @@ async def test_runtime_executor_prefers_runtime_max_rounds_over_langgraph_recurs
 
 
 @pytest.mark.asyncio
-async def test_runtime_executor_blocks_agent_initiated_commit_when_blocking_questions_remain():
-    tool_executor = _FakeToolExecutor()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            user_prompt="Continue setup discussion.",
-            tool_scope=["setup.proposal.commit"],
-            context_bundle={
-                "blocking_open_question_count": 1,
-                "open_question_texts": ["Need runtime preset choice"],
-            },
-        ),
-        _profile(),
-        llm_service=_CommitTooEarlyThenQuestionLLM(),
-    )
-
-    assert result.status == "completed"
-    assert result.finish_reason == "awaiting_user_input"
-    assert tool_executor.calls == []
-    assert "commit_proposal_blocked" in result.warnings
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_allows_user_requested_reproposal_after_rejection():
-    tool_executor = _FakeToolExecutor(
-        results=[
-            RuntimeToolResult(
-                call_id="call_commit",
-                tool_name="rp_setup__setup.proposal.commit",
-                success=True,
-                content_text='{"success": true, "warnings": ["previous_proposal_rejected"]}',
-                structured_payload={
-                    "result_payload": {"warnings": ["previous_proposal_rejected"]}
-                },
-            )
-        ]
-    )
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            user_prompt="Try committing again.",
-            tool_scope=["setup.proposal.commit"],
-            context_bundle={
-                "last_proposal_status": "rejected",
-                "blocking_open_question_count": 0,
-            },
-        ),
-        _profile(),
-        llm_service=_CommitTooEarlyThenQuestionLLM(),
-    )
-
-    assert result.status == "completed"
-    assert result.finish_reason == "awaiting_user_input"
-    assert len(tool_executor.calls) == 1
-    assert "commit_proposal_blocked" not in result.warnings
-    assert "previous_proposal_rejected" in result.warnings
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_allows_user_requested_commit_when_cognitive_state_is_invalidated():
-    tool_executor = _FakeToolExecutor()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            user_prompt="Please commit this step.",
-            tool_scope=["setup.proposal.commit"],
-            context_bundle={
-                "cognitive_state_summary": {
-                    "current_step": "story_config",
-                    "invalidated": True,
-                    "invalidation_reasons": ["user_edit_delta"],
-                }
-            },
-        ),
-        _profile(),
-        llm_service=_CommitTooEarlyThenQuestionLLM(),
-    )
-
-    assert result.status == "completed"
-    assert result.finish_reason == "awaiting_user_input"
-    assert len(tool_executor.calls) == 1
-    assert "commit_proposal_blocked" not in result.warnings
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_allows_chinese_user_requested_commit():
-    tool_executor = _FakeToolExecutor()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            user_prompt="请直接发起评审并提交这一阶段。",
-            tool_scope=["setup.proposal.commit"],
-            context_bundle={
-                "cognitive_state_summary": {
-                    "current_step": "story_config",
-                    "invalidated": True,
-                    "invalidation_reasons": ["user_edit_delta"],
-                }
-            },
-        ),
-        _profile(),
-        llm_service=_CommitTooEarlyThenQuestionLLM(),
-    )
-
-    assert result.status == "completed"
-    assert result.finish_reason == "awaiting_user_input"
-    assert len(tool_executor.calls) == 1
-    assert "commit_proposal_blocked" not in result.warnings
-
-
-@pytest.mark.asyncio
-async def test_runtime_executor_blocks_agent_initiated_commit_when_cognitive_state_is_invalidated():
-    tool_executor = _FakeToolExecutor()
-    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
-
-    result = await executor.run(
-        _turn_input(
-            user_prompt="Continue setup discussion.",
-            tool_scope=["setup.proposal.commit"],
-            context_bundle={
-                "cognitive_state_summary": {
-                    "current_step": "story_config",
-                    "invalidated": True,
-                    "invalidation_reasons": ["user_edit_delta"],
-                }
-            },
-        ),
-        _profile(),
-        llm_service=_CommitTooEarlyThenQuestionLLM(),
-    )
-
-    assert result.status == "completed"
-    assert result.finish_reason == "awaiting_user_input"
-    assert tool_executor.calls == []
-    assert "commit_proposal_blocked" in result.warnings
-
-
-@pytest.mark.asyncio
 async def test_runtime_executor_keeps_non_commit_tool_failure_in_recovery_semantics():
     tool_executor = _FakeToolExecutor(
         results=[
             RuntimeToolResult(
-                call_id="call_truth_write",
-                tool_name="rp_setup__setup.truth.write",
+                call_id="call_stage_entry",
+                tool_name="rp_setup__setup.stage_entry.write",
                 success=False,
                 content_text=json.dumps(
                     {
                         "code": "setup_tool_failed",
-                        "message": "Draft truth write could not be applied yet.",
+                        "message": "Stage entry write could not be applied yet.",
                         "details": {
                             "repair_strategy": "continue_discussion",
                         },
@@ -2298,9 +1915,9 @@ async def test_runtime_executor_keeps_non_commit_tool_failure_in_recovery_semant
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
     result = await executor.run(
-        _turn_input(tool_scope=["setup.truth.write"]),
+        _turn_input(tool_scope=["setup.stage_entry.write"]),
         _profile(),
-        llm_service=_TruthWriteFailureThenDiscussionLLM(),
+        llm_service=_StageEntryFailureThenDiscussionLLM(),
     )
 
     assert result.status == "completed"
@@ -2346,8 +1963,8 @@ async def test_runtime_executor_stream_preserves_typed_event_order():
     tool_executor = _FakeToolExecutor(
         results=[
             RuntimeToolResult(
-                call_id="call_patch",
-                tool_name="rp_setup__setup.patch.story_config",
+                call_id="call_stage_entry",
+                tool_name="rp_setup__setup.stage_entry.write",
                 success=True,
                 content_text='{"success": true}',
                 error_code=None,
@@ -2429,9 +2046,7 @@ async def test_runtime_executor_stream_keeps_raw_provider_deltas_private():
     assert payloads[0]["delta"] == "Public answer."
     assert all("raw_provider_delta" not in payload for payload in payloads)
     assert executor.last_result is not None
-    diagnostics = executor.last_result.structured_payload[
-        "model_gateway_diagnostics"
-    ]
+    diagnostics = executor.last_result.structured_payload["model_gateway_diagnostics"]
     assert diagnostics["failure_layer"] == "model_gateway"
     assert (
         diagnostics["private_details"]["private_events"][0]["type"]
@@ -2466,9 +2081,7 @@ async def test_runtime_executor_stream_provider_error_is_gateway_failure_private
     assert executor.last_result is not None
     assert executor.last_result.status == "failed"
     assert executor.last_result.finish_reason == "upstream_error"
-    diagnostics = executor.last_result.structured_payload[
-        "model_gateway_diagnostics"
-    ]
+    diagnostics = executor.last_result.structured_payload["model_gateway_diagnostics"]
     assert diagnostics["failure_layer"] == "model_gateway"
     assert diagnostics["failure_kind"] == "provider_stream_error"
     assert "provider stack trace" in diagnostics["message"]
@@ -2503,9 +2116,7 @@ async def test_runtime_executor_stream_parse_error_is_gateway_failure():
     assert executor.last_result is not None
     assert executor.last_result.status == "failed"
     assert executor.last_result.finish_reason == "upstream_error"
-    diagnostics = executor.last_result.structured_payload[
-        "model_gateway_diagnostics"
-    ]
+    diagnostics = executor.last_result.structured_payload["model_gateway_diagnostics"]
     assert diagnostics["failure_kind"] == "provider_stream_parse_error"
     assert (
         executor.last_result.structured_payload["output_inspection"]["classification"]
@@ -2567,7 +2178,7 @@ async def test_runtime_executor_emits_langfuse_generation_and_tool_observations(
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
     result = await executor.run(
-        _turn_input(tool_scope=["setup.patch.story_config"]),
+        _turn_input(tool_scope=["setup.stage_entry.write"]),
         _profile(),
         llm_service=_ToolThenTextLLM(),
     )
@@ -2579,7 +2190,7 @@ async def test_runtime_executor_emits_langfuse_generation_and_tool_observations(
     )
     assert any(
         item["kind"] == "observation_enter"
-        and item["name"] == "rp.runtime.tool:rp_setup__setup.patch.story_config"
+        and item["name"] == "rp.runtime.tool:rp_setup__setup.stage_entry.write"
         for item in fake_langfuse.events
     )
 

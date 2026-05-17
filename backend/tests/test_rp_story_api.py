@@ -44,9 +44,11 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialVisibility,
 )
 from rp.models.story_brainstorm import (
-    BrainstormApplyReceipt,
-    BrainstormDispatchReceipt,
-    BrainstormItem,
+    BrainstormBatch,
+    BrainstormBatchItem,
+    BrainstormBatchSubmitReceipt,
+    BrainstormContextWindow,
+    BrainstormMessage,
     BrainstormSession,
 )
 from rp.models.story_runtime import (
@@ -4061,21 +4063,29 @@ def test_story_memory_action_routes_return_refreshable_receipts(client):
     } <= set(archival_payload["action_metadata"]["affected_refs"])
 
 
-def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
+def test_story_brainstorm_routes_return_stage_w_batch_receipts(client):
     seeded = _seed_formal_memory_block_session()
     identity = _seed_memory_inspection_identity(seeded["session_id"])
     identity_model = MemoryRuntimeIdentity(**identity)
     brainstorm_id = "brainstorm.api"
-    item_id = f"{brainstorm_id}:item:1"
+    batch_id = f"{brainstorm_id}:batch:1"
+    item_id = f"{batch_id}:item:1"
+    now = datetime.now(timezone.utc)
 
-    def _session(items: list[BrainstormItem] | None = None) -> BrainstormSession:
+    def _session(
+        *,
+        windows: list[BrainstormContextWindow] | None = None,
+        batches: list[BrainstormBatch] | None = None,
+    ) -> BrainstormSession:
         return BrainstormSession(
             brainstorm_id=brainstorm_id,
             identity=identity_model,
-            prompt="Brainstorm chapter memory updates.",
             created_by="writer",
             updated_by="writer",
-            items=items or [],
+            windows=windows or [],
+            batches=batches or [],
+            created_at=now,
+            updated_at=now,
         )
 
     class _FakeBrainstormController:
@@ -4083,6 +4093,48 @@ def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
             assert session_id == seeded["session_id"]
             assert request.identity == identity_model
             return _session()
+
+        async def discuss_brainstorm_session(
+            self,
+            *,
+            session_id: str,
+            brainstorm_id: str,
+            request,
+        ):
+            assert session_id == seeded["session_id"]
+            assert brainstorm_id == "brainstorm.api"
+            assert request.prompt == "先讨论伏笔位置。"
+            return _session(
+                windows=[
+                    BrainstormContextWindow(
+                        window_id=f"{brainstorm_id}:window:1",
+                        brainstorm_id=brainstorm_id,
+                        session_id=seeded["session_id"],
+                        branch_head_id=identity["branch_head_id"],
+                        turn_id=identity["turn_id"],
+                        runtime_profile_snapshot_id=identity[
+                            "runtime_profile_snapshot_id"
+                        ],
+                        source_message_refs=["msg-user", "msg-assistant"],
+                        messages=[
+                            BrainstormMessage(
+                                message_id="msg-user",
+                                role="user",
+                                content_text="先讨论伏笔位置。",
+                                created_at=now,
+                            ),
+                            BrainstormMessage(
+                                message_id="msg-assistant",
+                                role="assistant",
+                                content_text="可以先别揭露，只给读者一处异样感。",
+                                created_at=now,
+                            ),
+                        ],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                ]
+            )
 
         async def summarize_brainstorm_session(
             self,
@@ -4095,37 +4147,120 @@ def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
             assert brainstorm_id == "brainstorm.api"
             assert request.identity == identity_model
             return _session(
-                [
-                    BrainstormItem(
-                        item_id=item_id,
-                        summary_text="Rename chapter to API Storm Gate.",
+                windows=[
+                    BrainstormContextWindow(
+                        window_id=f"{brainstorm_id}:window:1",
+                        brainstorm_id=brainstorm_id,
+                        session_id=seeded["session_id"],
+                        branch_head_id=identity["branch_head_id"],
+                        turn_id=identity["turn_id"],
+                        runtime_profile_snapshot_id=identity[
+                            "runtime_profile_snapshot_id"
+                        ],
+                        status="flushed",
+                        flush_reason="summarize",
+                        source_message_refs=["msg-user", "msg-assistant"],
+                        messages=[],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                ],
+                batches=[
+                    BrainstormBatch(
+                        batch_id=batch_id,
+                        brainstorm_id=brainstorm_id,
+                        session_id=seeded["session_id"],
+                        branch_head_id=identity["branch_head_id"],
+                        turn_id=identity["turn_id"],
+                        runtime_profile_snapshot_id=identity[
+                            "runtime_profile_snapshot_id"
+                        ],
+                        source_window_id=f"{brainstorm_id}:window:1",
+                        items=[
+                            BrainstormBatchItem(
+                                item_id=item_id,
+                                batch_id=batch_id,
+                                brainstorm_id=brainstorm_id,
+                                session_id=seeded["session_id"],
+                                branch_head_id=identity["branch_head_id"],
+                                turn_id=identity["turn_id"],
+                                runtime_profile_snapshot_id=identity[
+                                    "runtime_profile_snapshot_id"
+                                ],
+                                text="保留钟楼债务伏笔",
+                                created_at=now,
+                                updated_at=now,
+                            )
+                        ],
+                        created_at=now,
+                        updated_at=now,
                     )
                 ]
             )
+
+        def create_brainstorm_item(
+            self,
+            *,
+            session_id: str,
+            brainstorm_id: str,
+            batch_id: str,
+            request,
+        ):
+            assert session_id == seeded["session_id"]
+            assert brainstorm_id == "brainstorm.api"
+            assert batch_id == "brainstorm.api:batch:1"
+            assert request.text == "补一条使者的旧账册线索"
+            return _session()
 
         def update_brainstorm_item(
             self,
             *,
             session_id: str,
             brainstorm_id: str,
+            batch_id: str,
             item_id: str,
             request,
         ):
             assert session_id == seeded["session_id"]
             assert brainstorm_id == "brainstorm.api"
+            assert batch_id == "brainstorm.api:batch:1"
             assert item_id.endswith(":item:1")
-            assert request.status == "confirmed"
+            assert request.status == "deleted"
             return _session(
-                [
-                    BrainstormItem(
-                        item_id=item_id,
-                        summary_text="Rename chapter to API Storm Gate.",
-                        status="confirmed",
+                batches=[
+                    BrainstormBatch(
+                        batch_id=batch_id,
+                        brainstorm_id=brainstorm_id,
+                        session_id=seeded["session_id"],
+                        branch_head_id=identity["branch_head_id"],
+                        turn_id=identity["turn_id"],
+                        runtime_profile_snapshot_id=identity[
+                            "runtime_profile_snapshot_id"
+                        ],
+                        items=[
+                            BrainstormBatchItem(
+                                item_id=item_id,
+                                batch_id=batch_id,
+                                brainstorm_id=brainstorm_id,
+                                session_id=seeded["session_id"],
+                                branch_head_id=identity["branch_head_id"],
+                                turn_id=identity["turn_id"],
+                                runtime_profile_snapshot_id=identity[
+                                    "runtime_profile_snapshot_id"
+                                ],
+                                text="保留钟楼债务伏笔",
+                                status="deleted",
+                                created_at=now,
+                                updated_at=now,
+                            )
+                        ],
+                        created_at=now,
+                        updated_at=now,
                     )
                 ]
             )
 
-        async def apply_brainstorm_session(
+        def continue_brainstorm_session(
             self,
             *,
             session_id: str,
@@ -4134,35 +4269,83 @@ def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
         ):
             assert session_id == seeded["session_id"]
             assert brainstorm_id == "brainstorm.api"
-            assert request.core_field_changes[0].source_item_id == item_id
-            return BrainstormApplyReceipt(
-                brainstorm_id=brainstorm_id,
-                identity=identity_model,
-                status="applied",
-                dispatch_receipts=[
-                    BrainstormDispatchReceipt(
-                        source_item_id=item_id,
-                        status="applied",
-                        target_ref="chapter.current",
-                        proposal_id="proposal.api.brainstorm",
-                        operation="set_field",
-                        field_path="title",
-                        base_revision="5",
-                        old_value="Formal API Chapter",
-                        new_value="API Storm Gate",
+            assert request.identity == identity_model
+            return _session(
+                windows=[
+                    BrainstormContextWindow(
+                        window_id=f"{brainstorm_id}:window:2",
+                        brainstorm_id=brainstorm_id,
+                        session_id=seeded["session_id"],
+                        branch_head_id=identity["branch_head_id"],
+                        turn_id=identity["turn_id"],
+                        runtime_profile_snapshot_id=identity[
+                            "runtime_profile_snapshot_id"
+                        ],
+                        status="flushed",
+                        flush_reason="continue_writing",
+                        messages=[],
+                        created_at=now,
+                        updated_at=now,
                     )
-                ],
-                refresh={
-                    "memory_inspection": {
-                        "query_params": {
-                            "branch_head_id": identity["branch_head_id"],
-                            "turn_id": identity["turn_id"],
-                            "runtime_profile_snapshot_id": identity[
-                                "runtime_profile_snapshot_id"
-                            ],
-                        }
-                    }
-                },
+                ]
+            )
+
+        def submit_brainstorm_batch(
+            self,
+            *,
+            session_id: str,
+            brainstorm_id: str,
+            batch_id: str,
+            request,
+        ):
+            assert session_id == seeded["session_id"]
+            assert brainstorm_id == "brainstorm.api"
+            assert batch_id == "brainstorm.api:batch:1"
+            session = _session(
+                batches=[
+                    BrainstormBatch(
+                        batch_id=batch_id,
+                        brainstorm_id=brainstorm_id,
+                        session_id=seeded["session_id"],
+                        branch_head_id=identity["branch_head_id"],
+                        turn_id=identity["turn_id"],
+                        runtime_profile_snapshot_id=identity[
+                            "runtime_profile_snapshot_id"
+                        ],
+                        status="pending_processing",
+                        frozen=True,
+                        items=[
+                            BrainstormBatchItem(
+                                item_id=item_id,
+                                batch_id=batch_id,
+                                brainstorm_id=brainstorm_id,
+                                session_id=seeded["session_id"],
+                                branch_head_id=identity["branch_head_id"],
+                                turn_id=identity["turn_id"],
+                                runtime_profile_snapshot_id=identity[
+                                    "runtime_profile_snapshot_id"
+                                ],
+                                text="保留钟楼债务伏笔",
+                                status="pending_processing",
+                                created_at=now,
+                                updated_at=now,
+                            )
+                        ],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                ]
+            )
+            return (
+                session,
+                BrainstormBatchSubmitReceipt(
+                    brainstorm_id=brainstorm_id,
+                    batch_id=batch_id,
+                    identity=identity_model,
+                    status="pending_processing",
+                    submitted_item_ids=[item_id],
+                    deleted_item_ids=[],
+                ),
             )
 
     controller = _FakeBrainstormController()
@@ -4173,7 +4356,19 @@ def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
             json={
                 "identity": identity,
                 "actor": "writer",
-                "prompt": "Brainstorm chapter memory updates.",
+            },
+        )
+        discuss_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                f"/brainstorm/sessions/{brainstorm_id}/messages"
+            ),
+            json={
+                "identity": identity,
+                "actor": "writer",
+                "prompt": "先讨论伏笔位置。",
+                "model_id": "test-model",
+                "provider_id": "test-provider",
             },
         )
         summarize_response = client.post(
@@ -4184,41 +4379,49 @@ def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
             json={
                 "identity": identity,
                 "actor": "writer",
-                "dry_run_items": [
-                    {"summary_text": "Rename chapter to API Storm Gate."}
-                ],
+                "dry_run_items": ["保留钟楼债务伏笔"],
+            },
+        )
+        create_item_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                f"/brainstorm/sessions/{brainstorm_id}/batches/{batch_id}/items"
+            ),
+            json={
+                "identity": identity,
+                "actor": "writer",
+                "text": "补一条使者的旧账册线索",
             },
         )
         update_response = client.patch(
             (
                 f"/api/rp/story-sessions/{seeded['session_id']}"
-                f"/brainstorm/sessions/{brainstorm_id}/items/{item_id}"
+                f"/brainstorm/sessions/{brainstorm_id}/batches/{batch_id}/items/{item_id}"
             ),
             json={
                 "identity": identity,
                 "actor": "writer",
-                "status": "confirmed",
+                "status": "deleted",
             },
         )
-        apply_response = client.post(
+        continue_response = client.post(
             (
                 f"/api/rp/story-sessions/{seeded['session_id']}"
-                f"/brainstorm/sessions/{brainstorm_id}/apply"
+                f"/brainstorm/sessions/{brainstorm_id}/continue-writing"
             ),
             json={
                 "identity": identity,
                 "actor": "writer",
-                "item_ids": [item_id],
-                "core_field_changes": [
-                    {
-                        "source_item_id": item_id,
-                        "target_ref": "chapter.current",
-                        "base_revision": "5",
-                        "operation": "set_field",
-                        "field_path": "title",
-                        "new_value": "API Storm Gate",
-                    }
-                ],
+            },
+        )
+        submit_response = client.post(
+            (
+                f"/api/rp/story-sessions/{seeded['session_id']}"
+                f"/brainstorm/sessions/{brainstorm_id}/batches/{batch_id}/submit"
+            ),
+            json={
+                "identity": identity,
+                "actor": "writer",
             },
         )
     finally:
@@ -4234,28 +4437,30 @@ def test_story_brainstorm_routes_return_workspace_and_apply_receipts(client):
         "recall_truth": False,
         "archival_truth": False,
     }
-    assert "apply_confirmed" in start_payload["allowed_actions"]
+    assert "submit_batch" in start_payload["allowed_actions"]
+
+    assert discuss_response.status_code == 200
+    assert discuss_response.json()["item"]["windows"][0]["messages"][0]["role"] == "user"
 
     assert summarize_response.status_code == 200
-    assert summarize_response.json()["item"]["items"][0]["item_id"] == item_id
+    assert summarize_response.json()["item"]["batches"][0]["batch_id"] == batch_id
+    assert summarize_response.json()["item"]["windows"][0]["flush_reason"] == "summarize"
+
+    assert create_item_response.status_code == 200
 
     assert update_response.status_code == 200
-    assert update_response.json()["item"]["items"][0]["status"] == "confirmed"
+    assert update_response.json()["item"]["batches"][0]["items"][0]["status"] == "deleted"
 
-    assert apply_response.status_code == 200
-    apply_payload = apply_response.json()
-    assert apply_payload["action_metadata"]["origin_kind"] == (
-        "brainstorm_summary_apply"
+    assert continue_response.status_code == 200
+    assert continue_response.json()["item"]["windows"][0]["flush_reason"] == (
+        "continue_writing"
     )
-    assert "proposal.api.brainstorm" in apply_payload["action_metadata"][
-        "affected_refs"
-    ]
-    assert apply_payload["receipt"]["dispatch_receipts"][0]["old_value"] == (
-        "Formal API Chapter"
-    )
-    assert apply_payload["refresh"]["memory_inspection"]["query_params"][
-        "branch_head_id"
-    ] == identity["branch_head_id"]
+
+    assert submit_response.status_code == 200
+    submit_payload = submit_response.json()
+    assert submit_payload["action_metadata"]["origin_kind"] == "brainstorm_batch_submit"
+    assert submit_payload["receipt"]["submitted_item_ids"] == [item_id]
+    assert submit_payload["item"]["batches"][0]["status"] == "pending_processing"
 
 
 def test_story_memory_block_proposal_submission_is_governed(client, monkeypatch):

@@ -81,8 +81,11 @@ def test_worker_registry_bootstrap_exposes_runtime_centric_workers(
     ]
     assert longform_worker.source_worker_id == "specialist"
     assert writing_worker.source_worker_id == "writer"
+    # Longform brainstorm/direct Core apply now includes character facts, so
+    # the runtime-owned registry must expose character as an owned domain.
     assert longform_worker.descriptor.owned_domains == [
         "chapter",
+        "character",
         "narrative_progress",
         "plot_thread",
         "foreshadow",

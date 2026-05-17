@@ -15,7 +15,9 @@ from rp.models.memory_crud import (
 )
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
+from rp.retrieval.keyword_retriever import KeywordRetriever
 from rp.retrieval.query_preprocessor import DefaultQueryPreprocessor
+from rp.retrieval.rrf_fusion import reciprocal_rank_fusion
 from rp.retrieval.rag_context_builder import RagContextBuilder
 from rp.retrieval.reranker import SimpleMetadataReranker
 from rp.services.retrieval_collection_service import RetrievalCollectionService
@@ -113,6 +115,89 @@ def test_default_query_preprocessor_normalizes_narrative_and_archival_filters():
         "profile": "longform",
         "rerank": "on",
     }
+
+
+def test_default_query_preprocessor_adds_structured_query_analysis():
+    query = RetrievalQuery(
+        query_id="rq-query-analysis",
+        query_kind="archival",
+        story_id="story-query-analysis",
+        text_query="林鸢和夜紫林的关系",
+        filters={},
+    )
+
+    normalized = DefaultQueryPreprocessor().preprocess(query)
+
+    analysis = normalized.filters["query_analysis"]
+    assert analysis["version"] == "structured_query_analysis_v1"
+    assert analysis["intent"] == "relationship"
+    assert analysis["entity_terms"] == ["林鸢", "夜紫林"]
+    assert "关系" in analysis["intent_terms"]
+
+
+def test_rrf_fusion_supports_route_weight_hints_without_leaking_metadata():
+    fused = reciprocal_rank_fusion(
+        [
+            [
+                {
+                    "hit_id": "keyword-hit",
+                    "query_id": "rq-weighted-rrf",
+                    "layer": "archival",
+                    "domain": "world_rule",
+                    "domain_path": "world.keyword",
+                    "excerpt_text": "keyword hit",
+                    "score": 0.3,
+                    "rank": 1,
+                    "metadata": {},
+                    "_rrf_weight": 3.0,
+                }
+            ],
+            [
+                {
+                    "hit_id": "dense-hit",
+                    "query_id": "rq-weighted-rrf",
+                    "layer": "archival",
+                    "domain": "world_rule",
+                    "domain_path": "world.dense",
+                    "excerpt_text": "dense hit",
+                    "score": 0.9,
+                    "rank": 1,
+                    "metadata": {},
+                }
+            ],
+        ]
+    )
+
+    assert fused[0]["hit_id"] == "keyword-hit"
+    assert "_rrf_weight" not in fused[0]
+
+
+def test_keyword_retriever_bypasses_postgres_simple_fts_for_structured_sparse_queries(
+    retrieval_session,
+):
+    query = DefaultQueryPreprocessor().preprocess(
+        RetrievalQuery(
+            query_id="rq-pg-sparse-parity",
+            query_kind="archival",
+            story_id="story-pg-sparse-parity",
+            text_query="林鸢和夜紫林的关系",
+            filters={},
+        )
+    )
+
+    assert KeywordRetriever._should_use_python_sparse_path(query) is True
+
+
+def test_keyword_retriever_keeps_postgres_fts_available_for_plain_ascii_queries():
+    query = RetrievalQuery(
+        query_id="rq-pg-plain-fts",
+        query_kind="archival",
+        story_id="story-pg-plain-fts",
+        text_query="ledger room sunrise",
+        filters={},
+    )
+
+    assert KeywordRetriever._should_use_python_sparse_path(query) is False
 
 
 class _FakeLangfuseObservation:
@@ -281,6 +366,204 @@ async def test_search_chunks_and_documents_use_real_store(retrieval_session):
 
 
 @pytest.mark.asyncio
+async def test_keyword_retriever_python_fallback_uses_bm25_sparse_ranking(retrieval_session):
+    collection = RetrievalCollectionService(retrieval_session).ensure_story_collection(
+        story_id="story-bm25",
+        scope="story",
+        collection_kind="archival",
+    )
+    document_service = RetrievalDocumentService(retrieval_session)
+    for asset_id, title, text in (
+        (
+            "asset-bm25-exact",
+            "Rare Anchor Exact",
+            "The archive keeps the rare anchor ledger behind the dawn seal. "
+            "Appendix material lists archive archive archive archive archive "
+            "inventory inventory inventory inventory inventory catalog catalog "
+            "catalog catalog catalog without repeating the anchor ledger pair.",
+        ),
+        (
+            "asset-bm25-partial",
+            "Rare Partial",
+            "Rare rare rare archive inventory notes about shelves and catalog cards.",
+        ),
+        (
+            "asset-bm25-noise",
+            "Noise",
+            "Kitchen inventory and garden weather notes.",
+        ),
+    ):
+        document_service.upsert_source_asset(
+            SourceAsset(
+                asset_id=asset_id,
+                story_id="story-bm25",
+                mode=StoryMode.LONGFORM,
+                collection_id=collection.collection_id,
+                commit_id=f"commit-{asset_id}",
+                asset_kind="worldbook",
+                source_ref=f"memory://{asset_id}",
+                title=title,
+                parse_status="queued",
+                ingestion_status="queued",
+                mapped_targets=["foundation"],
+                metadata={
+                    "seed_sections": [
+                        {
+                            "section_id": asset_id,
+                            "title": title,
+                            "path": f"foundation.world.{asset_id}",
+                            "level": 1,
+                            "text": text,
+                            "metadata": {
+                                "domain": "world_rule",
+                                "domain_path": f"foundation.world.{asset_id}",
+                            },
+                        }
+                    ]
+                },
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+        )
+        retrieval_session.flush()
+        RetrievalIngestionService(retrieval_session).ingest_asset(
+            story_id="story-bm25",
+            asset_id=asset_id,
+            collection_id=collection.collection_id,
+        )
+    retrieval_session.commit()
+
+    result = await KeywordRetriever(retrieval_session).search(
+        RetrievalQuery(
+            query_id="rq-bm25",
+            query_kind="archival",
+            story_id="story-bm25",
+            domains=[Domain.WORLD_RULE],
+            text_query="rare anchor ledger",
+            filters={"knowledge_collections": [collection.collection_id]},
+            top_k=3,
+        )
+    )
+
+    assert result.trace is not None
+    assert result.trace.route == "retrieval.keyword.bm25"
+    assert result.hits[0].metadata["asset_id"] == "asset-bm25-exact"
+    assert result.hits[0].score > result.hits[1].score
+
+
+@pytest.mark.asyncio
+async def test_keyword_retriever_python_fallback_supports_chinese_field_boosts(retrieval_session):
+    collection = RetrievalCollectionService(retrieval_session).ensure_story_collection(
+        story_id="story-cjk",
+        scope="story",
+        collection_kind="archival",
+    )
+    document_service = RetrievalDocumentService(retrieval_session)
+    document_service.upsert_source_asset(
+        SourceAsset(
+            asset_id="asset-cjk-target",
+            story_id="story-cjk",
+            mode=StoryMode.LONGFORM,
+            collection_id=collection.collection_id,
+            commit_id="commit-cjk-target",
+            asset_kind="worldbook",
+            source_ref="memory://asset-cjk-target",
+            title="林鸢",
+            parse_status="queued",
+            ingestion_status="queued",
+            mapped_targets=["foundation"],
+            metadata={
+                "seed_sections": [
+                    {
+                        "section_id": "relationship",
+                        "title": "关系",
+                        "path": "character_design.character.lin_yuan.relationship",
+                        "level": 1,
+                        "text": "两人曾在旧城区共同调查遗失档案，后来成为互相信任的搭档。",
+                        "metadata": {
+                            "domain": "character",
+                            "domain_path": "character_design.character.lin_yuan.relationship",
+                            "entry_title": "林鸢",
+                            "aliases": ["林鸢", "林鸢儿"],
+                            "section_title": "关系",
+                            "retrieval_role": "relationship",
+                            "section_semantic_path": "character_design.character.lin_yuan.relationship",
+                        },
+                        "tags": ["夜紫林", "关系"],
+                    }
+                ]
+            },
+            created_at=_utcnow(),
+            updated_at=_utcnow(),
+        )
+    )
+    document_service.upsert_source_asset(
+        SourceAsset(
+            asset_id="asset-cjk-noise",
+            story_id="story-cjk",
+            mode=StoryMode.LONGFORM,
+            collection_id=collection.collection_id,
+            commit_id="commit-cjk-noise",
+            asset_kind="worldbook",
+            source_ref="memory://asset-cjk-noise",
+            title="旧城区档案馆",
+            parse_status="queued",
+            ingestion_status="queued",
+            mapped_targets=["foundation"],
+            metadata={
+                "seed_sections": [
+                    {
+                        "section_id": "summary",
+                        "title": "概要",
+                        "path": "world_background.location.archive",
+                        "level": 1,
+                        "text": "旧城区档案馆保存许多遗失档案，调查者经常在这里寻找线索。",
+                        "metadata": {
+                            "domain": "world_rule",
+                            "domain_path": "world_background.location.archive",
+                            "section_title": "概要",
+                            "retrieval_role": "summary",
+                        },
+                        "tags": ["调查", "档案"],
+                    }
+                ]
+            },
+            created_at=_utcnow(),
+            updated_at=_utcnow(),
+        )
+    )
+    retrieval_session.flush()
+    ingestion_service = RetrievalIngestionService(retrieval_session)
+    ingestion_service.ingest_asset(
+        story_id="story-cjk",
+        asset_id="asset-cjk-target",
+        collection_id=collection.collection_id,
+    )
+    ingestion_service.ingest_asset(
+        story_id="story-cjk",
+        asset_id="asset-cjk-noise",
+        collection_id=collection.collection_id,
+    )
+    retrieval_session.commit()
+
+    result = await KeywordRetriever(retrieval_session).search(
+        RetrievalQuery(
+            query_id="rq-cjk",
+            query_kind="archival",
+            story_id="story-cjk",
+            text_query="林鸢和夜紫林的关系",
+            filters={"knowledge_collections": [collection.collection_id]},
+            top_k=2,
+        )
+    )
+
+    assert result.trace is not None
+    assert result.trace.route == "retrieval.keyword.bm25"
+    assert result.hits[0].metadata["asset_id"] == "asset-cjk-target"
+    assert result.hits[0].metadata["retrieval_role"] == "relationship"
+
+
+@pytest.mark.asyncio
 async def test_retrieval_service_uses_explicit_pipeline_slots(retrieval_session):
     class StubPreprocessor:
         def __init__(self) -> None:
@@ -435,6 +718,208 @@ async def test_retrieval_service_uses_explicit_pipeline_slots(retrieval_session)
     assert chunk_builder.seen_query.text_query == "normalized slot query"
     assert result.query == "normalized slot query"
     assert result.warnings == ["fused", "reranked", "built"]
+
+
+@pytest.mark.asyncio
+async def test_retrieval_service_expands_internal_candidate_pool_before_rerank(
+    retrieval_session,
+):
+    class StubRetriever:
+        def __init__(self) -> None:
+            self.seen_top_k: int | None = None
+
+        async def search(self, query: RetrievalQuery) -> RetrievalSearchResult:
+            self.seen_top_k = query.top_k
+            hits = [
+                RetrievalHit(
+                    hit_id=f"candidate-{index}",
+                    query_id=query.query_id,
+                    layer="archival",
+                    domain=Domain.WORLD_RULE,
+                    domain_path=f"foundation.world.{index}",
+                    excerpt_text=f"Candidate {index}",
+                    score=1.0 / index,
+                    rank=index,
+                    metadata={
+                        "asset_id": f"asset-{index}",
+                        "title": f"Candidate {index}",
+                        "section_id": f"section-{index}",
+                        "section_part": 0,
+                    },
+                )
+                for index in range(1, query.top_k + 1)
+            ]
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=hits,
+                trace=RetrievalTrace(
+                    trace_id="trace-candidate-pool",
+                    query_id=query.query_id,
+                    route="retrieval.stub.candidates",
+                    result_kind="chunk",
+                    retriever_routes=["retrieval.stub.candidates"],
+                    pipeline_stages=["retrieve"],
+                    candidate_count=len(hits),
+                    returned_count=len(hits),
+                ),
+            )
+
+    class PassthroughReranker:
+        def __init__(self) -> None:
+            self.seen_count: int | None = None
+
+        async def rerank(
+            self,
+            *,
+            query: RetrievalQuery,
+            result: RetrievalSearchResult,
+        ) -> RetrievalSearchResult:
+            self.seen_count = len(result.hits)
+            return result
+
+    retriever = StubRetriever()
+    reranker = PassthroughReranker()
+    result = await RetrievalService(
+        retrieval_session,
+        retrievers=[retriever],
+        reranker=reranker,
+    ).search_chunks(
+        RetrievalQuery(
+            query_id="rq-candidate-pool",
+            query_kind="archival",
+            story_id="story-candidate-pool",
+            text_query="candidate pool",
+            filters={},
+            top_k=3,
+            rerank=True,
+        )
+    )
+
+    assert retriever.seen_top_k == 20
+    assert reranker.seen_count == 20
+    assert len(result.hits) == 3
+    assert result.trace is not None
+    assert result.trace.details["candidate_pool"] == {
+        "requested_top_k": 3,
+        "retrieval_top_k": 20,
+        "expanded": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_retrieval_service_honors_explicit_candidate_pool_limit(
+    retrieval_session,
+):
+    class StubRetriever:
+        def __init__(self) -> None:
+            self.seen_top_k: int | None = None
+
+        async def search(self, query: RetrievalQuery) -> RetrievalSearchResult:
+            self.seen_top_k = query.top_k
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[],
+                trace=RetrievalTrace(
+                    trace_id="trace-candidate-pool-explicit",
+                    query_id=query.query_id,
+                    route="retrieval.stub.empty",
+                    result_kind="chunk",
+                    retriever_routes=["retrieval.stub.empty"],
+                    pipeline_stages=["retrieve"],
+                ),
+            )
+
+    retriever = StubRetriever()
+    result = await RetrievalService(
+        retrieval_session,
+        retrievers=[retriever],
+    ).search_chunks(
+        RetrievalQuery(
+            query_id="rq-candidate-pool-explicit",
+            query_kind="archival",
+            story_id="story-candidate-pool-explicit",
+            text_query="candidate pool",
+            filters={"search_policy": {"hybrid": {"candidate_top_k": 12}}},
+            top_k=3,
+        )
+    )
+
+    assert retriever.seen_top_k == 12
+    assert result.trace is not None
+    assert result.trace.details["candidate_pool"]["retrieval_top_k"] == 12
+
+
+@pytest.mark.asyncio
+async def test_retrieval_service_weights_keyword_route_for_structured_queries(
+    retrieval_session,
+):
+    class StubRetriever:
+        def __init__(self, *, route: str, hit_id: str) -> None:
+            self.route = route
+            self.hit_id = hit_id
+
+        async def search(self, query: RetrievalQuery) -> RetrievalSearchResult:
+            return RetrievalSearchResult(
+                query=query.text_query or "",
+                hits=[
+                    RetrievalHit(
+                        hit_id=self.hit_id,
+                        query_id=query.query_id,
+                        layer="archival",
+                        domain=Domain.WORLD_RULE,
+                        domain_path=f"foundation.world.{self.hit_id}",
+                        excerpt_text=self.hit_id,
+                        score=0.5,
+                        rank=1,
+                        metadata={
+                            "asset_id": f"asset-{self.hit_id}",
+                            "title": self.hit_id,
+                            "section_id": self.hit_id,
+                            "section_part": 0,
+                        },
+                    )
+                ],
+                trace=RetrievalTrace(
+                    trace_id=f"trace-{self.hit_id}",
+                    query_id=query.query_id,
+                    route=self.route,
+                    result_kind="chunk",
+                    retriever_routes=[self.route],
+                    pipeline_stages=["retrieve"],
+                    candidate_count=1,
+                    returned_count=1,
+                ),
+            )
+
+    service = RetrievalService(
+        retrieval_session,
+        retrievers=[
+            StubRetriever(route="retrieval.semantic.python", hit_id="dense-hit"),
+            StubRetriever(route="retrieval.keyword.bm25", hit_id="keyword-hit"),
+        ],
+    )
+
+    result = await service.search_chunks(
+        RetrievalQuery(
+            query_id="rq-structured-fusion",
+            query_kind="archival",
+            story_id="story-structured-fusion",
+            text_query="林鸢和夜紫林的关系",
+            filters={},
+            top_k=2,
+        )
+    )
+
+    assert result.hits[0].hit_id == "keyword-hit"
+    assert result.trace is not None
+    assert (
+        result.trace.details["rrf"]["route_weights"]["retrieval.keyword.bm25"]
+        == 2.0
+    )
+    assert (
+        result.trace.details["rrf"]["route_weights"]["retrieval.semantic.python"]
+        == 1.0
+    )
 
 
 @pytest.mark.asyncio

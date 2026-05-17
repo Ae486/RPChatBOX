@@ -10,9 +10,17 @@ from uuid import uuid5, NAMESPACE_URL
 from sqlalchemy import asc
 from sqlmodel import Session, select
 
-from models.rp_story_store import BranchHeadRecord, StoryTurnRecord
+from models.rp_story_store import (
+    BranchHeadRecord,
+    RuntimeWorkflowJobRecord,
+    StoryTurnRecord,
+)
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.runtime_read_contract import RuntimeBranchReadScope, RuntimeReadManifest
+from rp.models.runtime_workflow_job import (
+    RuntimeWorkflowJobKind,
+    RuntimeWorkflowJobStatus,
+)
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
@@ -209,6 +217,29 @@ class BranchVisibilityResolver:
             cutoff_turn_id=cutoff_turn_id,
             hidden_after_turn_id=hidden_after_turn_id,
         )
+
+    def turn_order_index(
+        self,
+        *,
+        scope: RuntimeBranchReadScope,
+        branch_head_id: str,
+        turn_id: str,
+    ) -> int:
+        """Return the same stable branch-local turn order used by visibility checks."""
+
+        normalized_branch = str(branch_head_id or "").strip()
+        normalized_turn = str(turn_id or "").strip()
+        if not normalized_branch or not normalized_turn:
+            return -1
+        order_key = (scope.session_id, normalized_branch)
+        turn_order = self._turn_order_by_branch.get(order_key)
+        if turn_order is None:
+            turn_order = self._load_turn_order(
+                session_id=scope.session_id,
+                branch_head_id=normalized_branch,
+            )
+            self._turn_order_by_branch[order_key] = turn_order
+        return turn_order.get(normalized_turn, -1)
 
     def filter_visible_memory_refs(
         self,
@@ -486,11 +517,37 @@ class RuntimeReadManifestService:
             visible_refs=visible_refs,
             selected_section_labels=selected_section_labels or [],
         )
-        omitted = self._build_omitted_refs(
-            visible_refs=visible_refs,
+        (
+            materialization_visible_refs,
+            materialization_selected_refs,
+            materialization_omitted_refs,
+        ) = self._build_materialization_job_refs(
+            scope=scope,
             selected_refs=selected,
         )
+        visible_refs.extend(materialization_visible_refs)
+        visible_refs.sort(
+            key=lambda item: (str(item.get("ref_kind")), str(item.get("ref_id")))
+        )
+        selected.extend(materialization_selected_refs)
+        selected.sort(
+            key=lambda item: (str(item.get("ref_kind")), str(item.get("ref_id")))
+        )
+        omitted = self._build_omitted_refs(
+            visible_refs=[
+                item
+                for item in visible_refs
+                if not str(item.get("ref_kind") or "").startswith(
+                    "memory_materialization."
+                )
+            ],
+            selected_refs=selected,
+        )
+        omitted.extend(materialization_omitted_refs)
         omitted.extend(projection_omitted_refs)
+        omitted.sort(
+            key=lambda item: (str(item.get("ref_kind")), str(item.get("ref_id")))
+        )
         manifest_id = uuid5(
             NAMESPACE_URL,
             self._manifest_seed(
@@ -556,6 +613,193 @@ class RuntimeReadManifestService:
             retrieval_miss_refs=retrieval_miss_refs,
             writer_usage_refs=writer_usage_refs,
             token_usage_metadata=token_usage_metadata,
+        )
+
+    def _build_materialization_job_refs(
+        self,
+        *,
+        scope: RuntimeBranchReadScope,
+        selected_refs: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        jobs = self._list_materialization_jobs(scope=scope)
+        if not jobs:
+            return [], [], []
+        selected_source_ref_ids = {
+            str(source_ref_id).strip()
+            for item in selected_refs
+            for source_ref_id in list(item.get("source_ref_ids") or [])
+            if str(source_ref_id).strip()
+        }
+        visible_jobs: list[RuntimeWorkflowJobRecord] = []
+        hidden_omitted_refs: list[dict[str, Any]] = []
+        for job in jobs:
+            item = self._materialization_job_ref_item(job)
+            if self._branch_visibility_resolver.is_visible(
+                scope=scope,
+                visibility_scope="branch_scoped",
+                visibility_state="active",
+                owning_branch_head_id=job.branch_head_id,
+                origin_turn_id=job.turn_id,
+            ):
+                visible_jobs.append(job)
+                continue
+            hidden_item = deepcopy(item)
+            hidden_item["state"] = "hidden"
+            hidden_item["reason"] = "branch_hidden"
+            hidden_omitted_refs.append(hidden_item)
+        if not visible_jobs:
+            return [], [], hidden_omitted_refs
+        current_completed_by_kind: dict[str, str] = {}
+        visible_jobs_by_kind: dict[str, list[RuntimeWorkflowJobRecord]] = {}
+        for job in visible_jobs:
+            visible_jobs_by_kind.setdefault(job.job_kind, []).append(job)
+        for job_kind, grouped_jobs in visible_jobs_by_kind.items():
+            completed_jobs = [
+                job
+                for job in grouped_jobs
+                if job.status == RuntimeWorkflowJobStatus.COMPLETED.value
+            ]
+            if not completed_jobs:
+                continue
+            completed_jobs.sort(key=lambda item: self._job_preference_key(scope, item))
+            current_completed_by_kind[job_kind] = completed_jobs[0].job_id
+        visible_ref_items: list[dict[str, Any]] = []
+        selected_ref_items: list[dict[str, Any]] = []
+        omitted_ref_items: list[dict[str, Any]] = []
+        for job in visible_jobs:
+            item = self._materialization_job_ref_item(job)
+            visible_ref_items.append(deepcopy(item))
+            if job.status == RuntimeWorkflowJobStatus.DEFERRED.value:
+                deferred_item = deepcopy(item)
+                deferred_item["state"] = "deferred"
+                deferred_item["reason"] = "memory_materialization_deferred"
+                omitted_ref_items.append(deferred_item)
+                continue
+            if job.status != RuntimeWorkflowJobStatus.COMPLETED.value:
+                pending_item = deepcopy(item)
+                pending_item["state"] = job.status
+                pending_item["reason"] = "memory_materialization_incomplete"
+                omitted_ref_items.append(pending_item)
+                continue
+            if current_completed_by_kind.get(job.job_kind) != job.job_id:
+                stale_item = deepcopy(item)
+                stale_item["state"] = "stale"
+                stale_item["reason"] = "memory_materialization_stale"
+                omitted_ref_items.append(stale_item)
+                continue
+            if self._materialization_job_is_selected(
+                job=job,
+                selected_source_ref_ids=selected_source_ref_ids,
+            ):
+                selected_ref_items.append(deepcopy(item))
+                continue
+            completed_item = deepcopy(item)
+            completed_item["state"] = "completed"
+            completed_item["reason"] = "memory_materialization_not_selected"
+            omitted_ref_items.append(completed_item)
+        visible_ref_items.sort(
+            key=lambda item: (str(item.get("ref_kind")), str(item.get("ref_id")))
+        )
+        selected_ref_items.sort(
+            key=lambda item: (str(item.get("ref_kind")), str(item.get("ref_id")))
+        )
+        hidden_omitted_refs.extend(omitted_ref_items)
+        hidden_omitted_refs.sort(
+            key=lambda item: (str(item.get("ref_kind")), str(item.get("ref_id")))
+        )
+        return visible_ref_items, selected_ref_items, hidden_omitted_refs
+
+    def _list_materialization_jobs(
+        self,
+        *,
+        scope: RuntimeBranchReadScope,
+    ) -> list[RuntimeWorkflowJobRecord]:
+        stmt = (
+            select(RuntimeWorkflowJobRecord)
+            .where(RuntimeWorkflowJobRecord.session_id == scope.session_id)
+            .where(
+                RuntimeWorkflowJobRecord.branch_head_id.in_(
+                    list(scope.visible_branch_head_ids)
+                )
+            )
+            .where(
+                RuntimeWorkflowJobRecord.job_kind.in_(
+                    [
+                        RuntimeWorkflowJobKind.RECALL_MATERIALIZATION.value,
+                        RuntimeWorkflowJobKind.ARCHIVAL_MATERIALIZATION.value,
+                    ]
+                )
+            )
+            .order_by(RuntimeWorkflowJobRecord.created_at.asc())
+            .order_by(RuntimeWorkflowJobRecord.job_id.asc())
+        )
+        return list(self._session.exec(stmt).all())
+
+    def _job_preference_key(
+        self,
+        scope: RuntimeBranchReadScope,
+        job: RuntimeWorkflowJobRecord,
+    ) -> tuple[int, int, float, str]:
+        lineage_index = (
+            list(scope.visible_branch_head_ids).index(job.branch_head_id)
+            if job.branch_head_id in scope.visible_branch_head_ids
+            else len(scope.visible_branch_head_ids)
+        )
+        turn_order = self._branch_visibility_resolver.turn_order_index(
+            scope=scope,
+            branch_head_id=job.branch_head_id,
+            turn_id=job.turn_id,
+        )
+        created_at = 0.0 if job.created_at is None else job.created_at.timestamp()
+        return (lineage_index, -turn_order, -created_at, job.job_id)
+
+    @staticmethod
+    def _materialization_job_ref_item(
+        job: RuntimeWorkflowJobRecord,
+    ) -> dict[str, Any]:
+        return {
+            "ref_id": f"runtime_job:{job.job_id}",
+            "ref_kind": f"memory_materialization.{job.job_kind}",
+            "domain_path": f"turn.{job.turn_id}.job.{job.job_kind}",
+            "selection_group": job.job_kind,
+            "source_route": "runtime_workflow_job",
+            "job_id": job.job_id,
+            "job_kind": job.job_kind,
+            "job_status": job.status,
+            "state": "completed"
+            if job.status == RuntimeWorkflowJobStatus.COMPLETED.value
+            else job.status,
+            "owning_branch_head_id": job.branch_head_id,
+            "origin_turn_id": job.turn_id,
+            "source_ref_ids": list(job.source_ref_ids_json or []),
+            "result_ref_ids": list(job.result_ref_ids_json or []),
+            "trace_refs": list(job.trace_refs_json or []),
+            "completion_reason": job.completion_reason,
+            "failure_reason": job.failure_reason,
+            "metadata": deepcopy(job.metadata_json or {}),
+        }
+
+    @staticmethod
+    def _materialization_job_is_selected(
+        *,
+        job: RuntimeWorkflowJobRecord,
+        selected_source_ref_ids: set[str],
+    ) -> bool:
+        if not selected_source_ref_ids:
+            return False
+        result_ref_ids = {
+            str(item).strip()
+            for item in list(job.result_ref_ids_json or [])
+            if str(item).strip()
+        }
+        source_ref_ids = {
+            str(item).strip()
+            for item in list(job.source_ref_ids_json or [])
+            if str(item).strip()
+        }
+        return bool(
+            selected_source_ref_ids.intersection(result_ref_ids)
+            or selected_source_ref_ids.intersection(source_ref_ids)
         )
 
     @staticmethod

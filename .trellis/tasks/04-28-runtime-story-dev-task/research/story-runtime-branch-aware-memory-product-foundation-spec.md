@@ -23,8 +23,10 @@ memory requires all of the following to be true:
 - users can review Recall through lifecycle actions;
 - users can edit Archival through Story Evolution / version / reindex
   governance;
-- writer brainstorm can produce user-confirmed summary items and apply them
-  through the same governed memory paths;
+- Stage V only established the historical writer brainstorm safety foundation;
+  the current Stage W product path supersedes V4 `confirmed/apply` wording with
+  user-editable batches that freeze active items as `pending_processing` for a
+  later Core-oriented W5 consumer;
 - post-write maintenance can materialize the minimum memory outputs needed by
   the next writer turn.
 
@@ -67,8 +69,9 @@ code.
     ingestion/retrieval maintenance, memory events, and branch visibility.
 - `story-runtime-technical-research-and-pseudocode.md`
   - brainstorm does not directly modify blocks; it produces summary items,
-    waits for user edit/reject/apply, then hands confirmed items to scheduler /
-    workers / governed memory dispatch.
+    waits for user review. Historical V4 wording used edit/reject/apply and
+    confirmed items; Stage W supersedes that with edit/add/delete/restore plus
+    batch submit to `pending_processing`.
 - `runtime-tech-research-memory-versioning.md` and
   `branching-memory-framework-research.md`
   - use Dolt/lakeFS-style metadata-first branch semantics and Letta-inspired
@@ -263,19 +266,26 @@ Minimum flow:
 5. if the user decides nothing should change, the session closes as no-op and
    the user returns to writing;
 6. if the user explicitly clicks/runs "summarize as change items" or equivalent,
-   a dedicated `brainstorm_summarize` prompt reads this brainstorm session and
-   outputs structured `BrainstormItem[]`;
-7. user can edit, reject, or confirm each item;
-8. confirmed items are sent to the scheduler / dispatcher;
-9. the scheduler classifies Core domain / worker ownership for each confirmed
-   item;
-10. the corresponding Core worker reads branch-aware as-of Core State and base
-    revision, then produces minimal field-level executable changes;
-11. backend fills deterministic old values, performs base revision / conflict
+   a dedicated `brainstorm_summarize` prompt reads the active brainstorm window
+   and outputs a strict list of user-intent strings;
+7. backend creates a draft batch whose items are editable user intents;
+8. user can edit, add, delete, or restore items before submit;
+9. batch submit freezes the batch and changes only active items to
+   `pending_processing`; deleted items remain visible history and are excluded
+   from dispatch;
+10. W5 consumes only frozen `pending_processing` items and sends them to the
+    scheduler / dispatcher;
+11. the scheduler selects the Core domain owner worker for each actionable item;
+   it is not a Core / Recall / Archival layer router;
+12. the corresponding Core worker reads branch-aware as-of Core State and base
+    revision, optionally retrieves Recall / Archival evidence through the
+    Retrieval Broker / tools, then produces minimal field-level executable
+    changes for Core State;
+13. backend fills deterministic old values, performs base revision / conflict
     checks, and applies worker permission policy;
-12. Core-affecting worker outputs use `brainstorm_summary_apply` through the
+14. Core-affecting worker outputs use `brainstorm_summary_apply` through the
     shared Core mutation kernel;
-13. result receipts are visible in Memory inspection and runtime inspect.
+15. result receipts are visible in Memory inspection and runtime inspect.
 
 Brainstorm remains separate from revision comments and Story Evolution.
 Revision comments guide rewrite of prose. Writer brainstorm is a Core State
@@ -283,19 +293,21 @@ discussion-to-intent path. Recall is historical memory and is not normally
 edited by brainstorm. Archival changes go through Story Evolution / version /
 reindex governance, not through V4 brainstorm.
 
-Brainstorm summary items must stay memory-layer agnostic. They may preserve
-user intent, low-cost evidence handles, and uncertainty, but they must not claim
+Brainstorm summary items must stay memory-layer agnostic. They preserve only
+plain user intent text; low-cost evidence handles can be attached later by
+deterministic/runtime code if available. They must not claim
 `target_layer`, `target_domain`, `operation_kind`, `intent_labels`, or a
 governed operation. Those fields are owned by the scheduler/dispatcher and
-memory workers.
+Core owner workers.
 
 Brainstorm summary creation is a context-engineering operation, not ordinary
 writer chat and not memory mutation. It should use the shared Context
 Engineering / Compact-Summary contract described in
 `context-engineering-compact-summary-module-spec.md`: brainstorm sees the
 writer-visible context plus the user's brainstorm prompt, produces typed
-summary items, then waits for user edit/reject/confirm before scheduler
-dispatch.
+summary items, then waits for user review before later scheduler dispatch.
+Current Stage W wording is stricter than the older V4 text: user review is
+edit/add/delete/restore plus batch submit, not item-level `confirmed`.
 
 The first version uses explicit summarization only. Brainstorm must not decide
 by itself when to summarize, must not incrementally write temporary items after
@@ -307,10 +319,11 @@ Minimum persistence semantics:
 - `BrainstormSession` represents one discussion/summarization task and has
   Runtime Workspace material semantics: branch/turn scoped, temporary,
   traceable, cleanable, and not truth.
-- `BrainstormItem` is the per-item unit users can edit / reject / confirm /
-  dispatch.
-- `source_item_id` in downstream worker output points to the confirmed
-  `BrainstormItem`, not directly to an arbitrary discussion message.
+- `BrainstormBatchItem` is the per-item unit users can edit, delete, restore,
+  or submit while the batch is draft.
+- `source_item_id` in downstream worker output points to the submitted
+  `pending_processing` `BrainstormBatchItem`, not directly to an arbitrary
+  discussion message.
 - full conversation `source_refs` are optional and may be added after
   discussion message ids / transcript anchors are stable.
 
@@ -326,10 +339,13 @@ Minimum context scope:
 Resource principle:
 
 - brainstorm summarizes intent only;
-- scheduler classifies only confirmed items;
-- V4 workers process only confirmed Core-oriented items;
-- non-Core wishes are returned as review/redirect material, such as Story
-  Evolution for Archival changes, instead of being dispatched as Recall or
+- scheduler consumes only submitted active `pending_processing` items and
+  selects Core domain owner workers for actionable Core updates;
+- V4/W5 workers manage Core State and current projections;
+- Recall / Archival material can be retrieved as evidence, but brainstorm
+  dispatch must not write Recall or Archival durable layers;
+- items whose real product path is Recall lifecycle or Story Evolution are
+  returned as review/redirect material instead of being dispatched as Recall or
   Archival brainstorm edits;
 - worker result fields stay minimal and executable;
 - deterministic backend code fills fields that do not require LLM judgment.
@@ -411,8 +427,9 @@ feature from becoming a hidden truth-write shortcut.
 The discussion worker is not a Memory OS router. It should not know or decide
 whether an item belongs to Core, Recall, or Archival. Its job is to summarize
 what the user wants to change in plain structured items. The scheduler /
-dispatcher and memory-domain workers own classification, routing, and governed
-operation planning.
+dispatcher owns Core domain owner selection and governed operation planning.
+Recall / Archival are evidence sources for Core owner workers, not brainstorm
+dispatch mutation targets.
 
 ## 5. Validation Matrix
 
@@ -427,7 +444,7 @@ operation planning.
 | User edits Core | Shared mutation kernel records actor/origin/base refs/event/dirty/projection effect |
 | User reviews Recall | Recall lifecycle action records traceable recompute/invalidate/supersede result |
 | User edits Archival | Evolution creates version/reindex receipt and active runtime search excludes superseded hidden chunks |
-| User applies brainstorm item | Confirmed item routes through scheduler/governed memory dispatch with `brainstorm_summary_apply` origin where applicable |
+| User submits brainstorm batch | Active items freeze as `pending_processing`; W5 later routes only those items through Core-oriented scheduler/governed memory dispatch with `brainstorm_summary_apply` origin where applicable |
 | Post-write maintenance is incomplete | Next writer turn either sees completed memory materialization or an explicit omitted/deferred reason |
 
 ## 6. Wrong vs Correct

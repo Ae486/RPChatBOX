@@ -189,7 +189,8 @@ class RuntimeRetrievalCardService:
         used_expanded_chunk_ids: list[str],
         missed_query_ids: list[str] | None = None,
         actor: str,
-        knowledge_gaps: list[RetrievalKnowledgeGapItem | dict[str, object]] | None = None,
+        knowledge_gaps: list[RetrievalKnowledgeGapItem | dict[str, object]]
+        | None = None,
     ) -> RuntimeWorkspaceMaterial:
         used_cards = self._resolve_existing_materials(
             identity=identity,
@@ -210,7 +211,9 @@ class RuntimeRetrievalCardService:
         used_expanded_chunk_material_ids = [
             material.material_id for material in used_expanded_chunks
         ]
-        missed_query_material_ids = [material.material_id for material in missed_queries]
+        missed_query_material_ids = [
+            material.material_id for material in missed_queries
+        ]
         parent_cards_for_used_expanded_chunks = self._parent_cards_for_expanded_chunks(
             identity=identity,
             expanded_chunks=used_expanded_chunks,
@@ -445,7 +448,9 @@ class RuntimeRetrievalCardService:
                 "query_text": query_text,
                 "search_kind": search_kind,
                 "excerpt": hit.excerpt_text,
-                "summary": hit.excerpt_text[:220],
+                "text": hit.excerpt_text,
+                "summary": self._stored_summary_from_hit(hit),
+                "summary_source": self._stored_summary_source(hit),
                 "title": hit.metadata.get("title"),
                 "rank": hit.rank,
                 "score": hit.score,
@@ -483,6 +488,32 @@ class RuntimeRetrievalCardService:
             },
         )
         return self._workspace().record_material(material).material
+
+    @classmethod
+    def _stored_summary_from_hit(cls, hit: RetrievalHit) -> str | None:
+        source = cls._stored_summary_source(hit)
+        if source is None:
+            return None
+        value = hit.metadata.get(source)
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @staticmethod
+    def _stored_summary_source(hit: RetrievalHit) -> str | None:
+        for key in (
+            "stored_summary",
+            "entry_summary",
+            "summary_text",
+            "setup_summary",
+            "summary",
+            "document_summary",
+        ):
+            value = hit.metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return key
+        return None
 
     def _record_expanded_chunk(
         self,
@@ -696,9 +727,7 @@ class RuntimeRetrievalCardService:
         used_cards: list[RuntimeWorkspaceMaterial],
         parent_cards_for_used_expanded_chunks: list[RuntimeWorkspaceMaterial],
     ) -> list[RuntimeWorkspaceMaterial]:
-        consumed_card_ids = {
-            material.material_id for material in used_cards
-        } | {
+        consumed_card_ids = {material.material_id for material in used_cards} | {
             material.material_id for material in parent_cards_for_used_expanded_chunks
         }
         return [
@@ -717,7 +746,9 @@ class RuntimeRetrievalCardService:
         parents: list[RuntimeWorkspaceMaterial] = []
         seen: set[str] = set()
         for material in expanded_chunks:
-            card_material_id = str(material.payload.get("card_material_id") or "").strip()
+            card_material_id = str(
+                material.payload.get("card_material_id") or ""
+            ).strip()
             if not card_material_id:
                 raise RuntimeRetrievalCardServiceError(
                     "runtime_retrieval_expanded_chunk_card_missing",

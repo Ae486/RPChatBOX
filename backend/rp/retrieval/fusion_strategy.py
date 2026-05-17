@@ -25,6 +25,34 @@ def _dedupe_preserve_order(values: Sequence[str]) -> list[str]:
 class RrfFusionStrategy:
     """Fuse keyword and semantic rankings with reciprocal-rank fusion."""
 
+    @staticmethod
+    def _route_weight(*, query: RetrievalQuery, route: str | None) -> float:
+        policy = query.filters.get("search_policy")
+        hybrid_policy: dict[str, object] = {}
+        if isinstance(policy, dict) and isinstance(policy.get("hybrid"), dict):
+            hybrid_policy = dict(policy.get("hybrid") or {})
+        route_weights = hybrid_policy.get("route_weights")
+        if isinstance(route_weights, dict):
+            for route_prefix, raw_weight in route_weights.items():
+                if not str(route or "").startswith(str(route_prefix)):
+                    continue
+                try:
+                    weight = float(raw_weight)
+                except (TypeError, ValueError):
+                    continue
+                if weight > 0:
+                    return weight
+
+        analysis = query.filters.get("query_analysis")
+        has_structured_sparse_terms = (
+            isinstance(analysis, dict)
+            and bool(analysis.get("entity_terms") or analysis.get("intent_terms"))
+        )
+        normalized_route = str(route or "")
+        if has_structured_sparse_terms and normalized_route.startswith("retrieval.keyword"):
+            return 2.0
+        return 1.0
+
     def fuse(
         self,
         *,
@@ -47,13 +75,22 @@ class RrfFusionStrategy:
                 retriever_routes.extend(result.trace.retriever_routes or [result.trace.route])
                 pipeline_stages.extend(result.trace.pipeline_stages)
             if result.hits:
-                rankings.append([hit.model_dump(mode="json") for hit in result.hits])
+                route = result.trace.route if result.trace is not None else None
+                weight = self._route_weight(query=query, route=route)
+                ranking_items = []
+                for hit in result.hits:
+                    item = hit.model_dump(mode="json")
+                    if weight != 1.0:
+                        item["_rrf_weight"] = weight
+                    ranking_items.append(item)
+                rankings.append(ranking_items)
                 non_empty_results.append(result)
 
         if not rankings:
             route = "retrieval.hybrid.empty"
             hits: list[RetrievalHit] = []
             candidate_count = 0
+            fusion_details: dict[str, object] = {}
         elif len(rankings) == 1:
             source = non_empty_results[0]
             route = f"{source.trace.route if source.trace is not None else 'retrieval.hybrid.single'}.degraded"
@@ -62,6 +99,7 @@ class RrfFusionStrategy:
                 for index, hit in enumerate(source.hits[: query.top_k], start=1)
             ]
             candidate_count = len(source.hits)
+            fusion_details = {}
         else:
             route = "retrieval.hybrid.rrf"
             fused = reciprocal_rank_fusion(rankings)
@@ -70,6 +108,14 @@ class RrfFusionStrategy:
                 for index, item in enumerate(fused[: query.top_k], start=1)
             ]
             candidate_count = len({hit.hit_id for result in non_empty_results for hit in result.hits})
+            route_weights = {}
+            for result in non_empty_results:
+                result_route = result.trace.route if result.trace is not None else "unknown"
+                route_weights[result_route] = self._route_weight(
+                    query=query,
+                    route=result_route,
+                )
+            fusion_details = {"rrf": {"route_weights": route_weights}}
 
         timings["fusion_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return RetrievalSearchResult(
@@ -87,6 +133,7 @@ class RrfFusionStrategy:
                 returned_count=len(hits),
                 timings=timings,
                 warnings=warnings,
+                details=fusion_details,
             ),
             warnings=warnings,
         )

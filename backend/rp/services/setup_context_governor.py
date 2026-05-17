@@ -1,4 +1,5 @@
 """Current-step context governor for setup runtime-v2 turns."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -10,6 +11,9 @@ from rp.agent_runtime.contracts import (
     SetupToolOutcome,
     SetupWorkingDigest,
 )
+from rp.context_engineering.adapters.setup import SetupContextEngineeringAdapter
+from rp.context_engineering.contracts import ContextSelectionResult
+from rp.context_engineering.selection import select_context_sections
 from rp.models.setup_agent import SetupAgentDialogueMessage
 from rp.services.setup_context_compaction_service import SetupContextCompactionService
 
@@ -28,8 +32,10 @@ class SetupContextGovernorService:
         self,
         *,
         compaction_service: SetupContextCompactionService | None = None,
+        context_adapter: SetupContextEngineeringAdapter | None = None,
     ) -> None:
         self._compaction_service = compaction_service or SetupContextCompactionService()
+        self._context_adapter = context_adapter or SetupContextEngineeringAdapter()
 
     def govern_history(
         self,
@@ -40,6 +46,7 @@ class SetupContextGovernorService:
         existing_summary: SetupContextCompactSummary | None,
         context_profile: str,
         current_step: str | None = None,
+        current_stage: str | None = None,
         estimated_input_tokens: int | None = None,
         previous_usage: dict[str, int | None] | None = None,
     ) -> tuple[
@@ -54,6 +61,7 @@ class SetupContextGovernorService:
             existing_summary=existing_summary,
             context_profile=context_profile,
             current_step=current_step,
+            current_stage=current_stage,
             estimated_input_tokens=estimated_input_tokens,
             previous_usage=previous_usage,
         )
@@ -67,6 +75,7 @@ class SetupContextGovernorService:
         existing_summary: SetupContextCompactSummary | None,
         context_profile: str,
         current_step: str | None = None,
+        current_stage: str | None = None,
         estimated_input_tokens: int | None = None,
         previous_usage: dict[str, int | None] | None = None,
     ) -> tuple[
@@ -81,6 +90,7 @@ class SetupContextGovernorService:
             existing_summary=existing_summary,
             context_profile=context_profile,
             current_step=current_step,
+            current_stage=current_stage,
             estimated_input_tokens=estimated_input_tokens,
             previous_usage=previous_usage,
         )
@@ -94,6 +104,7 @@ class SetupContextGovernorService:
         existing_summary: SetupContextCompactSummary | None,
         context_profile: str,
         current_step: str | None = None,
+        current_stage: str | None = None,
         estimated_input_tokens: int | None = None,
         previous_usage: dict[str, int | None] | None = None,
     ) -> tuple[
@@ -101,17 +112,32 @@ class SetupContextGovernorService:
         SetupContextCompactSummary | None,
         dict[str, Any],
     ]:
-        limit = self._compaction_service.raw_history_limit(context_profile=context_profile)
-        compact_summary = self._compaction_service.build_summary(
+        operation_request = self._context_adapter.build_stage_local_compact_request(
             history=history,
             retained_tool_outcomes=retained_tool_outcomes,
             working_digest=working_digest,
             existing_summary=existing_summary,
-            context_profile=context_profile,
+            context_profile=self._normalized_context_profile(context_profile),
+            current_step=str(current_step or "unknown_step"),
+            current_stage=current_stage,
+            estimated_input_tokens=estimated_input_tokens,
+            previous_usage=previous_usage,
+        )
+        selection = select_context_sections(operation_request)
+        compact_summary = self._compaction_service.build_summary_from_common_selection(
+            request=operation_request,
+            selection=selection,
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            existing_summary=existing_summary,
             current_step=current_step,
         )
         summary_decision = self._compaction_service.last_summary_decision()
-        kept_history = list(history[-limit:]) if len(history) > limit else list(history)
+        kept_history = self._history_from_recent_raw(
+            history=history,
+            selection=selection,
+        )
+        limit = int(operation_request.metadata.get("raw_history_limit") or 0)
         previous_prompt_tokens = (
             previous_usage.get("prompt_tokens") if previous_usage else None
         )
@@ -124,7 +150,7 @@ class SetupContextGovernorService:
             {
                 "raw_history_limit": limit,
                 "kept_history_count": len(kept_history),
-                "compacted_history_count": max(len(history) - len(kept_history), 0),
+                "compacted_history_count": len(selection.compactable_dropped_items),
                 "estimated_input_tokens": estimated_input_tokens,
                 "previous_prompt_tokens": (
                     int(previous_prompt_tokens)
@@ -151,6 +177,7 @@ class SetupContextGovernorService:
         existing_summary: SetupContextCompactSummary | None,
         context_profile: str,
         current_step: str | None = None,
+        current_stage: str | None = None,
         estimated_input_tokens: int | None = None,
         previous_usage: dict[str, int | None] | None = None,
     ) -> tuple[
@@ -158,17 +185,34 @@ class SetupContextGovernorService:
         SetupContextCompactSummary | None,
         dict[str, Any],
     ]:
-        limit = self._compaction_service.raw_history_limit(context_profile=context_profile)
-        compact_summary = await self._compaction_service.build_summary_async(
+        operation_request = self._context_adapter.build_stage_local_compact_request(
             history=history,
             retained_tool_outcomes=retained_tool_outcomes,
             working_digest=working_digest,
             existing_summary=existing_summary,
-            context_profile=context_profile,
-            current_step=current_step,
+            context_profile=self._normalized_context_profile(context_profile),
+            current_step=str(current_step or "unknown_step"),
+            current_stage=current_stage,
+            estimated_input_tokens=estimated_input_tokens,
+            previous_usage=previous_usage,
+        )
+        selection = select_context_sections(operation_request)
+        compact_summary = (
+            await self._compaction_service.build_summary_from_common_selection_async(
+                request=operation_request,
+                selection=selection,
+                retained_tool_outcomes=retained_tool_outcomes,
+                working_digest=working_digest,
+                existing_summary=existing_summary,
+                current_step=current_step,
+            )
         )
         summary_decision = self._compaction_service.last_summary_decision()
-        kept_history = list(history[-limit:]) if len(history) > limit else list(history)
+        kept_history = self._history_from_recent_raw(
+            history=history,
+            selection=selection,
+        )
+        limit = int(operation_request.metadata.get("raw_history_limit") or 0)
         previous_prompt_tokens = (
             previous_usage.get("prompt_tokens") if previous_usage else None
         )
@@ -181,7 +225,7 @@ class SetupContextGovernorService:
             {
                 "raw_history_limit": limit,
                 "kept_history_count": len(kept_history),
-                "compacted_history_count": max(len(history) - len(kept_history), 0),
+                "compacted_history_count": len(selection.compactable_dropped_items),
                 "estimated_input_tokens": estimated_input_tokens,
                 "previous_prompt_tokens": (
                     int(previous_prompt_tokens)
@@ -199,6 +243,25 @@ class SetupContextGovernorService:
             },
         )
 
+    @staticmethod
+    def _normalized_context_profile(context_profile: str):
+        return "compact" if context_profile == "compact" else "standard"
+
+    @staticmethod
+    def _history_from_recent_raw(
+        *,
+        history: list[SetupAgentDialogueMessage],
+        selection: ContextSelectionResult,
+    ) -> list[SetupAgentDialogueMessage]:
+        indices: list[int] = []
+        for item in selection.recent_raw_items:
+            if item.sequence_index is None:
+                continue
+            index = int(item.sequence_index)
+            if 0 <= index < len(history):
+                indices.append(index)
+        return [history[index] for index in sorted(dict.fromkeys(indices))]
+
     def build_initial_digest(
         self,
         *,
@@ -214,14 +277,10 @@ class SetupContextGovernorService:
             else SetupWorkingDigest()
         )
         discussion_state = (
-            cognitive_state.discussion_state
-            if cognitive_state is not None
-            else None
+            cognitive_state.discussion_state if cognitive_state is not None else None
         )
         truth_write = (
-            cognitive_state.active_truth_write
-            if cognitive_state is not None
-            else None
+            cognitive_state.active_truth_write if cognitive_state is not None else None
         )
         if discussion_state is not None:
             base.next_focus = discussion_state.next_focus or base.next_focus
@@ -230,7 +289,10 @@ class SetupContextGovernorService:
                 for item in discussion_state.candidate_directions
                 if item.status == "discarded"
             ][: self._MAX_REJECTED_DIRECTIONS]
-        if cognitive_state_summary is not None and cognitive_state_summary.open_questions:
+        if (
+            cognitive_state_summary is not None
+            and cognitive_state_summary.open_questions
+        ):
             base.open_questions = list(
                 cognitive_state_summary.open_questions[: self._MAX_OPEN_QUESTIONS]
             )
@@ -260,7 +322,9 @@ class SetupContextGovernorService:
             blockers.extend(cognitive_state_summary.remaining_open_issues[:2])
         if str(last_proposal_status or "").lower() == "rejected":
             blockers.append("proposal_rejected")
-        base.commit_blockers = list(dict.fromkeys(blockers))[: self._MAX_COMMIT_BLOCKERS]
+        base.commit_blockers = list(dict.fromkeys(blockers))[
+            : self._MAX_COMMIT_BLOCKERS
+        ]
 
         has_content = any(
             (

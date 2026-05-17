@@ -15,11 +15,12 @@
 | [RP Setup Agent Prior-Stage Handoff Context](./rp-setup-agent-prior-stage-handoff-context.md) | Compact earlier-stage truth handoffs and budget-driven setup context compaction | Active |
 | [RP Setup Agent Stage-Local Context Governance](./rp-setup-agent-stage-local-context-governance.md) | Thin working digest, retained tool outcomes, compacted current-step history, and minimal no-progress guards | Active |
 | [RP Setup Agent Pre-Model Context Assembly](./rp-setup-agent-pre-model-context-assembly.md) | Deterministic `SetupContextPacket -> governed history -> runtime overlay -> final request messages` contract for setup turns | Active |
-| [RP Setup Agent Stage-Aware Tool Scope](./rp-setup-agent-stage-aware-tool-scope.md) | Shared tools plus current-step patch-family narrowing for setup-turn tool visibility | Active |
+| [RP Setup Agent Stage-Aware Tool Scope](./rp-setup-agent-stage-aware-tool-scope.md) | Stage-entry current-stage draft CRUD visibility plus retained read/context/memory tools for setup turns | Active |
 | [RP Setup Agent Structured Output Schema Repair](./rp-setup-agent-structured-output-schema-repair.md) | Machine-readable pydantic validation errors, one bounded schema repair retry, and deterministic blocking of false-success turn completion | Active |
-| [RP Setup Agent Slim Truth Write Tool Surface](./rp-setup-agent-strict-truth-write-tool-pilot.md) | Common slim `setup.truth.write` model-facing schema, runtime-owned argument injection, and strict-tool flags as verified enhancement before provider validation | Active |
-| [RP Setup Agent Stage SkillPack](./rp-setup-agent-stage-skill-pack.md) | Stage-keyed SkillPack registry that swaps stage-local persona / facilitation prose into the SetupAgent system prompt without touching tool scope or `setup.truth.write` | Active |
-| [RP Setup Agent Action Decision Policy](./rp-setup-agent-action-decision-policy.md) | Lightweight runtime-authored action expectations that force draft-ref readback before exact compacted setup detail is used | Active |
+| [RP Setup Agent Slim Truth Write Tool Surface](./rp-setup-agent-strict-truth-write-tool-pilot.md) | Historical/deprecated note for the removed `setup.truth.write` model-facing adapter; current draft CRUD uses `setup.stage_entry.*` | Deprecated |
+| [RP Setup Agent Stage SkillPack](./rp-setup-agent-stage-skill-pack.md) | Stage-keyed SkillPack registry that swaps stage-local persona / facilitation prose into the SetupAgent system prompt without changing the current stage-entry tool surface | Active |
+| [RP Setup Agent Action Decision Policy](./rp-setup-agent-action-decision-policy.md) | Historical memory-specific forced-readback policy; superseded by session-memory index/search/open guidance | Superseded |
+| [RP Setup Agent Session Memory](./rp-setup-agent-session-memory.md) | Session-scoped SetupAgent memory manifest/search/open subsystem exposed through read-only setup tools without becoming RP Memory OS or setup truth | Active |
 | [RP Setup Agent Loop Semantics ReAct Trace](./rp-setup-agent-loop-semantics-react-trace.md) | Explicit turn-loop order, continue/finish taxonomy, and thin runtime-authored ReAct trace above the current LangGraph graph | Active |
 | [RP Setup Agent Runtime-V2 Only Convergence](./rp-setup-agent-runtime-v2-only-convergence.md) | Remove the transitional setup legacy runtime path and keep every setup entrypoint on the runtime-v2 engine | Active |
 | [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md) | Keep the outer SetupGraph shell focused on checkpoint/routing and remove duplicate setup context assembly from the shell layer | Active |
@@ -29,6 +30,7 @@
 | [RP Setup Stage Module Draft Foundation Contract](./rp-setup-stage-module-draft-foundation-contract.md) | Canonical setup stage modules, reusable mode plans, data-driven draft blocks, and committed foundation truth source boundaries | Active |
 | [RP Setup Truth Index Foundation](./rp-setup-truth-index-foundation.md) | Deterministic direct search/read model over accepted setup stage snapshots, separate from editable draft reads and semantic retrieval | Active |
 | [RP Setup Retrieval Seed Materialization](./rp-setup-retrieval-seed-materialization.md) | Deterministic retrieval seed sections derived from committed setup entry/section trees, with mechanical chunk splitting handled by retrieval-core | Active |
+| [RP Story Brainstorm Product Loop](./rp-story-brainstorm-product-loop.md) | Writer brainstorm discussion, editable batch intent forms, pending-processing submit, and W5 consumer boundary | Active |
 | [RP Core State Block Envelope](./rp-core-state-block-envelope.md) | Read-only Block envelope over RP Core State formal store and compatibility mirrors | Active |
 | [RP Authoritative Block Governed Mutation](./rp-authoritative-block-governed-mutation.md) | Block-addressed authoritative mutation entry that normalizes into the existing proposal/apply workflow | Active |
 | [RP Authoritative Block Proposal Review Apply Visibility](./rp-authoritative-block-proposal-review-apply-visibility.md) | Block-scoped proposal detail and manual apply continuation over the existing proposal/apply persistence | Active |
@@ -93,9 +95,10 @@
 - [ ] If the change touches SetupAgent pre-model context assembly, runtime overlay insertion, or final request message ordering, read [RP Setup Agent Pre-Model Context Assembly](./rp-setup-agent-pre-model-context-assembly.md).
 - [ ] If the change touches SetupAgent per-step tool visibility, narrowed allowed-tool scope, or patch-family exposure, read [RP Setup Agent Stage-Aware Tool Scope](./rp-setup-agent-stage-aware-tool-scope.md).
 - [ ] If the change touches SetupAgent pydantic validation payloads, schema repair retry behavior, or false-success blocking after tool validation failure, read [RP Setup Agent Structured Output Schema Repair](./rp-setup-agent-structured-output-schema-repair.md).
-- [ ] If the change touches SetupAgent `setup.truth.write` model-facing tool schema, strict tool flags, or runtime-owned truth-write argument injection, read [RP Setup Agent Slim Truth Write Tool Surface](./rp-setup-agent-strict-truth-write-tool-pilot.md).
+- [ ] If the change touches removed `setup.truth.write` references, read [RP Setup Agent Slim Truth Write Tool Surface](./rp-setup-agent-strict-truth-write-tool-pilot.md) as historical context only; current draft CRUD changes must follow the stage-entry tool surface.
 - [ ] If the change adds or modifies stage-local SkillPack files, the SkillPack registry, or how SetupAgent injects stage-local persona / facilitation prose into the system prompt, read [RP Setup Agent Stage SkillPack](./rp-setup-agent-stage-skill-pack.md).
-- [ ] If the change touches SetupAgent action selection, text-finalization guards, compact recovery readback, or tool-batch blocking before required observations, read [RP Setup Agent Action Decision Policy](./rp-setup-agent-action-decision-policy.md).
+- [ ] If the change touches historical SetupAgent action-selection cleanup, read [RP Setup Agent Action Decision Policy](./rp-setup-agent-action-decision-policy.md), but treat memory-specific forced search/read expectations as superseded.
+- [ ] If the change adds or modifies SetupAgent session-scoped memory manifest/search/open, `setup.memory.search`, `setup.memory.open`, compatibility `setup.memory.read_refs`, or related read-only tool scope, read [RP Setup Agent Session Memory](./rp-setup-agent-session-memory.md).
 - [ ] If the change touches SetupAgent turn-loop order, graph-route meaning, runtime trace, or continue/finish semantics, read [RP Setup Agent Loop Semantics ReAct Trace](./rp-setup-agent-loop-semantics-react-trace.md).
 - [ ] If the change touches SetupAgent runtime entrypoint wiring, factory convergence, or removal of the transitional legacy runtime path, read [RP Setup Agent Runtime-V2 Only Convergence](./rp-setup-agent-runtime-v2-only-convergence.md).
 - [ ] If the change touches the phase-1 SetupGraph shell, stream checkpoint seeding, or graph-level duplication of setup context assembly, read [RP Setup Graph Shell Thin Checkpoint Contract](./rp-setup-graph-shell-thin-checkpoint-contract.md).
@@ -192,6 +195,7 @@
 - [ ] User-visible memory inspection/edit backends keep Core direct edit on the shared mutation kernel and route Recall/Archival corrections through their own lifecycle/evolution governance.
 - [ ] User-visible memory inspection surfaces return a canonical block/entry envelope that stays consistent with governed backend edit/review/evolution semantics.
 - [ ] Setup retrieval seed materialization keeps accepted setup entry/section trees as the semantic source, preserves setup anchors on emitted sections/chunks, and leaves mechanical paragraph/window splitting to retrieval-core.
+- [ ] Story brainstorm submit freezes only active user intent items as `pending_processing`, excludes deleted/draft items from dispatch, and does not mutate memory before the W5 consumer path.
 - [ ] Recall detail retention preserves settled prose through retrieval-core without treating drafts as history or replacing chapter summaries.
 - [ ] Character long-history retention is rooted in authoritative `character_state_digest` snapshots and does not overload `summary_updates` or runtime scratch.
 - [ ] Retired-foreshadow retention is rooted in authoritative terminal `foreshadow_registry` snapshots and does not infer retirement from `summary_updates` or runtime scratch.
@@ -209,6 +213,6 @@
 - [ ] SetupAgent loop routing, `continue_reason`, `finish_reason`, and runtime trace stay semantically aligned; `next_action` remains an internal graph-route token rather than a user-facing outcome contract.
 - [ ] SetupAgent action expectations stay turn-transient, high-certainty only, and do not become durable setup state or broad semantic planning.
 - [ ] `SetupAgentExecutionService` text and stream entrypoints reuse the same outer-harness preflight and runtime-v2 launch boundaries; drift is limited to the true run vs run_stream split.
-- [ ] SetupAgent stage SkillPack short-circuit lives only in `_stage_overlay`; tool scope, `setup.truth.write` runtime injection, and the no-SkillPack system prompt remain byte-for-byte unchanged from the legacy build.
+- [ ] SetupAgent stage SkillPack short-circuit lives only in `_stage_overlay`; it must not reopen deleted draft CRUD tools or bypass the current stage-entry tool surface.
 - [ ] Projection refresh remains a derived current-view write, records freshness / source / dirty metadata, and rejects stale base revisions before mutating the formal projection row.
 - [ ] Lint/format and relevant scoped type checks pass.

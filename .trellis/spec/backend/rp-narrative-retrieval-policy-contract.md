@@ -29,6 +29,204 @@ Confirmed implementation gaps as of this spec:
 | Context budget | RAG context builder dedupes and renders compact excerpts, but does not budget by source family/domain/scene/character/chapter | Add selected/excluded result composition trace |
 | Eval | retrieval eval covers ingestion/query/provenance/maintenance and optional RAGAS wiring | Add narrative policy gold cases and budget/ranking assertions |
 
+### Implemented Sparse Baseline: Chinese field-aware BM25 fallback
+
+- `KeywordRetriever` Python fallback must remain Chinese-capable. The fallback tokenizer emits:
+  - ASCII/number tokens;
+  - CJK single characters;
+  - CJK bi-grams;
+  - CJK tri-grams.
+- The fallback must not flatten every field into one equal-weight body string. Sparse scoring treats structured setup/worldbook fields as first-class ranking signals:
+  - `entry_title` / `aliases` are highest-weight entity signals;
+  - `title` / `asset_title` are strong document identity signals;
+  - `tags`, `section_title`, and `retrieval_role` are medium-weight routing signals;
+  - semantic/domain paths are weak structured hints;
+  - body text remains baseline evidence.
+- This is intentionally a Python/SQLite/local fallback contract. PostgreSQL FTS still uses `to_tsvector('simple', title || text)` for plain ASCII/simple queries, but structured or CJK queries must bypass that PG FTS path and use the same field-aware BM25 sparse path as the fallback until an indexed normalized sparse-text/analyzer slice exists.
+- Regression anchor: Chinese relationship queries such as `林鸢和夜紫林的关系` must be able to rank the matching relationship section above a shared-keyword noise section using metadata/title/tag/role signals, without requiring dense retrieval.
+
+### Implemented Query Analysis and Structured Sparse Boosts
+
+- `DefaultQueryPreprocessor` attaches deterministic `filters["query_analysis"]` for non-empty text queries. This is an internal retrieval hint, not a public memory search API field that callers must provide.
+- Current retrieval quality evaluation is retrieval-only: benchmark queries are hand-authored inputs used to test the retrieval chain after a query is already provided. Do not count LLM tool-query construction or prompt/query-contract quality as part of these retrieval metrics.
+- The retrieval tool boundary should not require model callers to know memory internals. Do not expose memory-layer filters such as entity type, source family, materialization kind, or section metadata as required LLM-authored inputs unless a later product spec explicitly opens that contract. Retrieval internals may still use normalized filters, stored metadata, and deterministic `query_analysis`.
+- Test queries should be stratified by input difficulty:
+  - `good`: retrieval-friendly manual query with explicit names and target terms;
+  - `base`: ordinary natural-language query;
+  - `bad`: underspecified, vague, or context-dependent query used to map retrieval-only limits, not as the primary success gate.
+- `query_analysis` shape:
+
+```python
+{
+    "version": "structured_query_analysis_v1",
+    "intent": "relationship | appearance | speech | history | weakness | motivation | rule | None",
+    "entity_terms": list[str],
+    "intent_terms": list[str],
+    "intent_expansion_terms": list[str],
+    "sparse_terms": list[str],
+}
+```
+
+- Query analysis must remain model-free and general. It may identify common structured RP/setup query signals such as entity names joined by Chinese connector words and explicit section/intent terms, but it must not special-case fixture names, dataset ids, or benchmark gold labels.
+- Sparse retrieval must not blindly append every intent synonym into the BM25 query. That failure mode turns queries such as `丰川祥子 的外貌` into broad "any appearance section" lookup and can outrank the target entity. The implemented fallback keeps BM25 query terms grounded in the original query text, then applies bounded metadata multipliers:
+  - entity metadata match: additive multiplier up to `+0.6`;
+  - explicit intent term metadata match: additive multiplier up to `+0.2`;
+  - structured entity query with no entity metadata match: mild penalty.
+- RRF supports per-route weights through transient `_rrf_weight` ranking hints. The helper must strip `_rrf_weight` before returning public hit payloads. For structured queries with entity/intent terms, keyword routes default to higher weight than semantic routes unless `filters.search_policy.hybrid.route_weights` overrides it.
+
+### Target Runtime LLM-Facing Retrieval Tool Contract
+
+This section captures the 2026-05-17 runtime-tool decision. It is a target
+contract for writer/worker/orchestrator-facing retrieval, not a statement that
+the current writer loop already implements the full shape.
+
+#### 1. Scope / Trigger
+
+- Trigger: runtime writer/worker/orchestrator need a shared LLM-facing retrieval
+  tool that is cleaner than legacy `memory.search_recall` /
+  `memory.search_archival` and simpler than the current card/expand-heavy
+  writer loop.
+- `SetupAgent` is out of scope. It keeps its independent
+  `setup.memory.search` / `setup.memory.read_refs` tools.
+- The LLM-facing retrieval contract should follow standard RAG: caller provides
+  the query intent, retrieval returns Top-K clean results, and the LLM reads the
+  returned results without reranking.
+
+#### 2. Signatures
+
+Target LLM-facing search input:
+
+```python
+class RuntimeRetrievalSearchInput(BaseModel):
+    query: str
+    mode: Literal["entity", "entity_relation", "semantic", "mixed", "vague"] | None = None
+    lexical_anchors: list[str] = Field(default_factory=list)
+    semantic_predicates: list[str] = Field(default_factory=list)
+```
+
+Target LLM-facing result item:
+
+```python
+class RuntimeRetrievalResultItem(BaseModel):
+    result_id: str
+    title: str | None = None
+    summary: str | None = None
+    excerpt: str | None = None
+    text: str
+    section: str | None = None
+```
+
+Target LLM-facing search response:
+
+```python
+class RuntimeRetrievalSearchOutput(BaseModel):
+    query: str
+    results: list[RuntimeRetrievalResultItem]
+    warnings: list[str] = Field(default_factory=list)
+```
+
+#### 3. Contracts
+
+- `query` is required and non-blank.
+- `mode`, `lexical_anchors`, and `semantic_predicates` are lightweight query
+  expression hints. They are not retrieval algorithm controls.
+- The LLM must not provide source routing, sparse/dense weights, K values,
+  rerank policy, source family, materialization kind, entity type, or memory
+  filters.
+- `search_kind` must not be present in the LLM-facing input. Recall vs archival
+  routing belongs to backend retrieval policy.
+- Writer main-path source policy may search both recall and archival/setup/worldbook material, then return one unified Top-K result list. The model must not see or select those sources.
+- `summary` means a stored setup/archival summary written before retrieval. It
+  must not be generated or invented by retrieval at query time.
+- If no stored summary exists, bounded preview text should be exposed as
+  `excerpt`, not `summary`.
+- `text` is the matched evidence body/section content, possibly length-bounded.
+- Do not expose raw `score`, `rank`, `hit_id`, `chunk_id`, `asset_id`,
+  `collection_id`, `domain_path`, raw `metadata`, `provenance_refs`, or raw
+  retrieval trace in the normal LLM-facing response. Keep those for backend
+  trace/eval/debug surfaces.
+- `results` replaces LLM-facing `cards` terminology. Internal runtime workspace
+  materials may still keep short ids or card-like storage records for
+  traceability, but the tool contract should look like standard RAG.
+- Do not add complex cross-source semantic deduplication in the first runtime
+  tool slice. Recall represents landed prose, story progress, outlines, and
+  runtime summaries; archival represents setting facts, worldbook material,
+  character foundations, and rules. Treat them as complementary unless the same
+  source/hit/chunk is already deduped by existing retrieval behavior.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| `query` is blank | Reject with schema/validation error |
+| `mode` is unknown | Reject or normalize to missing-mode fallback; do not silently treat it as a retrieval weight |
+| `lexical_anchors` / `semantic_predicates` contain blanks or duplicates | Trim and dedupe |
+| caller includes `search_kind` | Reject once the target strict schema is active |
+| caller attempts to pass `top_k`, route weights, filters, or rerank settings | Reject once the target strict schema is active |
+| no stored summary exists | Return `excerpt` or omit `summary`; do not fabricate `summary` |
+| retrieval returns no hits | Return empty `results` plus warning/miss metadata appropriate for backend trace |
+| recall and archival both produce useful hits | Return a unified Top-K list; do not ask the LLM to choose source family |
+| recall and archival appear semantically similar | Keep both in the first slice unless they are the same source/hit/chunk under existing dedup behavior |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `{"query": "林鸢和夜紫林的关系怎么样", "mode": "entity_relation", "lexical_anchors": ["林鸢", "夜紫林"], "semantic_predicates": ["关系"]}` returns relationship-focused Top-K results.
+- Base: `{"query": "林鸢和夜紫林的关系怎么样"}` still works through deterministic query analysis.
+- Bad: `{"query": "林鸢和夜紫林的关系怎么样", "search_kind": "archival", "top_k": 50, "filters": {"source_families": ["..."]}}` exposes backend retrieval concerns to the model and should not be accepted by the LLM-facing runtime tool.
+- Base: writer search may internally query both story recall and archival/worldbook facts, then return a unified `results` list without exposing source routing.
+
+#### 6. Tests Required
+
+- Schema tests: accept `query` plus optional lightweight hints; reject legacy
+  `search_kind`, filters, K, and route weights under strict mode.
+- Serialization tests: LLM-facing response includes only `result_id`, `title`,
+  stored `summary` when available, `excerpt` fallback when needed, `text`,
+  `section`, and `warnings`.
+- Regression tests: existing retrieval ranking remains backend-owned; the LLM
+  does not receive fields that imply manual reranking.
+- E2E runtime test: writer/worker/orchestrator can call `retrieval.search` and
+  receive clean Top-K RAG results while backend trace still preserves full
+  retrieval diagnostics.
+- Source policy test: writer main path does not require `search_kind` and can
+  compose recall plus archival results behind the tool boundary.
+- Dedup boundary test: do not add new cross-source semantic folding in this
+  slice; only same-source/same-hit behavior already present in retrieval may
+  apply.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```json
+{
+  "query": "林鸢和夜紫林的关系怎么样",
+  "search_kind": "archival",
+  "top_k": 50,
+  "filters": {"source_families": ["recall_detail"]},
+  "rerank_top_n": 20
+}
+```
+
+Correct:
+
+```json
+{
+  "query": "林鸢和夜紫林的关系怎么样",
+  "mode": "entity_relation",
+  "lexical_anchors": ["林鸢", "夜紫林"],
+  "semantic_predicates": ["关系"]
+}
+```
+- Deterministic dense fallback must not be used as the tuning anchor for final hybrid conclusions. If dense retrieval is local deterministic fallback, structured sparse metrics are the primary quality signal and RRF results are diagnostic only.
+- Real hosted embeddings must be evaluated before final RRF weighting. On the raw worldbook good/base/bad retrieval-only benchmark, SiliconFlow `Qwen/Qwen3-Embedding-8B` materially outperformed deterministic dense fallback and current structured sparse on early-ranking metrics; equal sparse+dense RRF improved Recall@10 but did not beat dense-only nDCG/MRR. Treat this as evidence that dense retrieval is required and that final fusion should be query-aware plus reranked, not a fixed sparse-heavy default.
+- Hybrid/rerank must use a deeper internal candidate pool than the caller's final `top_k`. The external `top_k` remains the response limit, while retrieval and RRF may use `filters.search_policy.hybrid.candidate_top_k` or a bounded default candidate pool. Candidate-pool expansion is an internal retrieval concern and must be visible in trace details, not exposed as a required LLM-authored filter.
+- Cross-Encoder rerank should operate on the fused candidate pool, not only the already-truncated response top-k. Hosted rerank latency/failure is expected to be managed through bounded `candidate_top_k`, trace warnings, and fallback to fused/metadata order.
+- PostgreSQL parity rule:
+  - plain ASCII/simple keyword queries may continue to use PG FTS;
+  - CJK queries or queries with structured `query_analysis.entity_terms` / `intent_terms` must bypass PG `simple` FTS because it does not tokenize Chinese or structured metadata fields correctly;
+  - the bypass route is `retrieval.keyword.bm25` with warning `fts_bypassed:structured_sparse_parity`;
+  - this is a correctness-first bridge, not the final performance architecture. The final PG implementation should index backend-generated normalized sparse text or use a Chinese-capable analyzer while preserving the same ranking semantics.
+
 ### 2. Signatures
 
 Public memory search input shape remains stable:

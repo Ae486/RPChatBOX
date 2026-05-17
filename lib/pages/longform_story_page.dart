@@ -11,6 +11,7 @@ import '../models/model_config.dart';
 import '../models/story_runtime.dart';
 import '../pages/rp_model_config_page.dart';
 import '../services/backend_story_service.dart';
+import '../widgets/story_brainstorm_batches_dialog.dart';
 import '../widgets/story_session_drawer.dart';
 import '../widgets/story_memory_panel.dart';
 import '../widgets/story_runtime_inspection_sheet.dart';
@@ -67,6 +68,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   bool _isReviewSaving = false;
   RpRuntimeInspection? _branchInspection;
   Map<String, dynamic>? _latestBranchControlReceipt;
+  RpBrainstormSession? _brainstormSession;
 
   @override
   void initState() {
@@ -100,6 +102,10 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
         _sessions = sessions;
         _currentSessionId = resolvedSessionId;
         _snapshot = snapshot;
+        _brainstormSession = _coerceBrainstormSessionForSnapshot(
+          snapshot,
+          existing: _brainstormSession,
+        );
         _branchInspection = null;
         _latestBranchControlReceipt = null;
         _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
@@ -132,6 +138,10 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
       _sessions = sessions;
       _currentSessionId = resolvedSessionId;
       _snapshot = snapshot;
+      _brainstormSession = _coerceBrainstormSessionForSnapshot(
+        snapshot,
+        existing: _brainstormSession,
+      );
       _branchInspection = null;
       _latestBranchControlReceipt = null;
       _selectedPendingArtifactId = _resolveSelectedPendingArtifactId(
@@ -192,7 +202,37 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     final pending = _selectedPendingSegment(snapshot);
     if (pending != null) return pending;
     final acceptedSegments = snapshot.acceptedSegmentArtifacts;
-    return acceptedSegments.isEmpty ? null : acceptedSegments.last;
+    if (acceptedSegments.isNotEmpty) return acceptedSegments.last;
+    // Outline artifacts also carry runtime identity, so outline-only chapters
+    // can still open memory/brainstorm flows before any body segment exists.
+    final acceptedOutlines = snapshot.acceptedOutlineArtifacts;
+    return acceptedOutlines.isEmpty ? null : acceptedOutlines.last;
+  }
+
+  RpBrainstormSession? _coerceBrainstormSessionForSnapshot(
+    RpChapterSnapshot? snapshot, {
+    required RpBrainstormSession? existing,
+  }) {
+    final identity = _brainstormIdentity(snapshot);
+    if (existing == null || identity == null) {
+      return identity == null ? null : existing;
+    }
+    if (_brainstormSessionMatchesIdentity(existing, identity)) {
+      return existing;
+    }
+    return null;
+  }
+
+  bool _brainstormSessionMatchesIdentity(
+    RpBrainstormSession session,
+    Map<String, dynamic> identity,
+  ) {
+    return session.identity['story_id'] == identity['story_id'] &&
+        session.identity['session_id'] == identity['session_id'] &&
+        session.identity['branch_head_id'] == identity['branch_head_id'] &&
+        session.identity['turn_id'] == identity['turn_id'] &&
+        session.identity['runtime_profile_snapshot_id'] ==
+            identity['runtime_profile_snapshot_id'];
   }
 
   int _activeReviewCommentCount() {
@@ -1386,17 +1426,274 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   Future<void> _sendDiscussion() async {
     final prompt = _messageController.text.trim();
     if (prompt.isEmpty) return;
+    final snapshot = _snapshot;
+    final sessionId = _currentSessionId;
+    final identity = _brainstormIdentity(snapshot);
+    final modelId = _selectedModelId;
+    if (snapshot == null ||
+        sessionId == null ||
+        identity == null ||
+        modelId == null) {
+      OwuiSnackBars.error(
+        context,
+        message: 'Brainstorm 需要当前 branch / turn / runtime snapshot。',
+      );
+      return;
+    }
+    final providerModel = globalModelServiceManager.getModelWithProvider(
+      modelId,
+    );
+    if (providerModel == null) {
+      OwuiSnackBars.warning(context, message: '请先选择可用模型');
+      return;
+    }
     _messageController.clear();
-    await _runStreamingCommand(
-      _discussionCommandForPhase(
-        _snapshot?.chapter.phase ?? 'outline_drafting',
+    setState(() {
+      _isSending = true;
+      _streamingCommandKind = 'brainstorm';
+      _streamingText = '';
+      _streamingThinking = '';
+    });
+    try {
+      final session = await _ensureBrainstormSession(
+        sessionId: sessionId,
+        identity: identity,
+      );
+      final updated = await _service.sendBrainstormMessage(
+        sessionId: sessionId,
+        brainstormId: session.brainstormId,
+        identity: identity,
+        actor: 'longform_story_page',
+        prompt: prompt,
+        modelId: modelId,
+        providerId: providerModel.provider.id,
+      );
+      _applyBrainstormSessionUpdate(updated);
+    } catch (e) {
+      if (!mounted) return;
+      OwuiSnackBars.error(context, message: 'Brainstorm 失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+          _streamingCommandKind = null;
+          _streamingThinking = '';
+          _streamingText = '';
+        });
+      }
+    }
+  }
+
+  Future<void> _summarizeBrainstorm() async {
+    final sessionId = _currentSessionId;
+    final identity = _brainstormIdentity(_snapshot);
+    final modelId = _selectedModelId;
+    final currentSession = _brainstormSession;
+    if (sessionId == null ||
+        identity == null ||
+        modelId == null ||
+        currentSession == null ||
+        (currentSession.activeWindow?.messages.isEmpty ?? true)) {
+      OwuiSnackBars.warning(context, message: '当前没有可总结的 brainstorm 对话。');
+      return;
+    }
+    final providerModel = globalModelServiceManager.getModelWithProvider(
+      modelId,
+    );
+    if (providerModel == null) {
+      OwuiSnackBars.warning(context, message: '请先选择可用模型');
+      return;
+    }
+    setState(() => _isSending = true);
+    try {
+      final updated = await _service.summarizeBrainstormSession(
+        sessionId: sessionId,
+        brainstormId: currentSession.brainstormId,
+        identity: identity,
+        actor: 'longform_story_page',
+        modelId: modelId,
+        providerId: providerModel.provider.id,
+      );
+      _applyBrainstormSessionUpdate(updated);
+      if (!mounted) return;
+      final latestBatch = updated.batches.isEmpty ? null : updated.batches.last;
+      OwuiSnackBars.success(
+        context,
+        message: '已生成 ${latestBatch?.items.length ?? 0} 条 brainstorm 变更项',
+      );
+      await _openBrainstormBatchesDialog();
+    } catch (e) {
+      if (!mounted) return;
+      OwuiSnackBars.error(context, message: '总结变更项失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  Future<void> _continueBrainstormWriting() async {
+    final sessionId = _currentSessionId;
+    final identity = _brainstormIdentity(_snapshot);
+    final currentSession = _brainstormSession;
+    if (sessionId == null || identity == null || currentSession == null) {
+      OwuiSnackBars.warning(context, message: '当前没有可 flush 的 brainstorm 会话。');
+      return;
+    }
+    if (currentSession.activeWindow?.messages.isEmpty ?? true) {
+      OwuiSnackBars.warning(context, message: '当前没有待 flush 的 brainstorm 上下文。');
+      return;
+    }
+    setState(() => _isSending = true);
+    try {
+      final updated = await _service.continueBrainstormWriting(
+        sessionId: sessionId,
+        brainstormId: currentSession.brainstormId,
+        identity: identity,
+        actor: 'longform_story_page',
+      );
+      _applyBrainstormSessionUpdate(updated);
+      if (!mounted) return;
+      OwuiSnackBars.success(context, message: '已 flush 当前 brainstorm 上下文。');
+    } catch (e) {
+      if (!mounted) return;
+      OwuiSnackBars.error(context, message: '续写前 flush 失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
+
+  Future<RpBrainstormSession> _ensureBrainstormSession({
+    required String sessionId,
+    required Map<String, dynamic> identity,
+  }) async {
+    final currentSession = _brainstormSession;
+    if (currentSession != null &&
+        _brainstormSessionMatchesIdentity(currentSession, identity)) {
+      return currentSession;
+    }
+    final started = await _service.startBrainstormSession(
+      sessionId: sessionId,
+      identity: identity,
+      actor: 'longform_story_page',
+      metadata: {'frontend_entry': 'longform_discussion_pane'},
+    );
+    _applyBrainstormSessionUpdate(started);
+    return started;
+  }
+
+  void _applyBrainstormSessionUpdate(RpBrainstormSession session) {
+    if (!mounted) return;
+    setState(() {
+      _brainstormSession = session;
+    });
+  }
+
+  Future<void> _openBrainstormBatchesDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => StoryBrainstormBatchesDialog(
+        initialSession: _brainstormSession,
+        onAddItem: _addBrainstormItem,
+        onUpdateItem: _updateBrainstormBatchItem,
+        onSubmitBatch: _submitBrainstormBatch,
       ),
-      userPrompt: prompt,
     );
   }
 
-  String _discussionCommandForPhase(String phase) {
-    return 'discuss_outline';
+  Future<RpBrainstormSession> _addBrainstormItem(
+    String batchId,
+    String text,
+  ) async {
+    final sessionId = _currentSessionId;
+    final identity = _brainstormIdentity(_snapshot);
+    final currentSession = _brainstormSession;
+    if (sessionId == null || identity == null || currentSession == null) {
+      throw StateError('brainstorm_session_missing');
+    }
+    final updated = await _service.addBrainstormBatchItem(
+      sessionId: sessionId,
+      brainstormId: currentSession.brainstormId,
+      batchId: batchId,
+      identity: identity,
+      actor: 'longform_story_page',
+      text: text,
+    );
+    _applyBrainstormSessionUpdate(updated);
+    return updated;
+  }
+
+  Future<RpBrainstormSession> _updateBrainstormBatchItem({
+    required String batchId,
+    required String itemId,
+    String? text,
+    String? status,
+  }) async {
+    final sessionId = _currentSessionId;
+    final identity = _brainstormIdentity(_snapshot);
+    final currentSession = _brainstormSession;
+    if (sessionId == null || identity == null || currentSession == null) {
+      throw StateError('brainstorm_session_missing');
+    }
+    final updated = await _service.updateBrainstormItem(
+      sessionId: sessionId,
+      brainstormId: currentSession.brainstormId,
+      batchId: batchId,
+      itemId: itemId,
+      identity: identity,
+      actor: 'longform_story_page',
+      text: text,
+      status: status,
+    );
+    _applyBrainstormSessionUpdate(updated);
+    return updated;
+  }
+
+  Future<RpBrainstormSession> _submitBrainstormBatch(String batchId) async {
+    final sessionId = _currentSessionId;
+    final identity = _brainstormIdentity(_snapshot);
+    final currentSession = _brainstormSession;
+    if (sessionId == null || identity == null || currentSession == null) {
+      throw StateError('brainstorm_session_missing');
+    }
+    final response = await _service.submitBrainstormBatch(
+      sessionId: sessionId,
+      brainstormId: currentSession.brainstormId,
+      batchId: batchId,
+      identity: identity,
+      actor: 'longform_story_page',
+    );
+    _applyBrainstormSessionUpdate(response.session);
+    if (mounted) {
+      OwuiSnackBars.success(context, message: '已提交处理');
+    }
+    return response.session;
+  }
+
+  Map<String, dynamic>? _brainstormIdentity(RpChapterSnapshot? snapshot) {
+    if (snapshot == null) return null;
+    final anchorArtifact = _runtimeInspectionAnchorArtifact(snapshot);
+    final branchHeadId =
+        _normalizedText(anchorArtifact?.runtimeBranchHeadId) ??
+        _normalizedText(snapshot.session.activeBranchHeadId);
+    final turnId = _normalizedText(anchorArtifact?.runtimeTurnId);
+    final runtimeProfileSnapshotId =
+        _normalizedText(anchorArtifact?.runtimeProfileSnapshotId) ??
+        _normalizedText(snapshot.session.activeRuntimeProfileSnapshotId);
+    if (branchHeadId == null ||
+        turnId == null ||
+        runtimeProfileSnapshotId == null) {
+      return null;
+    }
+    return {
+      'story_id': snapshot.session.storyId,
+      'session_id': snapshot.session.sessionId,
+      'branch_head_id': branchHeadId,
+      'turn_id': turnId,
+      'runtime_profile_snapshot_id': runtimeProfileSnapshotId,
+    };
   }
 
   @override
@@ -2368,6 +2665,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   Widget _buildDiscussionPane(RpChapterSnapshot snapshot) {
     final spacing = context.owuiSpacing;
     final phase = snapshot.chapter.phase;
+    final brainstormSession = _brainstormSession;
     return OwuiCard(
       padding: EdgeInsets.all(spacing.lg),
       child: Column(
@@ -2387,6 +2685,9 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           Expanded(
             child: ListView(
               children: [
+                _buildBrainstormEntryCard(),
+                SizedBox(height: spacing.md),
+                if (brainstormSession != null) ..._buildBrainstormTranscript(),
                 ...snapshot.discussionEntries.map(_buildDiscussionEntry),
                 if (_isStreamingDiscussionPane) _buildStreamingCard(),
               ],
@@ -2415,6 +2716,122 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
     );
   }
 
+  Widget _buildBrainstormEntryCard() {
+    final spacing = context.owuiSpacing;
+    final colors = context.owuiColors;
+    final session = _brainstormSession;
+    final batchCount = session?.batches.length ?? 0;
+    final itemCount = session?.totalItemCount ?? 0;
+    final pendingCount = session?.pendingBatchCount ?? 0;
+    final subtitle = switch ((batchCount, itemCount, pendingCount)) {
+      (0, _, _) => 'Brainstorm 变更项 · 暂无',
+      (_, _, > 0) =>
+        'Brainstorm 变更项 · $batchCount 批次 · $itemCount 条 · $pendingCount 待处理',
+      _ => 'Brainstorm 变更项 · $batchCount 批次 · $itemCount 条',
+    };
+    return InkWell(
+      borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+      onTap: _openBrainstormBatchesDialog,
+      child: Container(
+        padding: EdgeInsets.all(spacing.md),
+        decoration: BoxDecoration(
+          color: colors.surface2,
+          borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+          border: Border.all(color: colors.borderSubtle),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.playlist_add_check_circle_outlined),
+            SizedBox(width: spacing.md),
+            Expanded(
+              child: Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            Icon(
+              Icons.open_in_new_outlined,
+              size: 18,
+              color: colors.textSecondary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildBrainstormTranscript() {
+    final spacing = context.owuiSpacing;
+    final session = _brainstormSession;
+    if (session == null) return const [];
+    final widgets = <Widget>[
+      Padding(
+        padding: EdgeInsets.only(bottom: spacing.sm),
+        child: Text(
+          'Brainstorm Transcript',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+      ),
+    ];
+    for (final window in session.windows) {
+      for (final message in window.messages) {
+        widgets.add(_buildBrainstormMessage(message));
+      }
+      if (window.status == 'flushed') {
+        widgets.add(
+          Padding(
+            padding: EdgeInsets.only(top: spacing.xs, bottom: spacing.md),
+            child: Text(
+              switch (window.flushReason) {
+                'summarize' => '已 flush：总结变更项',
+                'continue_writing' => '已 flush：续写',
+                _ => '已 flush',
+              },
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: context.owuiColors.textSecondary,
+              ),
+            ),
+          ),
+        );
+      }
+    }
+    return widgets;
+  }
+
+  Widget _buildBrainstormMessage(RpBrainstormMessage message) {
+    final spacing = context.owuiSpacing;
+    final isUser = message.role == 'user';
+    final colors = context.owuiColors;
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 520),
+        margin: EdgeInsets.only(bottom: spacing.sm),
+        padding: EdgeInsets.all(spacing.md),
+        decoration: BoxDecoration(
+          color: isUser
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
+              : colors.surface2,
+          borderRadius: BorderRadius.circular(context.owuiRadius.rLg),
+          border: Border.all(color: colors.borderSubtle),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isUser ? '你' : 'Brainstorm',
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: colors.textSecondary),
+            ),
+            SizedBox(height: spacing.xs),
+            Text(message.contentText),
+          ],
+        ),
+      ),
+    );
+  }
+
   String? _formatModelSelectionSummary({
     required String? providerId,
     required String? modelId,
@@ -2438,6 +2855,12 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
   Widget _buildComposerFooter() {
     final spacing = context.owuiSpacing;
     final colors = context.owuiColors;
+    final canSummarize =
+        (_brainstormSession?.activeWindow?.messages.isNotEmpty ?? false) &&
+        !_isSending;
+    final canContinue =
+        (_brainstormSession?.activeWindow?.messages.isNotEmpty ?? false) &&
+        !_isSending;
     final agentSummary =
         _formatModelSelectionSummary(
           providerId: _selectedProviderId,
@@ -2502,10 +2925,20 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
               icon: const Icon(Icons.tune),
               label: const Text('模型配置'),
             ),
+            OutlinedButton.icon(
+              onPressed: canSummarize ? _summarizeBrainstorm : null,
+              icon: const Icon(Icons.summarize_outlined),
+              label: const Text('总结变更项'),
+            ),
+            OutlinedButton.icon(
+              onPressed: canContinue ? _continueBrainstormWriting : null,
+              icon: const Icon(Icons.redo_outlined),
+              label: const Text('续写'),
+            ),
             FilledButton.icon(
               onPressed: _isSending ? null : _sendDiscussion,
               icon: const Icon(Icons.send_outlined),
-              label: const Text('Send'),
+              label: const Text('发送讨论'),
             ),
           ],
         );
@@ -2943,5 +3376,7 @@ class _LongformStoryPageState extends State<LongformStoryPage> {
           _streamingCommandKind == 'rewrite_pending_segment');
 
   bool get _isStreamingDiscussionPane =>
-      _isSending && _streamingCommandKind == 'discuss_outline';
+      _isSending &&
+      (_streamingCommandKind == 'discuss_outline' ||
+          _streamingCommandKind == 'brainstorm');
 }

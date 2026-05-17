@@ -72,8 +72,10 @@
 - Retrieval materialization status remains asynchronous and non-blocking for setup stage progression and commit warnings.
 - This contract is the bridge out of setup-owned lightweight readback:
   - setup readback before and during prestory editing stays on
-    `setup.read.draft_refs`, `setup.truth_index.search`, and
-    `setup.truth_index.read_refs`;
+    model-facing `setup.memory.search` and `setup.memory.open`, backed by
+    the internal draft-ref reader and `SetupTruthIndexService`; compatibility
+    `setup.memory.read_refs` may remain only for older internal paths while the
+    transition is incomplete;
   - retrieval-core consumes accepted setup seed sections after commit and then
     owns chunking, indexing, embeddings, hybrid/rerank, Recall/Archival search,
     and active-story runtime retrieval policy;

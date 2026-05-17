@@ -224,9 +224,7 @@ class StoryTurnDomainService:
         target_artifact_id: str | None,
     ) -> dict[str, object]:
         session = self.require_session(session_id)
-        chapter = self._active_branch_chapter_view(
-            self.require_current_chapter(session_id)
-        )
+        chapter = self.require_active_branch_current_chapter(session_id)
         if user_prompt:
             self._story_session_service.create_discussion_entry(
                 session_id=session.session_id,
@@ -259,7 +257,7 @@ class StoryTurnDomainService:
         target_artifact_id: str | None,
     ) -> OrchestratorPlan:
         session = self.require_session(session_id)
-        chapter = self.require_current_chapter(session_id)
+        chapter = self.require_active_branch_current_chapter(session_id)
         plan = await self._orchestrator_service.plan(
             session=session,
             chapter=chapter,
@@ -289,9 +287,7 @@ class StoryTurnDomainService:
         runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> SpecialistResultBundle:
         session = self.require_session(session_id)
-        chapter = self._active_branch_chapter_view(
-            self.require_current_chapter(session_id)
-        )
+        chapter = self.require_active_branch_current_chapter(session_id)
         pending_artifact = self.resolve_pending_artifact(
             chapter=chapter,
             target_artifact_id=pending_artifact_id,
@@ -480,9 +476,7 @@ class StoryTurnDomainService:
         target_artifact_id: str | None = None,
     ) -> WritingPacket:
         session = self.require_session(session_id)
-        chapter = self._active_branch_chapter_view(
-            self.require_current_chapter(session_id)
-        )
+        chapter = self.require_active_branch_current_chapter(session_id)
         resolved_runtime_identity = (
             runtime_identity or self._runtime_identity_by_session.get(session_id)
         )
@@ -679,7 +673,9 @@ class StoryTurnDomainService:
             )
 
         session = self.require_session(runtime_identity.session_id)
-        chapter = self.require_current_chapter(runtime_identity.session_id)
+        chapter = self.require_active_branch_current_chapter(
+            runtime_identity.session_id
+        )
         trigger_context = self._post_write_scheduler_service.build_trigger_context(
             identity=runtime_identity,
             turn=turn,
@@ -853,9 +849,7 @@ class StoryTurnDomainService:
         pending_artifact_id: str | None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
-        chapter = self._active_branch_chapter_view(
-            self.require_current_chapter(request.session_id)
-        )
+        chapter = self.require_active_branch_current_chapter(request.session_id)
         pending_artifact = self.resolve_pending_artifact(
             chapter=chapter,
             target_artifact_id=pending_artifact_id,
@@ -894,7 +888,7 @@ class StoryTurnDomainService:
         runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
-        chapter = self.require_current_chapter(request.session_id)
+        chapter = self.require_active_branch_current_chapter(request.session_id)
         artifact = self.resolve_outline_artifact(
             chapter=chapter,
             target_artifact_id=request.target_artifact_id,
@@ -957,7 +951,9 @@ class StoryTurnDomainService:
             outline_text=accepted_artifact.content_text,
         )
         if self._longform_chapter_runtime_service is not None:
-            updated_chapter = self.require_current_chapter(request.session_id)
+            updated_chapter = self.require_active_branch_current_chapter(
+                request.session_id
+            )
             self._longform_chapter_runtime_service.initialize_outline_progress(
                 identity=runtime_identity,
                 chapter=updated_chapter,
@@ -983,7 +979,7 @@ class StoryTurnDomainService:
         runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
-        chapter = self.require_current_chapter(request.session_id)
+        chapter = self.require_active_branch_current_chapter(request.session_id)
         artifact = self.resolve_pending_artifact(
             chapter=chapter,
             target_artifact_id=request.target_artifact_id,
@@ -1116,9 +1112,7 @@ class StoryTurnDomainService:
         runtime_identity: MemoryRuntimeIdentity | None = None,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
-        chapter = self._active_branch_chapter_view(
-            self.require_current_chapter(request.session_id)
-        )
+        chapter = self.require_active_branch_current_chapter(request.session_id)
         if self._longform_chapter_runtime_service is not None:
             prepared_transition = (
                 await self._longform_chapter_runtime_service.prepare_chapter_transition_with_summary(
@@ -1207,22 +1201,23 @@ class StoryTurnDomainService:
             raise ValueError(f"Current ChapterWorkspace not found: {session_id}")
         return chapter
 
+    def require_active_branch_current_chapter(
+        self,
+        session_id: str,
+    ) -> ChapterWorkspace:
+        chapter = self._story_session_service.get_active_branch_current_chapter(
+            session_id
+        )
+        if chapter is None:
+            raise ValueError(f"Current ChapterWorkspace not found: {session_id}")
+        return chapter
+
     def accepted_segments(self, chapter: ChapterWorkspace) -> list[StoryArtifact]:
         return self._story_session_service.active_branch_accepted_segment_artifacts(
             session_id=chapter.session_id,
             chapter_index=chapter.chapter_index,
             chapter=chapter,
         )
-
-    def _active_branch_chapter_view(
-        self,
-        chapter: ChapterWorkspace,
-    ) -> ChapterWorkspace:
-        snapshot = self._story_session_service.build_chapter_snapshot(
-            session_id=chapter.session_id,
-            chapter_index=chapter.chapter_index,
-        )
-        return snapshot.chapter
 
     def resolve_pending_artifact(
         self,

@@ -79,7 +79,6 @@ SETUP_RUNTIME_OVERLAY_INPUTS: tuple[str, ...] = (
     "working_digest",
     "tool_outcomes",
     "compact_summary",
-    "action_expectation",
 )
 SETUP_CONTEXT_PACKET_EXCLUDED_FIELDS: tuple[str, ...] = (
     "raw_history",
@@ -173,9 +172,7 @@ class SetupPromptAssemblySnapshot(BaseModel):
             "raw_tool_retry_process",
         ]
     )
-    capability_guidance_source: str = (
-        "SetupCapabilityPlan.prompt_guidance_fragments"
-    )
+    capability_guidance_source: str = "SetupCapabilityPlan.prompt_guidance_fragments"
     skill_pack_boundary: str = "prompt_only_does_not_change_tool_scope"
     active_skill_pack_name: str | None = None
 
@@ -695,19 +692,6 @@ class SetupCompletionGuard(BaseModel):
         "finalize_failure",
     ]
     finish_reason: str | None = None
-
-
-class SetupActionExpectation(BaseModel):
-    """Turn-local action expectation derived from high-certainty setup context."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    expectation_type: Literal["read_draft_refs"]
-    reason: str
-    required_tools: list[str] = Field(default_factory=list)
-    draft_refs: list[str] = Field(default_factory=list)
-    allow_text_finalize: bool = False
-    requires_observation_first: bool = True
 
 
 class SetupReActTraceFrame(BaseModel):

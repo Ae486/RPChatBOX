@@ -85,13 +85,13 @@ def test_tool_info_qualified_name_sanitizes_dotted_setup_tool_names():
     tool = McpToolInfo(
         server_id="rp_setup",
         server_name="RP Setup",
-        name="setup.world_background.write_entry",
-        description="Write world background draft entry",
+        name="setup.stage_entry.write",
+        description="Write current-stage draft entry",
         input_schema={"type": "object"},
     )
 
-    assert tool.raw_qualified_name == "rp_setup__setup.world_background.write_entry"
-    assert tool.qualified_name == "rp_setup__setup_world_background_write_entry"
+    assert tool.raw_qualified_name == "rp_setup__setup.stage_entry.write"
+    assert tool.qualified_name == "rp_setup__setup_stage_entry_write"
     assert tool.to_openai_tool()["function"]["name"] == tool.qualified_name
 
 
@@ -99,8 +99,8 @@ def test_runtime_tool_registry_resolves_sanitized_and_raw_names():
     tool = McpToolInfo(
         server_id="rp_setup",
         server_name="RP Setup",
-        name="setup.world_background.write_entry",
-        description="Write world background draft entry",
+        name="setup.stage_entry.write",
+        description="Write current-stage draft entry",
         input_schema={"type": "object"},
     )
 
@@ -109,18 +109,18 @@ def test_runtime_tool_registry_resolves_sanitized_and_raw_names():
             return [tool]
 
     registry = RuntimeToolRegistryView(mcp_manager=_Manager())
-    visible = ["setup.world_background.write_entry"]
+    visible = ["setup.stage_entry.write"]
 
     assert registry.resolve_tool(
-        tool_name="rp_setup__setup_world_background_write_entry",
+        tool_name="rp_setup__setup_stage_entry_write",
         visible_tool_names=visible,
     ) == tool
     assert registry.resolve_tool(
-        tool_name="rp_setup__setup.world_background.write_entry",
+        tool_name="rp_setup__setup.stage_entry.write",
         visible_tool_names=visible,
     ) == tool
     assert registry.resolve_tool(
-        tool_name="setup.world_background.write_entry",
+        tool_name="setup.stage_entry.write",
         visible_tool_names=visible,
     ) == tool
 

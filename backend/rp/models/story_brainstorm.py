@@ -1,69 +1,185 @@
-"""Writer brainstorm Runtime Workspace contracts."""
+"""Writer brainstorm Runtime Workspace contracts for Stage W."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationInfo,
-    field_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class BrainstormSessionStatus(StrEnum):
-    OPEN = "open"
-    SUMMARIZED = "summarized"
-    REVIEWING = "reviewing"
-    DISPATCHED = "dispatched"
+    ACTIVE = "active"
     CLOSED = "closed"
 
 
-class BrainstormItemStatus(StrEnum):
-    PROPOSED = "proposed"
-    EDITED = "edited"
-    REJECTED = "rejected"
-    CONFIRMED = "confirmed"
-    DISPATCHED = "dispatched"
-    APPLIED = "applied"
-    PENDING_REVIEW = "pending_review"
-    CONFLICT = "conflict"
+class BrainstormContextWindowStatus(StrEnum):
+    ACTIVE = "active"
+    FLUSHED = "flushed"
+
+
+class BrainstormContextFlushReason(StrEnum):
+    SUMMARIZE = "summarize"
+    CONTINUE_WRITING = "continue_writing"
+
+
+class BrainstormBatchStatus(StrEnum):
+    DRAFT = "draft"
+    PENDING_PROCESSING = "pending_processing"
+    COMPLETED = "completed"
     FAILED = "failed"
+    CONFLICT = "conflict"
 
 
-class BrainstormItem(BaseModel):
-    """User-editable intent item; routing fields are intentionally forbidden."""
+class BrainstormItemStatus(StrEnum):
+    ACTIVE = "active"
+    DELETED = "deleted"
+    PENDING_PROCESSING = "pending_processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CONFLICT = "conflict"
 
+
+class BrainstormItemSourceKind(StrEnum):
+    SUMMARIZED = "summarized"
+    USER_ADDED = "user_added"
+
+
+class BrainstormMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    item_id: str
-    summary_text: str
-    evidence_text_refs: list[str] = Field(default_factory=list)
-    uncertainty: str | None = None
-    user_edited: bool = False
-    status: BrainstormItemStatus = BrainstormItemStatus.PROPOSED
+    message_id: str
+    role: Literal["user", "assistant"]
+    content_text: str
+    created_at: datetime = Field(default_factory=_utcnow)
 
-    @field_validator("item_id", "summary_text")
+    @field_validator("message_id", "content_text")
     @classmethod
     def _require_text(cls, value: str, info: ValidationInfo) -> str:
         return _require_non_blank(value, field_name=info.field_name or "value")
 
-    @field_validator("uncertainty")
+
+class BrainstormContextWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    window_id: str
+    brainstorm_id: str
+    session_id: str
+    branch_head_id: str
+    turn_id: str | None
+    runtime_profile_snapshot_id: str | None
+    status: BrainstormContextWindowStatus = BrainstormContextWindowStatus.ACTIVE
+    flush_reason: BrainstormContextFlushReason | None = None
+    flushed_at: datetime | None = None
+    source_message_refs: list[str] = Field(default_factory=list)
+    messages: list[BrainstormMessage] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+    @field_validator(
+        "window_id",
+        "brainstorm_id",
+        "session_id",
+        "branch_head_id",
+    )
     @classmethod
-    def _normalize_uncertainty(cls, value: str | None) -> str | None:
+    def _require_text(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
+    @field_validator("turn_id", "runtime_profile_snapshot_id")
+    @classmethod
+    def _normalize_optional_text(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
         if value is None:
             return None
-        return _optional_non_blank(value, field_name="uncertainty")
+        return _optional_non_blank(value, field_name=info.field_name or "value")
 
-    @field_validator("evidence_text_refs")
+    @field_validator("source_message_refs")
     @classmethod
-    def _normalize_evidence_refs(cls, values: list[str]) -> list[str]:
-        return _normalize_text_list(values, field_name="evidence_text_refs")
+    def _normalize_refs(cls, values: list[str]) -> list[str]:
+        return _normalize_text_list(values, field_name="source_message_refs")
+
+
+class BrainstormBatchItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str
+    batch_id: str
+    brainstorm_id: str
+    session_id: str
+    branch_head_id: str
+    turn_id: str | None
+    runtime_profile_snapshot_id: str | None
+    text: str
+    source_kind: BrainstormItemSourceKind = BrainstormItemSourceKind.SUMMARIZED
+    status: BrainstormItemStatus = BrainstormItemStatus.ACTIVE
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+    @field_validator(
+        "item_id",
+        "batch_id",
+        "brainstorm_id",
+        "session_id",
+        "branch_head_id",
+        "text",
+    )
+    @classmethod
+    def _require_text(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
+    @field_validator("turn_id", "runtime_profile_snapshot_id")
+    @classmethod
+    def _normalize_optional_text(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        if value is None:
+            return None
+        return _optional_non_blank(value, field_name=info.field_name or "value")
+
+
+class BrainstormBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str
+    brainstorm_id: str
+    session_id: str
+    branch_head_id: str
+    turn_id: str | None
+    runtime_profile_snapshot_id: str | None
+    source_window_id: str | None = None
+    status: BrainstormBatchStatus = BrainstormBatchStatus.DRAFT
+    frozen: bool = False
+    items: list[BrainstormBatchItem] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+    submitted_at: datetime | None = None
+
+    @field_validator("batch_id", "brainstorm_id", "session_id", "branch_head_id")
+    @classmethod
+    def _require_text(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
+    @field_validator("turn_id", "runtime_profile_snapshot_id", "source_window_id")
+    @classmethod
+    def _normalize_optional_text(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        if value is None:
+            return None
+        return _optional_non_blank(value, field_name=info.field_name or "value")
+
+    @property
+    def active_items(self) -> list[BrainstormBatchItem]:
+        return [item for item in self.items if item.status == BrainstormItemStatus.ACTIVE]
 
 
 class BrainstormSession(BaseModel):
@@ -73,20 +189,19 @@ class BrainstormSession(BaseModel):
 
     brainstorm_id: str
     identity: MemoryRuntimeIdentity
-    status: BrainstormSessionStatus = BrainstormSessionStatus.OPEN
-    prompt: str
-    items: list[BrainstormItem] = Field(default_factory=list)
-    source_entry_ids: list[str] = Field(default_factory=list)
-    source_refs: list[MemorySourceRef] = Field(default_factory=list)
-    revision: int = Field(default=1, ge=1)
+    status: BrainstormSessionStatus = BrainstormSessionStatus.ACTIVE
     created_by: str
     updated_by: str
+    revision: int = Field(default=1, ge=1)
+    windows: list[BrainstormContextWindow] = Field(default_factory=list)
+    batches: list[BrainstormBatch] = Field(default_factory=list)
     close_reason: str | None = None
     summary_trace: dict[str, Any] = Field(default_factory=dict)
-    apply_receipts: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
 
-    @field_validator("brainstorm_id", "prompt", "created_by", "updated_by")
+    @field_validator("brainstorm_id", "created_by", "updated_by")
     @classmethod
     def _require_required_text(cls, value: str, info: ValidationInfo) -> str:
         return _require_non_blank(value, field_name=info.field_name or "value")
@@ -98,63 +213,51 @@ class BrainstormSession(BaseModel):
             return None
         return _optional_non_blank(value, field_name="close_reason")
 
-    @field_validator("source_entry_ids")
-    @classmethod
-    def _normalize_source_entry_ids(cls, values: list[str]) -> list[str]:
-        return _normalize_text_list(values, field_name="source_entry_ids")
-
 
 class BrainstormSessionStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     identity: MemoryRuntimeIdentity
     actor: str
-    prompt: str
-    source_entry_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("actor", "prompt")
+    @field_validator("actor")
+    @classmethod
+    def _require_text(cls, value: str) -> str:
+        return _require_non_blank(value, field_name="actor")
+
+
+class BrainstormDiscussionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    identity: MemoryRuntimeIdentity
+    actor: str
+    prompt: str
+    model_id: str
+    provider_id: str | None = None
+
+    @field_validator("actor", "prompt", "model_id")
     @classmethod
     def _require_text(cls, value: str, info: ValidationInfo) -> str:
         return _require_non_blank(value, field_name=info.field_name or "value")
 
-    @field_validator("source_entry_ids")
+    @field_validator("provider_id")
     @classmethod
-    def _normalize_source_entry_ids(cls, values: list[str]) -> list[str]:
-        return _normalize_text_list(values, field_name="source_entry_ids")
-
-
-class BrainstormStructuredItem(BaseModel):
-    """Strict LLM output item for the dedicated brainstorm_summarize prompt."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    summary_text: str
-    evidence_text_refs: list[str] = Field(default_factory=list)
-    uncertainty: str | None = None
-
-    @field_validator("summary_text")
-    @classmethod
-    def _require_summary(cls, value: str) -> str:
-        return _require_non_blank(value, field_name="summary_text")
-
-    @field_validator("uncertainty")
-    @classmethod
-    def _normalize_uncertainty(cls, value: str | None) -> str | None:
+    def _normalize_provider_id(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _optional_non_blank(value, field_name="uncertainty")
-
-    @field_validator("evidence_text_refs")
-    @classmethod
-    def _normalize_evidence_refs(cls, values: list[str]) -> list[str]:
-        return _normalize_text_list(values, field_name="evidence_text_refs")
+        return _optional_non_blank(value, field_name="provider_id")
 
 
-class BrainstormStructuredSummary(BaseModel):
+class BrainstormSummarizeOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    items: list[BrainstormStructuredItem] = Field(default_factory=list, max_length=12)
+    items: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("items")
+    @classmethod
+    def _normalize_items(cls, values: list[str]) -> list[str]:
+        return _normalize_text_list(values, field_name="items")
 
 
 class BrainstormSummarizeRequest(BaseModel):
@@ -165,7 +268,7 @@ class BrainstormSummarizeRequest(BaseModel):
     model_id: str | None = None
     provider_id: str | None = None
     max_items: int = Field(default=8, ge=1, le=12)
-    dry_run_items: list[BrainstormStructuredItem] | None = None
+    dry_run_items: list[str] | None = None
 
     @field_validator("actor")
     @classmethod
@@ -181,126 +284,91 @@ class BrainstormSummarizeRequest(BaseModel):
             return None
         return _optional_non_blank(value, field_name=info.field_name or "value")
 
+    @field_validator("dry_run_items")
+    @classmethod
+    def _normalize_dry_run_items(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        return _normalize_text_list(values, field_name="dry_run_items")
+
+
+class BrainstormContinueWritingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    identity: MemoryRuntimeIdentity
+    actor: str
+
+    @field_validator("actor")
+    @classmethod
+    def _require_actor(cls, value: str) -> str:
+        return _require_non_blank(value, field_name="actor")
+
+
+class BrainstormItemCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    identity: MemoryRuntimeIdentity
+    actor: str
+    text: str
+
+    @field_validator("actor", "text")
+    @classmethod
+    def _require_text(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
 
 class BrainstormItemUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     identity: MemoryRuntimeIdentity
     actor: str
-    summary_text: str | None = None
-    evidence_text_refs: list[str] | None = None
-    uncertainty: str | None = None
-    status: Literal["edited", "rejected", "confirmed"] | None = None
+    text: str | None = None
+    status: Literal["active", "deleted"] | None = None
 
     @field_validator("actor")
     @classmethod
     def _require_actor(cls, value: str) -> str:
         return _require_non_blank(value, field_name="actor")
 
-    @field_validator("summary_text", "uncertainty")
+    @field_validator("text")
     @classmethod
-    def _normalize_optional_text(
-        cls, value: str | None, info: ValidationInfo
-    ) -> str | None:
+    def _normalize_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _optional_non_blank(value, field_name=info.field_name or "value")
-
-    @field_validator("evidence_text_refs")
-    @classmethod
-    def _normalize_optional_refs(cls, values: list[str] | None) -> list[str] | None:
-        if values is None:
-            return None
-        return _normalize_text_list(values, field_name="evidence_text_refs")
+        return _optional_non_blank(value, field_name="text")
 
 
-class BrainstormCoreFieldChange(BaseModel):
-    """Executable Core worker output; backend fills old_value before mutation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_item_id: str
-    target_ref: str
-    base_revision: str
-    operation: Literal["replace_field", "set_field", "delete_field"]
-    field_path: str
-    new_value: Any = Field(...)
-    reason: str | None = None
-    source_refs: list[MemorySourceRef] = Field(default_factory=list)
-
-    @field_validator("source_item_id", "target_ref", "base_revision", "field_path")
-    @classmethod
-    def _require_text(cls, value: str, info: ValidationInfo) -> str:
-        return _require_non_blank(value, field_name=info.field_name or "value")
-
-    @field_validator("reason")
-    @classmethod
-    def _normalize_reason(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _optional_non_blank(value, field_name="reason")
-
-
-class BrainstormApplyRequest(BaseModel):
+class BrainstormBatchSubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     identity: MemoryRuntimeIdentity
     actor: str
-    item_ids: list[str] = Field(default_factory=list)
-    core_field_changes: list[BrainstormCoreFieldChange] = Field(default_factory=list)
-    reason: str | None = None
 
     @field_validator("actor")
     @classmethod
     def _require_actor(cls, value: str) -> str:
         return _require_non_blank(value, field_name="actor")
 
-    @field_validator("item_ids")
-    @classmethod
-    def _normalize_item_ids(cls, values: list[str]) -> list[str]:
-        return _normalize_text_list(values, field_name="item_ids")
 
-    @field_validator("reason")
-    @classmethod
-    def _normalize_reason(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _optional_non_blank(value, field_name="reason")
-
-
-class BrainstormDispatchReceipt(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    source_item_id: str
-    status: Literal[
-        "applied",
-        "pending_review",
-        "redirect",
-        "conflict",
-        "failed",
-        "skipped",
-    ]
-    target_ref: str | None = None
-    proposal_id: str | None = None
-    operation: str | None = None
-    field_path: str | None = None
-    base_revision: str | None = None
-    old_value: Any = None
-    new_value: Any = None
-    reason_codes: list[str] = Field(default_factory=list)
-    message: str | None = None
-    review_entrypoint: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class BrainstormApplyReceipt(BaseModel):
+class BrainstormBatchSubmitReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     brainstorm_id: str
+    batch_id: str
     identity: MemoryRuntimeIdentity
-    status: Literal["applied", "pending_review", "redirect", "conflict", "failed"]
-    dispatch_receipts: list[BrainstormDispatchReceipt] = Field(default_factory=list)
-    refresh: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending_processing"]
+    submitted_item_ids: list[str] = Field(default_factory=list)
+    deleted_item_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("brainstorm_id", "batch_id")
+    @classmethod
+    def _require_text(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
+    @field_validator("submitted_item_ids", "deleted_item_ids")
+    @classmethod
+    def _normalize_refs(cls, values: list[str], info: ValidationInfo) -> list[str]:
+        return _normalize_text_list(values, field_name=info.field_name or "value")
 
 
 def _require_non_blank(value: str, *, field_name: str) -> str:

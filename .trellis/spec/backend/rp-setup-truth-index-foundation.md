@@ -10,7 +10,7 @@
 - Source:
   - User-confirmed direction: after commit, the agent's work on that draft is complete; backend logic may deterministically index the accepted structured draft so later stages can locate exact facts quickly.
   - Existing stage draft contract: accepted setup truth comes from `SetupStageDraftBlock` snapshots, not raw setup discussion.
-  - Existing project boundary: `setup.read.draft_refs` is for current editable draft and compact recovery; committed foundation reads need a separate source marker.
+  - Existing project boundary: the internal draft-ref reader is for current editable draft and compact recovery; committed foundation reads need a separate source marker.
 
 ## 2. Signatures
 
@@ -50,9 +50,11 @@
 - `SetupTruthIndexService.rebuild(workspace, commit_id=None) -> SetupTruthIndex`
 - `SetupTruthIndexService.search(workspace, query, filters, limit) -> SetupTruthIndexSearchResult`
 - `SetupTruthIndexService.read_refs(workspace, refs, detail, max_chars, commit_id=None) -> SetupTruthIndexReadResult`
-- Read tool names:
-  - `setup.truth_index.search`
-  - `setup.truth_index.read_refs`
+- Model-facing readback:
+  - SetupAgent does not expose `setup.truth_index.*` directly.
+  - `setup.memory.search` wraps accepted-truth search through `SetupTruthIndexService`.
+  - `setup.memory.open` is the agent-facing exact accepted-truth readback surface and dispatches through `SetupTruthIndexService.read_refs` internally.
+  - `setup.memory.read_refs` may remain as a compatibility/internal wrapper for exact accepted-truth readback while transition code still needs it.
 
 ## 3. Contracts
 
@@ -87,7 +89,7 @@
 - In the SetupAgent architecture roadmap, this service is part of setup-owned
   lightweight readback, not retrieval-core:
   - it supports prestory editing by locating accepted setup truth refs exactly;
-  - it complements `setup.read.draft_refs`, which reads current editable draft
+  - it complements the internal draft-ref reader, which reads current editable draft
     refs for compact recovery;
   - it does not call Memory OS, Recall, embeddings, hybrid search, reranking, or
     active-story retrieval policy;
@@ -135,10 +137,11 @@ Bad:
   - read by committed foundation ref returns exact bounded payload and source metadata.
   - default index uses the latest accepted commit per stage.
   - explicit `commit_id` can read an older accepted commit.
-- Tool tests:
-  - `setup.truth_index.search` returns candidate refs and previews.
-  - `setup.truth_index.read_refs` reads exact committed refs and reports misses.
-  - these tools do not read current uncommitted draft changes.
+- Service/tool tests:
+  - `SetupTruthIndexService.search` returns candidate refs and previews.
+  - `SetupTruthIndexService.read_refs` reads exact committed refs and reports misses.
+  - `setup.memory.search` and `setup.memory.open` are the SetupAgent model-facing wrappers for accepted-truth lookup and exact readback.
+  - compatibility `setup.memory.read_refs` stays aligned where still required, but is not the recommended agent-facing path.
 
 ## 7. Wrong vs Correct
 
@@ -147,7 +150,7 @@ Wrong:
 - Treat Setup Truth Index as a second RAG.
 - Persist a new mutable truth table before the deterministic model shape is proven.
 - Make the agent fix committed setup truth after commit.
-- Reuse `setup.read.draft_refs` and hide whether data came from editable draft or committed foundation.
+- Reuse the internal draft-ref reader directly as a public model tool or hide whether data came from editable draft or committed foundation outside `setup.memory.*`.
 
 Correct:
 

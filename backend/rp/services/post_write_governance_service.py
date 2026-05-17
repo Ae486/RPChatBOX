@@ -6,11 +6,13 @@ from typing import Any
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.projection_refresh import ProjectionRefreshRequest
+from rp.models.dsl import ObjectRef
+from rp.models.memory_contract_registry import MemoryDirtyTarget
 from rp.models.postwrite_runtime_contracts import (
     PostWriteGovernanceDispatchResult,
     WorkerProposalGovernanceEnvelope,
 )
-from rp.models.projection_refresh import ProjectionRefreshRequest
 from rp.models.runtime_workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
@@ -145,33 +147,9 @@ class PostWriteGovernanceService:
             job_id=job.job_id,
             reason="projection_refresh_dispatch_started",
         )
-        source_refs = _merge_source_refs(
-            [
-                source_ref
-                for result in refresh_results
-                for source_ref in _worker_result_source_refs(result)
-            ]
-        )
-        first_result = refresh_results[0]
-        source_core_state_snapshot_id = None
-        if self._core_state_as_of_resolver is not None:
-            source_core_state_snapshot_id = (
-                self._core_state_as_of_resolver.ensure_manifest_for_identity(
-                    identity=identity
-                ).snapshot_id
-            )
-        refresh_request = ProjectionRefreshRequest(
+        refresh_request = self._merge_projection_refresh_request(
             identity=identity,
-            refresh_actor=f"worker.{first_result.worker_id}",
-            refresh_reason="post_write_worker_result",
-            refresh_source_kind="worker_result",
-            refresh_source_ref=_worker_result_ref(
-                identity=identity,
-                result=first_result,
-            ),
-            source_core_state_snapshot_id=source_core_state_snapshot_id,
-            source_refs=source_refs,
-            projection_dirty_state="dirty",
+            worker_results=refresh_results,
         )
         updated_chapter = self._projection_refresh_service.refresh_from_bundle(
             chapter=chapter,
@@ -188,6 +166,16 @@ class PostWriteGovernanceService:
             metadata={
                 "refresh_actor": refresh_request.refresh_actor,
                 "refresh_reason": refresh_request.refresh_reason,
+                "refresh_source_kind": refresh_request.refresh_source_kind,
+                "projection_dirty_state": refresh_request.projection_dirty_state,
+                "source_core_state_snapshot_id": (
+                    refresh_request.source_core_state_snapshot_id
+                ),
+                "source_ref_count": len(refresh_request.source_refs),
+                "dirty_target_count": len(refresh_request.dirty_targets),
+                "source_authoritative_ref_count": len(
+                    refresh_request.source_authoritative_refs
+                ),
             },
         )
         return [f"runtime_job:{completed.job_id}"]
@@ -323,15 +311,160 @@ class PostWriteGovernanceService:
                     "dispatch_owner": "post_write_governance_service",
                     "f2_scope": "candidate_recorded_materialization_deferred",
                     "worker_ids": [result.worker_id for result in results],
+                    "candidate_count": sum(
+                        len(result.recall_candidates)
+                        if job_kind
+                        == RuntimeWorkflowJobKind.RECALL_MATERIALIZATION
+                        else len(result.archival_candidates)
+                        for result in results
+                    ),
                 },
             )
             if not _is_terminal(job):
                 job = self._runtime_workflow_job_service.mark_job_deferred(
                     job_id=job.job_id,
-                    reason="materialization_deferred_until_later_slice",
+                    reason="materialization_deferred_until_memory_maintenance_ready",
+                    metadata={
+                        "deferred_reason_code": (
+                            "post_write_materialization_not_implemented_in_v5_slice"
+                        ),
+                        "deferred_reason_detail": (
+                            "Materialization candidates were recorded, but this "
+                            "slice only exposes them through the job ledger and "
+                            "read manifest. They must not be treated as completed "
+                            "memory until a concrete materialization path lands."
+                        ),
+                    },
                 )
             materialization_refs.append(f"runtime_job:{job.job_id}")
         return materialization_refs
+
+    def _merge_projection_refresh_request(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        worker_results: list[WorkerResult],
+    ) -> ProjectionRefreshRequest:
+        first_result = worker_results[0]
+        merged_source_refs = _merge_source_refs(
+            [
+                source_ref
+                for result in worker_results
+                for source_ref in _worker_result_source_refs(result)
+            ]
+        )
+        source_core_state_snapshot_id = None
+        if self._core_state_as_of_resolver is not None:
+            source_core_state_snapshot_id = (
+                self._core_state_as_of_resolver.ensure_manifest_for_identity(
+                    identity=identity
+                ).snapshot_id
+            )
+        request = ProjectionRefreshRequest(
+            identity=identity,
+            refresh_actor=f"worker.{first_result.worker_id}",
+            refresh_reason="post_write_worker_result",
+            refresh_source_kind="worker_result",
+            refresh_source_ref=_worker_result_ref(
+                identity=identity,
+                result=first_result,
+            ),
+            source_core_state_snapshot_id=source_core_state_snapshot_id,
+            source_refs=merged_source_refs,
+            projection_dirty_state="dirty",
+        )
+        for result in worker_results:
+            for raw_request in result.projection_refresh_requests:
+                if not isinstance(raw_request, dict):
+                    continue
+                self._merge_projection_refresh_request_payload(
+                    request=request,
+                    identity=identity,
+                    result=result,
+                    raw_request=raw_request,
+                )
+        return request
+
+    def _merge_projection_refresh_request_payload(
+        self,
+        *,
+        request: ProjectionRefreshRequest,
+        identity: MemoryRuntimeIdentity,
+        result: WorkerResult,
+        raw_request: dict[str, Any],
+    ) -> None:
+        refresh_reason = _non_blank_text(
+            raw_request.get("refresh_reason") or raw_request.get("reason")
+        )
+        if refresh_reason is not None:
+            request.refresh_reason = refresh_reason
+        refresh_source_kind = _non_blank_text(
+            raw_request.get("refresh_source_kind") or raw_request.get("source_kind")
+        )
+        if refresh_source_kind is not None:
+            request.refresh_source_kind = refresh_source_kind
+        refresh_source_ref = _non_blank_text(
+            raw_request.get("refresh_source_ref") or raw_request.get("source_ref")
+        )
+        if refresh_source_ref is not None:
+            request.refresh_source_ref = refresh_source_ref
+        refresh_actor = _non_blank_text(raw_request.get("refresh_actor"))
+        if refresh_actor is not None:
+            request.refresh_actor = refresh_actor
+        source_snapshot_id = _non_blank_text(
+            raw_request.get("source_core_state_snapshot_id")
+        )
+        if source_snapshot_id is not None:
+            request.source_core_state_snapshot_id = source_snapshot_id
+        raw_base_revision = raw_request.get("base_revision")
+        if isinstance(raw_base_revision, int):
+            request.base_revision = raw_base_revision
+        projection_dirty_state = _non_blank_text(
+            raw_request.get("projection_dirty_state")
+        )
+        if projection_dirty_state is not None:
+            request.projection_dirty_state = projection_dirty_state
+        raw_source_authoritative_refs = raw_request.get("source_authoritative_refs")
+        if isinstance(raw_source_authoritative_refs, list):
+            request.source_authoritative_refs = _merge_object_refs(
+                [
+                    *request.source_authoritative_refs,
+                    *[
+                        _validate_object_ref(item)
+                        for item in raw_source_authoritative_refs
+                        if isinstance(item, dict)
+                    ],
+                ]
+            )
+        raw_source_refs = raw_request.get("source_refs")
+        if isinstance(raw_source_refs, list):
+            request.source_refs = _merge_source_refs(
+                [
+                    *request.source_refs,
+                    *[
+                        _validate_source_ref(item)
+                        for item in raw_source_refs
+                        if isinstance(item, dict)
+                    ],
+                ]
+            )
+        raw_dirty_targets = raw_request.get("dirty_targets")
+        if isinstance(raw_dirty_targets, list):
+            request.dirty_targets = _merge_dirty_targets(
+                [
+                    *request.dirty_targets,
+                    *[
+                        _validate_dirty_target(item)
+                        for item in raw_dirty_targets
+                        if isinstance(item, dict)
+                    ],
+                ]
+            )
+        if request.refresh_source_ref is None:
+            request.refresh_source_ref = _worker_result_ref(
+                identity=identity,
+                result=result,
+            )
 
     def _build_governance_envelope(
         self,
@@ -470,6 +603,71 @@ def _merge_source_refs(refs: list[MemorySourceRef]) -> list[MemorySourceRef]:
         seen.add(key)
         merged.append(ref)
     return merged
+
+
+def _merge_object_refs(refs: list[ObjectRef]) -> list[ObjectRef]:
+    merged: list[ObjectRef] = []
+    seen: set[tuple[str, str, str, str | None]] = set()
+    for ref in refs:
+        key = (ref.object_id, ref.layer.value, ref.domain.value, ref.domain_path)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(ref)
+    return merged
+
+
+def _merge_dirty_targets(targets: list[MemoryDirtyTarget]) -> list[MemoryDirtyTarget]:
+    merged: list[MemoryDirtyTarget] = []
+    seen: set[tuple[str, str, str, str | None, str | None]] = set()
+    for target in targets:
+        key = (
+            target.target_kind,
+            target.target_id,
+            target.layer,
+            target.domain,
+            target.block_id,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(target)
+    return merged
+
+
+def _validate_object_ref(payload: dict[str, Any]) -> ObjectRef:
+    try:
+        return ObjectRef.model_validate(payload)
+    except Exception as exc:  # pragma: no cover - defensive contract guard
+        raise PostWriteGovernanceServiceError(
+            "post_write_projection_refresh_object_ref_invalid",
+            str(exc),
+        ) from exc
+
+
+def _validate_source_ref(payload: dict[str, Any]) -> MemorySourceRef:
+    try:
+        return MemorySourceRef.model_validate(payload)
+    except Exception as exc:  # pragma: no cover - defensive contract guard
+        raise PostWriteGovernanceServiceError(
+            "post_write_projection_refresh_source_ref_invalid",
+            str(exc),
+        ) from exc
+
+
+def _validate_dirty_target(payload: dict[str, Any]) -> MemoryDirtyTarget:
+    try:
+        return MemoryDirtyTarget.model_validate(payload)
+    except Exception as exc:  # pragma: no cover - defensive contract guard
+        raise PostWriteGovernanceServiceError(
+            "post_write_projection_refresh_dirty_target_invalid",
+            str(exc),
+        ) from exc
+
+
+def _non_blank_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _unique_non_blank(values: list[str]) -> list[str]:

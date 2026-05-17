@@ -49,7 +49,10 @@
       "setup.patch.story_config",
       "setup.patch.writing_contract",
       "setup.patch.longform_blueprint",
-      "setup.proposal.commit"
+      "setup.proposal.commit",
+      "setup.question.raise",
+      "setup.discussion.update_state",
+      "setup.chunk.upsert"
     ]
   },
   "trace_hooks": {

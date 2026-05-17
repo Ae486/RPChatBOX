@@ -37,8 +37,11 @@ from rp.models.story_runtime import (
     StorySession,
 )
 from rp.models.story_brainstorm import (
-    BrainstormApplyReceipt,
-    BrainstormApplyRequest,
+    BrainstormBatchSubmitReceipt,
+    BrainstormBatchSubmitRequest,
+    BrainstormContinueWritingRequest,
+    BrainstormDiscussionRequest,
+    BrainstormItemCreateRequest,
     BrainstormItemUpdateRequest,
     BrainstormSession,
     BrainstormSessionStartRequest,
@@ -952,11 +955,71 @@ class StoryRuntimeController:
         self._story_session_service.commit()
         return result
 
+    async def discuss_brainstorm_session(
+        self,
+        *,
+        session_id: str,
+        brainstorm_id: str,
+        request: BrainstormDiscussionRequest,
+    ) -> BrainstormSession:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        result = await self._require_story_brainstorm_service().discuss_session(
+            brainstorm_id=brainstorm_id,
+            request=request,
+        )
+        self._story_session_service.commit()
+        return result
+
+    def continue_brainstorm_session(
+        self,
+        *,
+        session_id: str,
+        brainstorm_id: str,
+        request: BrainstormContinueWritingRequest,
+    ) -> BrainstormSession:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        result = self._require_story_brainstorm_service().continue_writing(
+            brainstorm_id=brainstorm_id,
+            request=request,
+        )
+        self._story_session_service.commit()
+        return result
+
+    def create_brainstorm_item(
+        self,
+        *,
+        session_id: str,
+        brainstorm_id: str,
+        batch_id: str,
+        request: BrainstormItemCreateRequest,
+    ) -> BrainstormSession:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("brainstorm_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("brainstorm_identity_story_mismatch")
+        result = self._require_story_brainstorm_service().create_item(
+            brainstorm_id=brainstorm_id,
+            batch_id=batch_id,
+            request=request,
+        )
+        self._story_session_service.commit()
+        return result
+
     def update_brainstorm_item(
         self,
         *,
         session_id: str,
         brainstorm_id: str,
+        batch_id: str,
         item_id: str,
         request: BrainstormItemUpdateRequest,
     ) -> BrainstormSession:
@@ -967,30 +1030,33 @@ class StoryRuntimeController:
             raise ValueError("brainstorm_identity_story_mismatch")
         result = self._require_story_brainstorm_service().update_item(
             brainstorm_id=brainstorm_id,
+            batch_id=batch_id,
             item_id=item_id,
             request=request,
         )
         self._story_session_service.commit()
         return result
 
-    async def apply_brainstorm_session(
+    def submit_brainstorm_batch(
         self,
         *,
         session_id: str,
         brainstorm_id: str,
-        request: BrainstormApplyRequest,
-    ) -> BrainstormApplyReceipt:
+        batch_id: str,
+        request: BrainstormBatchSubmitRequest,
+    ) -> tuple[BrainstormSession, BrainstormBatchSubmitReceipt]:
         session = self._require_session(session_id)
         if request.identity.session_id != session.session_id:
             raise ValueError("brainstorm_identity_session_mismatch")
         if request.identity.story_id != session.story_id:
             raise ValueError("brainstorm_identity_story_mismatch")
-        receipt = await self._require_story_brainstorm_service().apply_session(
+        result = self._require_story_brainstorm_service().submit_batch(
             brainstorm_id=brainstorm_id,
+            batch_id=batch_id,
             request=request,
         )
         self._story_session_service.commit()
-        return receipt
+        return result
 
     def apply_memory_block_proposal(
         self,

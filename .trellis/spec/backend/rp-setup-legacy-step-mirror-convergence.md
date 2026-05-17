@@ -52,9 +52,9 @@
 
 ### 3.4 This Slice Cleans Bridge Debt, Not Tool Semantics
 
-- Canonical setup writes still use shared `setup.truth.write` with `stage_draft`.
-- Empty `SETUP_STAGE_PATCH_TOOLS` remains acceptable in this slice.
-- Do not expand this cleanup into a new family of stage-specific patch tools.
+- Canonical draft writes now use the current `setup.stage_entry.*` tool surface; bridge logic must not reintroduce deleted `setup.truth.write` or `setup.patch.*` agent tools.
+- Empty legacy patch-tool mappings remain acceptable in this slice.
+- Do not expand this cleanup into another family of stage-specific patch tools.
 
 ### 3.5 Overview / Activate Compatibility Mapping Must Stay Explicit
 

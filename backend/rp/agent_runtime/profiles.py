@@ -7,62 +7,47 @@ from rp.agent_runtime.contracts import (
     SetupCapabilityGuidanceFragment,
     SetupCapabilityPlan,
 )
-from rp.models.setup_stage import SetupStageId, get_stage_module
+from rp.models.setup_stage import SetupStageId
 
 SETUP_READ_ONLY_MEMORY_TOOLS: tuple[str, ...] = (
-    "memory.get_state",
-    "memory.get_summary",
-    "memory.search_recall",
-    "memory.search_archival",
-    "memory.list_versions",
-    "memory.read_provenance",
+    "setup.memory.search",
+    "setup.memory.open",
+    "setup.memory.read_refs",
 )
 
-SETUP_SHARED_PRIVATE_TOOLS: tuple[str, ...] = (
-    "setup.discussion.update_state",
-    "setup.chunk.upsert",
-    "setup.truth.write",
-    "setup.question.raise",
-    "setup.asset.register",
-    "setup.proposal.commit",
-    "setup.read.workspace",
-    "setup.read.step_context",
-    "setup.read.draft_refs",
-    "setup.truth_index.search",
-    "setup.truth_index.read_refs",
+SETUP_SHARED_PRIVATE_TOOLS: tuple[str, ...] = ("setup.asset.register",)
+
+SETUP_STAGE_ENTRY_TOOLS: tuple[str, ...] = (
+    "setup.stage_entry.list",
+    "setup.stage_entry.read",
+    "setup.stage_entry.write",
+    "setup.stage_entry.edit",
+    "setup.stage_entry.delete",
+)
+
+SETUP_STAGE_ENTRY_TOOL_STAGES: tuple[SetupStageId, ...] = (
+    SetupStageId.WORLD_BACKGROUND,
+    SetupStageId.CHARACTER_DESIGN,
+    SetupStageId.PLOT_BLUEPRINT,
 )
 
 SETUP_STEP_PATCH_TOOLS: dict[str, tuple[str, ...]] = {
-    "story_config": ("setup.patch.story_config",),
-    "writing_contract": ("setup.patch.writing_contract",),
-    "foundation": ("setup.patch.foundation_entry",),
-    "longform_blueprint": ("setup.patch.longform_blueprint",),
+    "story_config": (),
+    "writing_contract": (),
+    "foundation": (),
+    "longform_blueprint": (),
 }
 
 SETUP_STAGE_PATCH_TOOLS: dict[str, tuple[str, ...]] = {
     stage_id.value: () for stage_id in SetupStageId
 }
 
-SETUP_WORLD_BACKGROUND_CANDIDATE_TOOLS: tuple[str, ...] = (
-    "setup.world_background.list_entries",
-    "setup.world_background.read_entry",
-    "setup.world_background.write_entry",
-    "setup.world_background.edit_entry",
-    "setup.world_background.delete_entry",
-)
-
-SETUP_AGENT_CANDIDATE_EXCLUDED_TOOLS: tuple[str, ...] = (
-    *SETUP_WORLD_BACKGROUND_CANDIDATE_TOOLS,
-)
+SETUP_AGENT_CANDIDATE_EXCLUDED_TOOLS: tuple[str, ...] = ()
 
 SETUP_AGENT_VISIBLE_TOOLS: tuple[str, ...] = (
     *SETUP_READ_ONLY_MEMORY_TOOLS,
     *SETUP_SHARED_PRIVATE_TOOLS,
-    *tuple(
-        tool_name
-        for tool_names in SETUP_STEP_PATCH_TOOLS.values()
-        for tool_name in tool_names
-    ),
+    *SETUP_STAGE_ENTRY_TOOLS,
 )
 
 
@@ -87,7 +72,8 @@ def build_setup_agent_capability_plan(
         else _ordered_unique(
             [
                 *SETUP_READ_ONLY_MEMORY_TOOLS,
-                *SETUP_SHARED_PRIVATE_TOOLS,
+                *_shared_tools_for_stage(stage_id),
+                *_stage_entry_tools_for_stage(stage_id),
                 *scoped_patch_tools,
             ]
         )
@@ -98,8 +84,7 @@ def build_setup_agent_capability_plan(
         step_id=step_id,
         active_tool_names=list(active_tool_names),
         model_schema_modes={
-            tool_name: _model_schema_mode(tool_name)
-            for tool_name in active_tool_names
+            tool_name: _model_schema_mode(tool_name) for tool_name in active_tool_names
         },
         runtime_allowlist=list(active_tool_names),
         prompt_guidance_fragments=_prompt_guidance_fragments(
@@ -117,7 +102,10 @@ def build_setup_agent_capability_plan(
             "fallback_to_full_union": fallback_to_full_union,
             "shared_tools_visible": all(
                 tool_name in active_set
-                for tool_name in (*SETUP_READ_ONLY_MEMORY_TOOLS, *SETUP_SHARED_PRIVATE_TOOLS)
+                for tool_name in (
+                    *SETUP_READ_ONLY_MEMORY_TOOLS,
+                    *_shared_tools_for_stage(stage_id),
+                )
             ),
             "legacy_patch_tools": list(_legacy_patch_tools()),
             "visible_legacy_patch_tools": [
@@ -173,8 +161,6 @@ def _coerce_stage_id(scope_key: str | None) -> SetupStageId | None:
 
 
 def _model_schema_mode(tool_name: str) -> str:
-    if tool_name == "setup.truth.write":
-        return "setup_truth_write_runtime_adapted"
     return "provider_default"
 
 
@@ -196,102 +182,50 @@ def _prompt_guidance_fragments(
                 )
             )
 
-    add(
-        "draft_refs.read",
-        ("setup.read.draft_refs",),
-        (
-            "If compact_summary contains draft_refs or recovery_hints and exact "
-            "draft detail is needed, call setup.read.draft_refs."
-        ),
-    )
-    add(
-        "discussion.update_state",
-        ("setup.discussion.update_state",),
-        (
-            "Use setup.discussion.update_state when the current-step discussion "
-            "map needs refresh or reconciliation."
-        ),
-    )
-    add(
-        "chunk.upsert",
-        ("setup.chunk.upsert",),
-        (
-            "Use setup.chunk.upsert when one concrete truth candidate is emerging "
-            "from discussion."
-        ),
-    )
-    add(
-        "truth.write",
-        ("setup.truth.write",),
-        (
-            "Use setup.truth.write when one chunk is stable enough to land in the "
-            "current draft. If setup.truth.write fails, repair it from current "
-            "context when possible; only ask the user when the missing information "
-            "is truly user-exclusive."
-        ),
-    )
-    if stage_id is not None:
+    if stage_id in SETUP_STAGE_ENTRY_TOOL_STAGES:
         add(
-            "truth.write.stage_hint",
-            ("setup.truth.write",),
-            _stage_truth_write_hint(stage_id),
+            "stage_entry.write",
+            ("setup.stage_entry.write",),
+            (
+                "For world_background, character_design, and plot_blueprint, use "
+                "setup.stage_entry.write as the primary draft write tool. Provide "
+                "only entry_type, title, summary, and text sections; the backend "
+                "chooses the current stage, ids, semantic paths, and section shape."
+            ),
         )
-    add(
-        "question.raise",
-        ("setup.question.raise",),
-        (
-            "Use setup.question.raise when an ambiguity is blocking or needs an "
-            "explicit user decision."
-        ),
-    )
+        add(
+            "stage_entry.read_list",
+            ("setup.stage_entry.list", "setup.stage_entry.read"),
+            (
+                "Use setup.stage_entry.list and setup.stage_entry.read to inspect "
+                "the current stage draft before editing or deleting entries."
+            ),
+        )
+        add(
+            "stage_entry.edit_delete",
+            ("setup.stage_entry.edit", "setup.stage_entry.delete"),
+            (
+                "Use setup.stage_entry.edit or setup.stage_entry.delete only with "
+                "a current target_ref and basis_fingerprint from the current stage."
+            ),
+        )
     add(
         "asset.register",
         ("setup.asset.register",),
         "Use setup.asset.register when the user provides a setup-scoped reference asset.",
     )
     add(
-        "proposal.commit",
-        ("setup.proposal.commit",),
+        "setup_session_memory.search",
+        ("setup.memory.search", "setup.memory.open"),
         (
-            "Before calling setup.proposal.commit, self-check readiness; if the "
-            "user explicitly asked to commit, carry unresolved issues as warnings "
-            "instead of blocking."
+            "Use setup.memory.search to find setup fact refs from editable draft "
+            "and accepted setup truth when the needed exact fact is not visible. "
+            "Search results and navigation_summary are navigation only, not fact "
+            "content. Use setup.memory.open on a chosen ref before relying on "
+            "exact details. Opening a level-3 entry ref returns a level-4 section "
+            "directory; opening a level-4 section ref returns clean fact content."
         ),
     )
-    add(
-        "workspace.read",
-        ("setup.read.workspace",),
-        "Use setup.read.workspace when you need the latest SetupWorkspace truth view.",
-    )
-    add(
-        "step_context.read",
-        ("setup.read.step_context",),
-        (
-            "Use setup.read.step_context when deterministic current step or "
-            "canonical-stage context needs readback."
-        ),
-    )
-    add(
-        "truth_index.search",
-        ("setup.truth_index.search",),
-        "Use setup.truth_index.search for small candidate ref lists from accepted setup truth.",
-    )
-    add(
-        "truth_index.read_refs",
-        ("setup.truth_index.read_refs",),
-        "Use setup.truth_index.read_refs for exact accepted setup truth refs.",
-    )
-    if all(tool_name in active_set for tool_name in SETUP_READ_ONLY_MEMORY_TOOLS):
-        fragments.append(
-            SetupCapabilityGuidanceFragment(
-                fragment_id="memory.read_only",
-                tool_names=list(SETUP_READ_ONLY_MEMORY_TOOLS),
-                text=(
-                    "Use active read-only memory tools only when needed for "
-                    "clarification or archival lookup."
-                ),
-            )
-        )
     for tool_name in patch_tools:
         add(
             f"legacy_patch.{tool_name}",
@@ -301,28 +235,22 @@ def _prompt_guidance_fragments(
     return fragments
 
 
-def _stage_truth_write_hint(stage_id: SetupStageId) -> str:
-    module = get_stage_module(stage_id)
-    preferred_entry_types = (
-        ", ".join(module.default_entry_types) or "stage-specific types"
-    )
-    return (
-        "For canonical stage setup.truth.write calls, prefer one entry payload "
-        "instead of a full stage block unless you are intentionally replacing or "
-        "merging the whole block. Minimal entry fields: entry_id, entry_type, "
-        "semantic_path, title. Optional fields: summary, sections. A text section "
-        'must look like {"section_id":"summary","title":"Summary","kind":"text",'
-        '"content":{"text":"..."}}. '
-        f"Preferred entry_type values for this stage: {preferred_entry_types}."
-    )
-
-
 def _legacy_patch_tools() -> tuple[str, ...]:
     return tuple(
         tool_name
         for tool_names in SETUP_STEP_PATCH_TOOLS.values()
         for tool_name in tool_names
     )
+
+
+def _shared_tools_for_stage(stage_id: SetupStageId | None) -> tuple[str, ...]:
+    return SETUP_SHARED_PRIVATE_TOOLS
+
+
+def _stage_entry_tools_for_stage(stage_id: SetupStageId | None) -> tuple[str, ...]:
+    if stage_id in SETUP_STAGE_ENTRY_TOOL_STAGES:
+        return SETUP_STAGE_ENTRY_TOOLS
+    return ()
 
 
 def _ordered_unique(values: list[str]) -> list[str]:

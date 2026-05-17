@@ -166,6 +166,18 @@ class StorySessionService:
             session_id=session_id, chapter_index=session.current_chapter_index
         )
 
+    def get_active_branch_current_chapter(
+        self,
+        session_id: str,
+    ) -> ChapterWorkspace | None:
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        return self.build_chapter_snapshot(
+            session_id=session_id,
+            chapter_index=session.current_chapter_index,
+        ).chapter
+
     def get_current_chapter_for_story(self, story_id: str) -> ChapterWorkspace | None:
         session = self.get_latest_session_for_story(story_id)
         if session is None:
@@ -472,17 +484,45 @@ class StorySessionService:
                 session_record=session,
             )
         ]
-        if chapter.pending_segment_artifact_id in hidden_artifact_ids:
-            chapter = chapter.model_copy(update={"pending_segment_artifact_id": None})
-        chapter = chapter.model_copy(
-            update={"accepted_segment_ids": visible_accepted_segment_ids}
+        pending_hidden = chapter.pending_segment_artifact_id in hidden_artifact_ids
+        effective_phase = self._active_branch_effective_phase(
+            chapter=chapter,
+            pending_hidden=pending_hidden,
         )
+        chapter_updates: dict[str, object] = {
+            "accepted_segment_ids": visible_accepted_segment_ids,
+        }
+        if pending_hidden:
+            chapter_updates["pending_segment_artifact_id"] = None
+        if effective_phase != chapter.phase:
+            chapter_updates["phase"] = effective_phase
+        chapter = chapter.model_copy(update=chapter_updates)
+        if (
+            chapter_index == session.current_chapter_index
+            and session.current_phase != effective_phase
+        ):
+            session = session.model_copy(update={"current_phase": effective_phase})
         return ChapterWorkspaceSnapshot(
             session=session,
             chapter=chapter,
             artifacts=artifacts,
             discussion_entries=discussion_entries,
         )
+
+    @staticmethod
+    def _active_branch_effective_phase(
+        *,
+        chapter: ChapterWorkspace,
+        pending_hidden: bool,
+    ) -> LongformChapterPhase:
+        if not pending_hidden:
+            return chapter.phase
+        if (
+            chapter.phase == LongformChapterPhase.SEGMENT_REVIEW
+            and chapter.accepted_outline_json is not None
+        ):
+            return LongformChapterPhase.SEGMENT_DRAFTING
+        return chapter.phase
 
     def _filter_active_branch_snapshot_items(
         self,

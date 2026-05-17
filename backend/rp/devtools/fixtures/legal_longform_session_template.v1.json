@@ -1,0 +1,135 @@
+{
+  "template_version": "legal_longform_session.v1",
+  "mode": "longform",
+  "session": {
+    "runtime_story_config": {
+      "post_write_policy_preset": "balanced"
+    },
+    "writer_contract": {
+      "style_rules": [
+        "克制",
+        "优先保持连续性"
+      ],
+      "writing_constraints": [
+        "让伪造钥匙保持在读者可感知的位置",
+        "避免大段解释设定"
+      ]
+    },
+    "current_state_overrides": {
+      "character_state_digest": {
+        "林鸢": {
+          "mood": "警觉"
+        }
+      }
+    }
+  },
+  "chapter": {
+    "chapter_index": 1,
+    "chapter_title": "第一枚假印",
+    "chapter_goal": "林鸢必须在黎明查验前证明城档案库的钥匙被人伪造。",
+    "phase": "segment_drafting",
+    "foundation_digest": [
+      "林鸢负责在黎明前整理城档案库的账册。",
+      "一枚伪造的城印钥匙可以绕过印室的封存规程。"
+    ],
+    "blueprint_digest": [
+      "情节从发现线索逐步推进到当众揭露。",
+      "守钟人隐瞒了一个关键细节。"
+    ],
+    "current_state_digest": [
+      "第一章正在推进。",
+      "林鸢正在追查那枚伪造钥匙。"
+    ]
+  },
+  "outline": {
+    "content_text": "# 第一枚假印\n章节目标：林鸢必须在黎明查验前证明城档案库的钥匙被人伪造。\n1. 账册破口：林鸢在档案账册中发现被藏起的伪造钥匙。\n2. 沉默证人：林鸢盘问目睹调包的守钟人。\n3. 假印之前：林鸢赶在黎明前，于印室准备对峙。",
+    "structured_outline": {
+      "schema_version": "longform_outline_v1",
+      "chapter_index": 1,
+      "chapter_title": "第一枚假印",
+      "chapter_goal": "林鸢必须在黎明查验前证明城档案库的钥匙被人伪造。",
+      "beats": [
+        {
+          "beat_id": "beat_001",
+          "order": 1,
+          "title": "账册破口",
+          "goal": "林鸢在档案账册中发现被藏起的伪造钥匙。",
+          "must_include": [
+            "伪造钥匙",
+            "档案账册"
+          ],
+          "avoid": [
+            "直接揭开完整阴谋"
+          ],
+          "continuity_notes": [
+            "伪造钥匙必须以实物形式继续在场。"
+          ],
+          "metadata_json": {}
+        },
+        {
+          "beat_id": "beat_002",
+          "order": 2,
+          "title": "沉默证人",
+          "goal": "林鸢盘问目睹调包的守钟人。",
+          "must_include": [
+            "守钟人",
+            "缺失证词"
+          ],
+          "avoid": [
+            "过早解决谜团"
+          ],
+          "continuity_notes": [
+            "守钟人仍然隐瞒了一个细节。"
+          ],
+          "metadata_json": {}
+        },
+        {
+          "beat_id": "beat_003",
+          "order": 3,
+          "title": "假印之前",
+          "goal": "林鸢赶在黎明前，于印室准备对峙。",
+          "must_include": [
+            "印室",
+            "黎明期限"
+          ],
+          "avoid": [
+            "直接完成本章结局"
+          ],
+          "continuity_notes": [
+            "黎明查验尚未开始。"
+          ],
+          "metadata_json": {}
+        }
+      ],
+      "constraints": {}
+    }
+  },
+  "segments": [
+    {
+      "content_text": "黎明前的档案库冷得像一口封住的井。林鸢撬开最底层的旧账册，在两页发脆的羊皮纸之间摸到一枚被压平的伪造钥匙。钥匙的铜边还残着灯烟味，像是有人在夜巡刚过后，匆忙把它塞回了原处。",
+      "target_beat_id": "beat_001",
+      "scene_ref": "chapter:1:scene:1",
+      "metadata_json": {}
+    },
+    {
+      "content_text": "守钟人在钟楼阶下压低声音，承认自己见过第二道人影停在印室门外。他不肯说出那人的名字，只反复摩挲掌心的铜铃绳结；可这份沉默本身，已经证明调包发生在第一声晨钟之前。",
+      "target_beat_id": "beat_002",
+      "scene_ref": "chapter:1:scene:1",
+      "metadata_json": {}
+    }
+  ],
+  "archival_seed": {
+    "asset_id": "legal_longform_archival_seed",
+    "title": "印室基础设定",
+    "text": "城档案库的印室只在黎明开启。查验开始前，每一枚铜钥匙都必须与账册记录逐项核对，任何多出或缺失的钥匙都会触发封库。",
+    "domain": "world_rule",
+    "domain_path": "foundation.world.seal_room_protocol",
+    "tags": [
+      "档案",
+      "世界规则",
+      "印室"
+    ],
+    "source_type": "foundation_entry",
+    "step_id": "foundation"
+  }
+}

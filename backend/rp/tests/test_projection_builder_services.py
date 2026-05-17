@@ -33,6 +33,14 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
     StoryArtifactKind,
 )
+from rp.models.story_brainstorm import (
+    BrainstormBatchSubmitRequest,
+    BrainstormDiscussionRequest,
+    BrainstormItemStatus,
+    BrainstormItemUpdateRequest,
+    BrainstormSessionStartRequest,
+    BrainstormSummarizeRequest,
+)
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
@@ -79,6 +87,7 @@ from rp.services.story_block_consumer_state_service import (
 from rp.services.story_block_prompt_compile_service import (
     StoryBlockPromptCompileService,
 )
+from rp.services.story_brainstorm_service import StoryBrainstormService
 from rp.services.story_block_prompt_context_service import (
     StoryBlockPromptContextService,
 )
@@ -105,6 +114,24 @@ from rp.models.worker_runtime_contracts import (
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class _BrainstormTestGateway:
+    async def complete_text_with_usage(self, **kwargs):
+        system_prompt = str(kwargs["messages"][0].content)
+        if "brainstorm_summarize" in system_prompt:
+            return (
+                '{"items":["保留钟楼债务伏笔","强化使者与旧账册的关联"]}',
+                {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14},
+            )
+        return (
+            "我们先把钟楼债务保留成未解释的异常细节。",
+            {"prompt_tokens": 7, "completion_tokens": 10, "total_tokens": 17},
+        )
+
+    @staticmethod
+    def extract_json_object(text: str):
+        return json.loads(text)
 
 
 def _seed_story_runtime(retrieval_session):
@@ -246,10 +273,14 @@ class _ToolLoopStoryLlmGateway(_RecordingStoryLlmGateway):
         return self._responses.pop(0)
 
     async def stream_text(self, **_kwargs):
-        raise AssertionError("buffered retrieval stream path should not call raw stream_text")
+        raise AssertionError(
+            "buffered retrieval stream path should not call raw stream_text"
+        )
 
 
-def _tool_loop_call(call_id: str, name: str, arguments: dict[str, object]) -> dict[str, object]:
+def _tool_loop_call(
+    call_id: str, name: str, arguments: dict[str, object]
+) -> dict[str, object]:
     return {
         "id": call_id,
         "type": "function",
@@ -632,7 +663,9 @@ def test_story_turn_domain_service_build_packet_attaches_deterministic_read_mani
     session, _, service = _seed_story_runtime(retrieval_session)
     service.create_discussion_entry(
         session_id=session.session_id,
-        chapter_workspace_id=service.get_current_chapter(session.session_id).chapter_workspace_id,
+        chapter_workspace_id=service.get_current_chapter(
+            session.session_id
+        ).chapter_workspace_id,
         role="user",
         content_text="Keep the storm callback alive.",
     )
@@ -886,9 +919,7 @@ def test_story_turn_domain_service_build_packet_routes_through_context_orchestra
     assert len(orchestration.writer_calls) == 1
     writer_call = cast(dict[str, Any], orchestration.writer_calls[0])
     assert writer_call["session"].session_id == session.session_id
-    assert writer_call["chapter"].chapter_workspace_id == (
-        chapter.chapter_workspace_id
-    )
+    assert writer_call["chapter"].chapter_workspace_id == (chapter.chapter_workspace_id)
     assert writer_call["specialist_bundle"] == bundle
     assert writer_call["runtime_identity"] == runtime_identity
 
@@ -962,6 +993,126 @@ def test_story_turn_domain_service_build_packet_includes_recent_raw_turn_window(
         "current_state_digest",
     ]
     assert flattened_labels[5:7] == ["recent_raw_turns", "writer_hints"]
+
+
+@pytest.mark.asyncio
+async def test_writer_packet_excludes_brainstorm_runtime_workspace_scratch(
+    retrieval_session,
+):
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    service.create_discussion_entry(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        role="user",
+        content_text="正常 writer 最近窗口应保留这句。",
+    )
+    service.commit()
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.writer_packet.exclude_brainstorm_scratch",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    runtime_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    brainstorm_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="brainstorm",
+        actor="writer",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    brainstorm_service = StoryBrainstormService(
+        story_session_service=service,
+        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+            session=retrieval_session
+        ),
+        llm_gateway=_BrainstormTestGateway(),
+    )
+    started = brainstorm_service.start_session(
+        BrainstormSessionStartRequest(identity=brainstorm_identity, actor="writer")
+    )
+    await brainstorm_service.discuss_session(
+        brainstorm_id=started.brainstorm_id,
+        request=BrainstormDiscussionRequest(
+            identity=brainstorm_identity,
+            actor="writer",
+            prompt="保留钟楼债务暗线，不要现在揭晓。",
+            model_id="test-model",
+            provider_id="test-provider",
+        ),
+    )
+    summarized = await brainstorm_service.summarize_session(
+        brainstorm_id=started.brainstorm_id,
+        request=BrainstormSummarizeRequest(
+            identity=brainstorm_identity,
+            actor="writer",
+            dry_run_items=["保留钟楼债务伏笔", "强化使者与旧账册的关联"],
+        ),
+    )
+    batch = summarized.batches[0]
+    deleted = brainstorm_service.update_item(
+        brainstorm_id=started.brainstorm_id,
+        batch_id=batch.batch_id,
+        item_id=batch.items[0].item_id,
+        request=BrainstormItemUpdateRequest(
+            identity=brainstorm_identity,
+            actor="writer",
+            status="deleted",
+        ),
+    )
+    brainstorm_service.submit_batch(
+        brainstorm_id=started.brainstorm_id,
+        batch_id=batch.batch_id,
+        request=BrainstormBatchSubmitRequest(
+            identity=brainstorm_identity,
+            actor="writer",
+        ),
+    )
+    turn_domain_service = _build_turn_domain_service(
+        service,
+        runtime_identity_service=identity_service,
+        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+            session=retrieval_session
+        ),
+    )
+    packet = turn_domain_service.build_packet(
+        session_id=session.session_id,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            writer_instruction="Write the next segment.",
+        ),
+        specialist_bundle=SpecialistResultBundle(
+            foundation_digest=["Found A"],
+            blueprint_digest=["Blueprint A"],
+            current_outline_digest=["Outline A"],
+            recent_segment_digest=["Segment A"],
+            current_state_digest=["State A"],
+            writer_hints=["Hint A"],
+        ),
+        runtime_identity=runtime_identity,
+    )
+
+    serialized_sections = json.dumps(packet.context_sections, ensure_ascii=False)
+    manifest = packet.metadata["runtime_read_manifest"]
+    manifest_text = json.dumps(manifest, ensure_ascii=False)
+
+    assert "保留钟楼债务暗线，不要现在揭晓。" not in serialized_sections
+    assert "我们先把钟楼债务保留成未解释的异常细节。" not in serialized_sections
+    assert "保留钟楼债务伏笔" not in serialized_sections
+    assert "保留钟楼债务伏笔" not in manifest_text
+    assert "正常 writer 最近窗口应保留这句。" in serialized_sections
+    assert all(
+        "brainstorm" not in str(ref.get("ref_id") or "")
+        for ref in manifest["selected_refs"]
+    )
+    assert deleted.batches[0].items[0].status == BrainstormItemStatus.DELETED
 
 
 def test_story_turn_domain_service_build_packet_records_runtime_workspace_writer_input_and_packet_refs(
@@ -1282,7 +1433,10 @@ def test_story_turn_domain_service_persist_generated_artifact_records_writer_out
     assert usage_materials[0].payload["usage_metadata"]["total_tokens"] == 30
     assert response.writing_result is not None
     assert response.writing_result.visible_output_ref == response.artifact_id
-    assert response.writing_result.writer_output_material_id == writer_outputs[0].material_id
+    assert (
+        response.writing_result.writer_output_material_id
+        == writer_outputs[0].material_id
+    )
     assert (
         response.writing_result.token_usage_material_id
         == usage_materials[0].material_id
@@ -1372,14 +1526,12 @@ def test_story_turn_domain_service_persist_generated_artifact_registers_obligati
         "required_post_write_analysis",
         "runtime_workspace_finalize",
     ]
-    assert {job.creation_mode for job in first_jobs} == {
-        "creation_time_obligation"
-    }
+    assert {job.creation_mode for job in first_jobs} == {"creation_time_obligation"}
     assert {job.required_for_turn_completion for job in first_jobs} == {True}
     assert {job.status for job in first_jobs} == {"pending"}
-    assert {
-        job.metadata_json["obligation_owner"] for job in first_jobs
-    } == {"story_turn_domain.persist_generated_artifact"}
+    assert {job.metadata_json["obligation_owner"] for job in first_jobs} == {
+        "story_turn_domain.persist_generated_artifact"
+    }
     assert {job.job_id for job in second_jobs} == {job.job_id for job in first_jobs}
 
 
@@ -1460,10 +1612,7 @@ async def test_story_turn_domain_service_trigger_post_write_defers_pending_oblig
 
     assert trigger_result["run_kind"] == "minimal_only"
     assert trigger_result["settled"] is True
-    assert (
-        trigger_result["settlement_reason"]
-        == "required_jobs_deferred_by_policy"
-    )
+    assert trigger_result["settlement_reason"] == "required_jobs_deferred_by_policy"
     assert turn is not None
     assert turn.status == "settled"
     assert turn.settlement_reason == "required_jobs_deferred_by_policy"
@@ -1477,9 +1626,7 @@ async def test_story_turn_domain_service_trigger_post_write_defers_pending_oblig
         "post_write_full_schedule_services_missing"
     }
     trigger_metadata = cast(dict[str, Any], trigger_result_again["metadata_json"])
-    assert set(trigger_metadata["job_ids"]) == {
-        job.job_id for job in jobs
-    }
+    assert set(trigger_metadata["job_ids"]) == {job.job_id for job in jobs}
 
 
 @pytest.mark.asyncio
@@ -1737,6 +1884,9 @@ async def test_story_turn_domain_service_full_post_write_governs_worker_results(
     assert jobs_by_kind["recall_materialization"].required_for_turn_completion is False
     assert jobs_by_kind["projection_refresh"].creation_mode == "derived"
     assert jobs_by_kind["proposal_submit"].creation_mode == "derived"
+    assert jobs_by_kind["projection_refresh"].metadata_json["refresh_reason"] == (
+        "retrieval_used"
+    )
     job_order = [job.job_kind for job in jobs]
     assert job_order.index("projection_refresh") < job_order.index("proposal_submit")
     assert proposal_workflow_service.calls
@@ -1882,9 +2032,7 @@ async def test_story_turn_domain_service_rewrite_preserves_prior_draft_until_acc
         )
         if item.artifact_kind == StoryArtifactKind.STORY_SEGMENT
     ]
-    assert [
-        (item.artifact_id, item.status) for item in accepted_segments
-    ] == [
+    assert [(item.artifact_id, item.status) for item in accepted_segments] == [
         (first_response.artifact_id, StoryArtifactStatus.ACCEPTED),
         (rewrite_response.artifact_id, StoryArtifactStatus.SUPERSEDED),
     ]
@@ -2473,9 +2621,7 @@ def test_graph_thread_binding_reports_rollback_visible_turn_head(
         runtime_identity_service=identity_service,
     )
 
-    binding = domain_service.resolve_graph_thread_binding(
-        session_id=session.session_id
-    )
+    binding = domain_service.resolve_graph_thread_binding(session_id=session.session_id)
 
     expected_thread_id = StoryTurnDomainService.build_graph_thread_id(
         session_id=session.session_id,
@@ -2636,8 +2782,7 @@ async def test_story_graph_runner_stream_persists_usage_metadata_into_writing_re
     assert graph_binding["captured_after_node"] == "finalize_turn"
     assert graph_binding["source"] == "langgraph_checkpoint"
     assert graph_binding["graph_thread_id"] == (
-        "story_session:"
-        f"{session.session_id}:branch_head:{turn.branch_head_id}"
+        f"story_session:{session.session_id}:branch_head:{turn.branch_head_id}"
     )
     assert branch.metadata_json["graph_checkpoint_binding"] == graph_binding
     workflow_jobs = retrieval_session.exec(
@@ -2686,13 +2831,16 @@ async def test_story_graph_runner_stream_persists_usage_metadata_into_writing_re
         material_kind=RuntimeWorkspaceMaterialKind.WRITER_INPUT_REF,
     )
     assert len(writer_output_materials) == 1
-    assert writer_output_materials[0].payload["artifact_id"] == draft_segment.artifact_id
+    assert (
+        writer_output_materials[0].payload["artifact_id"] == draft_segment.artifact_id
+    )
     assert writer_output_materials[0].payload["artifact_kind"] == (
         StoryArtifactKind.STORY_SEGMENT.value
     )
     assert len(packet_materials) == 1
-    assert packet_materials[0].payload["packet_id"] == (
-        writer_output_materials[0].payload["packet_id"]
+    assert (
+        packet_materials[0].payload["packet_id"]
+        == (writer_output_materials[0].payload["packet_id"])
     )
     assert packet_materials[0].payload["output_kind"] == (
         StoryArtifactKind.STORY_SEGMENT.value
@@ -2702,8 +2850,9 @@ async def test_story_graph_runner_stream_persists_usage_metadata_into_writing_re
         packet_materials[0].material_id
     )
     assert len(writer_input_materials) == 1
-    assert writer_input_materials[0].payload["packet_id"] == (
-        packet_materials[0].payload["packet_id"]
+    assert (
+        writer_input_materials[0].payload["packet_id"]
+        == (packet_materials[0].payload["packet_id"])
     )
     assert writer_input_materials[0].payload["output_kind"] == (
         StoryArtifactKind.STORY_SEGMENT.value
@@ -2715,8 +2864,9 @@ async def test_story_graph_runner_stream_persists_usage_metadata_into_writing_re
         source_ref.entry_id for source_ref in packet_materials[0].source_refs
     }
     assert usage_materials[0].payload["artifact_id"] == draft_segment.artifact_id
-    assert usage_materials[0].payload["packet_id"] == (
-        packet_materials[0].payload["packet_id"]
+    assert (
+        usage_materials[0].payload["packet_id"]
+        == (packet_materials[0].payload["packet_id"])
     )
     assert writer_output_materials[0].material_id in {
         source_ref.entry_id for source_ref in usage_materials[0].source_refs
@@ -2824,7 +2974,7 @@ async def test_story_graph_runner_stream_buffers_when_writer_retrieval_loop_is_e
                                 _tool_loop_call(
                                     "call_search",
                                     "retrieval.search",
-                                    {"query": "storm", "search_kind": "recall"},
+                                    {"query": "storm", "mode": "mixed"},
                                 )
                             ],
                         }
@@ -2861,13 +3011,13 @@ async def test_story_graph_runner_stream_buffers_when_writer_retrieval_loop_is_e
             },
             {
                 "choices": [
-                    {
-                        "message": {
-                            "content": "Retrieved segment grounded in evidence."
-                        }
-                    }
+                    {"message": {"content": "Retrieved segment grounded in evidence."}}
                 ],
-                "usage": {"prompt_tokens": 6, "completion_tokens": 3, "total_tokens": 9},
+                "usage": {
+                    "prompt_tokens": 6,
+                    "completion_tokens": 3,
+                    "total_tokens": 9,
+                },
             },
         ]
     )

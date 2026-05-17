@@ -298,7 +298,9 @@ class WorkerMemoryService:
         worker_activation_metadata: dict[str, Any],
     ) -> None:
         story_session_service = StorySessionService(session)
-        chapter = story_session_service.get_current_chapter(ctx.identity.session_id)
+        chapter = story_session_service.get_active_branch_current_chapter(
+            ctx.identity.session_id
+        )
         current_phase = chapter.phase.value if chapter is not None else None
         if current_phase is not None and current_phase != ctx.phase:
             self._raise_permission_error(

@@ -70,7 +70,9 @@ class StoryGraphNodes:
         if state.get("error"):
             return {}
         try:
-            chapter = self._domain_service.require_current_chapter(state["session_id"])
+            chapter = self._domain_service.require_active_branch_current_chapter(
+                state["session_id"]
+            )
         except ValueError as exc:
             return {
                 "error": {
@@ -90,7 +92,9 @@ class StoryGraphNodes:
         if state.get("error"):
             return {}
         try:
-            chapter = self._domain_service.require_current_chapter(state["session_id"])
+            chapter = self._domain_service.require_active_branch_current_chapter(
+                state["session_id"]
+            )
         except ValueError as exc:
             return {
                 "error": {

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import re
 import time
 import uuid
-from collections import defaultdict
+from collections import Counter
 from typing import Any
 
 from sqlalchemy import text
@@ -16,10 +17,127 @@ from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult, Retriev
 from .search_utils import build_chunk_hit, build_filters_applied, chunk_view_priority, row_matches_common_filters
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+", re.UNICODE)
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+_FIELD_WEIGHTS = {
+    "title": 8.0,
+    "asset_title": 6.0,
+    "entry_title": 10.0,
+    "aliases": 10.0,
+    "tags": 5.0,
+    "section_title": 4.0,
+    "retrieval_role": 3.0,
+    "semantic_path": 2.0,
+    "domain_path": 2.0,
+    "text": 1.0,
+}
+
+
+def _tokenize(text: str) -> list[str]:
+    ascii_tokens = [token for token in _TOKEN_RE.findall(text.lower()) if token]
+    cjk_chars = _CJK_RE.findall(text)
+    cjk_bigrams = [
+        "".join(cjk_chars[index : index + 2])
+        for index in range(max(len(cjk_chars) - 1, 0))
+    ]
+    cjk_trigrams = [
+        "".join(cjk_chars[index : index + 3])
+        for index in range(max(len(cjk_chars) - 2, 0))
+    ]
+    return [*ascii_tokens, *cjk_chars, *cjk_bigrams, *cjk_trigrams]
+
+
+def _weighted_tokens(text: str, *, weight: float) -> list[str]:
+    tokens = _tokenize(text)
+    if not tokens or weight <= 0.0:
+        return []
+    repeat_count = max(1, int(round(weight)))
+    return tokens * repeat_count
+
+
+def _metadata_text(metadata: dict[str, Any], *keys: str) -> str:
+    values: list[str] = []
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value)
+        elif isinstance(value, list):
+            values.extend(str(item) for item in value if str(item).strip())
+    return " ".join(values)
+
+
+def _field_weighted_tokens(field_values: dict[str, object]) -> list[str]:
+    tokens: list[str] = []
+    for field_name, weight in _FIELD_WEIGHTS.items():
+        value = field_values.get(field_name)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            text = " ".join(str(item) for item in value if str(item).strip())
+        else:
+            text = str(value)
+        tokens.extend(_weighted_tokens(text, weight=weight))
+    return tokens
+
+
+def _bm25_scores(
+    *,
+    query_terms: list[str],
+    documents: list[tuple[str, list[str]]],
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> dict[str, float]:
+    if not query_terms or not documents:
+        return {}
+
+    doc_count = len(documents)
+    avg_doc_len = sum(len(tokens) for _, tokens in documents) / doc_count
+    avg_doc_len = avg_doc_len or 1.0
+    doc_frequencies: Counter[str] = Counter()
+    term_frequencies: dict[str, Counter[str]] = {}
+    doc_lengths: dict[str, int] = {}
+    for chunk_id, tokens in documents:
+        frequencies = Counter(tokens)
+        term_frequencies[chunk_id] = frequencies
+        doc_lengths[chunk_id] = len(tokens)
+        for term in query_terms:
+            if frequencies.get(term, 0) > 0:
+                doc_frequencies[term] += 1
+
+    scores: dict[str, float] = {}
+    for chunk_id, frequencies in term_frequencies.items():
+        doc_len = doc_lengths.get(chunk_id, 0) or 1
+        score = 0.0
+        for term in query_terms:
+            tf = float(frequencies.get(term, 0))
+            if tf <= 0.0:
+                continue
+            df = float(doc_frequencies.get(term, 0))
+            idf = math.log(1.0 + (doc_count - df + 0.5) / (df + 0.5))
+            denominator = tf + k1 * (1.0 - b + b * (doc_len / avg_doc_len))
+            score += idf * ((tf * (k1 + 1.0)) / denominator)
+        if score > 0.0:
+            scores[chunk_id] = score
+    return scores
+
+
+def _contains_term(value: object, term: str) -> bool:
+    normalized_term = str(term or "").strip().lower()
+    if not normalized_term:
+        return False
+    if isinstance(value, list):
+        return any(_contains_term(item, normalized_term) for item in value)
+    if isinstance(value, tuple | set):
+        return any(_contains_term(item, normalized_term) for item in value)
+    return normalized_term in str(value or "").lower()
+
+
+def _has_cjk_text(text: str | None) -> bool:
+    return bool(_CJK_RE.search(str(text or "")))
 
 
 class KeywordRetriever:
-    """Prefer PostgreSQL FTS and fall back to lexical overlap elsewhere."""
+    """Prefer PostgreSQL FTS and fall back to BM25 sparse scoring elsewhere."""
 
     def __init__(self, session) -> None:
         self._session = session
@@ -82,13 +200,28 @@ class KeywordRetriever:
         query: RetrievalQuery,
     ) -> tuple[list[tuple[KnowledgeChunkRecord, SourceAssetRecord, KnowledgeCollectionRecord | None, float]], list[str], str]:
         if self._session.get_bind().dialect.name == "postgresql" and (query.text_query or "").strip():
+            if self._should_use_python_sparse_path(query):
+                return (
+                    self._load_with_python_scoring(query),
+                    ["fts_bypassed:structured_sparse_parity"],
+                    "retrieval.keyword.bm25",
+                )
             try:
                 postgres_rows = self._load_with_postgres_fts(query)
                 if postgres_rows:
                     return postgres_rows, [], "retrieval.keyword.fts"
             except Exception as exc:  # pragma: no cover - postgres only
-                return self._load_with_python_scoring(query), [f"fts_unavailable:{type(exc).__name__}"], "retrieval.keyword.lexical"
-        return self._load_with_python_scoring(query), [], "retrieval.keyword.lexical"
+                return self._load_with_python_scoring(query), [f"fts_unavailable:{type(exc).__name__}"], "retrieval.keyword.bm25"
+        return self._load_with_python_scoring(query), [], "retrieval.keyword.bm25"
+
+    @staticmethod
+    def _should_use_python_sparse_path(query: RetrievalQuery) -> bool:
+        if _has_cjk_text(query.text_query):
+            return True
+        analysis = query.filters.get("query_analysis")
+        if not isinstance(analysis, dict):
+            return False
+        return bool(analysis.get("entity_terms") or analysis.get("intent_terms"))
 
     def _load_with_postgres_fts(
         self,
@@ -136,19 +269,134 @@ class KeywordRetriever:
         self,
         query: RetrievalQuery,
     ) -> list[tuple[KnowledgeChunkRecord, SourceAssetRecord, KnowledgeCollectionRecord | None, float]]:
-        tokens = [token for token in _TOKEN_RE.findall((query.text_query or "").lower()) if token]
-        if not tokens:
+        query_terms = list(dict.fromkeys(_tokenize(query.text_query or "")))
+        if not query_terms:
             return []
 
-        score_map: dict[str, float] = defaultdict(float)
-        for chunk, asset, collection in self._iter_joined_rows(query):
-            haystack = f"{chunk.title or ''}\n{chunk.text}".lower()
-            for token in tokens:
-                if token in haystack:
-                    score_map[chunk.chunk_id] += haystack.count(token)
-            if score_map.get(chunk.chunk_id):
-                score_map[chunk.chunk_id] += min(len(tokens), 4) * 0.05
+        rows = self._iter_joined_rows(query)
+        documents = [
+            (chunk.chunk_id, self._tokens_for_chunk(chunk=chunk, asset=asset))
+            for chunk, asset, _ in rows
+        ]
+        score_map = _bm25_scores(query_terms=query_terms, documents=documents)
+        score_map = {
+            chunk.chunk_id: score * self._structured_query_multiplier(
+                query=query,
+                chunk=chunk,
+                asset=asset,
+            )
+            for chunk, asset, _ in rows
+            if (score := score_map.get(chunk.chunk_id, 0.0)) > 0.0
+        }
         return self._load_joined_rows(query, score_map)
+
+    def _tokens_for_chunk(
+        self,
+        *,
+        chunk: KnowledgeChunkRecord,
+        asset: SourceAssetRecord,
+    ) -> list[str]:
+        metadata = chunk.metadata_json or {}
+        asset_metadata = asset.metadata_json or {}
+        seed_tags = _metadata_text(metadata, "tags")
+        if not seed_tags:
+            seed_sections = asset_metadata.get("seed_sections")
+            if isinstance(seed_sections, list):
+                seed_tags = " ".join(
+                    " ".join(str(tag) for tag in item.get("tags") or [])
+                    for item in seed_sections
+                    if isinstance(item, dict)
+                    and item.get("section_id") == metadata.get("section_id")
+                )
+        return _field_weighted_tokens(
+            {
+                "title": chunk.title or metadata.get("title") or "",
+                "asset_title": asset.title or "",
+                "entry_title": _metadata_text(metadata, "entry_title"),
+                "aliases": _metadata_text(metadata, "aliases"),
+                "tags": seed_tags,
+                "section_title": _metadata_text(metadata, "section_title"),
+                "retrieval_role": _metadata_text(metadata, "retrieval_role"),
+                "semantic_path": _metadata_text(
+                    metadata,
+                    "semantic_path",
+                    "entry_semantic_path",
+                    "section_semantic_path",
+                ),
+                "domain_path": f"{chunk.domain_path or ''} {metadata.get('domain_path') or ''}",
+                "text": chunk.text,
+            }
+        )
+
+    def _structured_query_multiplier(
+        self,
+        *,
+        query: RetrievalQuery,
+        chunk: KnowledgeChunkRecord,
+        asset: SourceAssetRecord,
+    ) -> float:
+        analysis = query.filters.get("query_analysis")
+        if not isinstance(analysis, dict):
+            return 1.0
+
+        metadata = chunk.metadata_json or {}
+        entity_fields = (
+            chunk.title,
+            asset.title,
+            metadata.get("title"),
+            metadata.get("entry_title"),
+            metadata.get("aliases"),
+            metadata.get("tags"),
+            metadata.get("semantic_path"),
+            metadata.get("entry_semantic_path"),
+            metadata.get("section_semantic_path"),
+            chunk.domain_path,
+        )
+        intent_fields = (
+            chunk.title,
+            metadata.get("section_title"),
+            metadata.get("retrieval_role"),
+            metadata.get("tags"),
+            metadata.get("semantic_path"),
+            metadata.get("section_semantic_path"),
+            chunk.domain_path,
+        )
+
+        multiplier = 1.0
+        entity_terms = [
+            str(term).strip()
+            for term in analysis.get("entity_terms") or []
+            if str(term).strip()
+        ]
+        if entity_terms:
+            entity_matches = sum(
+                1
+                for term in entity_terms
+                if any(_contains_term(value, term) for value in entity_fields)
+            )
+            if entity_matches:
+                multiplier += min(0.6, 0.3 * entity_matches)
+
+        intent_terms = [
+            str(term).strip()
+            for term in analysis.get("intent_terms") or []
+            if str(term).strip()
+        ]
+        if intent_terms:
+            intent_matches = sum(
+                1
+                for term in intent_terms
+                if any(_contains_term(value, term) for value in intent_fields)
+            )
+            if intent_matches:
+                multiplier += min(0.2, 0.1 * intent_matches)
+
+        if entity_terms and not any(
+            any(_contains_term(value, term) for value in entity_fields)
+            for term in entity_terms
+        ):
+            multiplier *= 0.9
+        return multiplier
 
     def _load_joined_rows(
         self,

@@ -63,14 +63,6 @@ class _PreparedRuntimeV2Launch:
 class SetupAgentExecutionService:
     """Execute one SetupAgent turn against SetupWorkspace and setup tools."""
 
-    _READ_ONLY_MEMORY_TOOLS = {
-        "memory.get_state",
-        "memory.get_summary",
-        "memory.search_recall",
-        "memory.search_archival",
-        "memory.list_versions",
-        "memory.read_provenance",
-    }
     _STANDARD_CONTEXT_TOKEN_BUDGET = 2400
     _COMPACT_CONTEXT_TOKEN_BUDGET = 600
     _COMPACT_HISTORY_COUNT_THRESHOLD = 8
@@ -756,6 +748,7 @@ class SetupAgentExecutionService:
             existing_summary=existing_compact_summary,
             context_profile=context_packet.context_profile,
             current_step=current_step.value,
+            current_stage=current_stage.value if current_stage is not None else None,
             estimated_input_tokens=estimated_input_tokens,
             previous_usage=previous_usage,
         )

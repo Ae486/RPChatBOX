@@ -1,6 +1,8 @@
 """Compaction helpers for trimmed older setup-stage discussion history."""
+
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -14,6 +16,17 @@ from rp.agent_runtime.contracts import (
     SetupContextCompactSummary,
     SetupToolOutcome,
     SetupWorkingDigest,
+)
+from rp.context_engineering.compaction import (
+    CompactPromptRunner,
+    run_compact_operation,
+)
+from rp.context_engineering.contracts import (
+    ContextCompactPromptRequest,
+    ContextOperationRequest,
+    ContextOperationResult,
+    ContextSelectionResult,
+    ContextSourceItem,
 )
 from rp.models.setup_agent import SetupAgentDialogueMessage
 
@@ -35,12 +48,7 @@ class SetupContextCompactionService:
     _RECOVERY_HINT_LIMIT = 6
     _MUST_NOT_INFER_LIMIT = 4
     _MAX_SUMMARY_CHARS = 180
-    _VALID_DRAFT_REF_PREFIXES = (
-        "draft:story_config",
-        "draft:writing_contract",
-        "draft:longform_blueprint",
-        "foundation:",
-    )
+    _VALID_DRAFT_REF_PREFIXES = ("draft:", "foundation:", "stage:")
 
     def __init__(
         self,
@@ -64,6 +72,66 @@ class SetupContextCompactionService:
             return self._COMPACT_RECENT_HISTORY_MESSAGES
         return self._STANDARD_RECENT_HISTORY_MESSAGES
 
+    def build_summary_from_common_selection(
+        self,
+        *,
+        request: ContextOperationRequest,
+        selection: ContextSelectionResult,
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        existing_summary: SetupContextCompactSummary | None,
+        current_step: str | None = None,
+    ) -> SetupContextCompactSummary | None:
+        """Build a setup summary from common selection and compaction mechanics."""
+
+        result = asyncio.run(
+            self._run_common_compact_operation(
+                request=request,
+                selection=selection,
+                retained_tool_outcomes=retained_tool_outcomes,
+                working_digest=working_digest,
+                current_step=current_step,
+                allow_async_provider=False,
+            )
+        )
+        return self._summary_from_common_result(
+            result=result,
+            dropped_items=selection.compactable_dropped_items,
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            existing_summary=existing_summary,
+            provider_configured=self._compact_prompt_provider is not None,
+        )
+
+    async def build_summary_from_common_selection_async(
+        self,
+        *,
+        request: ContextOperationRequest,
+        selection: ContextSelectionResult,
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        existing_summary: SetupContextCompactSummary | None,
+        current_step: str | None = None,
+    ) -> SetupContextCompactSummary | None:
+        """Async variant used by runtime-v2 setup launches."""
+
+        result = await self._run_common_compact_operation(
+            request=request,
+            selection=selection,
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            current_step=current_step,
+            allow_async_provider=True,
+        )
+        return self._summary_from_common_result(
+            result=result,
+            dropped_items=selection.compactable_dropped_items,
+            retained_tool_outcomes=retained_tool_outcomes,
+            working_digest=working_digest,
+            existing_summary=existing_summary,
+            provider_configured=self._compact_prompt_provider is not None,
+        )
+
     def build_summary(
         self,
         *,
@@ -82,6 +150,168 @@ class SetupContextCompactionService:
             context_profile=context_profile,
             current_step=current_step,
         )
+
+    async def _run_common_compact_operation(
+        self,
+        *,
+        request: ContextOperationRequest,
+        selection: ContextSelectionResult,
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        current_step: str | None,
+        allow_async_provider: bool,
+    ) -> ContextOperationResult:
+        runner = (
+            _SetupCompactPromptRunner(
+                service=self,
+                all_dropped_items=list(selection.compactable_dropped_items),
+                retained_tool_outcomes=retained_tool_outcomes,
+                working_digest=working_digest,
+                current_step=str(current_step or "unknown_step"),
+                allow_async_provider=allow_async_provider,
+            )
+            if self._compact_prompt_provider is not None
+            else None
+        )
+        first_kept_source_item_id = (
+            selection.recent_raw_items[0].source_item_id
+            if selection.recent_raw_items
+            else None
+        )
+        return await run_compact_operation(
+            request=request,
+            dropped_items=selection.compactable_dropped_items,
+            first_kept_source_item_id=first_kept_source_item_id,
+            compact_prompt_runner=runner,
+        )
+
+    def _summary_from_common_result(
+        self,
+        *,
+        result: ContextOperationResult,
+        dropped_items: list[ContextSourceItem],
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        existing_summary: SetupContextCompactSummary | None,
+        provider_configured: bool,
+    ) -> SetupContextCompactSummary | None:
+        summary_action = str(result.trace.summary_action or result.status)
+        setup_summary_action = self._setup_summary_action(
+            summary_action=summary_action,
+            artifact_present=result.artifact is not None,
+        )
+        if result.status == "not_needed" or not dropped_items:
+            self._last_summary_decision = {
+                "summary_strategy": "none",
+                "summary_action": "none",
+                "fallback_reason": None,
+            }
+            return None
+        if result.status == "reused" and existing_summary is not None:
+            self._last_summary_decision = {
+                "summary_strategy": "deterministic_prefix_summary",
+                "summary_action": "reused_existing",
+                "fallback_reason": None,
+            }
+            return existing_summary
+
+        fallback_reason = (
+            result.fallback_report.reason
+            if result.fallback_report is not None
+            else None
+        )
+        if (
+            fallback_reason == "compact_prompt_runner_unavailable"
+            and not provider_configured
+        ):
+            fallback_reason = None
+        if result.artifact is not None and result.artifact.created_by == "model":
+            summary = SetupContextCompactSummary.model_validate(result.artifact.payload)
+            self._last_summary_decision = {
+                "summary_strategy": "compact_prompt_summary",
+                "summary_action": setup_summary_action,
+                "fallback_reason": None,
+            }
+            return summary
+
+        dropped_history = self._history_from_source_items(dropped_items)
+        fingerprint = (
+            result.artifact.source_fingerprint
+            if result.artifact
+            else self._common_fingerprint(dropped_items)
+        )
+        if setup_summary_action == "updated_existing" and existing_summary is not None:
+            newly_compacted_history = self._newly_compacted_history_from_source_items(
+                dropped_items=dropped_items,
+                existing_summary=existing_summary,
+            )
+            summary = self._deterministic_incremental_summary(
+                existing_summary=existing_summary,
+                newly_compacted_history=newly_compacted_history,
+                fingerprint=fingerprint,
+                source_message_count=len(dropped_items),
+                retained_tool_outcomes=retained_tool_outcomes,
+                working_digest=working_digest,
+            )
+        else:
+            summary = self._deterministic_summary(
+                dropped_history=dropped_history,
+                fingerprint=fingerprint,
+                retained_tool_outcomes=retained_tool_outcomes,
+                working_digest=working_digest,
+            )
+        self._last_summary_decision = {
+            "summary_strategy": "deterministic_prefix_summary",
+            "summary_action": setup_summary_action,
+            "fallback_reason": fallback_reason,
+        }
+        return summary
+
+    @staticmethod
+    def _setup_summary_action(
+        *,
+        summary_action: str,
+        artifact_present: bool,
+    ) -> str:
+        if summary_action == "not_needed" or not artifact_present:
+            return "none"
+        if summary_action == "reused":
+            return "reused_existing"
+        if summary_action == "updated":
+            return "updated_existing"
+        return "rebuilt"
+
+    def _newly_compacted_history_from_source_items(
+        self,
+        *,
+        dropped_items: list[ContextSourceItem],
+        existing_summary: SetupContextCompactSummary,
+    ) -> list[SetupAgentDialogueMessage]:
+        previous_count = int(existing_summary.source_message_count or 0)
+        if previous_count <= 0 or previous_count >= len(dropped_items):
+            return []
+        return self._history_from_source_items(dropped_items[previous_count:])
+
+    @staticmethod
+    def _history_from_source_items(
+        items: list[ContextSourceItem],
+    ) -> list[SetupAgentDialogueMessage]:
+        history: list[SetupAgentDialogueMessage] = []
+        for item in items:
+            role = "assistant" if item.source_family == "assistant_turn" else "user"
+            history.append(
+                SetupAgentDialogueMessage(
+                    role=role,
+                    content=str(item.text or ""),
+                )
+            )
+        return history
+
+    @staticmethod
+    def _common_fingerprint(items: list[ContextSourceItem]) -> str:
+        from rp.context_engineering.fingerprinting import fingerprint_source_items
+
+        return fingerprint_source_items(items)
 
     async def build_summary_async(
         self,
@@ -139,7 +369,9 @@ class SetupContextCompactionService:
         context_profile: str,
         current_step: str | None = None,
         allow_async_provider: bool,
-    ) -> SetupContextCompactSummary | None | Awaitable[SetupContextCompactSummary | None]:
+    ) -> (
+        SetupContextCompactSummary | None | Awaitable[SetupContextCompactSummary | None]
+    ):
         dropped_history = self._dropped_history(
             history=history,
             context_profile=context_profile,
@@ -184,7 +416,9 @@ class SetupContextCompactionService:
                     dropped_history=dropped_history,
                     newly_compacted_history=newly_compacted_history,
                     existing_summary=(
-                        existing_summary if summary_action == "updated_existing" else None
+                        existing_summary
+                        if summary_action == "updated_existing"
+                        else None
                     ),
                     working_digest=working_digest,
                     retained_tool_outcomes=retained_tool_outcomes,
@@ -226,7 +460,10 @@ class SetupContextCompactionService:
                     "summary_action": summary_action,
                     "fallback_reason": self._fallback_reason(exc),
                 }
-                if summary_action == "updated_existing" and existing_summary is not None:
+                if (
+                    summary_action == "updated_existing"
+                    and existing_summary is not None
+                ):
                     return self._deterministic_incremental_summary(
                         existing_summary=existing_summary,
                         newly_compacted_history=newly_compacted_history or [],
@@ -320,6 +557,8 @@ class SetupContextCompactionService:
         current_step: str,
         draft_refs: list[str],
         newly_compacted_history: list[SetupAgentDialogueMessage] | None = None,
+        source_fingerprint: str | None = None,
+        source_message_count: int | None = None,
     ) -> list[ChatMessage]:
         """Build the no-tools compact prompt pass for one setup stage."""
 
@@ -336,10 +575,11 @@ class SetupContextCompactionService:
         )
         payload = {
             "current_step": current_step,
-            "dropped_current_step_fingerprint": self._history_fingerprint(
-                dropped_history
-            ),
-            "dropped_current_step_message_count": len(dropped_history),
+            "dropped_current_step_fingerprint": source_fingerprint
+            or self._history_fingerprint(dropped_history),
+            "dropped_current_step_message_count": source_message_count
+            if source_message_count is not None
+            else len(dropped_history),
             "incremental_update": incremental_update,
             "dropped_current_step_messages": (
                 None
@@ -414,6 +654,20 @@ class SetupContextCompactionService:
             raise ValueError(
                 f"compact_prompt_summary_forbidden_fields:{','.join(extra_fields)}"
             )
+        payload_fingerprint = payload.get("source_fingerprint")
+        if (
+            payload_fingerprint is not None
+            and str(payload_fingerprint) != source_fingerprint
+        ):
+            raise ValueError("compact_prompt_summary_source_fingerprint_mismatch")
+        payload_message_count = payload.get("source_message_count")
+        if payload_message_count is not None:
+            try:
+                count_matches = int(payload_message_count) == int(source_message_count)
+            except (TypeError, ValueError):
+                count_matches = False
+            if not count_matches:
+                raise ValueError("compact_prompt_summary_source_message_count_mismatch")
 
         draft_refs = self._string_list(
             payload.get("draft_refs"),
@@ -480,7 +734,7 @@ class SetupContextCompactionService:
                 SetupCompactRecoveryHint(
                     ref=ref,
                     reason="recover_exact_draft_detail",
-                    detail="Use setup.read.draft_refs if exact current draft detail is needed.",
+                    detail="Use setup.memory.open if exact setup fact detail is needed.",
                 )
                 for ref in draft_refs[: self._RECOVERY_HINT_LIMIT]
             ],
@@ -713,7 +967,7 @@ class SetupContextCompactionService:
                 SetupCompactRecoveryHint(
                     ref=ref,
                     reason="recover_exact_draft_detail",
-                    detail="Use setup.read.draft_refs if exact current draft detail is needed.",
+                    detail="Use setup.memory.open if exact setup fact detail is needed.",
                 )
             )
             seen_refs.add(ref)
@@ -729,10 +983,10 @@ class SetupContextCompactionService:
             )
 
     def _is_supported_ref(self, ref: str) -> bool:
-        if ref in self._VALID_DRAFT_REF_PREFIXES[:3]:
-            return True
-        return ref.startswith("foundation:") and bool(
-            ref.removeprefix("foundation:").strip()
+        value = str(ref or "").strip()
+        return any(
+            value.startswith(prefix) and bool(value.removeprefix(prefix).strip())
+            for prefix in self._VALID_DRAFT_REF_PREFIXES
         )
 
     @staticmethod
@@ -741,3 +995,73 @@ class SetupContextCompactionService:
         if not text:
             return exc.__class__.__name__
         return text[:160]
+
+
+class _SetupCompactPromptRunner(CompactPromptRunner):
+    """Bridge common data-only compaction requests into setup's prompt schema."""
+
+    def __init__(
+        self,
+        *,
+        service: SetupContextCompactionService,
+        all_dropped_items: list[ContextSourceItem],
+        retained_tool_outcomes: list[SetupToolOutcome],
+        working_digest: SetupWorkingDigest | None,
+        current_step: str,
+        allow_async_provider: bool,
+    ) -> None:
+        self._service = service
+        self._all_dropped_items = all_dropped_items
+        self._retained_tool_outcomes = retained_tool_outcomes
+        self._working_digest = working_digest
+        self._current_step = current_step
+        self._allow_async_provider = allow_async_provider
+
+    async def run_compact_prompt(
+        self,
+        request: ContextCompactPromptRequest,
+    ) -> dict[str, Any]:
+        if self._service._compact_prompt_provider is None:
+            raise RuntimeError("compact_prompt_provider_unavailable")
+        dropped_history = self._service._history_from_source_items(
+            self._all_dropped_items
+        )
+        newly_compacted_history = (
+            self._service._history_from_source_items(list(request.dropped_items))
+            if request.action == "updated"
+            else None
+        )
+        existing_summary = (
+            SetupContextCompactSummary.model_validate(request.previous_artifact_payload)
+            if request.previous_artifact_payload is not None
+            else None
+        )
+        draft_refs = self._service._draft_refs(
+            retained_tool_outcomes=self._retained_tool_outcomes,
+            working_digest=self._working_digest,
+        )
+        prompt_messages = self._service.build_compact_prompt(
+            dropped_history=dropped_history,
+            newly_compacted_history=newly_compacted_history,
+            existing_summary=existing_summary,
+            working_digest=self._working_digest,
+            retained_tool_outcomes=self._retained_tool_outcomes,
+            current_step=self._current_step,
+            draft_refs=draft_refs,
+            source_fingerprint=request.source_fingerprint,
+            source_message_count=request.source_item_count,
+        )
+        payload = self._service._compact_prompt_provider(prompt_messages)
+        if inspect.isawaitable(payload):
+            if not self._allow_async_provider:
+                close = getattr(payload, "close", None)
+                if callable(close):
+                    close()
+                raise RuntimeError("compact_prompt_provider_returned_awaitable")
+            payload = await payload
+        summary = self._service.validate_compact_prompt_summary(
+            payload=payload,
+            source_fingerprint=request.source_fingerprint,
+            source_message_count=request.source_item_count,
+        )
+        return summary.model_dump(mode="json", exclude_none=True)

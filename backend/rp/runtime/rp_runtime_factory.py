@@ -130,7 +130,6 @@ from rp.services.worker_registry_service import WorkerRegistryService
 from rp.services.worker_scheduler_service import WorkerSchedulerService
 from rp.services.writing_packet_builder import WritingPacketBuilder
 from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
-from rp.tools.memory_crud_provider import MemoryCrudToolProvider
 from rp.tools.setup_tool_provider import SetupToolProvider
 from services.mcp_manager import McpManager
 
@@ -188,16 +187,6 @@ class RpRuntimeFactory:
         )
         runtime_state_service = self._build_setup_runtime_state_service()
         registry = LocalToolProviderRegistry()
-        registry.register(
-            MemoryCrudToolProvider(
-                memory_os_service=MemoryOsService(
-                    retrieval_broker=RetrievalBroker(default_story_id=story_id)
-                ),
-                allowed_tools=SetupAgentExecutionService._READ_ONLY_MEMORY_TOOLS,
-                provider_id="rp_memory",
-                server_name="RP Memory",
-            )
-        )
         registry.register(
             SetupToolProvider(
                 workspace_service=workspace_service,

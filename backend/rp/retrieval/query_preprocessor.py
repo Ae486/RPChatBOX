@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rp.models.memory_crud import RetrievalQuery
+from .query_analysis import build_query_analysis
 
 
 def _dedupe_preserve_order(values: Iterable[object]) -> list[object]:
@@ -151,6 +152,8 @@ class DefaultQueryPreprocessor:
             if isinstance(query.text_query, str)
             else query.text_query
         )
+        if normalized_text:
+            filters["query_analysis"] = build_query_analysis(normalized_text)
 
         return query.model_copy(
             update={

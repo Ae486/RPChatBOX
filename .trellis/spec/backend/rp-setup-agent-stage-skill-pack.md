@@ -1,6 +1,6 @@
 # RP Setup Agent Stage SkillPack
 
-> Executable contract for SetupAgent stage-local SkillPack prompt prose: file format, deterministic stage-keyed registry, prompt-only injection through the existing `_stage_overlay` slot, and explicit decoupling from tool scope and `setup.truth.write` runtime injection.
+> Executable contract for SetupAgent stage-local SkillPack prompt prose: file format, deterministic stage-keyed registry, prompt-only injection through the existing `_stage_overlay` slot, and explicit decoupling from tool scope and stage-entry draft tools.
 
 ## Scenario: SetupAgent Loads One Stage SkillPack Into The System Prompt And Hard-Unloads It On Stage Change
 
@@ -8,7 +8,7 @@
 
 - Trigger: add or edit `backend/rp/agent_runtime/skill_packs/`, `backend/rp/services/setup_agent_prompt_service.py`, or `backend/rp/agent_runtime/adapters.py` when the change affects how stage-local persona / facilitation prose enters the SetupAgent system prompt.
 - Applies only to the SetupAgent runtime-v2 system prompt assembled by `SetupAgentPromptService.build_system_prompt(...)`.
-- This slice owns prompt-layer prose only. It does not change `SetupWorkspace` business truth, `SetupAgentTurnRequest` shape, `SetupGraphState`, prior-stage handoff packets, runtime overlay, tool scope, or `setup.truth.write` runtime injection.
+- This slice owns prompt-layer prose only. It does not change `SetupWorkspace` business truth, `SetupAgentTurnRequest` shape, `SetupGraphState`, prior-stage handoff packets, runtime overlay, or the current stage-entry tool surface.
 - This slice must keep deterministic stage-driven loading. Heuristic / LLM-self-selected SkillPack discovery is out of scope.
 - Source:
   - Anthropic Skill Authoring Best Practices: markdown + YAML frontmatter, conciseness, second-person agent-facing prose, imperative voice.
@@ -89,11 +89,11 @@
 - The SkillPack lives only in the system prompt. When the next turn resolves a different stage or `current_stage = None`, the new system prompt must contain no SkillPack body, no `[Stage Skill Pack` marker, and no specialist-hat preamble.
 - There is no "former skill summary" soft handoff. Prior-stage truth continues to flow through the existing `prior_stage_handoffs` contract.
 
-#### 3.6 SkillPack Does Not Touch Tool Scope Or Truth-Write Injection
+#### 3.6 SkillPack Does Not Touch Tool Scope Or Stage-Entry Tools
 
 - `SkillPackRecord` must not declare any `required_tools_*` field.
-- `build_setup_agent_tool_scope(...)` and `SETUP_STAGE_PATCH_TOOLS` must remain unchanged by SkillPack work.
-- Stage-scoped truth writes continue to land through `setup.truth.write` with runtime-owned `stage_id` and `block_type=stage_draft` injection per `rp-setup-agent-strict-truth-write-tool-pilot.md`.
+- `build_setup_agent_tool_scope(...)` and current stage-entry scope rules must remain unchanged by SkillPack work.
+- Stage draft writes for `world_background`, `character_design`, and `plot_blueprint` continue through `setup.stage_entry.*`; SkillPack work must not reintroduce deleted `setup.truth.write` or `setup.patch.*` agent tools.
 - SkillPack body may reference tool names in prose, but the registry must never produce or modify the tool allowlist.
 
 #### 3.7 Adapter Metadata May Carry `skill_pack_name` For Trace Correlation
@@ -113,7 +113,7 @@
 
 - A SkillPack body may include a "Recommended content skeleton" section.
 - The skeleton is a thinking aid for the LLM; the runtime must not introduce pydantic validation or schema repair branches that enforce skeleton fields.
-- `SetupTruthWriteInput` validation, `SetupDraftEntry` shape, and the existing structured-output schema repair contract remain authoritative for what reaches commit.
+- `setup.stage_entry.*` validation, `SetupDraftEntry` shape, and the existing structured-output schema repair contract remain authoritative for what reaches commit.
 
 ### 4. Validation & Error Matrix
 
@@ -167,5 +167,5 @@
 - Short-circuit only inside `_stage_overlay`, leaving every other prompt-assembly site identical to the legacy behavior when no SkillPack is loaded.
 - Insert the specialist-hat preamble between the stable `You are SetupAgent ...` block and `Core rules:` only when a SkillPack is loaded.
 - Hard-unload SkillPacks on stage change; rely on `prior_stage_handoffs` for cross-stage truth continuity.
-- Keep tool scope and `setup.truth.write` runtime injection unchanged; SkillPack work is prompt-layer only.
+- Keep tool scope and stage-entry draft tooling unchanged; SkillPack work is prompt-layer only.
 - Surface `skill_pack_name` as observability metadata only when behavior does not depend on it.

@@ -19,7 +19,11 @@ from rp.agent_runtime.profiles import (
 )
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor
 from rp.agent_runtime.tools import RuntimeToolExecutor
-from rp.models.setup_drafts import FoundationEntry
+from rp.models.setup_drafts import (
+    SetupDraftEntry,
+    SetupDraftSection,
+    SetupStageDraftBlock,
+)
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_handoff import SetupContextBuilderInput
 from rp.models.setup_stage import SetupStageId
@@ -34,6 +38,15 @@ from rp.tools.setup_tool_provider import SetupToolProvider
 
 
 _RECOVERED_MAGIC_LAW_DETAIL = "Public spellcasting requires guild permits."
+_RECOVERED_MEMORY_DETAIL = "Moonlit forest cities."
+EXTERNAL_MEMORY_TOOLS = {
+    "memory.get_state",
+    "memory.get_summary",
+    "memory.search_recall",
+    "memory.search_archival",
+    "memory.list_versions",
+    "memory.read_provenance",
+}
 
 
 def _messages_text(messages: list[Any]) -> str:
@@ -115,7 +128,7 @@ class _SetupProviderBackedToolExecutor(RuntimeToolExecutor):
         )
 
 
-class _DraftRefRecoveryLLM:
+class _MemoryOpenRecoveryLLM:
     def __init__(self, *, workspace_id: str) -> None:
         self.workspace_id = workspace_id
         self.requests: list[Any] = []
@@ -130,21 +143,18 @@ class _DraftRefRecoveryLLM:
             visible_text = _messages_text(request.messages)
             assert _RECOVERED_MAGIC_LAW_DETAIL not in visible_text
             assert "OLD_RAW_HISTORY_OUTSIDE_SUMMARY_WINDOW" not in visible_text
-            assert "foundation:magic-law" in visible_text
+            assert "stage:world_background:magic_law:summary" in visible_text
             assert "recovery_hints" in visible_text
-            assert (
-                "If compact_summary recovery_hints point to draft refs" in visible_text
-            )
             assert any(
-                "setup_read_draft_refs" in item["function"]["name"]
+                "setup_memory_open" in item["function"]["name"]
                 for item in (request.tools or [])
             )
-            draft_ref_schema = next(
+            open_schema = next(
                 item
                 for item in (request.tools or [])
-                if item["function"]["name"] == "rp_setup__setup_read_draft_refs"
+                if item["function"]["name"] == "rp_setup__setup_memory_open"
             )
-            assert "refs" in draft_ref_schema["function"]["parameters"]["required"]
+            assert "ref" in open_schema["function"]["parameters"]["required"]
             return {
                 "choices": [
                     {
@@ -153,16 +163,14 @@ class _DraftRefRecoveryLLM:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_read_magic_law",
+                                    "id": "call_open_magic_law",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup_read_draft_refs",
+                                        "name": "rp_setup__setup_memory_open",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": self.workspace_id,
-                                                "step_id": "longform_blueprint",
-                                                "refs": ["foundation:magic-law"],
-                                                "detail": "full",
+                                                "ref": "stage:world_background:magic_law:summary",
                                                 "max_chars": 1200,
                                             },
                                             sort_keys=True,
@@ -188,7 +196,7 @@ class _DraftRefRecoveryLLM:
                     "message": {
                         "role": "assistant",
                         "content": (
-                            "Recovered foundation:magic-law from draft readback: "
+                            "Recovered stage:world_background:magic_law:summary from memory open: "
                             f"{self.recovered_detail}"
                         ),
                     }
@@ -202,13 +210,142 @@ class _DraftRefRecoveryLLM:
             if message.role != "tool":
                 continue
             payload = json.loads(str(message.content or "{}"))
-            for item in payload.get("items") or []:
-                if item.get("ref") != "foundation:magic-law" or not item.get("found"):
-                    continue
-                draft_payload = item.get("payload") or {}
-                content = draft_payload.get("content") or {}
-                if isinstance(content, dict) and content.get("summary"):
-                    return str(content["summary"])
+            if payload.get("opened_ref") != "stage:world_background:magic_law:summary":
+                continue
+            content = payload.get("content") or {}
+            if content.get("type") == "text" and content.get("text"):
+                return str(content["text"])
+        return None
+
+
+class _SetupMemorySearchThenOpenLLM:
+    def __init__(self, *, workspace_id: str) -> None:
+        self.workspace_id = workspace_id
+        self.requests: list[Any] = []
+        self.round = 0
+        self.search_hit_ref: str | None = None
+        self.search_carried_payload = False
+        self.recovered_detail: str | None = None
+
+    async def chat_completion(self, request):
+        self.round += 1
+        self.requests.append(request)
+        if self.round == 1:
+            visible_text = _messages_text(request.messages)
+            assert _RECOVERED_MEMORY_DETAIL not in visible_text
+            assert any(
+                item["function"]["name"] == "rp_setup__setup_memory_search"
+                for item in (request.tools or [])
+            )
+            assert any(
+                item["function"]["name"] == "rp_setup__setup_memory_open"
+                for item in (request.tools or [])
+            )
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_memory_search",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup_memory_search",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": self.workspace_id,
+                                                "query": "Moonlit forest",
+                                                "limit": 5,
+                                            },
+                                            sort_keys=True,
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+        if self.round == 2:
+            self.search_hit_ref = self._search_ref_from_tool_messages(request.messages)
+            assert self.search_hit_ref == "stage:world_background:race_elf:summary"
+            assert self.search_carried_payload is False
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_memory_read",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "rp_setup__setup_memory_open",
+                                        "arguments": json.dumps(
+                                            {
+                                                "workspace_id": self.workspace_id,
+                                                "ref": self.search_hit_ref,
+                                                "max_chars": 1200,
+                                            },
+                                            sort_keys=True,
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+        self.recovered_detail = self._recovered_detail_from_tool_messages(
+            request.messages
+        )
+        assert self.recovered_detail == _RECOVERED_MEMORY_DETAIL
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": (
+                            f"Recovered via setup memory: {self.recovered_detail}"
+                        ),
+                    }
+                }
+            ]
+        }
+
+    def _search_ref_from_tool_messages(self, messages: list[Any]) -> str | None:
+        for message in messages:
+            if message.role != "tool":
+                continue
+            payload = json.loads(str(message.content or "{}"))
+            items = payload.get("items") or []
+            if not items:
+                continue
+            encoded = json.dumps(payload, sort_keys=True)
+            self.search_carried_payload = '"payload"' in encoded
+            for item in items:
+                if item.get("ref") == "stage:world_background:race_elf:summary":
+                    assert item.get("scope") == "section"
+                    assert item.get("navigation_summary")
+                    return str(item["ref"])
+        return None
+
+    @staticmethod
+    def _recovered_detail_from_tool_messages(messages: list[Any]) -> str | None:
+        for message in messages:
+            if message.role != "tool":
+                continue
+            payload = json.loads(str(message.content or "{}"))
+            if payload.get("opened_ref") != "stage:world_background:race_elf:summary":
+                continue
+            content = payload.get("content") or {}
+            if content.get("type") == "text" and content.get("text"):
+                return str(content["text"])
         return None
 
 
@@ -238,7 +375,7 @@ class _CompactPromptLLM:
                         {
                             "ref": draft_refs[0],
                             "reason": "Recover exact draft detail if needed.",
-                            "detail": "Use setup.read.draft_refs.",
+                            "detail": "Use setup.memory.open.",
                         }
                     ]
                     if draft_refs
@@ -267,6 +404,28 @@ def test_setup_runtime_factory_always_uses_runtime_v2(retrieval_session):
     assert service._adapter is not None
     assert runner._execution_service._runtime_executor is not None
     assert runner._execution_service._adapter is not None
+
+
+def test_setup_runtime_factory_exposes_setup_memory_without_external_memory_os(
+    retrieval_session,
+):
+    manager = RpRuntimeFactory(retrieval_session)._build_setup_mcp_manager(
+        story_id="story-setup-memory-manager-scope"
+    )
+
+    tool_names = {tool.name for tool in manager.get_all_tools()}
+
+    assert "setup.memory.search" in tool_names
+    assert "setup.memory.open" in tool_names
+    assert "setup.memory.read_refs" in tool_names
+    assert {
+        "memory.get_state",
+        "memory.get_summary",
+        "memory.search_recall",
+        "memory.search_archival",
+        "memory.list_versions",
+        "memory.read_provenance",
+    }.isdisjoint(tool_names)
 
 
 def test_setup_agent_execution_service_uses_standard_context_budget_for_small_turn():
@@ -419,12 +578,16 @@ async def test_setup_agent_execution_service_v2_builds_governed_history_for_comp
     assert turn_input.conversation_messages[0]["content"] == "history message 6"
     assert turn_input.conversation_messages[-1]["content"] == "history message 9"
     assert "setup.world_background.write_entry" not in turn_input.tool_scope
-    assert "setup.truth.write" in turn_input.tool_scope
-    assert "setup.question.raise" in turn_input.tool_scope
-    assert "setup.proposal.commit" in turn_input.tool_scope
+    assert "setup.stage_entry.write" in turn_input.tool_scope
+    assert "setup.truth.write" not in turn_input.tool_scope
+    assert "setup.question.raise" not in turn_input.tool_scope
+    assert "setup.proposal.commit" not in turn_input.tool_scope
+    assert "setup.discussion.update_state" not in turn_input.tool_scope
+    assert "setup.chunk.upsert" not in turn_input.tool_scope
     assert "setup.patch.foundation_entry" not in turn_input.tool_scope
     assert "setup.patch.story_config" not in turn_input.tool_scope
     assert "setup.patch.longform_blueprint" not in turn_input.tool_scope
+    assert EXTERNAL_MEMORY_TOOLS.isdisjoint(turn_input.tool_scope)
     assert turn_input.context_bundle["governance_metadata"]["raw_history_limit"] == 4
     assert turn_input.context_bundle["governance_metadata"]["kept_history_count"] == 4
     assert (
@@ -489,15 +652,30 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
         story_id="story-compact-draft-ref-recovery-1",
         mode=StoryMode.LONGFORM,
     )
-    workspace_service.patch_foundation_entry(
+    workspace_service.patch_stage_draft(
         workspace_id=workspace.workspace_id,
-        entry=FoundationEntry(
-            entry_id="magic-law",
-            domain="rule",
-            path="world.magic.law",
-            title="Magic Law",
-            tags=["law", "magic"],
-            content={"summary": _RECOVERED_MAGIC_LAW_DETAIL},
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            entries=[
+                SetupDraftEntry(
+                    entry_id="magic_law",
+                    entry_type="rule",
+                    semantic_path="world_background.rule.magic_law",
+                    title="Magic Law",
+                    summary="Spellcasting permit law.",
+                    tags=["law", "magic"],
+                    sections=[
+                        SetupDraftSection(
+                            section_id="summary",
+                            title="Summary",
+                            kind="text",
+                            content={"text": _RECOVERED_MAGIC_LAW_DETAIL},
+                            retrieval_role="summary",
+                        )
+                    ],
+                )
+            ],
         ),
     )
     workspace = workspace_service.get_workspace(workspace.workspace_id)
@@ -519,7 +697,7 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
         working_digest=SetupWorkingDigest(
             current_goal="Continue blueprint planning from compact refs.",
             next_focus="Recover the exact magic-law constraint before using it.",
-            draft_refs=["foundation:magic-law"],
+            draft_refs=["stage:world_background:magic_law:summary"],
         ),
         tool_outcomes=[],
         compact_summary=None,
@@ -566,8 +744,10 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
         for message in turn_input.conversation_messages
     )
     assert compact_summary is not None
-    assert compact_summary["draft_refs"] == ["foundation:magic-law"]
-    assert compact_summary["recovery_hints"][0]["ref"] == "foundation:magic-law"
+    assert compact_summary["draft_refs"] == ["stage:world_background:magic_law:summary"]
+    assert compact_summary["recovery_hints"][0]["ref"] == (
+        "stage:world_background:magic_law:summary"
+    )
     assert _RECOVERED_MAGIC_LAW_DETAIL not in json.dumps(
         turn_input.model_dump(mode="json", exclude_none=True),
         sort_keys=True,
@@ -579,7 +759,7 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
         runtime_state_service=runtime_state_service,
     )
     tool_executor = _SetupProviderBackedToolExecutor(provider=provider)
-    llm = _DraftRefRecoveryLLM(workspace_id=workspace.workspace_id)
+    llm = _MemoryOpenRecoveryLLM(workspace_id=workspace.workspace_id)
     executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
 
     result = await executor.run(
@@ -592,12 +772,126 @@ async def test_setup_agent_runtime_v2_recovers_compacted_draft_ref_detail(
     assert result.assistant_text.endswith(_RECOVERED_MAGIC_LAW_DETAIL)
     assert llm.recovered_detail == _RECOVERED_MAGIC_LAW_DETAIL
     assert llm.recovered_from_tool_result is True
-    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup_read_draft_refs"
+    assert tool_executor.calls[0][0].tool_name == "rp_setup__setup_memory_open"
     assert result.tool_results[0].success is True
     assert _RECOVERED_MAGIC_LAW_DETAIL in result.tool_results[0].content_text
     assert result.structured_payload["compact_summary"]["draft_refs"] == [
-        "foundation:magic-law"
+        "stage:world_background:magic_law:summary"
     ]
+
+
+@pytest.mark.asyncio
+async def test_setup_agent_runtime_v2_recovers_detail_through_session_memory(
+    retrieval_session,
+):
+    workspace_service = SetupWorkspaceService(retrieval_session)
+    context_builder = SetupContextBuilder(workspace_service)
+    runtime_state_service = SetupAgentRuntimeStateService(retrieval_session)
+    adapter = SetupRuntimeAdapter()
+    service = SetupAgentExecutionService(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        adapter=adapter,
+        runtime_executor=None,
+        runtime_state_service=runtime_state_service,
+    )
+    workspace = workspace_service.create_workspace(
+        story_id="story-setup-memory-e2e-1",
+        mode=StoryMode.LONGFORM,
+    )
+    workspace_service.patch_stage_draft(
+        workspace_id=workspace.workspace_id,
+        stage_id=SetupStageId.WORLD_BACKGROUND,
+        draft=SetupStageDraftBlock(
+            stage_id=SetupStageId.WORLD_BACKGROUND,
+            entries=[
+                SetupDraftEntry(
+                    entry_id="race_elf",
+                    entry_type="race",
+                    semantic_path="world_background.race.elf",
+                    title="Elf",
+                    summary="A forest ancestry with a recoverable city detail.",
+                    tags=["forest"],
+                    sections=[
+                        SetupDraftSection(
+                            section_id="summary",
+                            title="Summary",
+                            kind="text",
+                            content={"text": _RECOVERED_MEMORY_DETAIL},
+                            retrieval_role="summary",
+                        )
+                    ],
+                )
+            ],
+        ),
+    )
+    workspace = workspace_service.get_workspace(workspace.workspace_id)
+    assert workspace is not None
+    request = SetupAgentTurnRequest(
+        workspace_id=workspace.workspace_id,
+        model_id="model-1",
+        user_prompt=(
+            "Recover the exact world-background detail about Moonlit forest "
+            "before using it in the current setup discussion."
+        ),
+        target_stage=SetupStageId.CHARACTER_DESIGN,
+        history=[],
+        user_edit_delta_ids=[],
+    )
+
+    turn_input, context_packet = await service._build_runtime_v2_turn_input(
+        adapter=adapter,
+        request=request,
+        workspace=workspace,
+        model_name="gpt-4o-mini",
+        provider=ProviderConfig(
+            type="openai",
+            api_key="sk-test",
+            api_url="https://example.com/v1",
+            custom_headers={},
+        ),
+    )
+
+    assert context_packet.current_stage == SetupStageId.CHARACTER_DESIGN
+    assert _RECOVERED_MEMORY_DETAIL not in json.dumps(
+        turn_input.model_dump(mode="json", exclude_none=True),
+        sort_keys=True,
+    )
+    provider = SetupToolProvider(
+        workspace_service=workspace_service,
+        context_builder=context_builder,
+        runtime_state_service=runtime_state_service,
+    )
+    tool_executor = _SetupProviderBackedToolExecutor(provider=provider)
+    llm = _SetupMemorySearchThenOpenLLM(workspace_id=workspace.workspace_id)
+    executor = RpAgentRuntimeExecutor(tool_executor_factory=lambda _: tool_executor)
+
+    result = await executor.run(
+        turn_input,
+        adapter.build_runtime_profile(),
+        llm_service=llm,
+    )
+
+    assert result.status == "completed"
+    assert result.assistant_text.endswith(_RECOVERED_MEMORY_DETAIL)
+    assert llm.search_hit_ref == "stage:world_background:race_elf:summary"
+    assert llm.search_carried_payload is False
+    assert llm.recovered_detail == _RECOVERED_MEMORY_DETAIL
+    assert [call[0].tool_name for call in tool_executor.calls] == [
+        "rp_setup__setup_memory_search",
+        "rp_setup__setup_memory_open",
+    ]
+    assert [tool_result.success for tool_result in result.tool_results] == [
+        True,
+        True,
+    ]
+    search_payload = json.loads(result.tool_results[0].content_text)
+    open_payload = json.loads(result.tool_results[1].content_text)
+    assert search_payload["items"][0]["ref"] == (
+        "stage:world_background:race_elf:summary"
+    )
+    assert "payload" not in search_payload["items"][0]
+    assert open_payload["content"]["text"] == _RECOVERED_MEMORY_DETAIL
 
 
 @pytest.mark.asyncio
@@ -778,7 +1072,8 @@ async def test_setup_agent_execution_service_v2_uses_target_step_for_tool_scope(
         ),
     )
 
-    assert "setup.patch.story_config" in turn_input.tool_scope
+    assert "setup.stage_entry.write" not in turn_input.tool_scope
+    assert "setup.patch.story_config" not in turn_input.tool_scope
     assert "setup.patch.foundation_entry" not in turn_input.tool_scope
 
 
@@ -835,9 +1130,12 @@ async def test_setup_agent_execution_service_v2_uses_current_stage_metadata(
     assert "context_pipeline" not in turn_input.context_bundle
     assert "Active capability guidance:" in turn_input.context_bundle["system_prompt"]
     assert "setup.world_background.write_entry" not in turn_input.tool_scope
-    assert "setup.truth.write" in turn_input.tool_scope
-    assert "setup.question.raise" in turn_input.tool_scope
-    assert "setup.proposal.commit" in turn_input.tool_scope
+    assert "setup.stage_entry.write" in turn_input.tool_scope
+    assert "setup.truth.write" not in turn_input.tool_scope
+    assert "setup.question.raise" not in turn_input.tool_scope
+    assert "setup.proposal.commit" not in turn_input.tool_scope
+    assert "setup.discussion.update_state" not in turn_input.tool_scope
+    assert "setup.chunk.upsert" not in turn_input.tool_scope
     assert "setup.patch.foundation_entry" not in turn_input.tool_scope
     assert "setup.patch.story_config" not in turn_input.tool_scope
 
@@ -1132,9 +1430,12 @@ async def test_setup_agent_execution_service_prepare_runtime_v2_launch_sets_stre
     assert prepared.turn_input.stream is True
     assert prepared.turn_input.context_bundle["current_step"] == "foundation"
     assert "setup.world_background.write_entry" not in prepared.turn_input.tool_scope
-    assert "setup.truth.write" in prepared.turn_input.tool_scope
-    assert "setup.question.raise" in prepared.turn_input.tool_scope
-    assert "setup.proposal.commit" in prepared.turn_input.tool_scope
+    assert "setup.stage_entry.write" in prepared.turn_input.tool_scope
+    assert "setup.truth.write" not in prepared.turn_input.tool_scope
+    assert "setup.question.raise" not in prepared.turn_input.tool_scope
+    assert "setup.proposal.commit" not in prepared.turn_input.tool_scope
+    assert "setup.discussion.update_state" not in prepared.turn_input.tool_scope
+    assert "setup.chunk.upsert" not in prepared.turn_input.tool_scope
     assert "setup.patch.foundation_entry" not in prepared.turn_input.tool_scope
     assert "setup.patch.story_config" not in prepared.turn_input.tool_scope
     assert prepared.context_packet.workspace_id == workspace.workspace_id

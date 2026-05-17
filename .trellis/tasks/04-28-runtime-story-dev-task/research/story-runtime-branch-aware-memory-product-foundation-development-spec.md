@@ -176,47 +176,44 @@ Likely frontend files:
 - `lib/pages/longform_story_page.dart`
 - Memory panel / discussion panel widgets.
 
-Contract sketch:
+Historical V4 contract sketch below is retained only as foundation context.
+Stage W supersedes the product path: brainstorm creates an editable batch,
+batch submit freezes active items as `pending_processing`, and W5 consumes
+those frozen items through Core-oriented scheduler/worker governance.
+
+Current Stage W contract sketch:
 
 ```python
-class BrainstormSession(BaseModel):
-    brainstorm_id: str
-    identity: MemoryRuntimeIdentity
-    status: Literal["open", "summarized", "reviewing", "dispatched", "closed"]
-    items: list[BrainstormItem] = Field(default_factory=list)
+class BrainstormSummarizeOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[str] = Field(default_factory=list, max_length=12)
 
 
-class BrainstormItem(BaseModel):
+class BrainstormBatchItem(BaseModel):
     item_id: str
-    summary_text: str
-    evidence_text_refs: list[str] = Field(default_factory=list)
-    uncertainty: str | None = None
-    user_edited: bool = False
+    text: str
+    source_kind: Literal["summarized", "user_added"]
     status: Literal[
-        "proposed",
-        "edited",
-        "rejected",
-        "confirmed",
-        "dispatched",
-        "applied",
-        "pending_review",
-        "conflict",
+        "active",
+        "deleted",
+        "pending_processing",
+        "completed",
         "failed",
+        "conflict",
     ]
 
 
-class BrainstormApplyRequest(BaseModel):
+class BrainstormBatchSubmitRequest(BaseModel):
     identity: MemoryRuntimeIdentity
     actor: str
-    items: list[BrainstormItem]
-    reason: str | None = None
 ```
 
-`BrainstormItem` must not contain `target_layer`, `target_domain`,
+`BrainstormBatchItem` must not contain `target_layer`, `target_domain`,
 `operation_kind`, `intent_labels`, or other governed routing fields.
 Brainstorm is responsible for summarizing what the user may want to change.
-The scheduler/dispatcher is responsible for classifying items and planning
-memory-layer work.
+The scheduler/dispatcher is responsible for selecting the Core domain owner
+worker and planning governed Core State work. It must not be treated as a
+general Core / Recall / Archival layer router for brainstorm batches.
 
 Brainstorm summary creation should use the common Context Engineering /
 Compact-Summary operation contract once that common module is extracted by the
@@ -224,24 +221,25 @@ setup agent dev session. Until then, V4 may implement only the story runtime
 adapter contract and must not create a second generic compact engine under
 story runtime.
 
-The scheduler output may carry layer/domain/operation routing:
+The scheduler output may carry Core domain / operation planning:
 
 ```python
 class BrainstormDispatchPlanItem(BaseModel):
     source_item_id: str
-    target_layer: Literal["core"]
     target_domain: str
     operation_kind: str
     worker_id: str
+    retrieval_evidence_policy: dict[str, Any] = Field(default_factory=dict)
     worker_input: dict[str, Any] = Field(default_factory=dict)
 ```
 
-V4 first version is Core-oriented. Scheduler routing is still kept in the
+V4/W5 first version is Core-oriented. Scheduler routing is still kept in the
 dispatch layer because the scheduler owns worker/domain planning, but this
-brainstorm path must only dispatch Core-oriented work. Non-Core wishes should
-return review/redirect material instead of becoming brainstorm edits. Recall
-changes normally remain lifecycle review actions, and Archival changes go
-through Story Evolution / version / reindex governance.
+brainstorm path dispatches only Core State maintenance work. Core workers may
+use Recall / Archival retrieval evidence when needed. They must not directly
+write Recall or Archival durable layers. Items that truly require Recall
+lifecycle action or Archival source evolution should return review/redirect
+material instead of becoming brainstorm edits.
 
 The Core worker result should use the minimum field-level executable structure:
 
@@ -259,7 +257,8 @@ class BrainstormCoreFieldChange(BaseModel):
 
 Rules:
 
-- `source_item_id` is required and points to a confirmed `BrainstormItem`;
+- `source_item_id` is required and points to a submitted `pending_processing`
+  `BrainstormBatchItem`;
 - `target_ref`, `base_revision`, `operation`, `field_path`, and `new_value` are
   required because apply / proposal / conflict checks need executable data;
 - `old_value` is not produced by the LLM; backend fills it deterministically
@@ -274,11 +273,15 @@ Lifecycle:
 
 - `BrainstormSession` starts when the user sends the first brainstorm prompt;
 - ordinary discussion keeps the session open and does not create items;
-- if the user returns to writing without changes, close the session as no-op;
-- explicit summarize/apply action runs a dedicated `brainstorm_summarize`
-  structured prompt over the session discussion;
-- generated items are user-editable before dispatch;
-- only confirmed items enter scheduler / worker execution.
+- if the user returns to writing without summarize, flush the active window and
+  do not create a batch;
+- explicit summarize action runs a dedicated `brainstorm_summarize` structured
+  prompt over the active brainstorm window;
+- generated items become a draft batch that users can edit/add/delete/restore;
+- submit freezes the batch and changes only active items to
+  `pending_processing`;
+- only submitted `pending_processing` items enter W5 scheduler / worker
+  execution, and deleted items never upload to the scheduler.
 
 Completion criteria:
 
@@ -289,12 +292,15 @@ Completion criteria:
   Archival routing;
 - brainstorm summary output is produced by an explicit summary/apply action,
   not by automatic hidden judgment during ordinary writer discussion;
-- user can edit/reject/confirm items;
-- confirmed items go to scheduler/dispatcher for classification;
-- scheduler/dispatcher routes Core-classified work to the appropriate Core
+- user can edit/add/delete/restore items before submit;
+- submitted active items go to scheduler/dispatcher for Core owner-worker
+  selection;
+- scheduler/dispatcher routes actionable work to the appropriate Core
   memory-domain worker and does not dispatch Recall/Archival brainstorm edits;
-- non-Core wishes produce review/redirect receipts rather than memory mutation
-  through V4 brainstorm;
+- Core workers may retrieve Recall / Archival material as evidence, but durable
+  Recall lifecycle and Archival evolution stay on their own product paths;
+- items outside Core State maintenance produce review/redirect receipts rather
+  than memory mutation through V4/W5 brainstorm;
 - worker-produced Core operations use minimal executable field changes and
   apply with `origin_kind=brainstorm_summary_apply`;
 - backend fills `old_value` from base revision and rejects stale-base /

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -28,12 +30,23 @@ def _normalize_text_list(values: list[str], *, field_name: str) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for value in values:
-        text = _require_non_blank(value, field_name=field_name)
+        text = str(value or "").strip()
+        if not text:
+            continue
         if text in seen:
             continue
         seen.add(text)
         normalized.append(text)
     return normalized
+
+
+RuntimeRetrievalSearchMode = Literal[
+    "entity",
+    "entity_relation",
+    "semantic",
+    "mixed",
+    "vague",
+]
 
 
 class RetrievalKnowledgeGapItem(BaseModel):
@@ -65,18 +78,90 @@ class RetrievalKnowledgeGapItem(BaseModel):
         return _require_non_blank(value, field_name=info.field_name or "value")
 
 
-class WriterRetrievalSearchToolInput(BaseModel):
-    """Thin writer-facing search tool contract for bounded retrieval."""
+class RuntimeRetrievalSearchInput(BaseModel):
+    """LLM-facing runtime retrieval query expression.
+
+    The model is allowed to describe what it needs to retrieve, but source
+    routing, K values, filters, route weights, and rerank policy stay backend
+    concerns.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     query: str
-    search_kind: str = "recall"
+    mode: RuntimeRetrievalSearchMode | None = None
+    lexical_anchors: list[str] = Field(default_factory=list)
+    semantic_predicates: list[str] = Field(default_factory=list)
 
-    @field_validator("query", "search_kind")
+    @field_validator("query")
     @classmethod
     def _normalize_required_text(cls, value: str, info: ValidationInfo) -> str:
         return _require_non_blank(value, field_name=info.field_name or "value")
+
+    @field_validator("lexical_anchors", "semantic_predicates")
+    @classmethod
+    def _normalize_hint_lists(
+        cls,
+        values: list[str],
+        info: ValidationInfo,
+    ) -> list[str]:
+        return _normalize_text_list(values, field_name=info.field_name or "values")
+
+
+class RuntimeRetrievalResultItem(BaseModel):
+    """Clean RAG result item returned to runtime LLM callers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    result_id: str
+    title: str | None = None
+    summary: str | None = None
+    excerpt: str | None = None
+    text: str
+    section: str | None = None
+
+    @field_validator("result_id", "text")
+    @classmethod
+    def _normalize_required_text(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
+    @field_validator("title", "summary", "excerpt", "section")
+    @classmethod
+    def _normalize_optional_text(
+        cls,
+        value: str | None,
+        info: ValidationInfo,
+    ) -> str | None:
+        return _normalize_optional_text(
+            value,
+            field_name=info.field_name or "value",
+        )
+
+
+class RuntimeRetrievalSearchOutput(BaseModel):
+    """Standard RAG search output for writer/worker/orchestrator tools."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    results: list[RuntimeRetrievalResultItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("query")
+    @classmethod
+    def _normalize_required_text(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "value")
+
+    @field_validator("warnings")
+    @classmethod
+    def _normalize_warnings(cls, values: list[str]) -> list[str]:
+        return _normalize_text_list(values, field_name="warnings")
+
+
+class WriterRetrievalSearchToolInput(RuntimeRetrievalSearchInput):
+    """Writer-facing alias for the shared runtime retrieval search contract."""
+
+    pass
 
 
 class WriterRetrievalExpandToolInput(BaseModel):
@@ -151,6 +236,4 @@ class RetrievalUsageRecordPayload(BaseModel):
     def _normalize_text_lists(
         cls, values: list[str], info: ValidationInfo
     ) -> list[str]:
-        return _normalize_text_list(
-            values, field_name=info.field_name or "values"
-        )
+        return _normalize_text_list(values, field_name=info.field_name or "values")

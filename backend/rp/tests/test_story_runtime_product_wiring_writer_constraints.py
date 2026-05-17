@@ -9,6 +9,7 @@ import pytest
 from sqlmodel import select
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
+from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_identity import StoryTurnStatus
 from rp.models.story_runtime import (
@@ -731,6 +732,113 @@ async def test_branch_accept_sequence_is_isolated_per_active_branch(retrieval_se
     assert main_pending.artifact_id not in {
         artifact.artifact_id for artifact in branch_snapshot_after_main_accept.artifacts
     }
+
+
+def test_child_branch_can_write_next_segment_when_main_pending_is_hidden(
+    retrieval_session,
+):
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    _accept_outline(story_session_service, session, chapter)
+    main_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="v1.branch_pending.base_segment",
+        actor="v1.branch_pending.base_segment",
+    )
+    base_segment = _create_settled_story_segment(
+        story_session_service,
+        identity_service,
+        session=session,
+        chapter=chapter,
+        identity=main_identity,
+        content_text="Shared settled segment before branching.",
+        target_beat_id="beat_001",
+    )
+    main_pending_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="v1.branch_pending.main_pending",
+        actor="v1.branch_pending.main_pending",
+    )
+    main_pending = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Main branch pending draft that child branch must not see.",
+        metadata={
+            **_artifact_runtime_metadata(
+                story_id=main_pending_identity.story_id,
+                session_id=main_pending_identity.session_id,
+                branch_head_id=main_pending_identity.branch_head_id,
+                turn_id=main_pending_identity.turn_id,
+                runtime_profile_snapshot_id=(
+                    main_pending_identity.runtime_profile_snapshot_id
+                ),
+            ),
+            "target_beat_id": "beat_002",
+        },
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=LongformChapterPhase.SEGMENT_REVIEW,
+        accepted_segment_ids=[base_segment.artifact_id],
+        pending_segment_artifact_id=main_pending.artifact_id,
+    )
+    identity_service.update_turn_status(
+        turn_id=main_pending_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+    )
+
+    receipt = identity_service.create_branch_from_turn(
+        session_id=session.session_id,
+        origin_turn_id=main_identity.turn_id,
+        actor="v1.branch_pending.create_child_branch",
+        branch_name="child-from-settled",
+    )
+    assert receipt.to_branch_head_id is not None
+
+    snapshot = story_session_service.build_chapter_snapshot(
+        session_id=session.session_id,
+        chapter_index=chapter.chapter_index,
+    )
+    assert snapshot.chapter.pending_segment_artifact_id is None
+    assert snapshot.chapter.phase == LongformChapterPhase.SEGMENT_DRAFTING
+    assert snapshot.session.current_phase == LongformChapterPhase.SEGMENT_DRAFTING
+    assert snapshot.chapter.accepted_segment_ids == [base_segment.artifact_id]
+    assert main_pending.artifact_id not in {
+        artifact.artifact_id for artifact in snapshot.artifacts
+    }
+
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    )
+    active_chapter = turn_domain_service.require_active_branch_current_chapter(
+        session.session_id
+    )
+    assert active_chapter.phase == LongformChapterPhase.SEGMENT_DRAFTING
+
+    graph_nodes = StoryGraphNodes(domain_service=turn_domain_service)
+    loaded = graph_nodes.load_session_and_chapter({"session_id": session.session_id})
+    validated = graph_nodes.validate_command(
+        {
+            "session_id": session.session_id,
+            "command_kind": LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+        }
+    )
+    generation_inputs = turn_domain_service.prepare_generation_inputs(
+        session_id=session.session_id,
+        user_prompt=None,
+        target_artifact_id=None,
+    )
+
+    assert loaded["chapter_phase"] == LongformChapterPhase.SEGMENT_DRAFTING.value
+    assert validated["status"] == "command_validated"
+    assert generation_inputs["pending_artifact_id"] is None
+    assert generation_inputs["accepted_segment_ids"] == [base_segment.artifact_id]
 
 
 def test_branch_writer_packet_omits_source_future_projection_digest(

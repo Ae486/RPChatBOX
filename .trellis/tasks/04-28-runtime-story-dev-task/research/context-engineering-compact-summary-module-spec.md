@@ -198,8 +198,9 @@ Required measures:
 7. forbidden business fields are rejected;
 8. invalid model output falls back to deterministic summary or fails closed.
 
-For story runtime V4, `BrainstormItem` is intentionally memory-layer agnostic.
-It must not contain scheduler / worker fields such as `target_layer`,
+For current Stage W story runtime, `BrainstormSummarizeOutput.items` /
+`BrainstormBatchItem.text` are intentionally memory-layer agnostic. They must
+not contain scheduler / worker fields such as `target_layer`,
 `target_domain`, `operation_kind`, `operation`, or `intent_labels`.
 
 ## 7. Prompt / Message Assembly Rules
@@ -249,44 +250,25 @@ Brainstorm is the writer's discussion persona / mode. It sees what writer sees,
 plus the user's brainstorm prompt and the brainstorm discussion transcript.
 
 Summary creation is explicit-user-action based in the current product stage.
-The summary result is user-editable and confirmable before dispatch.
-Ordinary brainstorm discussion does not incrementally create items or dispatch
-memory changes.
+The summary result is a user-editable batch of intent strings. User review is
+expressed by editing, adding, deleting, or restoring items; there is no
+item-level `confirmed` state in Stage W. Ordinary brainstorm discussion does
+not incrementally create items or dispatch memory changes.
 
 The output schema is:
 
 ```python
-class BrainstormSession(BaseModel):
-    brainstorm_id: str
-    identity: MemoryRuntimeIdentity
-    status: Literal["open", "summarized", "reviewing", "dispatched", "closed"]
-    items: list[BrainstormItem] = Field(default_factory=list)
-
-
-class BrainstormItem(BaseModel):
-    item_id: str
-    summary_text: str
-    evidence_text_refs: list[str] = Field(default_factory=list)
-    uncertainty: str | None = None
-    user_edited: bool = False
-    status: Literal[
-        "proposed",
-        "edited",
-        "rejected",
-        "confirmed",
-        "dispatched",
-        "applied",
-        "pending_review",
-        "conflict",
-        "failed",
-    ]
+class BrainstormSummarizeOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[str] = Field(default_factory=list, max_length=12)
 ```
 
-Brainstorm does not know Memory OS layer details. Confirmed items go to the
-scheduler / dispatcher. In story runtime V4, only Core-oriented items should be
-dispatched to specialized workers; non-Core wishes are returned as
-review/redirect material instead of becoming Recall or Archival brainstorm
-edits.
+Brainstorm does not know Memory OS layer details. Submitted active items go to
+the Stage W5 consumer as plain user intent. W5 is Core-oriented: the scheduler
+selects the relevant Core domain owner worker, and that worker may use
+Retrieval Broker / retrieval tools to read Recall or Archival evidence. Recall
+and Archival are not brainstorm-dispatch write targets; historical Recall
+lifecycle and Archival Story Evolution remain separate product paths.
 
 The brainstorm summary adapter should keep resource cost low:
 
@@ -295,7 +277,7 @@ The brainstorm summary adapter should keep resource cost low:
 - it does not require full conversation `source_refs` until discussion message
   ids / transcript anchors are stable;
 - downstream worker output should use `source_item_id` to refer back to the
-  confirmed `BrainstormItem`;
+  submitted `BrainstormBatchItem`;
 - backend deterministic code should fill old field values from base revision
   instead of asking an LLM to copy them.
 

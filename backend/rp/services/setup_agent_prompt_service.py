@@ -99,8 +99,7 @@ class SetupAgentPromptService:
         fragments = [
             f"- {fragment.text}"
             for fragment in capability_plan.prompt_guidance_fragments
-            if fragment.text.strip()
-            and set(fragment.tool_names).issubset(active_tools)
+            if fragment.text.strip() and set(fragment.tool_names).issubset(active_tools)
         ]
         if not fragments:
             return "- No setup tools are active for this turn; continue with visible text only."

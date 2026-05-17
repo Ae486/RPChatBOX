@@ -105,7 +105,7 @@
     - `previous_usage: dict[str, int] | None`
 - `SetupContextGovernorService.build_initial_digest(...) -> SetupWorkingDigest | None`
 - `SetupContextGovernorService.retain_tool_outcomes(...) -> list[SetupToolOutcome]`
-- Local setup tool `setup.read.draft_refs`
+- Internal draft-ref reader used behind the agent-facing `setup.memory.open` tool and the compatibility/internal `setup.memory.read_refs` path
   - input schema: `SetupDraftRefReadInput`
   - output schema: `SetupDraftRefReadResult`
   - stage-aware refs supported during canonical setup migration:
@@ -152,12 +152,13 @@
 - `tool_outcomes` keep final outcomes only:
   - keep one summarized outcome per completed tool result
   - never keep retry chains, intermediate argument fixes, or raw tool execution process as cross-turn prompt context
-- `setup.read.draft_refs` is the stage-local recovery tool:
+- `setup.memory.open` is the model-facing stage-local recovery tool:
   - it reads existing setup draft refs without mutating `SetupWorkspace`
   - it exists because `compact_summary` carries refs and recovery hints, not every draft detail
-  - it must be visible to SetupAgent as a read-only setup tool
+  - it is backed by the internal draft-ref reader for editable draft refs
   - it must not read prior-stage raw discussion or Memory OS state
   - it must preserve old refs such as `draft:story_config`, `draft:writing_contract`, `draft:longform_blueprint`, and `foundation:<entry_id>` until write tools migrate to canonical stage refs
+- `setup.memory.read_refs` may remain as a compatibility/internal readback path while older tests and compact recovery code are migrated, but prompt guidance and model-facing examples must prefer `setup.memory.search` + `setup.memory.open`.
 - Stage-local context remains step-scoped:
   - `context_packet.current_draft_snapshot`
   - `context_packet.user_edit_deltas`
@@ -281,10 +282,10 @@
 - compact prompt provider is disabled/unavailable -> use deterministic compact summary and report strategy `deterministic_prefix_summary`
 - retained outcomes exceed `6` after merge -> prune successes first, preserve unresolved failures
 - tool result has no meaningful `updated_refs` and is a non-failure read/tool artifact -> it may be dropped from retained cross-turn outcomes
-- `setup.read.draft_refs` receives an empty `refs` list -> validation error `setup_draft_refs_required`
-- `setup.read.draft_refs` receives an unsupported ref prefix -> item returns `found=false` and the ref appears in `missing_refs`
-- `setup.read.draft_refs` receives `detail="summary"` -> return compact summaries/picked fields, not full draft payload blobs
-- `setup.read.draft_refs` receives `detail="full"` -> return payload bounded by `max_chars`; do not exceed the requested cap
+- compatibility `setup.memory.read_refs` receives an empty `refs` list -> validation error from the setup memory read schema/provider path
+- compatibility `setup.memory.read_refs` receives an unsupported ref prefix -> item returns `found=false` and the ref appears in `missing_refs`
+- compatibility `setup.memory.read_refs` receives `detail="summary"` -> return compact summaries/picked fields, not full draft payload blobs
+- compatibility `setup.memory.read_refs` receives `detail="full"` -> return payload bounded by `max_chars`; do not exceed the requested cap
 - assistant question repeats a recent assistant question and no new tool result succeeded -> `CompletionGuardPolicy` blocks finalization with `reason="repeated_question_without_progress"`
 - latest tool failure repeats a retained failure signature -> keep the normal repair route, but append warning `repeated_tool_failure`
 - assistant question is merely topically similar but not an exact normalized repeat -> no special runtime block in this slice; rely on normal completion semantics and eval observation
@@ -296,9 +297,9 @@
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a long `foundation` discussion keeps the last 4 raw messages, carries earlier discussion through one validated compact prompt summary, preserves one unresolved `setup.truth.write` failure outcome, records `foundation:magic-law` as a draft ref with a recovery hint, and injects a thin digest that says what still blocks review.
+- Good: a long `foundation` discussion keeps the last 4 raw messages, carries earlier discussion through one validated compact prompt summary, preserves one unresolved retained-tool failure outcome, records `foundation:magic-law` as a draft ref with a recovery hint, and injects a thin digest that says what still blocks review.
 - Good: after an earlier compact summarized messages `0..3`, a later turn drops messages `0..5`; runtime keeps recent raw messages visible and updates the compact summary from previous summary plus newly compacted messages `4..5` instead of sending the whole `0..5` prefix to the compact prompt pass again.
-- Good: after compaction, the model needs the exact guild-law detail, calls `setup.read.draft_refs` with `refs=["foundation:magic-law"]`, and receives the current draft entry instead of relying on old raw chat text.
+- Good: after compaction, the model needs the exact guild-law detail, calls `setup.memory.open` with a visible or searched ref such as `foundation:magic-law`, and receives clean current content instead of relying on old raw chat text.
 - Good: runtime result payload contains `loop_trace`, `output_inspection`, and `model_gateway_diagnostics`, but the persisted runtime snapshot stores only durable cognition/governance fields.
 - Good: a user edit delta invalidates a stale truth-write candidate and clears review readiness without mutating the workspace draft itself.
 - Base: a short `story_config` turn with 2 prior messages keeps the full raw history, has no compact summary, and carries no retained outcomes.
@@ -315,10 +316,12 @@
   - assert incremental compact prompt receives previous summary plus the newly compacted messages, while keeping the recent raw window out of the prompt input
   - assert retained outcomes keep unresolved failures and prune duplicate/superseded successes
   - assert initial digest stays thin and deterministic
-- `backend/rp/tests/test_setup_tool_provider.py`
-  - assert `setup.read.draft_refs` resolves `draft:story_config`, `draft:writing_contract`, `draft:longform_blueprint`, and `foundation:<entry_id>`
-  - assert unsupported or missing refs are reported in `missing_refs`
-  - assert `detail="summary"` returns bounded summaries and `detail="full"` honors `max_chars`
+- `backend/rp/tests/test_setup_session_memory_tools.py`
+  - assert `setup.memory.open` resolves editable draft refs through the internal draft reader and exact accepted-truth refs through `SetupTruthIndexService`
+  - assert `setup.memory.open` reports unsupported or missing refs with clean failures
+  - assert compatibility `setup.memory.read_refs` remains aligned where still required
+  - assert compatibility `setup.memory.read_refs` reports unsupported or missing refs in `missing_refs`
+  - assert compatibility `detail="summary"` returns bounded summaries and `detail="full"` honors `max_chars`
 - `backend/rp/tests/test_setup_agent_runtime_state_service.py`
   - assert `persist_turn_governance(...)` stores digest / tool outcomes / compact summary in the existing snapshot
   - assert `summarize_for_prompt(...)` exposes those governance artifacts
@@ -350,7 +353,7 @@
 - Introduce semantic "similar-question" or "stall-intent" classifiers without eval evidence and without a mature reference pattern.
 - Let the compact prompt pass call setup tools, write drafts, decide commit readiness, or reconstruct previous-stage raw discussion.
 - Copy CC's full coding-agent compact schema into RP setup even though RP setup truth is already recoverable through drafts.
-- Store all draft details inside `compact_summary` instead of storing refs and using `setup.read.draft_refs` for recovery.
+- Store all draft details inside `compact_summary` instead of storing refs and using `setup.memory.open` for recovery.
 - Reject nested user draft payload fields just because a nested business object happens to use a word such as `trace` or `debug`.
 
 #### Correct
@@ -363,5 +366,5 @@
 - Keep the durable snapshot guard root-field scoped so business draft payloads are not accidentally rejected.
 - Keep the current no-progress guard narrow: exact normalized repeat-question and repeated failure signature only; leave broader stall policy to later eval-driven work.
 - Run compact as pre-model context engineering: pressure check, raw-window retention, outcome pruning, optional compact prompt summary, runtime overlay assembly.
-- Use `setup.read.draft_refs` as the stage-local detail recovery tool after compaction.
+- Use `setup.memory.open` as the model-facing stage-local detail recovery tool after compaction.
 - Borrow mature framework mechanics where they fit, lighten generic coding-agent features, and customize recovery around RP setup drafts.

@@ -24,12 +24,36 @@ from rp.services.story_runtime_identity_service import StoryRuntimeIdentityServi
 from rp.services.story_session_service import StorySessionService
 from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
 from rp.services.writing_worker_retrieval_loop_service import (
+    WritingWorkerRetrievalLoopService,
     WritingWorkerRetrievalLoopServiceError,
 )
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def test_writer_retrieval_search_tool_schema_exposes_only_query_hints():
+    tools = WritingWorkerRetrievalLoopService._tool_definitions()
+    search_tool = next(
+        tool for tool in tools if tool["function"]["name"] == "retrieval.search"
+    )
+    parameters = search_tool["function"]["parameters"]
+    properties = parameters["properties"]
+
+    assert parameters["additionalProperties"] is False
+    assert set(properties) == {
+        "query",
+        "mode",
+        "lexical_anchors",
+        "semantic_predicates",
+    }
+    assert "search_kind" not in properties
+    assert "top_k" not in properties
+    assert "filters" not in properties
+    assert "rerank" not in properties
+    assert "route_weights" not in properties
+    assert parameters["required"] == ["query"]
 
 
 def _seed_story_runtime(retrieval_session):
@@ -264,13 +288,22 @@ async def test_writing_worker_execution_service_runs_search_expand_usage_then_fi
                                 _tool_call(
                                     "call_search",
                                     "retrieval.search",
-                                    {"query": "storm", "search_kind": "recall"},
+                                    {
+                                        "query": "storm",
+                                        "mode": "mixed",
+                                        "lexical_anchors": ["storm"],
+                                        "semantic_predicates": [],
+                                    },
                                 )
                             ],
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
             },
             {
                 "choices": [
@@ -287,7 +320,11 @@ async def test_writing_worker_execution_service_runs_search_expand_usage_then_fi
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12},
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 4,
+                    "total_tokens": 12,
+                },
             },
             {
                 "choices": [
@@ -315,7 +352,11 @@ async def test_writing_worker_execution_service_runs_search_expand_usage_then_fi
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 6, "completion_tokens": 3, "total_tokens": 9},
+                "usage": {
+                    "prompt_tokens": 6,
+                    "completion_tokens": 3,
+                    "total_tokens": 9,
+                },
             },
             {
                 "choices": [
@@ -325,7 +366,11 @@ async def test_writing_worker_execution_service_runs_search_expand_usage_then_fi
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 12, "completion_tokens": 18, "total_tokens": 30},
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 18,
+                    "total_tokens": 30,
+                },
             },
         ]
     )
@@ -359,7 +404,10 @@ async def test_writing_worker_execution_service_runs_search_expand_usage_then_fi
         identity=identity,
         material_id=result.retrieval_source_ref_bundle.retrieval_usage_material_ids[0],
     )
-    assert usage_material.material_kind == RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD
+    assert (
+        usage_material.material_kind
+        == RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD
+    )
     assert usage_material.payload["used_card_short_ids"] == ["R1"]
     assert usage_material.payload["expanded_card_short_ids"] == ["R1"]
 
@@ -381,13 +429,17 @@ async def test_writing_worker_execution_service_fails_closed_when_final_output_s
                                 _tool_call(
                                     "call_search",
                                     "retrieval.search",
-                                    {"query": "storm", "search_kind": "recall"},
+                                    {"query": "storm", "mode": "mixed"},
                                 )
                             ],
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 9,
+                    "completion_tokens": 4,
+                    "total_tokens": 13,
+                },
             },
             {
                 "choices": [
@@ -397,7 +449,11 @@ async def test_writing_worker_execution_service_fails_closed_when_final_output_s
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 8, "completion_tokens": 7, "total_tokens": 15},
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 7,
+                    "total_tokens": 15,
+                },
             },
         ]
     )
@@ -441,13 +497,17 @@ async def test_writing_worker_execution_service_enforces_attempt_limit(
                                 _tool_call(
                                     "call_search_1",
                                     "retrieval.search",
-                                    {"query": "storm", "search_kind": "recall"},
+                                    {"query": "storm", "mode": "mixed"},
                                 )
                             ],
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+                "usage": {
+                    "prompt_tokens": 5,
+                    "completion_tokens": 3,
+                    "total_tokens": 8,
+                },
             },
             {
                 "choices": [
@@ -458,13 +518,17 @@ async def test_writing_worker_execution_service_enforces_attempt_limit(
                                 _tool_call(
                                     "call_search_2",
                                     "retrieval.search",
-                                    {"query": "storm aftermath", "search_kind": "recall"},
+                                    {"query": "storm aftermath", "mode": "semantic"},
                                 )
                             ],
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+                "usage": {
+                    "prompt_tokens": 5,
+                    "completion_tokens": 3,
+                    "total_tokens": 8,
+                },
             },
         ]
     )
@@ -514,4 +578,7 @@ async def test_runtime_retrieval_card_service_expand_cards_by_refs_accepts_short
     )
     assert cards[0].short_id == "R1"
     assert expanded[0].short_id == "X1"
-    assert expanded[0].visibility == RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value
+    assert (
+        expanded[0].visibility
+        == RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value
+    )

@@ -1,23 +1,14 @@
-"""Writer brainstorm session, summary, and governed Core apply service."""
+"""Writer brainstorm session, discussion, summarize, and Stage W batch service."""
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
-from typing import Literal
 from uuid import uuid4
 
 from models.chat import ChatMessage
-from models.rp_core_state_store import CoreStateAuthoritativeRevisionRecord
-from rp.models.core_mutation import (
-    CORE_MUTATION_ORIGIN_BRAINSTORM_SUMMARY_APPLY,
-    CoreMutationEnvelope,
-)
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_crud import PatchFieldsOp, ProposalReceipt
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
@@ -25,56 +16,49 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialVisibility,
 )
 from rp.models.story_brainstorm import (
-    BrainstormApplyReceipt,
-    BrainstormApplyRequest,
-    BrainstormCoreFieldChange,
-    BrainstormDispatchReceipt,
-    BrainstormItem,
+    BrainstormBatch,
+    BrainstormBatchItem,
+    BrainstormBatchStatus,
+    BrainstormBatchSubmitReceipt,
+    BrainstormBatchSubmitRequest,
+    BrainstormContextFlushReason,
+    BrainstormContextWindow,
+    BrainstormContextWindowStatus,
+    BrainstormContinueWritingRequest,
+    BrainstormDiscussionRequest,
+    BrainstormItemCreateRequest,
+    BrainstormItemSourceKind,
     BrainstormItemStatus,
     BrainstormItemUpdateRequest,
+    BrainstormMessage,
     BrainstormSession,
     BrainstormSessionStartRequest,
     BrainstormSessionStatus,
-    BrainstormStructuredSummary,
+    BrainstormSummarizeOutput,
     BrainstormSummarizeRequest,
 )
-from rp.services.core_state_as_of_resolver import (
-    CoreStateAsOfResolver,
-    CoreStateAsOfResolverError,
-)
-from rp.services.memory_object_mapper import authoritative_bindings
-from rp.services.proposal_workflow_service import ProposalWorkflowService
-from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
     RuntimeWorkspaceMaterialServiceError,
 )
 from rp.services.story_llm_gateway import StoryLlmGateway
 from rp.services.story_session_service import StorySessionService
-from rp.models.worker_memory import WorkerMemoryContext
-from rp.services.worker_memory_service import (
-    WorkerMemoryPermissionError,
-    WorkerMemoryService,
-)
-from rp.services.worker_registry_service import (
-    LONGFORM_MEMORY_WORKER_ID,
-    WorkerRegistryService,
-)
 
 
 BRAINSTORM_MATERIAL_DOMAIN = "narrative_progress"
 BRAINSTORM_MATERIAL_DOMAIN_PATH = "narrative_progress.runtime.brainstorm"
-BRAINSTORM_APPLY_PHASE = "manual_refresh"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
-class _ResolvedAuthoritativeBlock:
-    label: str
-    domain: Domain
-    domain_path: str
-    scope: str
-    revision: int
-    data_json: Any
+class _ChapterBrainstormContext:
+    phase: str
+    outline_text: str
+    accepted_segments: list[str]
+    current_title: str
 
 
 class StoryBrainstormServiceError(ValueError):
@@ -86,28 +70,30 @@ class StoryBrainstormServiceError(ValueError):
 
 
 class StoryBrainstormService:
-    """Persist brainstorm scratch and route confirmed Core changes through governance."""
+    """Persist brainstorm scratch and Stage W batch review state in Runtime Workspace."""
 
     def __init__(
         self,
         *,
         story_session_service: StorySessionService,
         runtime_workspace_material_service: RuntimeWorkspaceMaterialService,
-        proposal_workflow_service: ProposalWorkflowService,
-        rp_block_read_service: RpBlockReadService,
-        worker_registry_service: WorkerRegistryService | None = None,
-        worker_memory_service: WorkerMemoryService | None = None,
-        core_state_as_of_resolver: CoreStateAsOfResolver | None = None,
+        proposal_workflow_service: object | None = None,
+        rp_block_read_service: object | None = None,
+        worker_registry_service: object | None = None,
+        worker_memory_service: object | None = None,
+        core_state_as_of_resolver: object | None = None,
         llm_gateway: StoryLlmGateway | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._runtime_workspace_material_service = runtime_workspace_material_service
+        self._llm_gateway = llm_gateway or StoryLlmGateway()
+        # Keep these constructor seams for factory/test compatibility even though
+        # Stage W W1-W4 intentionally does not enter proposal/worker mutation paths.
         self._proposal_workflow_service = proposal_workflow_service
         self._rp_block_read_service = rp_block_read_service
         self._worker_registry_service = worker_registry_service
         self._worker_memory_service = worker_memory_service
         self._core_state_as_of_resolver = core_state_as_of_resolver
-        self._llm_gateway = llm_gateway or StoryLlmGateway()
 
     def start_session(self, request: BrainstormSessionStartRequest) -> BrainstormSession:
         self._ensure_identity_matches_session(request.identity)
@@ -115,16 +101,16 @@ class StoryBrainstormService:
         session = BrainstormSession(
             brainstorm_id=brainstorm_id,
             identity=request.identity,
-            status=BrainstormSessionStatus.OPEN,
-            prompt=request.prompt,
-            source_entry_ids=request.source_entry_ids,
+            status=BrainstormSessionStatus.ACTIVE,
             created_by=request.actor,
             updated_by=request.actor,
+            windows=[self._new_window(identity=request.identity, brainstorm_id=brainstorm_id)],
             metadata={
                 "runtime_workspace_semantics": True,
                 "temporary": True,
                 "source_of_truth": False,
                 "writer_discussion_mode": True,
+                "batch_submit_stage": "w1_w4",
                 **dict(request.metadata or {}),
             },
         )
@@ -140,6 +126,70 @@ class StoryBrainstormService:
         self._ensure_identity_matches_session(identity)
         return self._load_latest_session(identity=identity, brainstorm_id=brainstorm_id)
 
+    async def discuss_session(
+        self,
+        *,
+        brainstorm_id: str,
+        request: BrainstormDiscussionRequest,
+    ) -> BrainstormSession:
+        self._ensure_identity_matches_session(request.identity)
+        session = self._load_latest_session(
+            identity=request.identity,
+            brainstorm_id=brainstorm_id,
+        )
+        if session.status == BrainstormSessionStatus.CLOSED:
+            raise StoryBrainstormServiceError("brainstorm_session_closed", brainstorm_id)
+        active_window = self._ensure_active_window(session)
+        user_message = BrainstormMessage(
+            message_id=f"brainstorm-msg-{uuid4().hex}",
+            role="user",
+            content_text=request.prompt,
+        )
+        assistant_text, usage = await self._llm_gateway.complete_text_with_usage(
+            model_id=request.model_id,
+            provider_id=request.provider_id,
+            messages=self._discussion_messages(session=session, prompt=request.prompt),
+            temperature=0.4,
+            max_tokens=1200,
+        )
+        assistant_message = BrainstormMessage(
+            message_id=f"brainstorm-msg-{uuid4().hex}",
+            role="assistant",
+            content_text=assistant_text.strip() or "我还需要你补充一点具体信息。",
+        )
+        updated_window = active_window.model_copy(
+            update={
+                "messages": [
+                    *active_window.messages,
+                    user_message,
+                    assistant_message,
+                ],
+                "source_message_refs": [
+                    *active_window.source_message_refs,
+                    user_message.message_id,
+                    assistant_message.message_id,
+                ],
+                "updated_at": _utcnow(),
+            }
+        )
+        updated = session.model_copy(
+            update={
+                "windows": _replace_window(session.windows, updated_window),
+                "updated_by": request.actor,
+                "updated_at": _utcnow(),
+                "revision": session.revision + 1,
+                "summary_trace": {
+                    **dict(session.summary_trace or {}),
+                    "last_discussion_usage": usage,
+                    "last_discussion_window_id": updated_window.window_id,
+                    "last_discussion_model_id": request.model_id,
+                    "last_discussion_provider_id": request.provider_id,
+                },
+            }
+        )
+        self._record_session_revision(updated, previous=session)
+        return updated
+
     async def summarize_session(
         self,
         *,
@@ -152,40 +202,152 @@ class StoryBrainstormService:
             brainstorm_id=brainstorm_id,
         )
         if session.status == BrainstormSessionStatus.CLOSED:
+            raise StoryBrainstormServiceError("brainstorm_session_closed", brainstorm_id)
+        active_window = self._find_active_window(session)
+        if active_window is None:
             raise StoryBrainstormServiceError(
-                "brainstorm_session_closed",
+                "brainstorm_summarize_no_active_window",
+                brainstorm_id,
+            )
+        if not active_window.messages:
+            raise StoryBrainstormServiceError(
+                "brainstorm_summarize_window_empty",
                 brainstorm_id,
             )
         structured = await self._run_structured_summary(
             session=session,
+            window=active_window,
             request=request,
         )
+        flushed_window = self._flush_window(
+            active_window,
+            reason=BrainstormContextFlushReason.SUMMARIZE,
+        )
+        now = _utcnow()
+        batch_id = f"{brainstorm_id}:batch:{uuid4().hex}"
         items = [
-            BrainstormItem(
-                item_id=f"{brainstorm_id}:item:{index + 1}",
-                summary_text=item.summary_text,
-                evidence_text_refs=list(item.evidence_text_refs),
-                uncertainty=item.uncertainty,
-                status=BrainstormItemStatus.PROPOSED,
+            BrainstormBatchItem(
+                item_id=f"{batch_id}:item:{uuid4().hex}",
+                batch_id=batch_id,
+                brainstorm_id=brainstorm_id,
+                session_id=request.identity.session_id,
+                branch_head_id=request.identity.branch_head_id,
+                turn_id=request.identity.turn_id,
+                runtime_profile_snapshot_id=request.identity.runtime_profile_snapshot_id,
+                text=item_text,
+                source_kind=BrainstormItemSourceKind.SUMMARIZED,
+                status=BrainstormItemStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
             )
-            for index, item in enumerate(structured.items[: request.max_items])
+            for item_text in structured.items[: request.max_items]
         ]
+        batch = BrainstormBatch(
+            batch_id=batch_id,
+            brainstorm_id=brainstorm_id,
+            session_id=request.identity.session_id,
+            branch_head_id=request.identity.branch_head_id,
+            turn_id=request.identity.turn_id,
+            runtime_profile_snapshot_id=request.identity.runtime_profile_snapshot_id,
+            source_window_id=flushed_window.window_id,
+            status=BrainstormBatchStatus.DRAFT,
+            frozen=False,
+            items=items,
+            created_at=now,
+            updated_at=now,
+        )
         updated = session.model_copy(
             update={
-                "status": BrainstormSessionStatus.REVIEWING,
-                "items": items,
+                "windows": _replace_window(session.windows, flushed_window),
+                "batches": [*session.batches, batch],
                 "updated_by": request.actor,
+                "updated_at": now,
                 "revision": session.revision + 1,
                 "summary_trace": {
                     **dict(session.summary_trace or {}),
                     "operation_kind": "brainstorm_summarize",
-                    "schema_id": "rp.story.brainstorm_items.v1",
+                    "schema_id": "rp.story.brainstorm_items.v2",
                     "item_count": len(items),
                     "model_id": request.model_id,
                     "provider_id": request.provider_id,
-                    "source_entry_ids": list(session.source_entry_ids),
+                    "source_window_id": flushed_window.window_id,
                     "fail_closed": True,
                 },
+            }
+        )
+        self._record_session_revision(updated, previous=session)
+        return updated
+
+    def continue_writing(
+        self,
+        *,
+        brainstorm_id: str,
+        request: BrainstormContinueWritingRequest,
+    ) -> BrainstormSession:
+        self._ensure_identity_matches_session(request.identity)
+        session = self._load_latest_session(
+            identity=request.identity,
+            brainstorm_id=brainstorm_id,
+        )
+        active_window = self._find_active_window(session)
+        if active_window is None or not active_window.messages:
+            return session
+        flushed_window = self._flush_window(
+            active_window,
+            reason=BrainstormContextFlushReason.CONTINUE_WRITING,
+        )
+        updated = session.model_copy(
+            update={
+                "windows": _replace_window(session.windows, flushed_window),
+                "updated_by": request.actor,
+                "updated_at": _utcnow(),
+                "revision": session.revision + 1,
+            }
+        )
+        self._record_session_revision(updated, previous=session)
+        return updated
+
+    def create_item(
+        self,
+        *,
+        brainstorm_id: str,
+        batch_id: str,
+        request: BrainstormItemCreateRequest,
+    ) -> BrainstormSession:
+        self._ensure_identity_matches_session(request.identity)
+        session = self._load_latest_session(
+            identity=request.identity,
+            brainstorm_id=brainstorm_id,
+        )
+        batch = self._require_batch(session, batch_id=batch_id)
+        self._ensure_batch_editable(batch)
+        now = _utcnow()
+        new_item = BrainstormBatchItem(
+            item_id=f"{batch_id}:item:{uuid4().hex}",
+            batch_id=batch_id,
+            brainstorm_id=brainstorm_id,
+            session_id=request.identity.session_id,
+            branch_head_id=request.identity.branch_head_id,
+            turn_id=request.identity.turn_id,
+            runtime_profile_snapshot_id=request.identity.runtime_profile_snapshot_id,
+            text=request.text,
+            source_kind=BrainstormItemSourceKind.USER_ADDED,
+            status=BrainstormItemStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+        updated_batch = batch.model_copy(
+            update={
+                "items": [*batch.items, new_item],
+                "updated_at": now,
+            }
+        )
+        updated = session.model_copy(
+            update={
+                "batches": _replace_batch(session.batches, updated_batch),
+                "updated_by": request.actor,
+                "updated_at": now,
+                "revision": session.revision + 1,
             }
         )
         self._record_session_revision(updated, previous=session)
@@ -195,6 +357,7 @@ class StoryBrainstormService:
         self,
         *,
         brainstorm_id: str,
+        batch_id: str,
         item_id: str,
         request: BrainstormItemUpdateRequest,
     ) -> BrainstormSession:
@@ -203,142 +366,111 @@ class StoryBrainstormService:
             identity=request.identity,
             brainstorm_id=brainstorm_id,
         )
-        items: list[BrainstormItem] = []
+        batch = self._require_batch(session, batch_id=batch_id)
+        self._ensure_batch_editable(batch)
+        updated_items: list[BrainstormBatchItem] = []
         found = False
-        for item in session.items:
+        now = _utcnow()
+        for item in batch.items:
             if item.item_id != item_id:
-                items.append(item)
+                updated_items.append(item)
                 continue
             found = True
-            updates: dict[str, Any] = {}
-            if request.summary_text is not None:
-                updates["summary_text"] = request.summary_text
-                updates["user_edited"] = True
-            if request.evidence_text_refs is not None:
-                updates["evidence_text_refs"] = request.evidence_text_refs
-                updates["user_edited"] = True
-            if request.uncertainty is not None:
-                updates["uncertainty"] = request.uncertainty
-                updates["user_edited"] = True
+            if item.status == BrainstormItemStatus.DELETED and request.text is not None:
+                raise StoryBrainstormServiceError(
+                    "brainstorm_deleted_item_read_only",
+                    item_id,
+                )
+            item_updates: dict[str, Any] = {"updated_at": now}
             if request.status is not None:
-                updates["status"] = BrainstormItemStatus(request.status)
-            elif updates:
-                updates["status"] = BrainstormItemStatus.EDITED
-            items.append(item.model_copy(update=updates))
+                item_updates["status"] = BrainstormItemStatus(request.status)
+            if request.text is not None:
+                item_updates["text"] = request.text
+            updated_items.append(item.model_copy(update=item_updates))
         if not found:
-            raise StoryBrainstormServiceError(
-                "brainstorm_item_not_found",
-                item_id,
-            )
+            raise StoryBrainstormServiceError("brainstorm_item_not_found", item_id)
+        updated_batch = batch.model_copy(
+            update={
+                "items": updated_items,
+                "updated_at": now,
+            }
+        )
         updated = session.model_copy(
             update={
-                "items": items,
-                "status": BrainstormSessionStatus.REVIEWING,
+                "batches": _replace_batch(session.batches, updated_batch),
                 "updated_by": request.actor,
+                "updated_at": now,
                 "revision": session.revision + 1,
             }
         )
         self._record_session_revision(updated, previous=session)
         return updated
 
-    async def apply_session(
+    def submit_batch(
         self,
         *,
         brainstorm_id: str,
-        request: BrainstormApplyRequest,
-    ) -> BrainstormApplyReceipt:
+        batch_id: str,
+        request: BrainstormBatchSubmitRequest,
+    ) -> tuple[BrainstormSession, BrainstormBatchSubmitReceipt]:
         self._ensure_identity_matches_session(request.identity)
         session = self._load_latest_session(
             identity=request.identity,
             brainstorm_id=brainstorm_id,
         )
-        confirmed_by_id = {
-            item.item_id: item
-            for item in session.items
-            if item.status == BrainstormItemStatus.CONFIRMED
-        }
-        requested_ids = set(request.item_ids or confirmed_by_id.keys())
-        eligible_items = {
-            item_id: item
-            for item_id, item in confirmed_by_id.items()
-            if item_id in requested_ids
-        }
-        if not eligible_items:
+        batch = self._require_batch(session, batch_id=batch_id)
+        self._ensure_batch_editable(batch)
+        active_items = [item for item in batch.items if item.status == BrainstormItemStatus.ACTIVE]
+        if not active_items:
             raise StoryBrainstormServiceError(
-                "brainstorm_apply_no_confirmed_items",
-                brainstorm_id,
+                "brainstorm_batch_submit_empty",
+                batch_id,
             )
-
-        changes_by_item: dict[str, list[BrainstormCoreFieldChange]] = {}
-        for change in request.core_field_changes:
-            if change.source_item_id not in eligible_items:
-                raise StoryBrainstormServiceError(
-                    "brainstorm_apply_unconfirmed_source_item",
-                    change.source_item_id,
-                )
-            changes_by_item.setdefault(change.source_item_id, []).append(change)
-
-        dispatch_receipts: list[BrainstormDispatchReceipt] = []
-        item_status_updates: dict[str, BrainstormItemStatus] = {}
-        for item_id, item in eligible_items.items():
-            item_changes = changes_by_item.get(item_id, [])
-            if not item_changes:
-                dispatch_receipts.append(
-                    self._redirect_receipt(
-                        item_id=item.item_id,
-                        message=(
-                            "No Core worker field change was produced for this "
-                            "confirmed brainstorm item."
-                        ),
-                    )
-                )
-                item_status_updates[item_id] = BrainstormItemStatus.PENDING_REVIEW
-                continue
-            for change in item_changes:
-                receipt = await self._apply_core_field_change(
-                    session=session,
-                    change=change,
-                    actor=request.actor,
-                    reason=request.reason,
-                )
-                dispatch_receipts.append(receipt)
-                item_status_updates[item_id] = _item_status_for_receipt(receipt)
-
+        now = _utcnow()
         updated_items = [
             item.model_copy(
                 update={
-                    "status": item_status_updates.get(item.item_id, item.status),
+                    "status": (
+                        BrainstormItemStatus.PENDING_PROCESSING
+                        if item.status == BrainstormItemStatus.ACTIVE
+                        else item.status
+                    ),
+                    "updated_at": now,
                 }
             )
-            for item in session.items
+            for item in batch.items
         ]
-        overall_status = _overall_apply_status(dispatch_receipts)
+        updated_batch = batch.model_copy(
+            update={
+                "status": BrainstormBatchStatus.PENDING_PROCESSING,
+                "frozen": True,
+                "items": updated_items,
+                "updated_at": now,
+                "submitted_at": now,
+            }
+        )
         updated_session = session.model_copy(
             update={
-                "items": updated_items,
-                "status": BrainstormSessionStatus.DISPATCHED,
+                "batches": _replace_batch(session.batches, updated_batch),
                 "updated_by": request.actor,
+                "updated_at": now,
                 "revision": session.revision + 1,
-                "apply_receipts": [
-                    *session.apply_receipts,
-                    {
-                        "status": overall_status,
-                        "dispatch_receipts": [
-                            item.model_dump(mode="json")
-                            for item in dispatch_receipts
-                        ],
-                    },
-                ],
             }
         )
         self._record_session_revision(updated_session, previous=session)
-        return BrainstormApplyReceipt(
+        receipt = BrainstormBatchSubmitReceipt(
             brainstorm_id=brainstorm_id,
+            batch_id=batch_id,
             identity=request.identity,
-            status=overall_status,
-            dispatch_receipts=dispatch_receipts,
-            refresh=_refresh_payload(request.identity),
+            status="pending_processing",
+            submitted_item_ids=[item.item_id for item in active_items],
+            deleted_item_ids=[
+                item.item_id
+                for item in batch.items
+                if item.status == BrainstormItemStatus.DELETED
+            ],
         )
+        return updated_session, receipt
 
     def close_session(
         self,
@@ -349,15 +481,13 @@ class StoryBrainstormService:
         reason: str = "user_closed_noop",
     ) -> BrainstormSession:
         self._ensure_identity_matches_session(identity)
-        session = self._load_latest_session(
-            identity=identity,
-            brainstorm_id=brainstorm_id,
-        )
+        session = self._load_latest_session(identity=identity, brainstorm_id=brainstorm_id)
         updated = session.model_copy(
             update={
                 "status": BrainstormSessionStatus.CLOSED,
                 "close_reason": reason,
                 "updated_by": actor,
+                "updated_at": _utcnow(),
                 "revision": session.revision + 1,
             }
         )
@@ -368,10 +498,11 @@ class StoryBrainstormService:
         self,
         *,
         session: BrainstormSession,
+        window: BrainstormContextWindow,
         request: BrainstormSummarizeRequest,
-    ) -> BrainstormStructuredSummary:
+    ) -> BrainstormSummarizeOutput:
         if request.dry_run_items is not None:
-            return BrainstormStructuredSummary(items=list(request.dry_run_items))
+            return BrainstormSummarizeOutput(items=list(request.dry_run_items))
         if request.model_id is None:
             raise StoryBrainstormServiceError(
                 "brainstorm_summarize_model_required",
@@ -380,13 +511,13 @@ class StoryBrainstormService:
         text, usage = await self._llm_gateway.complete_text_with_usage(
             model_id=request.model_id,
             provider_id=request.provider_id,
-            messages=self._summary_messages(session),
+            messages=self._summary_messages(session=session, window=window),
             temperature=0,
-            max_tokens=1200,
+            max_tokens=900,
         )
         try:
             payload = self._llm_gateway.extract_json_object(text)
-            structured = BrainstormStructuredSummary.model_validate(payload)
+            structured = BrainstormSummarizeOutput.model_validate(payload)
         except Exception as exc:
             raise StoryBrainstormServiceError(
                 "brainstorm_summarize_invalid_output",
@@ -395,445 +526,178 @@ class StoryBrainstormService:
         session.summary_trace.update({"usage": usage})
         return structured
 
-    def _summary_messages(self, session: BrainstormSession) -> list[ChatMessage]:
-        transcript = self._brainstorm_transcript(session)
+    def _discussion_messages(
+        self,
+        *,
+        session: BrainstormSession,
+        prompt: str,
+    ) -> list[ChatMessage]:
+        active_window = self._ensure_active_window(session)
+        context = self._chapter_context(session.identity.session_id)
+        messages = [
+            ChatMessage(
+                role="system",
+                content=(
+                    "You are the writer brainstorm discussion persona for a story runtime. "
+                    "Discuss chapter direction, character setup, foreshadowing, memory-change wishes, "
+                    "and unresolved intent with the user. Ask clarifying questions when the request is underspecified. "
+                    "Do not write story prose, do not output memory routing fields, and do not claim any Core/Recall/Archival mutation happened."
+                ),
+            ),
+            ChatMessage(role="system", content=self._chapter_context_prompt(context)),
+        ]
+        for message in active_window.messages:
+            messages.append(
+                ChatMessage(role=message.role, content=message.content_text)
+            )
+        messages.append(ChatMessage(role="user", content=prompt))
+        return messages
+
+    def _summary_messages(
+        self,
+        *,
+        session: BrainstormSession,
+        window: BrainstormContextWindow,
+    ) -> list[ChatMessage]:
+        context = self._chapter_context(session.identity.session_id)
+        transcript = self._window_transcript(window)
         return [
             ChatMessage(
                 role="system",
                 content=(
-                    "You are running the dedicated brainstorm_summarize "
-                    "operation. Return JSON only: {\"items\":[...]}. Each item "
-                    "may contain summary_text, evidence_text_refs, uncertainty. "
-                    "Do not include target_layer, target_domain, operation_kind, "
-                    "intent_labels, field_path, operation, or memory routing fields."
+                    "You are running the dedicated brainstorm_summarize operation. "
+                    "Return JSON only with the exact shape {\"items\":[\"...\"]}. "
+                    "Each item must be one concise user-intent summary string. "
+                    "Do not include uncertainty, suggested_question, evidence_refs, "
+                    "routing fields, target_layer, target_domain, operation_kind, "
+                    "field_path, old_value, or new_value."
                 ),
             ),
+            ChatMessage(role="system", content=self._chapter_context_prompt(context)),
             ChatMessage(
                 role="user",
                 content=(
-                    "Brainstorm prompt:\n"
-                    f"{session.prompt}\n\n"
-                    "Brainstorm discussion transcript:\n"
-                    f"{transcript}\n\n"
-                    "Summarize only user-confirmable intent items."
+                    "Summarize the current brainstorm context window into editable user intent items.\n\n"
+                    f"{transcript}"
                 ),
             ),
         ]
 
-    def _brainstorm_transcript(self, session: BrainstormSession) -> str:
-        current = self._story_session_service.get_current_chapter(
-            session.identity.session_id
+    def _chapter_context(self, session_id: str) -> _ChapterBrainstormContext:
+        story_session = self._story_session_service.get_session(session_id)
+        if story_session is None:
+            return _ChapterBrainstormContext("", "", [], "")
+        snapshot = self._story_session_service.build_chapter_snapshot(
+            session_id=story_session.session_id,
+            chapter_index=story_session.current_chapter_index,
         )
-        if current is None:
-            return ""
-        entries = self._story_session_service.list_discussion_entries(
-            chapter_workspace_id=current.chapter_workspace_id
+        outline_text = ""
+        accepted_outline = snapshot.chapter.accepted_outline_json or {}
+        if isinstance(accepted_outline, dict):
+            outline_text = str(accepted_outline.get("content_text") or "").strip()
+        accepted_segments = [
+            str(artifact.content_text or "").strip()
+            for artifact in snapshot.artifacts
+            if artifact.artifact_kind.value == "story_segment"
+            and artifact.status.value == "accepted"
+            and str(artifact.content_text or "").strip()
+        ]
+        current_title = str(
+            dict(story_session.current_state_json or {}).get("chapter_digest", {}).get(
+                "title", ""
+            )
+        ).strip()
+        phase = getattr(snapshot.chapter.phase, "value", snapshot.chapter.phase)
+        return _ChapterBrainstormContext(
+            phase=str(phase or "").strip(),
+            outline_text=outline_text,
+            accepted_segments=accepted_segments[-2:],
+            current_title=current_title,
         )
-        selected_ids = set(session.source_entry_ids)
-        lines: list[str] = []
-        for entry in entries[-24:]:
-            if selected_ids and entry.entry_id not in selected_ids:
-                continue
-            lines.append(f"[{entry.entry_id}] {entry.role}: {entry.content_text}")
+
+    def _chapter_context_prompt(self, context: _ChapterBrainstormContext) -> str:
+        lines = ["Current branch-visible story context:"]
+        if context.phase:
+            lines.append(f"- phase: {context.phase}")
+        if context.current_title:
+            lines.append(f"- chapter_title: {context.current_title}")
+        if context.outline_text:
+            lines.append(f"- accepted_outline: {context.outline_text}")
+        if context.accepted_segments:
+            lines.append("- accepted_segments:")
+            for segment in context.accepted_segments:
+                lines.append(f"  - {segment}")
         return "\n".join(lines)
 
-    async def _apply_core_field_change(
+    def _window_transcript(self, window: BrainstormContextWindow) -> str:
+        lines: list[str] = []
+        for message in window.messages:
+            lines.append(f"{message.role}: {message.content_text}")
+        return "\n".join(lines)
+
+    def _find_active_window(
         self,
-        *,
         session: BrainstormSession,
-        change: BrainstormCoreFieldChange,
-        actor: str,
-        reason: str | None,
-    ) -> BrainstormDispatchReceipt:
-        if change.operation == "delete_field":
-            return BrainstormDispatchReceipt(
-                source_item_id=change.source_item_id,
-                status="failed",
-                target_ref=change.target_ref,
-                operation=change.operation,
-                field_path=change.field_path,
-                base_revision=change.base_revision,
-                reason_codes=["brainstorm_core_delete_field_not_supported_v4"],
-                message="V4 does not support Core delete_field apply yet.",
-            )
-
-        try:
-            block = self._resolve_authoritative_block(
-                identity=session.identity,
-                target_ref=change.target_ref,
-            )
-        except StoryBrainstormServiceError as exc:
-            return BrainstormDispatchReceipt(
-                source_item_id=change.source_item_id,
-                status="pending_review",
-                target_ref=change.target_ref,
-                operation=change.operation,
-                field_path=change.field_path,
-                base_revision=change.base_revision,
-                reason_codes=[exc.code],
-                message=str(exc),
-                review_entrypoint="/memory/inspection",
-            )
-        if block is None:
-            return self._redirect_receipt(
-                item_id=change.source_item_id,
-                target_ref=change.target_ref,
-                message="Target is not a known Core authoritative block.",
-                reason_codes=["brainstorm_non_core_or_unknown_target"],
-            )
-        try:
-            base_revision = int(change.base_revision)
-        except ValueError:
-            return BrainstormDispatchReceipt(
-                source_item_id=change.source_item_id,
-                status="failed",
-                target_ref=change.target_ref,
-                operation=change.operation,
-                field_path=change.field_path,
-                base_revision=change.base_revision,
-                reason_codes=["brainstorm_core_base_revision_invalid"],
-            )
-        if int(block.revision or 1) != base_revision:
-            return BrainstormDispatchReceipt(
-                source_item_id=change.source_item_id,
-                status="conflict",
-                target_ref=change.target_ref,
-                operation=change.operation,
-                field_path=change.field_path,
-                base_revision=change.base_revision,
-                old_value=_value_at_path(block.data_json, change.field_path),
-                new_value=change.new_value,
-                reason_codes=["phase_e_apply_base_revision_conflict"],
-                message=(
-                    f"Current revision {block.revision} does not match "
-                    f"base revision {change.base_revision}."
-                ),
-            )
-        permission = self._resolve_worker_permission(
-            identity=session.identity,
-            target_domain=block.domain.value,
-        )
-        if permission is not None:
-            return permission.model_copy(
-                update={
-                    "source_item_id": change.source_item_id,
-                    "target_ref": change.target_ref,
-                    "operation": change.operation,
-                    "field_path": change.field_path,
-                    "base_revision": change.base_revision,
-                }
-            )
-
-        old_value = _value_at_path(block.data_json, change.field_path)
-        field_patch = _field_patch_for_path(
-            data=block.data_json,
-            field_path=change.field_path,
-            new_value=change.new_value,
-        )
-        target_ref = ObjectRef(
-            object_id=block.label,
-            layer=Layer.CORE_STATE_AUTHORITATIVE,
-            domain=block.domain,
-            domain_path=block.domain_path,
-            scope=block.scope,
-            revision=block.revision,
-        )
-        candidate = self._record_worker_candidate(
-            identity=session.identity,
-            change=change,
-            block_domain=block.domain.value,
-            old_value=old_value,
-        )
-        source_refs = [
-            *change.source_refs,
-            MemorySourceRef(
-                source_type="brainstorm_item",
-                source_id=change.source_item_id,
-                layer="runtime_workspace",
-                domain=BRAINSTORM_MATERIAL_DOMAIN,
-                entry_id=session.brainstorm_id,
-                metadata={"brainstorm_id": session.brainstorm_id},
-            ),
-            MemorySourceRef(
-                source_type="runtime_workspace_material",
-                source_id=candidate.material.material_id,
-                layer="runtime_workspace",
-                domain=block.domain.value,
-                entry_id=candidate.material.material_id,
-                metadata={"source_of_truth": False},
-            ),
-        ]
-        envelope = CoreMutationEnvelope(
-            identity=session.identity,
-            origin_kind=CORE_MUTATION_ORIGIN_BRAINSTORM_SUMMARY_APPLY,
-            actor=f"brainstorm.{actor}",
-            worker_id=LONGFORM_MEMORY_WORKER_ID,
-            phase=BRAINSTORM_APPLY_PHASE,
-            domain=block.domain,
-            domain_path=block.domain_path,
-            operations=[
-                PatchFieldsOp(target_ref=target_ref, field_patch=field_patch)
-            ],
-            base_refs=[
-                target_ref.model_copy(update={"revision": base_revision})
-            ],
-            source_refs=source_refs,
-            trace_refs=[session.brainstorm_id, candidate.material.material_id],
-            permission_decision="allowed",
-            permission_reason_codes=[
-                "allowed",
-                "brainstorm_core_oriented_v4",
-            ],
-            reason=reason or change.reason,
-        )
-        try:
-            proposal = await self._proposal_workflow_service.submit_core_mutation(
-                envelope,
-                story_id=session.identity.story_id,
-                mode="longform",
-                session_id=session.identity.session_id,
-                chapter_workspace_id=self._current_chapter_workspace_id(
-                    session.identity.session_id
-                ),
-                submit_source="brainstorm_summary_apply",
-                policy=PostWriteMaintenancePolicy(
-                    preset_id="brainstorm_summary_apply",
-                    fallback_decision=PolicyDecision.NOTIFY_APPLY,
-                ),
-            )
-        except ValueError as exc:
-            message = str(exc)
-            status = (
-                "conflict"
-                if "phase_e_apply_base_revision_conflict" in message
-                else "failed"
-            )
-            return BrainstormDispatchReceipt(
-                source_item_id=change.source_item_id,
-                status=status,
-                target_ref=change.target_ref,
-                proposal_id=None,
-                operation=change.operation,
-                field_path=change.field_path,
-                base_revision=change.base_revision,
-                old_value=old_value,
-                new_value=change.new_value,
-                reason_codes=[message.split(":", 1)[0]],
-                message=message,
-            )
-        return self._proposal_receipt_to_dispatch(
-            change=change,
-            proposal=proposal,
-            old_value=old_value,
-        )
-
-    def _resolve_worker_permission(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        target_domain: str,
-    ) -> BrainstormDispatchReceipt | None:
-        if self._worker_registry_service is None:
-            return BrainstormDispatchReceipt(
-                source_item_id="pending",
-                status="pending_review",
-                reason_codes=["brainstorm_worker_registry_unavailable"],
-                message="Worker registry is unavailable; brainstorm apply is fail-closed.",
-                review_entrypoint="/memory/inspection",
-                metadata={"target_domain": target_domain},
-            )
-        worker = self._worker_registry_service.get_worker(
-            LONGFORM_MEMORY_WORKER_ID,
-            snapshot_id=identity.runtime_profile_snapshot_id,
-            include_inactive=True,
-        )
-        if worker is None:
-            return BrainstormDispatchReceipt(
-                source_item_id="pending",
-                status="pending_review",
-                reason_codes=["brainstorm_worker_not_registered"],
-                message="No Core brainstorm worker is registered for this snapshot.",
-                review_entrypoint="/memory/inspection",
-                metadata={"target_domain": target_domain},
-            )
-        if not worker.active:
-            return BrainstormDispatchReceipt(
-                source_item_id="pending",
-                status="pending_review",
-                reason_codes=["brainstorm_worker_inactive"],
-                message="Core brainstorm worker is inactive in the pinned snapshot.",
-                review_entrypoint="/memory/inspection",
-                metadata={"target_domain": target_domain},
-            )
-        if BRAINSTORM_APPLY_PHASE not in worker.descriptor.supported_phases:
-            return BrainstormDispatchReceipt(
-                source_item_id="pending",
-                status="pending_review",
-                reason_codes=["brainstorm_worker_phase_not_supported"],
-                message="Core brainstorm worker does not support manual refresh phase.",
-                review_entrypoint="/memory/inspection",
-                metadata={"target_domain": target_domain},
-            )
-        if target_domain not in set(worker.descriptor.owned_domains):
-            return BrainstormDispatchReceipt(
-                source_item_id="pending",
-                status="redirect",
-                reason_codes=["brainstorm_non_core_wish_redirect"],
-                message="Confirmed item is not owned by the Core brainstorm worker.",
-                review_entrypoint="/memory/inspection",
-                metadata={"target_domain": target_domain},
-            )
-        worker_memory_service = self._worker_memory_service or WorkerMemoryService()
-        phase = self._current_chapter_phase(identity.session_id) or BRAINSTORM_APPLY_PHASE
-        try:
-            worker_memory_service.authorize_operation(
-                ctx=WorkerMemoryContext(
-                    identity=identity,
-                    worker_id=worker.source_worker_id,
-                    phase=phase,
-                    domain=target_domain,
-                    runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
-                ),
-                operation_kind="proposal.submit",
-                domains=[target_domain],
-                layers=[Layer.CORE_STATE_AUTHORITATIVE.value],
-            )
-        except WorkerMemoryPermissionError as exc:
-            return BrainstormDispatchReceipt(
-                source_item_id="pending",
-                status="pending_review",
-                reason_codes=[*exc.reason_codes, exc.code],
-                message=str(exc),
-                review_entrypoint="/memory/inspection",
-                metadata={
-                    "target_domain": target_domain,
-                    "worker_id": worker.source_worker_id,
-                    "permission_phase": phase,
-                },
-            )
+    ) -> BrainstormContextWindow | None:
+        for window in reversed(session.windows):
+            if window.status == BrainstormContextWindowStatus.ACTIVE:
+                return window
         return None
 
-    def _record_worker_candidate(
+    def _ensure_active_window(self, session: BrainstormSession) -> BrainstormContextWindow:
+        existing = self._find_active_window(session)
+        if existing is not None:
+            return existing
+        return self._new_window(
+            identity=session.identity,
+            brainstorm_id=session.brainstorm_id,
+        )
+
+    def _new_window(
         self,
         *,
         identity: MemoryRuntimeIdentity,
-        change: BrainstormCoreFieldChange,
-        block_domain: str,
-        old_value: Any,
-    ):
-        return self._runtime_workspace_material_service.record_material(
-            RuntimeWorkspaceMaterial(
-                material_id=(
-                    f"brainstorm-candidate:{change.source_item_id}:"
-                    f"{uuid4().hex}"
-                ),
-                material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
-                identity=identity,
-                domain=block_domain,
-                domain_path=change.target_ref,
-                payload={
-                    "payload_kind": "brainstorm_core_field_change",
-                    "source_item_id": change.source_item_id,
-                    "target_ref": change.target_ref,
-                    "base_revision": change.base_revision,
-                    "operation": change.operation,
-                    "field_path": change.field_path,
-                    "old_value": old_value,
-                    "new_value": change.new_value,
-                    "reason": change.reason,
-                    "memory_layer_agnostic_item": True,
-                    "authoritative_mutation": False,
-                },
-                visibility=RuntimeWorkspaceMaterialVisibility.WORKER_VISIBLE.value,
-                created_by="brainstorm.core_worker",
-                metadata={
-                    "target_domain_path": change.target_ref,
-                    "source_item_id": change.source_item_id,
-                    "brainstorm_candidate": True,
-                    "source_of_truth": False,
-                },
-            )
+        brainstorm_id: str,
+    ) -> BrainstormContextWindow:
+        now = _utcnow()
+        return BrainstormContextWindow(
+            window_id=f"{brainstorm_id}:window:{uuid4().hex}",
+            brainstorm_id=brainstorm_id,
+            session_id=identity.session_id,
+            branch_head_id=identity.branch_head_id,
+            turn_id=identity.turn_id,
+            runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+            status=BrainstormContextWindowStatus.ACTIVE,
+            messages=[],
+            source_message_refs=[],
+            created_at=now,
+            updated_at=now,
         )
 
-    def _proposal_receipt_to_dispatch(
+    def _flush_window(
         self,
+        window: BrainstormContextWindow,
         *,
-        change: BrainstormCoreFieldChange,
-        proposal: ProposalReceipt,
-        old_value: Any,
-    ) -> BrainstormDispatchReceipt:
-        status = "applied" if proposal.status == "applied" else "pending_review"
-        return BrainstormDispatchReceipt(
-            source_item_id=change.source_item_id,
-            status=status,
-            target_ref=change.target_ref,
-            proposal_id=proposal.proposal_id,
-            operation=change.operation,
-            field_path=change.field_path,
-            base_revision=change.base_revision,
-            old_value=old_value,
-            new_value=change.new_value,
-            reason_codes=[
-                "brainstorm_summary_apply",
-                f"proposal_status:{proposal.status}",
-            ],
-            metadata=proposal.model_dump(mode="json"),
+        reason: BrainstormContextFlushReason,
+    ) -> BrainstormContextWindow:
+        return window.model_copy(
+            update={
+                "status": BrainstormContextWindowStatus.FLUSHED,
+                "flush_reason": reason,
+                "flushed_at": _utcnow(),
+                "updated_at": _utcnow(),
+            }
         )
 
-    def _redirect_receipt(
-        self,
-        *,
-        item_id: str,
-        message: str,
-        target_ref: str | None = None,
-        reason_codes: list[str] | None = None,
-    ) -> BrainstormDispatchReceipt:
-        return BrainstormDispatchReceipt(
-            source_item_id=item_id,
-            status="redirect",
-            target_ref=target_ref,
-            reason_codes=reason_codes or ["brainstorm_non_core_or_unrouted_review"],
-            message=message,
-            review_entrypoint="/memory/inspection",
-        )
+    def _require_batch(self, session: BrainstormSession, *, batch_id: str) -> BrainstormBatch:
+        for batch in session.batches:
+            if batch.batch_id == batch_id:
+                return batch
+        raise StoryBrainstormServiceError("brainstorm_batch_not_found", batch_id)
 
-    def _resolve_authoritative_block(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        target_ref: str,
-    ) -> _ResolvedAuthoritativeBlock | None:
-        binding = _binding_for_target_ref(target_ref)
-        if binding is None:
-            return None
-        if self._core_state_as_of_resolver is None:
-            raise StoryBrainstormServiceError(
-                "brainstorm_core_as_of_resolver_unavailable",
-                target_ref,
-            )
-        object_ref = ObjectRef(
-            object_id=binding.object_id,
-            layer=Layer.CORE_STATE_AUTHORITATIVE,
-            domain=binding.domain,
-            domain_path=binding.domain_path,
-            scope="story",
-        )
-        try:
-            manifest = self._core_state_as_of_resolver.ensure_manifest_for_identity(
-                identity=identity,
-                selected_turn_id=identity.turn_id,
-            )
-            revision = self._core_state_as_of_resolver.resolve_object_revision(
-                manifest=manifest,
-                object_ref=object_ref,
-            )
-        except CoreStateAsOfResolverError as exc:
-            raise StoryBrainstormServiceError(exc.code, str(exc)) from exc
-        return _block_from_revision(
-            binding_object_id=binding.object_id,
-            revision=revision,
-        )
-        return None
+    def _ensure_batch_editable(self, batch: BrainstormBatch) -> None:
+        if batch.status != BrainstormBatchStatus.DRAFT or batch.frozen:
+            raise StoryBrainstormServiceError("brainstorm_batch_frozen", batch.batch_id)
 
     def _load_latest_session(
         self,
@@ -852,10 +716,7 @@ class StoryBrainstormService:
                 continue
             matches.append(BrainstormSession.model_validate(payload))
         if not matches:
-            raise StoryBrainstormServiceError(
-                "brainstorm_session_not_found",
-                brainstorm_id,
-            )
+            raise StoryBrainstormServiceError("brainstorm_session_not_found", brainstorm_id)
         return max(matches, key=lambda item: item.revision)
 
     def _record_session_revision(
@@ -881,7 +742,6 @@ class StoryBrainstormService:
                 identity=session.identity,
                 domain=BRAINSTORM_MATERIAL_DOMAIN,
                 domain_path=BRAINSTORM_MATERIAL_DOMAIN_PATH,
-                source_refs=list(session.source_refs),
                 payload=session.model_dump(mode="json"),
                 visibility=RuntimeWorkspaceMaterialVisibility.REVIEW_VISIBLE.value,
                 created_by="writer.brainstorm",
@@ -902,124 +762,43 @@ class StoryBrainstormService:
     def _ensure_identity_matches_session(self, identity: MemoryRuntimeIdentity) -> None:
         story_session = self._story_session_service.get_session(identity.session_id)
         if story_session is None:
-            raise StoryBrainstormServiceError(
-                "story_session_not_found",
-                identity.session_id,
-            )
+            raise StoryBrainstormServiceError("story_session_not_found", identity.session_id)
         if story_session.story_id != identity.story_id:
             raise StoryBrainstormServiceError(
                 "brainstorm_identity_story_mismatch",
                 identity.story_id,
             )
 
-    def _current_chapter_workspace_id(self, session_id: str) -> str | None:
-        chapter = self._story_session_service.get_current_chapter(session_id)
-        return None if chapter is None else chapter.chapter_workspace_id
 
-    def _current_chapter_phase(self, session_id: str) -> str | None:
-        chapter = self._story_session_service.get_current_chapter(session_id)
-        if chapter is None:
-            return None
-        phase = getattr(chapter.phase, "value", chapter.phase)
-        return str(phase or "").strip() or None
-
-
-def _binding_for_target_ref(target_ref: str):
-    normalized = str(target_ref or "").strip()
-    for binding in authoritative_bindings():
-        if normalized in {binding.object_id, binding.domain_path}:
-            return binding
-    return None
+def _replace_window(
+    windows: list[BrainstormContextWindow],
+    updated_window: BrainstormContextWindow,
+) -> list[BrainstormContextWindow]:
+    replaced = False
+    result: list[BrainstormContextWindow] = []
+    for window in windows:
+        if window.window_id == updated_window.window_id:
+            result.append(updated_window)
+            replaced = True
+        else:
+            result.append(window)
+    if not replaced:
+        result.append(updated_window)
+    return result
 
 
-def _block_from_revision(
-    *,
-    binding_object_id: str,
-    revision: CoreStateAuthoritativeRevisionRecord,
-) -> _ResolvedAuthoritativeBlock:
-    return _ResolvedAuthoritativeBlock(
-        label=binding_object_id,
-        domain=Domain(revision.domain),
-        domain_path=revision.domain_path,
-        scope=revision.scope,
-        revision=int(revision.revision or 1),
-        data_json=deepcopy(revision.data_json),
-    )
-
-
-def _value_at_path(data: Any, path: str) -> Any:
-    current = data
-    for segment in path.split("."):
-        if isinstance(current, dict) and segment in current:
-            current = current[segment]
-            continue
-        return None
-    return deepcopy(current)
-
-
-def _field_patch_for_path(*, data: Any, field_path: str, new_value: Any) -> dict[str, Any]:
-    segments = field_path.split(".")
-    if len(segments) == 1:
-        return {segments[0]: new_value}
-    root_key = segments[0]
-    root_value = deepcopy(data.get(root_key) if isinstance(data, dict) else {})
-    if not isinstance(root_value, dict):
-        root_value = {}
-    cursor = root_value
-    for segment in segments[1:-1]:
-        next_value = cursor.get(segment)
-        if not isinstance(next_value, dict):
-            next_value = {}
-        cursor[segment] = next_value
-        cursor = next_value
-    cursor[segments[-1]] = new_value
-    return {root_key: root_value}
-
-
-def _item_status_for_receipt(receipt: BrainstormDispatchReceipt) -> BrainstormItemStatus:
-    if receipt.status == "applied":
-        return BrainstormItemStatus.APPLIED
-    if receipt.status == "conflict":
-        return BrainstormItemStatus.CONFLICT
-    if receipt.status == "failed":
-        return BrainstormItemStatus.FAILED
-    if receipt.status in {"pending_review", "redirect"}:
-        return BrainstormItemStatus.PENDING_REVIEW
-    return BrainstormItemStatus.DISPATCHED
-
-
-def _overall_apply_status(
-    receipts: list[BrainstormDispatchReceipt],
-) -> Literal["applied", "pending_review", "redirect", "conflict", "failed"]:
-    statuses = {receipt.status for receipt in receipts}
-    if "failed" in statuses:
-        return "failed"
-    if "conflict" in statuses:
-        return "conflict"
-    if statuses == {"applied"}:
-        return "applied"
-    if "applied" in statuses or "pending_review" in statuses:
-        return "pending_review"
-    return "redirect"
-
-
-def _refresh_payload(identity: MemoryRuntimeIdentity) -> dict[str, Any]:
-    return {
-        "memory_inspection": {
-            "method": "GET",
-            "path_template": "/api/rp/story-sessions/{session_id}/memory/inspection",
-            "query_params": {
-                "branch_head_id": identity.branch_head_id,
-                "turn_id": identity.turn_id,
-                "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
-            },
-        },
-        "runtime_inspect": {
-            "method": "GET",
-            "path_template": "/api/rp/story-sessions/{session_id}/runtime/inspect",
-            "query_params": {
-                "branch_head_id": identity.branch_head_id,
-                "turn_id": identity.turn_id,
-            },
-        },
-    }
+def _replace_batch(
+    batches: list[BrainstormBatch],
+    updated_batch: BrainstormBatch,
+) -> list[BrainstormBatch]:
+    result: list[BrainstormBatch] = []
+    replaced = False
+    for batch in batches:
+        if batch.batch_id == updated_batch.batch_id:
+            result.append(updated_batch)
+            replaced = True
+        else:
+            result.append(batch)
+    if not replaced:
+        result.append(updated_batch)
+    return result

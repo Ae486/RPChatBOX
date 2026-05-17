@@ -24,7 +24,7 @@
 4. 主脑一次最多只允许 `2` 个 subagent 同时运行。
 5. 开发 subagent 固定使用：
    - `agent_type = default`（prompt 中按 trellis-implement 标准执行）
-   - `model = gpt-5.4`
+   - `model = gpt-5.5`
    - `reasoning_effort = xhigh`
 6. check subagent 固定使用：
    - `agent_type = default`（prompt 中按 trellis-check 标准执行）
@@ -1029,8 +1029,8 @@ E1 当前工作树的关键新增/收口点：
 - `[x]` V2. Backend Memory Product Contract
 - `[x]` V3. Frontend Memory Product Surface
 - `[x]` V4. Writer Brainstorm Apply
-- `[>]` V5. Post-write Memory Maintenance Minimum Closure
-- `[ ]` V6. Product Acceptance
+- `[x]` V5. Post-write Memory Maintenance Minimum Closure
+- `[x]` V6. Product Acceptance
 
 V0/V1 implementation evidence:
 
@@ -1149,17 +1149,28 @@ V3 focused verification:
 
 V4 implementation evidence:
 
+Note for Stage W continuation: the following V4 evidence is historical
+foundation evidence. Stage W product path supersedes `confirmed/apply` wording
+with `draft -> pending_processing` batch submit. W5 must be understood as a
+Core-oriented consumer: scheduler selects Core domain owner workers; those
+workers may retrieve Recall / Archival evidence through tools, but brainstorm
+dispatch must not write Recall or Archival durable layers.
+
 - Writer Brainstorm Apply now treats brainstorm as Runtime Workspace temporary
   material, not Memory truth. `BrainstormSession` and `BrainstormItem` remain
-  traceable, branch/turn scoped scratch state; user-confirmed items are the only
-  inputs to apply.
+  traceable, branch/turn scoped scratch state. This is historical V4 foundation
+  wording; Stage W replaces item-level confirmation with submitted active batch
+  items frozen as `pending_processing`, which are the only inputs eligible for
+  later W5 processing.
 - `BrainstormItem` stays memory-layer agnostic. Worker-routing fields such as
   `target_layer`, `target_domain`, `operation_kind`, and `intent_labels` are
   rejected by the model contract instead of being accepted silently.
-- Core-oriented V4 apply routes confirmed items through
+- Historical Core-oriented V4 apply routes confirmed items through
   `BrainstormCoreFieldChange` and shared `CoreMutationEnvelope` with
-  `origin_kind=brainstorm_summary_apply`; non-Core wishes stay in
-  review/redirect instead of being treated as Recall or Archival edits.
+  `origin_kind=brainstorm_summary_apply`. Stage W/W5 must express the same
+  boundary as Core owner-worker maintenance: items that cannot become Core
+  State maintenance stay in review/redirect instead of being treated as Recall
+  or Archival edits.
 - Core target reads use `CoreStateAsOfResolver.ensure_manifest_for_identity(...)`
   and `resolve_object_revision(...)`, so branch-from-turn apply sees the Core
   state of that branch/turn, not main-branch future state.
@@ -1190,6 +1201,82 @@ V4 focused verification:
 - `python -m mypy --follow-imports=skip --check-untyped-defs` on V4 touched
   source files:
   passed
+
+V5 implementation evidence:
+
+- Post-write projection refresh is now a real derived-view maintenance dispatch,
+  not a boolean placeholder. Worker `projection_refresh_requests` payload is
+  merged into `ProjectionRefreshRequest` and forwarded to
+  `ProjectionRefreshService` with refresh reason/source, base revision, dirty
+  targets, source refs, source authoritative refs, and Core snapshot evidence
+  where available.
+- Recall / Archival materialization jobs remain outside full materialization
+  executor scope, but are no longer silent placeholders. Deferred jobs carry
+  explicit reason/detail and stay visible in job/read-manifest evidence.
+- Runtime read manifest now classifies materialization refs as `completed`,
+  `deferred`, `stale`, `hidden`, or `not_selected`. Deferred/hidden/stale refs
+  are omitted with explicit reasons and cannot be treated as completed selected
+  memory by the next writer packet.
+- Branch/rollback-hidden future materialization jobs are emitted as omitted
+  `branch_hidden` evidence rather than selected runtime memory.
+- Check fixed a low-risk implementation issue by adding a stable
+  `BranchVisibilityResolver.turn_order_index(...)` helper, replacing direct
+  cross-class reads of private turn-order cache.
+- Independent `gpt-5.5 xhigh` V5 module check found no remaining blocker.
+
+V5 focused verification:
+
+- `python -m pytest backend\rp\tests\test_projection_builder_services.py::test_story_turn_domain_service_full_post_write_governs_worker_results -q --tb=short`:
+  `1 passed`
+- `python -m pytest backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_tracks_materialization_job_states backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_hides_rollback_hidden_materialization_jobs backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_hides_source_branch_future_materialization_jobs backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff -q --tb=short`:
+  `4 passed`
+- `python -m pytest backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_service_is_deterministic_and_separates_visible_selected_omitted -q --tb=short`:
+  `1 passed`
+- `python -m pytest backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_branch_writer_packet_omits_source_future_projection_digest -q --tb=short`:
+  `1 passed`
+- `ruff check` on V5 touched backend files:
+  passed
+- `mypy --follow-imports=skip --check-untyped-defs` on V5 touched source/test
+  files:
+  passed
+
+V6 product acceptance evidence (2026-05-12):
+
+- Scope was held to implemented Stage V V0-V5 behavior only. V6 did not expand
+  into full RP/TRPG runtime, branch merge, physical purge, legacy-session
+  migration, full Recall/Archival materialization executor, or Memory UI redesign.
+- Acceptance doc now includes a Chinese V6 "做什么 / 预期看到什么" checklist in
+  `story-runtime-product-acceptance-manual-qa.md`.
+- Focused validation reran the minimum product path evidence:
+  - clean longform / accepted segments / branch anchor:
+    `python -m pytest backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_write_next_segment_chapter_progress_uses_active_branch_visible_segments backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_branch_accept_sequence_is_isolated_per_active_branch backend\tests\test_rp_story_api.py::test_story_branch_create_route_uses_inclusive_anchor_for_first_segment -q --tb=short`
+    -> `3 passed`;
+  - V1 branch/core as-of read scope:
+    `python -m pytest backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_stage_v_alias_filters_memory_source_refs backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff backend\rp\tests\test_memory_lineage_services.py::test_branch_visibility_resolver_hides_rollback_future_but_allows_new_future backend\rp\tests\test_core_state_as_of_manifest_service.py::test_branch_and_rollback_select_turn_bound_core_manifests -q --tb=short`
+    -> `4 passed`;
+  - V2 Memory inspection/actions:
+    `python -m pytest backend\rp\tests\test_memory_inspection_service.py::test_core_direct_edit_routes_product_surface_to_block_mutation_kernel backend\rp\tests\test_memory_inspection_service.py::test_recall_review_routes_through_lifecycle_and_rejects_hidden_refs backend\rp\tests\test_memory_inspection_service.py::test_archival_evolution_routes_through_governed_service backend\tests\test_rp_story_api.py::test_story_memory_inspection_route_uses_memory_family_and_identity_scope backend\tests\test_rp_story_api.py::test_story_memory_action_routes_return_refreshable_receipts -q --tb=short`
+    -> `5 passed`;
+  - V3 Flutter Memory surface:
+    `flutter analyze lib\models\story_runtime.dart lib\services\backend_story_service.dart lib\pages\longform_story_page.dart lib\widgets\story_memory_panel.dart test\unit\models\story_memory_surface_test.dart`
+    -> no issues;
+    `flutter test test\unit\models\story_memory_surface_test.dart`
+    -> `2 passed`;
+  - V4 brainstorm apply/API:
+    `python -m pytest backend\rp\tests\test_story_brainstorm_service.py backend\rp\tests\test_worker_memory_service.py::test_worker_memory_service_rejects_disabled_worker backend\rp\tests\test_worker_memory_service.py::test_worker_memory_service_rejects_forbidden_operation_kind backend\tests\test_rp_story_api.py::test_story_brainstorm_routes_return_workspace_and_apply_receipts -q --tb=short`
+    -> `13 passed`;
+  - V5 materialization/read manifest:
+    `python -m pytest backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_tracks_materialization_job_states backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_hides_rollback_hidden_materialization_jobs backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_hides_source_branch_future_materialization_jobs backend\rp\tests\test_memory_lineage_services.py::test_runtime_read_manifest_service_is_deterministic_and_separates_visible_selected_omitted backend\rp\tests\test_story_runtime_product_wiring_writer_constraints.py::test_branch_writer_packet_omits_source_future_projection_digest backend\rp\tests\test_projection_builder_services.py::test_story_turn_domain_service_full_post_write_governs_worker_results -q --tb=short`
+    -> `6 passed`;
+  - focused lint/type for currently touched Stage V backend files:
+    `python -m ruff check backend\rp\services\post_write_governance_service.py backend\rp\services\runtime_read_manifest_service.py backend\rp\tests\test_memory_lineage_services.py backend\rp\tests\test_projection_builder_services.py`
+    -> passed;
+    `python -m mypy --follow-imports=skip --check-untyped-defs backend\rp\services\post_write_governance_service.py backend\rp\services\runtime_read_manifest_service.py`
+    -> passed.
+- Warnings observed were existing Pydantic/FastAPI deprecation warnings only.
+  They do not change Stage V acceptance semantics.
+- No unresolved Stage V blocker or grill-me item was found. Stage V is accepted
+  for the implemented V0-V5 product-foundation scope.
 
 并行规则：
 

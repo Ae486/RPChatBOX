@@ -248,9 +248,7 @@ async def test_runtime_retrieval_card_service_usage_derives_unused_and_missed_fi
                 "title": "Unused Recall",
             },
             "source_refs": [
-                cards[0].source_refs[0].model_copy(
-                    update={"source_id": "manual-hit-2"}
-                )
+                cards[0].source_refs[0].model_copy(update={"source_id": "manual-hit-2"})
             ],
             "metadata": {
                 **cards[0].metadata,
@@ -389,6 +387,5 @@ async def test_runtime_retrieval_card_service_usage_rejects_wrong_kind_and_missi
             actor="writer.retrieval",
         )
     assert (
-        broken_parent_exc.value.code
-        == "runtime_retrieval_expanded_chunk_card_missing"
+        broken_parent_exc.value.code == "runtime_retrieval_expanded_chunk_card_missing"
     )

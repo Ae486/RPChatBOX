@@ -68,7 +68,7 @@ def test_render_skill_pack_contains_user_authority_forbidden_clauses():
     record = STAGE_SKILL_PACKS[SetupStageId.CHARACTER_DESIGN]
     rendered = render_skill_pack(record)
 
-    assert "Do not call `setup.proposal.commit` on your own initiative" in rendered
+    assert "Stage advancement and commit are user-driven through the UI commit button" in rendered
     assert 'Do not declare the stage "ready" or "done"' in rendered
 
 

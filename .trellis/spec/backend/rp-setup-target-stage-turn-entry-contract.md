@@ -67,11 +67,11 @@
 - New canonical stages must be added once to the stage-id mapping used by the setup request builder.
 - Backend is not required to accept camelCase stage ids in this slice.
 
-### 3.5 This Slice Does Not Add Stage-Specific Patch Tools
+### 3.5 Stage Draft Writes Use The Current Stage-Entry Tool Surface
 
-- Known canonical stages may continue to use shared `setup.truth.write` with runtime-owned `stage_draft` injection.
-- Empty `SETUP_STAGE_PATCH_TOOLS` for canonical stages is not itself a bug in this slice.
-- Do not widen this ingress slice into a new stage-specific patch-tool family.
+- Known canonical draft stages use `setup.stage_entry.*` rather than legacy `setup.truth.write` or `setup.patch.*` agent tools.
+- Empty legacy patch-tool mappings for canonical stages are expected.
+- Do not widen this ingress slice into another stage-specific patch-tool family.
 
 ### 3.6 Compatibility Boundary During Dual-Track Migration
 

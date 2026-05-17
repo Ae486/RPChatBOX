@@ -752,6 +752,190 @@ class RpMemoryActionResponse {
       _mapOrEmpty(refresh['runtime_inspect']);
 }
 
+class RpBrainstormSession {
+  final Map<String, dynamic> raw;
+  final String brainstormId;
+  final Map<String, dynamic> identity;
+  final String status;
+  final List<RpBrainstormContextWindow> windows;
+  final List<RpBrainstormBatch> batches;
+
+  const RpBrainstormSession({
+    required this.raw,
+    required this.brainstormId,
+    required this.identity,
+    required this.status,
+    required this.windows,
+    required this.batches,
+  });
+
+  factory RpBrainstormSession.fromJson(Map<String, dynamic> json) {
+    return RpBrainstormSession(
+      raw: Map<String, dynamic>.from(json),
+      brainstormId: _stringOrNull(json['brainstorm_id']) ?? '',
+      identity: _mapOrEmpty(json['identity']),
+      status: _stringOrNull(json['status']) ?? 'active',
+      windows: _mapList(
+        json['windows'],
+      ).map(RpBrainstormContextWindow.fromJson).toList(),
+      batches: _mapList(
+        json['batches'],
+      ).map(RpBrainstormBatch.fromJson).toList(),
+    );
+  }
+
+  RpBrainstormContextWindow? get activeWindow {
+    for (final window in windows.reversed) {
+      if (window.status == 'active') {
+        return window;
+      }
+    }
+    return null;
+  }
+
+  int get totalItemCount =>
+      batches.fold(0, (sum, batch) => sum + batch.items.length);
+  int get pendingBatchCount =>
+      batches.where((batch) => batch.status == 'pending_processing').length;
+}
+
+class RpBrainstormContextWindow {
+  final Map<String, dynamic> raw;
+  final String windowId;
+  final String status;
+  final String? flushReason;
+  final List<RpBrainstormMessage> messages;
+
+  const RpBrainstormContextWindow({
+    required this.raw,
+    required this.windowId,
+    required this.status,
+    required this.flushReason,
+    required this.messages,
+  });
+
+  factory RpBrainstormContextWindow.fromJson(Map<String, dynamic> json) {
+    return RpBrainstormContextWindow(
+      raw: Map<String, dynamic>.from(json),
+      windowId: _stringOrNull(json['window_id']) ?? '',
+      status: _stringOrNull(json['status']) ?? 'active',
+      flushReason: _stringOrNull(json['flush_reason']),
+      messages: _mapList(
+        json['messages'],
+      ).map(RpBrainstormMessage.fromJson).toList(),
+    );
+  }
+}
+
+class RpBrainstormMessage {
+  final Map<String, dynamic> raw;
+  final String messageId;
+  final String role;
+  final String contentText;
+
+  const RpBrainstormMessage({
+    required this.raw,
+    required this.messageId,
+    required this.role,
+    required this.contentText,
+  });
+
+  factory RpBrainstormMessage.fromJson(Map<String, dynamic> json) {
+    return RpBrainstormMessage(
+      raw: Map<String, dynamic>.from(json),
+      messageId: _stringOrNull(json['message_id']) ?? '',
+      role: _stringOrNull(json['role']) ?? 'assistant',
+      contentText: _stringOrNull(json['content_text']) ?? '',
+    );
+  }
+}
+
+class RpBrainstormBatch {
+  final Map<String, dynamic> raw;
+  final String batchId;
+  final String status;
+  final bool frozen;
+  final List<RpBrainstormBatchItem> items;
+
+  const RpBrainstormBatch({
+    required this.raw,
+    required this.batchId,
+    required this.status,
+    required this.frozen,
+    required this.items,
+  });
+
+  factory RpBrainstormBatch.fromJson(Map<String, dynamic> json) {
+    return RpBrainstormBatch(
+      raw: Map<String, dynamic>.from(json),
+      batchId: _stringOrNull(json['batch_id']) ?? '',
+      status: _stringOrNull(json['status']) ?? 'draft',
+      frozen: json['frozen'] as bool? ?? false,
+      items: _mapList(
+        json['items'],
+      ).map(RpBrainstormBatchItem.fromJson).toList(),
+    );
+  }
+
+  int get activeItemCount =>
+      items.where((item) => item.status == 'active').length;
+}
+
+class RpBrainstormBatchItem {
+  final Map<String, dynamic> raw;
+  final String itemId;
+  final String text;
+  final String status;
+  final String sourceKind;
+
+  const RpBrainstormBatchItem({
+    required this.raw,
+    required this.itemId,
+    required this.text,
+    required this.status,
+    required this.sourceKind,
+  });
+
+  factory RpBrainstormBatchItem.fromJson(Map<String, dynamic> json) {
+    return RpBrainstormBatchItem(
+      raw: Map<String, dynamic>.from(json),
+      itemId: _stringOrNull(json['item_id']) ?? '',
+      text: _stringOrNull(json['text']) ?? '',
+      status: _stringOrNull(json['status']) ?? 'active',
+      sourceKind: _stringOrNull(json['source_kind']) ?? 'summarized',
+    );
+  }
+
+  bool get isDeleted => status == 'deleted';
+  bool get isEditable => status == 'active';
+}
+
+class RpBrainstormBatchSubmitResponse {
+  final Map<String, dynamic> raw;
+  final RpBrainstormSession session;
+  final Map<String, dynamic> receipt;
+  final Map<String, dynamic> actionMetadata;
+
+  const RpBrainstormBatchSubmitResponse({
+    required this.raw,
+    required this.session,
+    required this.receipt,
+    required this.actionMetadata,
+  });
+
+  factory RpBrainstormBatchSubmitResponse.fromJson(Map<String, dynamic> json) {
+    return RpBrainstormBatchSubmitResponse(
+      raw: Map<String, dynamic>.from(json),
+      session: RpBrainstormSession.fromJson(_mapOrEmpty(json['item'])),
+      receipt: _mapOrEmpty(json['receipt']),
+      actionMetadata: _mapOrEmpty(json['action_metadata']),
+    );
+  }
+
+  List<String> get submittedItemIds =>
+      _stringList(receipt['submitted_item_ids']);
+}
+
 class RpRuntimeDebugSurface {
   final String? threadId;
   final String? graphThreadId;

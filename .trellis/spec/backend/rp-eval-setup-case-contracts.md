@@ -87,7 +87,7 @@
 - The real behavior chain must include an actual model-driven draft write before recovery:
   - first turn calls a draft-writing setup tool, such as `setup.truth.write`, and the draft contains the exact hidden detail afterward
   - second turn triggers compact with the exact detail absent from prompt-visible messages and compact summary prose
-  - second turn requires that exact detail and must call `setup.read.draft_refs` before using it
+  - second turn requires that exact detail and must call `setup.memory.open` before using it
 - A first failed draft-write call followed by runtime schema repair and a successful retry is acceptable and should be observable, because this matches the setup-agent repair contract for missing Pydantic fields.
 - Plain assistant responses from OpenAI-compatible providers may serialize `tool_calls` as `null`; runtime must treat that as no tool call rather than crashing.
 
@@ -101,11 +101,11 @@
 - Old trimmed raw-history marker remains prompt-visible -> fail.
 - Recovery ref/hint is absent from prompt-visible context -> fail.
 - Real-model first interaction does not eventually write the foundation draft -> fail.
-- `setup.read.draft_refs` is not called with the expected ref before final use of the detail -> fail.
+- `setup.memory.open` is not called with the expected ref before final use of the detail -> fail.
 - Tool result lacks the exact detail or final answer does not use it -> fail.
 
 ### 5. Good/Base/Bad Cases
-- Good: compact context exposes `foundation:magic-law` and `recovery_hints`, hides the exact detail, the model calls `setup.read.draft_refs(detail="full")`, and the final answer uses the returned detail.
+- Good: compact context exposes `foundation:magic-law` and `recovery_hints`, hides the exact detail, the model calls `setup.memory.open`, and the final answer uses the returned clean content.
 - Good: the first real-model draft write initially omits a required field, the runtime repair loop corrects it, and the final successful tool result writes `foundation:magic-law` before the compact recovery turn.
 - Good: a full env-seeded test config can coexist with a durable local registry model id, and the env-seeded config wins without leaking blank registry secrets.
 - Base: no real-model env is configured, so the test is reported as skipped with no network call.
@@ -116,11 +116,11 @@
   - exact detail absent from first-round prompt-visible message content
   - old raw-history marker absent
   - recovery ref/hint visible
-  - `setup.read.draft_refs` tool schema visible
+  - `setup.memory.open` tool schema visible
 - The behavior assertion must inspect runtime result tool invocations/results and final assistant text.
 - The behavior assertion must inspect both turns:
   - write turn: model invoked a draft-write tool and the workspace draft contains the exact detail afterward
-  - recovery turn: model-visible prompt hides the exact detail, exposes only ref/hint, invokes `setup.read.draft_refs`, and final answer uses the readback
+  - recovery turn: model-visible prompt hides the exact detail, exposes only ref/hint, invokes `setup.memory.open`, and final answer uses the readback
 - If a durable registry fallback is used, the test should assert that the loaded provider/model config is complete before seeding and that no blank secret fields are written back.
 
 ### 7. Wrong vs Correct

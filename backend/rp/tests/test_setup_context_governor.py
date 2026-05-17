@@ -207,7 +207,7 @@ def test_context_governor_validates_compact_prompt_summary_and_records_strategy(
                 {
                     "ref": "draft:story_config",
                     "reason": "Need exact configured preset.",
-                    "detail": "Recover through setup.read.draft_refs.",
+                    "detail": "Recover through setup.memory.open.",
                 }
             ],
             "must_not_infer": ["Do not infer prior-stage raw discussion."],
@@ -253,7 +253,7 @@ def test_context_governor_passes_only_newly_compacted_messages_to_incremental_pr
                 {
                     "ref": "draft:story_config",
                     "reason": "Need exact configured preset.",
-                    "detail": "Recover through setup.read.draft_refs.",
+                    "detail": "Recover through setup.memory.open.",
                 }
             ],
             "must_not_infer": ["Do not infer prior-stage raw discussion."],
@@ -306,6 +306,115 @@ def test_context_governor_passes_only_newly_compacted_messages_to_incremental_pr
     assert "message 7" not in json.dumps(prompt_payloads[1], ensure_ascii=False)
 
 
+def test_context_governor_compact_prompt_uses_only_common_dropped_raw_items():
+    prompt_payloads: list[dict[str, Any]] = []
+
+    def _compact_prompt_provider(messages):
+        payload = json.loads(str(messages[1].content))
+        prompt_payloads.append(payload)
+        return {
+            "summary_lines": ["Only old raw dialogue should be compacted."],
+            "draft_refs": ["foundation:magic-law"],
+            "recovery_hints": [
+                {
+                    "ref": "foundation:magic-law",
+                    "reason": "Recover exact draft detail if needed.",
+                }
+            ],
+        }
+
+    governor = SetupContextGovernorService(
+        compaction_service=SetupContextCompactionService(
+            compact_prompt_provider=_compact_prompt_provider
+        )
+    )
+    retained_outcomes = [
+        SetupToolOutcome(
+            tool_name="rp_setup__setup.patch.foundation",
+            success=True,
+            summary="Updated foundation magic-law draft.",
+            updated_refs=["foundation:magic-law"],
+            relevance="draft",
+            recorded_at=datetime(2026, 5, 16, tzinfo=timezone.utc),
+        )
+    ]
+
+    _, compact_summary, metadata = governor.govern_history(
+        history=_history(8),
+        retained_tool_outcomes=retained_outcomes,
+        working_digest=SetupWorkingDigest(draft_refs=["foundation:magic-law"]),
+        existing_summary=None,
+        context_profile="compact",
+        current_step="foundation",
+        current_stage="world_background",
+    )
+
+    assert compact_summary is not None
+    assert compact_summary.source_message_count == 4
+    assert (
+        prompt_payloads[0]["dropped_current_step_fingerprint"]
+        == compact_summary.source_fingerprint
+    )
+    assert (
+        prompt_payloads[0]["dropped_current_step_message_count"]
+        == compact_summary.source_message_count
+    )
+    assert metadata["compacted_history_count"] == 4
+    assert len(prompt_payloads) == 1
+    assert [
+        item["content"] for item in prompt_payloads[0]["dropped_current_step_messages"]
+    ] == [
+        "user message 0",
+        "assistant message 1",
+        "user message 2",
+        "assistant message 3",
+    ]
+    assert prompt_payloads[0]["retained_tool_outcomes"][0]["tool_name"].endswith(
+        "foundation"
+    )
+    assert prompt_payloads[0]["working_digest"]["draft_refs"] == [
+        "foundation:magic-law"
+    ]
+
+
+def test_context_governor_accepts_stage_refs_from_common_setup_policy():
+    def _compact_prompt_provider(_messages):
+        return {
+            "summary_lines": ["World background draft needs exact city detail."],
+            "draft_refs": ["stage:world_background:city-grid"],
+            "recovery_hints": [
+                {
+                    "ref": "stage:world_background:city-grid",
+                    "reason": "Recover exact current-stage draft detail.",
+                }
+            ],
+        }
+
+    governor = SetupContextGovernorService(
+        compaction_service=SetupContextCompactionService(
+            compact_prompt_provider=_compact_prompt_provider
+        )
+    )
+
+    _, compact_summary, metadata = governor.govern_history(
+        history=_history(8),
+        retained_tool_outcomes=[],
+        working_digest=SetupWorkingDigest(
+            draft_refs=["stage:world_background:city-grid"]
+        ),
+        existing_summary=None,
+        context_profile="compact",
+        current_step="foundation",
+        current_stage="world_background",
+    )
+
+    assert compact_summary is not None
+    assert metadata["summary_strategy"] == "compact_prompt_summary"
+    assert metadata["fallback_reason"] is None
+    assert compact_summary.draft_refs == ["stage:world_background:city-grid"]
+    assert compact_summary.recovery_hints[0].ref == "stage:world_background:city-grid"
+
+
 def test_context_governor_falls_back_when_compact_prompt_summary_is_invalid():
     def _invalid_compact_prompt_provider(_messages):
         return {
@@ -339,7 +448,7 @@ def test_context_governor_falls_back_when_compact_prompt_summary_uses_unsupporte
     def _unsupported_ref_provider(_messages):
         return {
             "summary_lines": ["Looks valid except for the ref."],
-            "draft_refs": ["draft:story_config_extra"],
+            "draft_refs": ["memory:story_config_extra"],
         }
 
     governor = SetupContextGovernorService(
@@ -399,7 +508,9 @@ def test_context_governor_retains_failure_before_superseded_successes():
 
     assert retained[0].success is False
     assert retained[0].tool_name == "rp_setup__setup.truth.write"
-    assert len([item for item in retained if item.tool_name.endswith("story_config")]) == 1
+    assert (
+        len([item for item in retained if item.tool_name.endswith("story_config")]) == 1
+    )
 
 
 def test_context_governor_builds_initial_digest_from_cognitive_state():

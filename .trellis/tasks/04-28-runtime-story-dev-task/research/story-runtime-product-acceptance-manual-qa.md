@@ -36,6 +36,39 @@ V0 当前结论：证据口径已锁定，未发现阻塞 V1 的 grill 问题。
 writer context、Memory inspection、runtime inspect、runtime-owned Recall search、
 RetrievalBroker runtime calls、debug/eval reads 必须共享 branch-aware read scope。
 
+## Stage V / V6 产品验收手测清单
+
+这段只验收 Stage V V0-V5 已实现的 Memory Product Foundation 路径。不要把
+完整 RP/TRPG runtime、branch merge、physical purge、老 session 迁移、完整
+Recall/Archival materialization executor 或 UI 大改放进 V6 blocker。
+
+复测前准备：
+
+1. 使用干净 longform session，不用旧 outline / 旧 metadata 损坏样本。
+2. 记录 `session_id`、main branch、当前 turn、active snapshot。
+3. 准备打开 `Memory` 面板、`运行态` 面板，必要时用现有 API route 复核。
+
+| Step | 做什么 | 预期看到什么 | 失败分流 |
+|---|---|---|---|
+| Clean longform | 新建/打开干净 longform，接受结构化 outline，再写并接受两段正文 | 正文基础只来自 accepted segments；候选/未采用 rewrite 不成为 truth | old session/old outline 不算 V6 blocker；accepted-flow 错才算 Stage V bug |
+| Main memory view | 在 main branch 打开 `Memory` 面板 | Core / Projection / Runtime Workspace / Recall / Archival 以 canonical block/entry envelope 展示；能看到 branch/cutoff/snapshot 身份 | V2/V3 contract 或 UI reachability 问题 |
+| Branch from first segment | 从第一段对应 settled turn 创建并切到新 branch | 新 branch 保留 fork 前材料，不复制整套 memory；branch identity 明确 | branch control / branch visibility 问题 |
+| Future memory isolation | 在新 branch 查看 Memory、writer packet/read manifest、runtime inspect | 不包含 source branch 第二段之后的 future memory；被排除材料有 hidden/omitted/deferred/stale 等解释 | V1/V5 blocker |
+| Core direct edit | 对一个 Core entry 做直接编辑 | 响应显示 shared mutation kernel / base refs / event 或 dirty/projection refresh effect；刷新后 Memory/inspect 可见 | V2 blocker；不能接受 raw state write |
+| Recall action | 对 Recall item 执行 recompute / invalidate / supersede 之一 | 走 Recall lifecycle receipt，不 raw delete；cross-story 或不可见 ref fail closed | V2 blocker |
+| Archival Evolution | 对 Archival entry 做一次 Evolution edit | 产生 version / supersession / reindex receipt；默认 current-branch scoped | V2 blocker |
+| Brainstorm apply | 进入 brainstorm，显式 summarize，提交一个 active item；Stage W 当前产品路径到 `pending_processing` 为止，W5 再消费 | Brainstorm item 仍是 Runtime Workspace scratch；W5 只能派给 Core domain owner worker，必要时通过 retrieval 读取 Recall / Archival evidence；不能把 brainstorm item 路由成 Recall / Archival 写入 | Stage W/W5 blocker；不能让 brainstorm 直接写 Core，也不能让 worker 直接写 Recall / Archival |
+| Continue writing | 修改/治理后继续写下一段 | writer context/read manifest 使用更新后的 branch-aware memory state；deferred/hidden/stale materialization 不当作 completed selected memory | V1/V5 blocker |
+| Evidence closeout | 对照本清单和自动化 focused tests 汇总 | 若只有模型没遵循但 packet/manifest 证据正确，记为 model-following，不阻塞 Stage V foundation | 只把产品语义缺口列为 grill-me，不自创口径 |
+
+V6 最小通过标准：
+
+1. V0-V5 focused automation 通过，且手测路径只依赖已实现 surface。
+2. Memory 面板/route 使用同一 canonical envelope 与 governed action receipt。
+3. Branch from segment/turn 后，Memory view、writer packet、read manifest 都不泄漏 source-branch post-fork future memory。
+4. Core / Recall / Archival / Brainstorm 四类改动均走各自治理链。
+5. 继续写作时，writer context 使用 updated branch-aware memory state；未完成 materialization 只以 omitted/deferred/stale/hidden 证据出现。
+
 ## Phase S 复测清单
 
 这段是当前 S3 人工复测的主清单。下面保留的 Phase Q 英文清单只作为历史追溯；Q 的结论已经被修正为“后端 foundation acceptance”，不能再代表产品路径通过。

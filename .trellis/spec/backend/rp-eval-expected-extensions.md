@@ -42,7 +42,7 @@
 | `expected_tool_calls_excludes` | `report["tool_calls"]` | `_evaluate_expected_list_disjoint` |
 
 - The grader must not infer SkillPack identity from prompt content, assistant text, or stage id alone — only the trace attribute is authoritative. This is the same anti-inference rule as `rp-eval-setup-stage-skillpack-assertion-contract.md` §3.3.
-- Tool names in cases and assertions use the normalized surface (e.g. `setup.truth.write`, `setup.world_background.write_entry`), not the runtime-prefixed `rp_setup__setup.truth.write`. The normalization helper lives in `eval/trace_capture.py::normalize_tool_name` and is imported by `eval/reporting.py`.
+- Tool names in cases and assertions use the normalized surface (e.g. `setup.truth.write`, `setup.stage_entry.write`), not the runtime-prefixed `rp_setup__setup.truth.write`. The normalization helper lives in `eval/trace_capture.py::normalize_tool_name` and is imported by `eval/reporting.py`.
 
 #### 3.2 List-Shape Graders Use Different Helpers For Contains vs Excludes
 

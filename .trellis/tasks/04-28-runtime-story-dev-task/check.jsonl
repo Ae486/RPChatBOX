@@ -11,6 +11,7 @@
 {"file": ".trellis/spec/backend/rp-shared-core-mutation-kernel-direct-edit.md", "reason": "Verify direct edit and governed mutation still share one kernel."}
 {"file": ".trellis/spec/backend/rp-memory-change-event-spine.md", "reason": "Verify trace/invalidation spine stays lightweight and exact-identity scoped."}
 {"file": ".trellis/spec/backend/rp-memory-temporal-materialization.md", "reason": "Verify layer ownership and materialization boundaries remain intact."}
+{"file": ".trellis/spec/backend/rp-story-brainstorm-product-loop.md", "reason": "Verify writer brainstorm batch/item submit semantics, context exclusion, and W5 consumer boundary."}
 {"file": ".trellis/spec/backend/rp-projection-refresh-write-contract.md", "reason": "Verify projection refresh metadata, source refs, and freshness rules."}
 {"file": ".trellis/spec/backend/rp-core-state-base-revision-conflict-enforcement.md", "reason": "Verify stale base revisions are rejected and user edits cannot be overwritten."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/prd.md", "reason": "Primary task contract and acceptance criteria for review."}
@@ -37,3 +38,9 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-product-wiring-writer-constraint-development-spec.md", "reason": "Verify Phase-S implementation split, test requirements, and product acceptance rerun boundaries."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-outline-progress-chapter-summary-spec.md", "reason": "Verify Phase-T structured outline, beat cursor, one-segment-one-beat, and chapter summary provider requirements."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-longform-outline-progress-chapter-summary-development-spec.md", "reason": "Verify Phase-T implementation split, tests, ownership, and no future-feature overreach."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-stage-w-brainstorm-product-loop-development-spec.md", "reason": "Verify Stage W brainstorm product loop keeps discussion/summarize/batch submit separate from W5 memory mutation."}
+{"file": ".trellis/spec/backend/rp-story-brainstorm-product-loop.md", "reason": "Verify backend implementation follows Stage W batch/status/writer-context exclusion and W5 Core owner-worker boundaries."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-aware-memory-product-foundation-spec.md", "reason": "Verify older Stage V brainstorm wording is treated as historical and does not override Stage W pending_processing semantics."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-branch-aware-memory-product-foundation-development-spec.md", "reason": "Verify legacy apply contract is not used as the current Stage W product contract."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-stage-w5-scheduler-layer-development-spec.md", "reason": "Verify W5 implementation respects K-window counting, source paragraph mapping, Scheduler Decision authority, modular boundaries, and brainstorm trigger rules."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/research/story-runtime-worker-scheduler-spec.md", "reason": "Verify scheduler/worker implementation remains registry-driven and aligned with W5 source-selection and orchestrator proposal boundaries."}

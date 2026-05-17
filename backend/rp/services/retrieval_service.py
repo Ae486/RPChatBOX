@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
 from rp.retrieval.embedder import Embedder
@@ -166,25 +167,81 @@ class RetrievalService:
         self, query: RetrievalQuery
     ) -> RetrievalSearchResult:
         retrievers, reranker = self._resolve_runtime_components(query)
+        retrieval_query = self._candidate_pool_query(query)
         fused_result = await retrieve_and_fuse(
-            query=query,
+            query=retrieval_query,
             retrievers=retrievers,
             fusion_strategy=self._fusion_strategy,
         )
-        if graph_expansion_should_run(query):
-            graph_result = await GraphExpansionRetriever(self._session).search(query)
+        if graph_expansion_should_run(retrieval_query):
+            graph_result = await GraphExpansionRetriever(self._session).search(retrieval_query)
             fused_result = merge_graph_expansion_result(
-                query=query,
+                query=retrieval_query,
                 result=fused_result,
                 graph_result=graph_result,
             )
         else:
             fused_result = attach_skipped_graph_summary(
-                query=query,
+                query=retrieval_query,
                 result=fused_result,
             )
+        fused_result = self._attach_candidate_pool_trace(
+            requested_query=query,
+            retrieval_query=retrieval_query,
+            result=fused_result,
+        )
         reranked_result = await reranker.rerank(query=query, result=fused_result)
         return self._chunk_result_builder.build(query=query, result=reranked_result)
+
+    @staticmethod
+    def _candidate_pool_query(query: RetrievalQuery) -> RetrievalQuery:
+        candidate_top_k = RetrievalService._resolve_candidate_top_k(query)
+        if candidate_top_k <= query.top_k:
+            return query
+        return query.model_copy(update={"top_k": candidate_top_k})
+
+    @staticmethod
+    def _resolve_candidate_top_k(query: RetrievalQuery) -> int:
+        requested_top_k = max(1, int(query.top_k))
+        policy = query.filters.get("search_policy")
+        hybrid_policy: dict[str, Any] = {}
+        if isinstance(policy, dict) and isinstance(policy.get("hybrid"), dict):
+            hybrid_policy = dict(policy.get("hybrid") or {})
+
+        raw_candidate_top_k = hybrid_policy.get("candidate_top_k")
+        if raw_candidate_top_k is not None:
+            try:
+                candidate_top_k = int(raw_candidate_top_k)
+            except (TypeError, ValueError):
+                candidate_top_k = requested_top_k
+            return min(max(candidate_top_k, requested_top_k), 100)
+
+        return min(max(requested_top_k * 5, 20), 100)
+
+    @staticmethod
+    def _attach_candidate_pool_trace(
+        *,
+        requested_query: RetrievalQuery,
+        retrieval_query: RetrievalQuery,
+        result: RetrievalSearchResult,
+    ) -> RetrievalSearchResult:
+        if result.trace is None:
+            return result
+        details = dict(result.trace.details or {})
+        details["candidate_pool"] = {
+            "requested_top_k": requested_query.top_k,
+            "retrieval_top_k": retrieval_query.top_k,
+            "expanded": retrieval_query.top_k > requested_query.top_k,
+        }
+        return result.model_copy(
+            update={
+                "trace": result.trace.model_copy(
+                    update={
+                        "details": details,
+                    }
+                )
+            }
+        )
 
     def _resolve_runtime_components(
         self,

@@ -41,12 +41,18 @@ from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.version_history_read_service import VersionHistoryReadService
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
 )
 from rp.models.runtime_identity import StoryTurnStatus
+from rp.models.runtime_workflow_job import (
+    RuntimeWorkflowJobCategory,
+    RuntimeWorkflowJobCreationMode,
+    RuntimeWorkflowJobKind,
+)
 
 
 def _seed_story_runtime(retrieval_session):
@@ -435,6 +441,15 @@ def test_branch_visibility_resolver_tracks_active_lineage_and_parent_cutoff(
         owning_branch_head_id=branch.branch_head_id,
         origin_turn_id=fork_turn.turn_id,
     )
+    assert resolver.turn_order_index(
+        scope=scope,
+        branch_head_id=main_branch.branch_head_id,
+        turn_id=turn_two.turn_id,
+    ) > resolver.turn_order_index(
+        scope=scope,
+        branch_head_id=main_branch.branch_head_id,
+        turn_id=turn_one.turn_id,
+    )
 
 
 def test_branch_visibility_resolver_stage_v_alias_filters_memory_source_refs(
@@ -698,6 +713,351 @@ def test_runtime_read_manifest_service_is_deterministic_and_separates_visible_se
     assert "usage-U1" not in selected_ids
     assert "miss-M1" not in visible_ids
     assert "miss-M1" not in selected_ids
+
+
+def test_runtime_read_manifest_tracks_materialization_job_states(
+    retrieval_session,
+):
+    session, _, _ = _seed_story_runtime(retrieval_session)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.materialization_manifest",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    job_service = RuntimeWorkflowJobService(retrieval_session)
+
+    first_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-first",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    first_job = job_service.ensure_job(
+        identity=first_identity,
+        job_kind=RuntimeWorkflowJobKind.RECALL_MATERIALIZATION,
+        job_category=RuntimeWorkflowJobCategory.MEMORY_MATERIALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+        required_for_turn_completion=False,
+        result_ref_ids=["asset:recall-first"],
+        source_ref_ids=["worker_result:first"],
+    )
+    job_service.mark_job_completed(
+        job_id=first_job.job_id,
+        reason="recall_completed_first",
+        result_ref_ids=["asset:recall-first"],
+    )
+    identity_service.update_turn_status(
+        turn_id=first_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_first_settled",
+    )
+
+    second_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-second",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    second_job = job_service.ensure_job(
+        identity=second_identity,
+        job_kind=RuntimeWorkflowJobKind.RECALL_MATERIALIZATION,
+        job_category=RuntimeWorkflowJobCategory.MEMORY_MATERIALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+        required_for_turn_completion=False,
+        result_ref_ids=["asset:recall-second"],
+        source_ref_ids=["worker_result:second"],
+    )
+    job_service.mark_job_completed(
+        job_id=second_job.job_id,
+        reason="recall_completed_second",
+        result_ref_ids=["asset:recall-second"],
+    )
+    archival_job = job_service.ensure_job(
+        identity=second_identity,
+        job_kind=RuntimeWorkflowJobKind.ARCHIVAL_MATERIALIZATION,
+        job_category=RuntimeWorkflowJobCategory.MEMORY_MATERIALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+        required_for_turn_completion=False,
+        source_ref_ids=["worker_result:archival"],
+    )
+    job_service.mark_job_deferred(
+        job_id=archival_job.job_id,
+        reason="materialization_deferred_until_memory_maintenance_ready",
+        metadata={
+            "deferred_reason_code": (
+                "post_write_materialization_not_implemented_in_v5_slice"
+            )
+        },
+    )
+    identity_service.update_turn_status(
+        turn_id=second_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_second_settled",
+    )
+
+    third_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-third",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    completed_archival_job = job_service.ensure_job(
+        identity=third_identity,
+        job_kind=RuntimeWorkflowJobKind.ARCHIVAL_MATERIALIZATION,
+        job_category=RuntimeWorkflowJobCategory.MEMORY_MATERIALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+        required_for_turn_completion=False,
+        result_ref_ids=["asset:archival-third"],
+        source_ref_ids=["worker_result:archival-third"],
+    )
+    job_service.mark_job_completed(
+        job_id=completed_archival_job.job_id,
+        reason="archival_completed_third",
+        result_ref_ids=["asset:archival-third"],
+    )
+    identity_service.update_turn_status(
+        turn_id=third_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_third_settled",
+    )
+
+    current_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-fourth",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    service = RuntimeReadManifestService(
+        session=retrieval_session,
+        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+            session=retrieval_session
+        ),
+    )
+    manifest = service.build_writer_manifest(
+        identity=current_identity,
+        packet_kind="writer",
+        packet_sections=[
+            {
+                "section_id": "recall.current",
+                "label": "retrieval_card_summary",
+                "source_ref_ids": ["asset:recall-second"],
+                "items": ["Recall summary from the latest completed material."],
+            }
+        ],
+        selected_section_labels=["retrieval_card_summary"],
+    )
+
+    selected_memory_refs = [
+        item
+        for item in manifest.selected_refs
+        if str(item.get("ref_kind", "")).startswith("memory_materialization.")
+    ]
+    omitted_by_reason = {
+        (item["ref_kind"], item["reason"]): item for item in manifest.omitted_refs
+    }
+
+    assert {
+        item["ref_id"] for item in selected_memory_refs
+    } == {f"runtime_job:{second_job.job_id}"}
+    assert omitted_by_reason[
+        (
+            f"memory_materialization.{RuntimeWorkflowJobKind.RECALL_MATERIALIZATION.value}",
+            "memory_materialization_stale",
+        )
+    ]["ref_id"] == f"runtime_job:{first_job.job_id}"
+    deferred_item = omitted_by_reason[
+        (
+            f"memory_materialization.{RuntimeWorkflowJobKind.ARCHIVAL_MATERIALIZATION.value}",
+            "memory_materialization_deferred",
+        )
+    ]
+    assert deferred_item["ref_id"] == f"runtime_job:{archival_job.job_id}"
+    assert deferred_item["completion_reason"] == (
+        "materialization_deferred_until_memory_maintenance_ready"
+    )
+    not_selected_item = omitted_by_reason[
+        (
+            f"memory_materialization.{RuntimeWorkflowJobKind.ARCHIVAL_MATERIALIZATION.value}",
+            "memory_materialization_not_selected",
+        )
+    ]
+    assert not_selected_item["ref_id"] == (
+        f"runtime_job:{completed_archival_job.job_id}"
+    )
+    assert not_selected_item["state"] == "completed"
+
+
+def test_runtime_read_manifest_hides_rollback_hidden_materialization_jobs(
+    retrieval_session,
+):
+    session, _, _ = _seed_story_runtime(retrieval_session)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.hidden_materialization_manifest",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    job_service = RuntimeWorkflowJobService(retrieval_session)
+
+    visible_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-visible",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    identity_service.update_turn_status(
+        turn_id=visible_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_visible_settled",
+    )
+
+    hidden_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-hidden",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    hidden_job = job_service.ensure_job(
+        identity=hidden_identity,
+        job_kind=RuntimeWorkflowJobKind.RECALL_MATERIALIZATION,
+        job_category=RuntimeWorkflowJobCategory.MEMORY_MATERIALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+        required_for_turn_completion=False,
+        result_ref_ids=["asset:recall-hidden"],
+    )
+    job_service.mark_job_completed(
+        job_id=hidden_job.job_id,
+        reason="recall_completed_hidden",
+        result_ref_ids=["asset:recall-hidden"],
+    )
+    identity_service.update_turn_status(
+        turn_id=hidden_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_hidden_settled",
+    )
+    identity_service.rollback_to_turn(
+        session_id=session.session_id,
+        target_turn_id=visible_identity.turn_id,
+        actor="test.hidden_materialization_manifest",
+    )
+    current_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-after-rollback",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    service = RuntimeReadManifestService(
+        session=retrieval_session,
+        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+            session=retrieval_session
+        ),
+    )
+    manifest = service.build_writer_manifest(
+        identity=current_identity,
+        packet_kind="writer",
+    )
+
+    hidden_items = [
+        item
+        for item in manifest.omitted_refs
+        if item.get("ref_id") == f"runtime_job:{hidden_job.job_id}"
+    ]
+
+    assert hidden_items
+    assert hidden_items[0]["reason"] == "branch_hidden"
+    assert hidden_items[0]["state"] == "hidden"
+
+
+def test_runtime_read_manifest_hides_source_branch_future_materialization_jobs(
+    retrieval_session,
+):
+    session, _, _ = _seed_story_runtime(retrieval_session)
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.branch_future_materialization_manifest",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    job_service = RuntimeWorkflowJobService(retrieval_session)
+
+    visible_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-visible",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    identity_service.update_turn_status(
+        turn_id=visible_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_visible_settled",
+    )
+
+    future_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-source-future",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    future_job = job_service.ensure_job(
+        identity=future_identity,
+        job_kind=RuntimeWorkflowJobKind.RECALL_MATERIALIZATION,
+        job_category=RuntimeWorkflowJobCategory.MEMORY_MATERIALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+        required_for_turn_completion=False,
+        result_ref_ids=["asset:recall-source-future"],
+    )
+    job_service.mark_job_completed(
+        job_id=future_job.job_id,
+        reason="recall_completed_source_future",
+        result_ref_ids=["asset:recall-source-future"],
+    )
+    identity_service.update_turn_status(
+        turn_id=future_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_future_settled",
+    )
+    identity_service.create_branch_from_turn(
+        session_id=session.session_id,
+        origin_turn_id=visible_identity.turn_id,
+        actor="test.branch_future_materialization_manifest",
+    )
+
+    current_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind="write-on-new-branch",
+        actor="story_runtime",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    service = RuntimeReadManifestService(
+        session=retrieval_session,
+        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+            session=retrieval_session
+        ),
+    )
+    manifest = service.build_writer_manifest(
+        identity=current_identity,
+        packet_kind="writer",
+    )
+
+    hidden_items = [
+        item
+        for item in manifest.omitted_refs
+        if item.get("ref_id") == f"runtime_job:{future_job.job_id}"
+    ]
+
+    assert hidden_items
+    assert hidden_items[0]["reason"] == "branch_hidden"
+    assert hidden_items[0]["state"] == "hidden"
 
 
 def test_runtime_read_manifest_hash_is_stable_for_equivalent_json_shapes(

@@ -6,7 +6,6 @@ import pytest
 
 from rp.agent_runtime.contracts import SetupCapabilityGuidanceFragment
 from rp.agent_runtime.profiles import (
-    SETUP_AGENT_CANDIDATE_EXCLUDED_TOOLS,
     SETUP_AGENT_VISIBLE_TOOLS,
     build_setup_agent_capability_plan,
 )
@@ -34,7 +33,31 @@ CHARACTER_DESIGN_LEGACY_OVERLAY_PROSE = (
 )
 PROMPT_TOOL_NAME_CANDIDATES = {
     *SETUP_AGENT_VISIBLE_TOOLS,
-    *SETUP_AGENT_CANDIDATE_EXCLUDED_TOOLS,
+    "memory.get_state",
+    "memory.get_summary",
+    "memory.search_recall",
+    "memory.search_archival",
+    "memory.list_versions",
+    "memory.read_provenance",
+    "setup.proposal.commit",
+    "setup.question.raise",
+    "setup.discussion.update_state",
+    "setup.chunk.upsert",
+    "setup.truth.write",
+    "setup.patch.story_config",
+    "setup.patch.writing_contract",
+    "setup.patch.foundation_entry",
+    "setup.patch.longform_blueprint",
+    "setup.read.workspace",
+    "setup.read.step_context",
+    "setup.read.draft_refs",
+    "setup.truth_index.search",
+    "setup.truth_index.read_refs",
+    "setup.world_background.list_entries",
+    "setup.world_background.read_entry",
+    "setup.world_background.write_entry",
+    "setup.world_background.edit_entry",
+    "setup.world_background.delete_entry",
     "proposal.submit",
 }
 
@@ -115,7 +138,11 @@ def test_no_skill_pack_when_current_stage_is_none_uses_capability_guidance():
 
     assert "[Stage Skill Pack" not in prompt
     assert "Active capability guidance:" in prompt
-    assert "setup.patch.foundation_entry" in prompt
+    assert "setup.memory.search" in prompt
+    assert "setup.memory.open" in prompt
+    assert "setup.memory.read_refs" not in prompt
+    assert "setup.patch.foundation_entry" not in prompt
+    assert "setup.truth.write" not in prompt
     assert "proposal.submit" not in prompt
 
 
@@ -147,7 +174,7 @@ def test_non_character_design_stages_do_not_load_any_skill_pack(stage_id):
     assert "For this turn, you operate in the" not in prompt
 
 
-def test_world_background_prompt_exposes_stage_truth_write_hint():
+def test_world_background_prompt_exposes_stage_entry_guidance():
     service = SetupAgentPromptService()
     packet = _packet(current_stage=SetupStageId.WORLD_BACKGROUND)
 
@@ -158,15 +185,17 @@ def test_world_background_prompt_exposes_stage_truth_write_hint():
         context_packet=packet,
     )
 
-    assert "For canonical stage setup.truth.write calls" in prompt
+    assert "setup.stage_entry.write as the primary draft write tool" in prompt
+    assert "setup.stage_entry.list" in prompt
+    assert "setup.stage_entry.read" in prompt
+    assert "setup.stage_entry.edit" in prompt
+    assert "setup.stage_entry.delete" in prompt
+    assert "For canonical stage setup.truth.write calls" not in prompt
+    assert "setup.truth.write" not in prompt
     assert "Use the setup.world_background.* tools" not in prompt
     assert "setup.world_background.write_entry" not in prompt
     assert "setup.world_background.edit_entry" not in prompt
     assert "setup.world_background.delete_entry" not in prompt
-    assert (
-        "Preferred entry_type values for this stage: world_rule, location, faction, race, history."
-        in prompt
-    )
 
 
 @pytest.mark.parametrize(
@@ -218,9 +247,27 @@ def test_prompt_mentions_only_active_capability_tools_for_world_background():
         tool_name for tool_name in PROMPT_TOOL_NAME_CANDIDATES if tool_name in prompt
     }
     assert mentioned_tools.issubset(set(plan.active_tool_names))
-    assert "setup.read.draft_refs" in mentioned_tools
-    assert "setup.truth.write" in mentioned_tools
+    assert "setup.memory.search" in mentioned_tools
+    assert "setup.memory.open" in mentioned_tools
+    assert "setup.memory.read_refs" not in mentioned_tools
+    assert "setup.stage_entry.write" in mentioned_tools
+    assert "memory.get_state" not in mentioned_tools
+    assert "memory.get_summary" not in mentioned_tools
+    assert "memory.search_recall" not in mentioned_tools
+    assert "memory.search_archival" not in mentioned_tools
+    assert "memory.list_versions" not in mentioned_tools
+    assert "memory.read_provenance" not in mentioned_tools
+    assert "setup.truth.write" not in mentioned_tools
+    assert "setup.proposal.commit" not in mentioned_tools
+    assert "setup.question.raise" not in mentioned_tools
+    assert "setup.discussion.update_state" not in mentioned_tools
+    assert "setup.chunk.upsert" not in mentioned_tools
     assert "setup.world_background.write_entry" not in mentioned_tools
+    assert "setup.read.workspace" not in mentioned_tools
+    assert "setup.read.step_context" not in mentioned_tools
+    assert "setup.read.draft_refs" not in mentioned_tools
+    assert "setup.truth_index.search" not in mentioned_tools
+    assert "setup.truth_index.read_refs" not in mentioned_tools
     assert "proposal.submit" not in mentioned_tools
 
 

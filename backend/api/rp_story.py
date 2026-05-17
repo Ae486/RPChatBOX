@@ -21,7 +21,10 @@ from rp.models.memory_inspection import RecallReviewCommand
 from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.story_brainstorm import (
-    BrainstormApplyRequest,
+    BrainstormBatchSubmitRequest,
+    BrainstormContinueWritingRequest,
+    BrainstormDiscussionRequest,
+    BrainstormItemCreateRequest,
     BrainstormItemUpdateRequest,
     BrainstormSessionStartRequest,
     BrainstormSummarizeRequest,
@@ -241,6 +244,7 @@ def _brainstorm_invalid(exc: Exception) -> HTTPException:
     status_code = 404 if error_code in {
         "story_session_not_found",
         "brainstorm_session_not_found",
+        "brainstorm_batch_not_found",
         "brainstorm_item_not_found",
     } else 400
     return HTTPException(
@@ -928,6 +932,26 @@ async def get_story_brainstorm_session(
 
 
 @router.post(
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/messages"
+)
+async def discuss_story_brainstorm_session(
+    session_id: str,
+    brainstorm_id: str,
+    payload: BrainstormDiscussionRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        session = await controller.discuss_brainstorm_session(
+            session_id=session_id,
+            brainstorm_id=brainstorm_id,
+            request=payload,
+        )
+        return _brainstorm_session_response(session_id=session_id, session=session)
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
+@router.post(
     "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/summarize"
 )
 async def summarize_story_brainstorm_session(
@@ -948,11 +972,12 @@ async def summarize_story_brainstorm_session(
 
 
 @router.patch(
-    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/items/{item_id}"
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/batches/{batch_id}/items/{item_id}"
 )
 async def update_story_brainstorm_item(
     session_id: str,
     brainstorm_id: str,
+    batch_id: str,
     item_id: str,
     payload: BrainstormItemUpdateRequest,
     controller: StoryRuntimeController = Depends(_story_controller),
@@ -961,6 +986,7 @@ async def update_story_brainstorm_item(
         session = controller.update_brainstorm_item(
             session_id=session_id,
             brainstorm_id=brainstorm_id,
+            batch_id=batch_id,
             item_id=item_id,
             request=payload,
         )
@@ -970,44 +996,78 @@ async def update_story_brainstorm_item(
 
 
 @router.post(
-    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/apply"
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/continue-writing"
 )
-async def apply_story_brainstorm_session(
+async def continue_story_brainstorm_session(
     session_id: str,
     brainstorm_id: str,
-    payload: BrainstormApplyRequest,
+    payload: BrainstormContinueWritingRequest,
     controller: StoryRuntimeController = Depends(_story_controller),
 ):
     try:
-        receipt = await controller.apply_brainstorm_session(
+        session = controller.continue_brainstorm_session(
             session_id=session_id,
             brainstorm_id=brainstorm_id,
             request=payload,
         )
+        return _brainstorm_session_response(session_id=session_id, session=session)
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/batches/{batch_id}/items"
+)
+async def create_story_brainstorm_item(
+    session_id: str,
+    brainstorm_id: str,
+    batch_id: str,
+    payload: BrainstormItemCreateRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        session = controller.create_brainstorm_item(
+            session_id=session_id,
+            brainstorm_id=brainstorm_id,
+            batch_id=batch_id,
+            request=payload,
+        )
+        return _brainstorm_session_response(session_id=session_id, session=session)
+    except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
+        raise _brainstorm_invalid(exc) from exc
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/brainstorm/sessions/{brainstorm_id}/batches/{batch_id}/submit"
+)
+async def submit_story_brainstorm_batch(
+    session_id: str,
+    brainstorm_id: str,
+    batch_id: str,
+    payload: BrainstormBatchSubmitRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        session, receipt = controller.submit_brainstorm_batch(
+            session_id=session_id,
+            brainstorm_id=brainstorm_id,
+            batch_id=batch_id,
+            request=payload,
+        )
         return {
             "session_id": session_id,
+            "item": session.model_dump(mode="json"),
             "receipt": receipt.model_dump(mode="json"),
             "action_metadata": {
-                "schema_version": "rp.brainstorm.apply_receipt.v1",
-                "action": "brainstorm_summary_apply",
-                "origin_kind": "brainstorm_summary_apply",
+                "schema_version": "rp.brainstorm.batch_submit_receipt.v1",
+                "action": "brainstorm_batch_submit",
+                "origin_kind": "brainstorm_batch_submit",
                 "identity": payload.identity.model_dump(mode="json"),
                 "brainstorm_id": brainstorm_id,
-                "source_item_ids": [
-                    item.source_item_id for item in receipt.dispatch_receipts
-                ],
-                "affected_refs": _unique_memory_action_refs(
-                    [
-                        str(item.target_ref or "")
-                        for item in receipt.dispatch_receipts
-                    ]
-                    + [
-                        str(item.proposal_id or "")
-                        for item in receipt.dispatch_receipts
-                    ]
-                ),
+                "batch_id": batch_id,
+                "submitted_item_ids": list(receipt.submitted_item_ids),
             },
-            "refresh": receipt.refresh,
+            "refresh": {},
         }
     except (StoryBrainstormServiceError, RuntimeError, ValueError) as exc:
         raise _brainstorm_invalid(exc) from exc
@@ -1202,11 +1262,14 @@ def _brainstorm_session_response(*, session_id: str, session) -> dict[str, objec
             "archival_truth": False,
         },
         "allowed_actions": [
+            "discuss",
             "summarize",
+            "continue_writing",
+            "add_item",
             "edit_item",
-            "reject_item",
-            "confirm_item",
-            "apply_confirmed",
+            "delete_item",
+            "restore_item",
+            "submit_batch",
         ],
     }
 

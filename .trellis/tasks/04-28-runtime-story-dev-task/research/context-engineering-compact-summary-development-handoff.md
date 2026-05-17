@@ -85,7 +85,8 @@ After setup owns the common kernel, story runtime should add adapters for:
 - chapter bridge summary;
 - chapter/session review summary if needed.
 
-V4 writer brainstorm must keep this lifecycle:
+Stage W supersedes the older V4 `confirmed/dispatched` wording for the current
+product path. Writer brainstorm must keep this lifecycle:
 
 1. user enters brainstorm mode / discussion;
 2. brainstorm sees writer-visible context plus user brainstorm prompt;
@@ -93,12 +94,16 @@ V4 writer brainstorm must keep this lifecycle:
 4. user may close the session as no-op and return to writing;
 5. explicit user action asks for a one-shot `brainstorm_summarize` pass;
 6. summary operation returns typed `BrainstormItem` list;
-7. user edits / rejects / confirms items;
-8. confirmed items go to scheduler / dispatcher;
-9. Core-classified items go to Core workers for governed memory changes through
-   the shared Core mutation path according to worker permission;
-10. non-Core wishes return review/redirect material instead of being dispatched
-    as Recall or Archival brainstorm edits.
+7. user edits, adds, deletes, or restores items in the generated batch;
+8. batch submit freezes active items as `pending_processing`;
+9. the W5 consumer sends only submitted active items to scheduler / dispatcher;
+10. scheduler selects Core domain owner workers, not Core / Recall / Archival
+    layer writers;
+11. Core workers may use Retrieval Broker / tools to read Recall or Archival
+    evidence, then produce governed Core changes through the shared Core
+    mutation path according to worker permission;
+12. Recall lifecycle or Archival Evolution wishes return review/redirect
+    material instead of becoming Recall or Archival brainstorm edits.
 
 Brainstorm must not know Memory OS layer details.
 It must not be used as a Recall editor or Archival editor; Archival changes go

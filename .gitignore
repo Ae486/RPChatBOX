@@ -126,6 +126,11 @@ coverage/
 # Local AI/agent config
 .claude/settings.local.json
 
+# Trellis task-local generated artifacts.
+# Keep task PRDs/specs/research in Git. Treat artifacts as local scratch output;
+# move any script/report that must be preserved into research/ or source dirs.
+.trellis/tasks/**/artifacts/
+
 # 用户数据和配置（包含 API Key 等敏感信息）
 **/storage/
 **/user_data/

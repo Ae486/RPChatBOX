@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from models.chat import ChatMessage
-from rp.models.memory_crud import MemorySearchArchivalInput, MemorySearchRecallInput
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.retrieval_runtime_contracts import (
     WriterRetrievalExpandToolInput,
@@ -19,6 +18,7 @@ from rp.services.runtime_retrieval_card_service import (
     RuntimeRetrievalCardService,
     RuntimeRetrievalCardServiceError,
 )
+from rp.services.runtime_retrieval_search_service import RuntimeRetrievalSearchService
 from rp.services.story_llm_gateway import StoryLlmGateway
 from rp.services.writer_retrieval_usage_guard_service import (
     WriterRetrievalUsageGuardService,
@@ -29,7 +29,6 @@ from rp.services.writer_retrieval_usage_guard_service import (
 WRITER_RETRIEVAL_SEARCH_TOOL = "retrieval.search"
 WRITER_RETRIEVAL_EXPAND_TOOL = "retrieval.expand"
 WRITER_RETRIEVAL_USAGE_TOOL = "retrieval.usage"
-_SUPPORTED_SEARCH_KINDS = {"recall", "archival"}
 
 
 class WritingWorkerRetrievalLoopServiceError(ValueError):
@@ -47,7 +46,9 @@ class WriterRetrievalLoopResult:
     output_text: str
     usage_metadata: dict[str, Any] = field(default_factory=dict)
     tool_trace_refs: list[str] = field(default_factory=list)
-    source_ref_bundle: WorkerSourceRefBundle = field(default_factory=WorkerSourceRefBundle)
+    source_ref_bundle: WorkerSourceRefBundle = field(
+        default_factory=WorkerSourceRefBundle
+    )
 
 
 @dataclass
@@ -66,12 +67,22 @@ class WritingWorkerRetrievalLoopService:
         *,
         llm_gateway: StoryLlmGateway,
         runtime_retrieval_card_service: RuntimeRetrievalCardService,
+        runtime_retrieval_search_service: RuntimeRetrievalSearchService | None = None,
         usage_guard_service: WriterRetrievalUsageGuardService | None = None,
     ) -> None:
         self._llm_gateway = llm_gateway
         self._runtime_retrieval_card_service = runtime_retrieval_card_service
-        self._usage_guard_service = usage_guard_service or WriterRetrievalUsageGuardService(
-            runtime_retrieval_card_service=runtime_retrieval_card_service
+        self._runtime_retrieval_search_service = (
+            runtime_retrieval_search_service
+            or RuntimeRetrievalSearchService(
+                runtime_retrieval_card_service=runtime_retrieval_card_service
+            )
+        )
+        self._usage_guard_service = (
+            usage_guard_service
+            or WriterRetrievalUsageGuardService(
+                runtime_retrieval_card_service=runtime_retrieval_card_service
+            )
         )
 
     async def run(
@@ -218,7 +229,10 @@ class WritingWorkerRetrievalLoopService:
                     arguments=arguments,
                     state=state,
                 )
-        except (RuntimeRetrievalCardServiceError, WriterRetrievalUsageGuardServiceError) as exc:
+        except (
+            RuntimeRetrievalCardServiceError,
+            WriterRetrievalUsageGuardServiceError,
+        ) as exc:
             raise WritingWorkerRetrievalLoopServiceError(exc.code, str(exc)) from exc
         raise WritingWorkerRetrievalLoopServiceError(
             "writer_retrieval_tool_not_allowed",
@@ -234,44 +248,22 @@ class WritingWorkerRetrievalLoopService:
         attempt_index: int,
     ) -> str:
         payload = WriterRetrievalSearchToolInput.model_validate(arguments)
-        search_kind = payload.search_kind.lower()
-        if search_kind not in _SUPPORTED_SEARCH_KINDS:
-            raise WritingWorkerRetrievalLoopServiceError(
-                "writer_retrieval_search_kind_unsupported",
-                search_kind,
-            )
-        if search_kind == "archival":
-            result, cards, miss = await self._run_archival_search(
-                identity=identity,
-                payload=payload,
-                attempt_index=attempt_index,
-            )
-        else:
-            result, cards, miss = await self._run_recall_search(
-                identity=identity,
-                payload=payload,
-                attempt_index=attempt_index,
-            )
-        if cards or miss is not None:
+        execution = await self._runtime_retrieval_search_service.search_for_writer(
+            identity=identity,
+            input_model=payload,
+            actor="writer.retrieval",
+            attempt_index=attempt_index,
+        )
+        if execution.materials or execution.miss_materials:
             state.retrieval_generation += 1
             for material_id in [
-                *(card.material_id for card in cards),
-                *([] if miss is None else [miss.material_id]),
+                *(material.material_id for material in execution.materials),
+                *(material.material_id for material in execution.miss_materials),
             ]:
                 state.tool_trace_refs.append(f"runtime_workspace:{material_id}")
         state.usage_material_id = None
-        return json.dumps(
-            {
-                "search_kind": search_kind,
-                "query": payload.query,
-                "cards": [
-                    self._card_tool_payload(card)
-                    for card in cards
-                ],
-                "miss": None if miss is None else self._miss_tool_payload(miss),
-                "warnings": list(getattr(result, "warnings", [])),
-            },
-            ensure_ascii=False,
+        return execution.output.model_dump_json(
+            exclude_none=True,
         )
 
     def _handle_expand(
@@ -335,34 +327,6 @@ class WritingWorkerRetrievalLoopService:
             ensure_ascii=False,
         )
 
-    async def _run_recall_search(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        payload: WriterRetrievalSearchToolInput,
-        attempt_index: int,
-    ):
-        return await self._runtime_retrieval_card_service.search_recall_to_cards(
-            identity=identity,
-            input_model=MemorySearchRecallInput(query=payload.query, scope="story"),
-            actor="writer.retrieval",
-            attempt_index=attempt_index,
-        )
-
-    async def _run_archival_search(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        payload: WriterRetrievalSearchToolInput,
-        attempt_index: int,
-    ):
-        return await self._runtime_retrieval_card_service.search_archival_to_cards(
-            identity=identity,
-            input_model=MemorySearchArchivalInput(query=payload.query),
-            actor="writer.retrieval",
-            attempt_index=attempt_index,
-        )
-
     @staticmethod
     def _tool_definitions() -> list[dict[str, Any]]:
         return [
@@ -371,7 +335,7 @@ class WritingWorkerRetrievalLoopService:
                 "function": {
                     "name": WRITER_RETRIEVAL_SEARCH_TOOL,
                     "description": (
-                        "Search recall or archival knowledge and return short-id cards."
+                        "Search runtime memory with a concise query and return clean RAG results."
                     ),
                     "strict": True,
                     "parameters": {
@@ -379,9 +343,23 @@ class WritingWorkerRetrievalLoopService:
                         "additionalProperties": False,
                         "properties": {
                             "query": {"type": "string"},
-                            "search_kind": {
+                            "mode": {
                                 "type": "string",
-                                "enum": ["recall", "archival"],
+                                "enum": [
+                                    "entity",
+                                    "entity_relation",
+                                    "semantic",
+                                    "mixed",
+                                    "vague",
+                                ],
+                            },
+                            "lexical_anchors": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "semantic_predicates": {
+                                "type": "array",
+                                "items": {"type": "string"},
                             },
                         },
                         "required": ["query"],
@@ -464,7 +442,9 @@ class WritingWorkerRetrievalLoopService:
         return choice if isinstance(choice, dict) else None
 
     @staticmethod
-    def _tool_calls_from_message(message_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _tool_calls_from_message(
+        message_payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
         raw = message_payload.get("tool_calls") or []
         return [call for call in raw if isinstance(call, dict)]
 
@@ -540,17 +520,6 @@ class WritingWorkerRetrievalLoopService:
         totals["total_tokens"] += total_tokens
 
     @staticmethod
-    def _card_tool_payload(card) -> dict[str, Any]:
-        return {
-            "short_id": card.short_id,
-            "title": card.payload.get("title"),
-            "summary": card.payload.get("summary") or card.payload.get("excerpt"),
-            "domain": card.domain,
-            "domain_path": card.domain_path,
-            "search_kind": card.payload.get("search_kind"),
-        }
-
-    @staticmethod
     def _expanded_tool_payload(material) -> dict[str, Any]:
         return {
             "short_id": material.short_id,
@@ -558,13 +527,4 @@ class WritingWorkerRetrievalLoopService:
             "title": material.payload.get("title"),
             "summary": material.payload.get("summary"),
             "text": material.payload.get("text"),
-        }
-
-    @staticmethod
-    def _miss_tool_payload(material) -> dict[str, Any]:
-        return {
-            "short_id": material.short_id,
-            "query_text": material.payload.get("query_text"),
-            "search_kind": material.payload.get("search_kind"),
-            "miss_reason": material.payload.get("miss_reason"),
         }

@@ -113,7 +113,7 @@ def test_deepseek_tool_request_disables_thinking_by_default():
             {
                 "type": "function",
                 "function": {
-                    "name": "rp_setup__setup_world_background_write_entry",
+                    "name": "rp_setup__setup_stage_entry_write",
                     "parameters": {"type": "object", "properties": {}},
                 },
             }
