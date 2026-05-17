@@ -127,6 +127,11 @@ coverage/
 .claude/settings.local.json
 .codex/
 .agents/
+.cursor/
+
+# Markdown docs are local draft/discussion material for now. Re-enable and
+# publish curated docs after the project reaches a stable implementation point.
+*.md
 
 # Local Trellis execution state and task logs.
 # Keep .trellis/scripts, .trellis/spec, workflow, and config in Git; task/session
@@ -146,7 +151,7 @@ coverage/
 **/user_data/
 **/.local_storage/
 
-# 临时文档（只保留 README.md 和 CHANGELOG.md）
+# 临时文档 / Markdown 草稿
 *修复*.md
 *测试*.md
 *方案*.md
@@ -160,10 +165,6 @@ v3.*.md
 批量*.md
 项目*.md
 桌面*.md
-!README.md
-!CHANGELOG.md
-!LICENSE.md
-!CONTRIBUTING.md
 
 # 导出的对话文件
 exports/
@@ -271,6 +272,7 @@ docs
 .ace-tool/
 
 # Python Backend build artifacts
+backend/artifacts/
 backend/dist/
 backend/build/
 backend/venv/
