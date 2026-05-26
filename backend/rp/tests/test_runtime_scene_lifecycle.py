@@ -16,13 +16,13 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.services.builder_projection_context_service import (
+from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.projection_state_service import ProjectionStateService
+from rp.services.projection.state_service import ProjectionStateService
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.story_runtime_controller import StoryRuntimeController
 from rp.services.story_session_service import StorySessionService

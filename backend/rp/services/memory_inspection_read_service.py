@@ -8,7 +8,7 @@ from typing import Any
 from .core_state_store_repository import CoreStateStoreRepository
 from rp.models.dsl import Layer, ObjectRef
 
-from .builder_projection_context_service import BuilderProjectionContextService
+from .projection.builder_context_service import BuilderProjectionContextService
 from .memory_object_mapper import authoritative_bindings, normalize_authoritative_ref
 from .proposal_repository import ProposalRepository
 from .story_session_service import StorySessionService

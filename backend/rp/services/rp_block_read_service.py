@@ -13,7 +13,7 @@ from rp.models.story_runtime import (
     StoryDiscussionEntry,
 )
 
-from .builder_projection_context_service import BuilderProjectionContextService
+from .projection.builder_context_service import BuilderProjectionContextService
 from .core_state_store_repository import CoreStateStoreRepository
 from .memory_inspection_read_service import MemoryInspectionReadService
 from .memory_object_mapper import (

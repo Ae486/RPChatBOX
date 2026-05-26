@@ -42,8 +42,8 @@ from .longform_regression_service import LongformRegressionService
 from .longform_specialist_service import LongformSpecialistService
 from .post_write_governance_service import PostWriteGovernanceService
 from .post_write_scheduler_service import PostWriteSchedulerService
-from .builder_projection_context_service import BuilderProjectionContextService
-from .projection_state_service import ProjectionStateService
+from .projection.builder_context_service import BuilderProjectionContextService
+from .projection.state_service import ProjectionStateService
 from .recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )

@@ -14,7 +14,7 @@ from rp.models.story_runtime import (
     StorySession,
 )
 from .authoritative_state_view_service import AuthoritativeStateViewService
-from .projection_state_service import ProjectionStateService
+from .projection.state_service import ProjectionStateService
 from .story_block_prompt_compile_service import StoryBlockPromptCompileService
 from .story_block_prompt_context_service import StoryBlockPromptContextService
 from .story_block_prompt_render_service import StoryBlockPromptRenderService

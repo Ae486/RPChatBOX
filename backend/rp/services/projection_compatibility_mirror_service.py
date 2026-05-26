@@ -1,40 +1,16 @@
-"""Compatibility mirror access for legacy projection chapter snapshots."""
-
+"""DEPRECATED: moved to rp.services.projection.compatibility_mirror_service."""
 from __future__ import annotations
 
-from copy import deepcopy
+import warnings
 
-from rp.models.story_runtime import ChapterWorkspace
+from rp.services.projection.compatibility_mirror_service import *  # noqa: F401, F403
+from rp.services.projection.compatibility_mirror_service import (  # noqa: F401
+    ProjectionCompatibilityMirrorService,
+)
 
-from .story_session_service import StorySessionService
-
-
-class ProjectionCompatibilityMirrorService:
-    """Read/write the legacy builder snapshot mirror without treating it as truth source."""
-
-    def __init__(self, *, story_session_service: StorySessionService) -> None:
-        self._story_session_service = story_session_service
-
-    def read_mirror_snapshot(
-        self,
-        *,
-        chapter: ChapterWorkspace | None = None,
-        chapter_workspace_id: str | None = None,
-    ) -> dict:
-        resolved = chapter
-        if resolved is None and chapter_workspace_id is not None:
-            resolved = self._story_session_service.get_chapter_workspace(chapter_workspace_id)
-        if resolved is None:
-            return {}
-        return deepcopy(resolved.builder_snapshot_json or {})
-
-    def sync_mirror_snapshot(
-        self,
-        *,
-        chapter_workspace_id: str,
-        snapshot: dict,
-    ) -> ChapterWorkspace:
-        return self._story_session_service.update_chapter_workspace(
-            chapter_workspace_id=chapter_workspace_id,
-            builder_snapshot_json=snapshot,
-        )
+warnings.warn(
+    "rp.services.projection_compatibility_mirror_service is deprecated and will be "
+    "removed next release; use rp.services.projection.compatibility_mirror_service instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

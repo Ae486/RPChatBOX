@@ -13,8 +13,8 @@ BUSINESS_SERVICE_FILES = [
 ]
 PRIMARY_MEMORY_WRITE_SERVICE_FILES = [
     SERVICE_ROOT / "proposal_apply_service.py",
-    SERVICE_ROOT / "projection_refresh_service.py",
-    SERVICE_ROOT / "projection_state_service.py",
+    SERVICE_ROOT / "projection" / "refresh_service.py",
+    SERVICE_ROOT / "projection" / "state_service.py",
     SERVICE_ROOT / "story_state_apply_service.py",
 ]
 FORBIDDEN_BACKEND_KEYS = [
@@ -23,13 +23,13 @@ FORBIDDEN_BACKEND_KEYS = [
 ]
 LEGACY_MEMORY_BACKEND_ALLOWLIST = {
     "authoritative_compatibility_mirror_service.py",
-    "chapter_workspace_projection_adapter.py",
+    "chapter_workspace_adapter.py",
     "core_state_backfill_service.py",
     "core_state_read_service.py",
     "core_state_dual_write_service.py",
     "memory_inspection_read_service.py",
-    "projection_compatibility_mirror_service.py",
-    "projection_read_service.py",
+    "compatibility_mirror_service.py",
+    "read_service.py",
     "provenance_read_service.py",
     "story_activation_service.py",
     "story_session_core_state_adapter.py",
@@ -55,7 +55,7 @@ def test_primary_memory_write_services_use_mirror_boundaries():
 
 def test_legacy_memory_backend_key_usage_stays_inside_allowlist():
     offenders: set[str] = set()
-    for file_path in SERVICE_ROOT.glob("*.py"):
+    for file_path in SERVICE_ROOT.rglob("*.py"):
         content = file_path.read_text(encoding="utf-8")
         if any(forbidden_key in content for forbidden_key in FORBIDDEN_BACKEND_KEYS):
             offenders.add(file_path.name)

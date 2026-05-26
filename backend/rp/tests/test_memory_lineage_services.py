@@ -15,11 +15,11 @@ from rp.models.memory_crud import (
 from rp.models.memory_contract_registry import MemorySourceRef
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.projection_state_service import ProjectionStateService
-from rp.services.builder_projection_context_service import (
+from rp.services.projection.state_service import ProjectionStateService
+from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService

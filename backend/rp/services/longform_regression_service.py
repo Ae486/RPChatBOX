@@ -18,7 +18,7 @@ from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePoli
 from .legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
 from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_specialist_service import LongformSpecialistService
-from .projection_refresh_service import ProjectionRefreshService
+from .projection.refresh_service import ProjectionRefreshService
 from .proposal_workflow_service import ProposalWorkflowService
 from .recall.character_long_history_ingestion_service import (
     RecallCharacterLongHistoryIngestionService,

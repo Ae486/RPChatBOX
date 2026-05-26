@@ -21,13 +21,13 @@ from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
 from rp.services.context_orchestration_service import ContextOrchestrationService
-from rp.services.builder_projection_context_service import (
+from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.projection_state_service import ProjectionStateService
+from rp.services.projection.state_service import ProjectionStateService
 from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,

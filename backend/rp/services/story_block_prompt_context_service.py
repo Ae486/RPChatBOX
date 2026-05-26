@@ -13,7 +13,7 @@ from .memory_object_mapper import (
     resolve_projection_binding,
 )
 from .rp_block_read_service import RpBlockReadService
-from .settled_projection_mapper import settled_projection_slots
+from .projection.settled_mapper import settled_projection_slots
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
 
 

@@ -40,10 +40,10 @@ from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import MemorySearchRecallInput
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.builder_projection_context_service import (
+from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
@@ -54,7 +54,7 @@ from rp.services.memory_inspection_service import MemoryInspectionService
 from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
-from rp.services.projection_state_service import ProjectionStateService
+from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService

@@ -22,10 +22,10 @@ from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.longform_specialist_service import LongformSpecialistService
-from rp.services.builder_projection_context_service import (
+from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.longform_chapter_runtime_service import (
@@ -50,12 +50,12 @@ from rp.services.minimal_retrieval_ingestion_service import (
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.post_write_governance_service import PostWriteGovernanceService
 from rp.services.post_write_scheduler_service import PostWriteSchedulerService
-from rp.services.projection_compatibility_mirror_service import (
+from rp.services.projection.compatibility_mirror_service import (
     ProjectionCompatibilityMirrorService,
 )
-from rp.services.projection_read_service import ProjectionReadService
-from rp.services.projection_state_service import ProjectionStateService
-from rp.services.projection_refresh_service import ProjectionRefreshService
+from rp.services.projection.read_service import ProjectionReadService
+from rp.services.projection.state_service import ProjectionStateService
+from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.provenance_read_service import ProvenanceReadService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository

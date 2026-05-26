@@ -49,7 +49,7 @@ from rp.models.story_brainstorm import (
 )
 from .memory_inspection_read_service import MemoryInspectionReadService
 from .memory_inspection_service import MemoryInspectionService
-from .projection_read_service import ProjectionReadService
+from .projection.read_service import ProjectionReadService
 from .provenance_read_service import ProvenanceReadService
 from .recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,

@@ -22,7 +22,7 @@ from rp.models.story_runtime import (
 from rp.models.worker_runtime_contracts import WorkerContextPacket
 from .authoritative_state_view_service import AuthoritativeStateViewService
 from .memory_os_service import MemoryOsService
-from .projection_state_service import ProjectionStateService
+from .projection.state_service import ProjectionStateService
 from .runtime_retrieval_card_service import RuntimeRetrievalCardService
 from .retrieval_block_adapter_service import RetrievalBlockAdapterService
 from .retrieval_broker import RetrievalBroker

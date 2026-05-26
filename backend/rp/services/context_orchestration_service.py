@@ -26,7 +26,7 @@ from rp.models.worker_memory import WorkerSourceRefBundle
 from rp.models.worker_runtime_contracts import WorkerContextPacket
 from rp.models.writing_runtime import WritingPacket
 
-from .builder_projection_context_service import BuilderProjectionContextService
+from .projection.builder_context_service import BuilderProjectionContextService
 from .longform_chapter_runtime_service import LongformChapterRuntimeService
 from .runtime_read_manifest_service import RuntimeReadManifestService
 from .runtime_retrieval_card_service import RuntimeRetrievalCardService

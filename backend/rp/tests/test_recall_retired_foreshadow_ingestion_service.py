@@ -18,13 +18,13 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.longform_specialist_service import LongformSpecialistService
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
-from rp.services.projection_state_service import ProjectionStateService
+from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService

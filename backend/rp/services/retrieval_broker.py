@@ -38,10 +38,10 @@ from rp.models.memory_crud import (
 from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
 from rp.models.runtime_identity import RuntimeProfileSnapshotCompiledProfile
 from rp.observability.langfuse_scores import emit_retrieval_trace_scores
-from rp.services.builder_projection_context_service import (
+from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.core_state_backfill_service import CoreStateBackfillService
@@ -49,10 +49,10 @@ from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state_read_service import CoreStateReadService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
-from rp.services.projection_state_service import ProjectionStateService
+from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.provenance_read_service import ProvenanceReadService
-from rp.services.projection_read_service import ProjectionReadService
+from rp.services.projection.read_service import ProjectionReadService
 from rp.services.retrieval_observability_service import RetrievalObservabilityService
 from rp.services.retrieval_runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.retrieval_service import RetrievalService

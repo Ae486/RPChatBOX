@@ -1,15 +1,16 @@
-"""Build writer-facing settled projection context from the current chapter snapshot."""
-
+"""DEPRECATED: moved to rp.services.projection.builder_context_service."""
 from __future__ import annotations
 
-from .projection_state_service import ProjectionStateService
+import warnings
 
+from rp.services.projection.builder_context_service import *  # noqa: F401, F403
+from rp.services.projection.builder_context_service import (  # noqa: F401
+    BuilderProjectionContextService,
+)
 
-class BuilderProjectionContextService:
-    """Expose settled projection slots for WritingPacketBuilder consumption."""
-
-    def __init__(self, projection_state_service: ProjectionStateService) -> None:
-        self._projection_state_service = projection_state_service
-
-    def build_context_sections(self, *, session_id: str) -> list[dict[str, object]]:
-        return self._projection_state_service.build_context_sections(session_id=session_id)
+warnings.warn(
+    "rp.services.builder_projection_context_service is deprecated and will be "
+    "removed next release; use rp.services.projection.builder_context_service instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

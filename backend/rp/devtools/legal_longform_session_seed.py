@@ -65,14 +65,14 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.services.chapter_workspace_projection_adapter import (
+from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
-from rp.services.projection_state_service import ProjectionStateService
+from rp.services.projection.state_service import ProjectionStateService
 from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
