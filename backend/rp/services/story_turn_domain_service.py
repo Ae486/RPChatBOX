@@ -44,7 +44,7 @@ from .post_write_governance_service import PostWriteGovernanceService
 from .post_write_scheduler_service import PostWriteSchedulerService
 from .builder_projection_context_service import BuilderProjectionContextService
 from .projection_state_service import ProjectionStateService
-from .recall_scene_transcript_ingestion_service import (
+from .recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
 from .rewrite_packet_constraint_service import RewritePacketConstraintService

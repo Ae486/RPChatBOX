@@ -28,11 +28,11 @@ from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
-from rp.services.recall_continuity_note_ingestion_service import (
+from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )
-from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
-from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
+from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
+from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService

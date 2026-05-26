@@ -73,7 +73,7 @@ from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.projection_state_service import ProjectionStateService
-from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
+from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_ingestion_service import RetrievalIngestionService

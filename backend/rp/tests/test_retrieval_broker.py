@@ -46,11 +46,11 @@ from rp.retrieval.search_utils import build_chunk_hit
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_os_service import MemoryOsService
 from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
-from rp.services.recall_continuity_note_ingestion_service import (
+from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )
-from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
-from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
+from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
+from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.retrieval_broker import RetrievalBroker
 from rp.services.retrieval_collection_service import RetrievalCollectionService
 from rp.services.retrieval_document_service import RetrievalDocumentService

@@ -18,7 +18,7 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from rp.services.longform_regression_service import LongformRegressionService
-from rp.services.recall_character_long_history_ingestion_service import (
+from rp.services.recall.character_long_history_ingestion_service import (
     RecallCharacterLongHistoryIngestionService,
 )
 from rp.services.retrieval_broker import RetrievalBroker

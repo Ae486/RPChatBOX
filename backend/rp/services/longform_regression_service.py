@@ -20,17 +20,17 @@ from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_specialist_service import LongformSpecialistService
 from .projection_refresh_service import ProjectionRefreshService
 from .proposal_workflow_service import ProposalWorkflowService
-from .recall_character_long_history_ingestion_service import (
+from .recall.character_long_history_ingestion_service import (
     RecallCharacterLongHistoryIngestionService,
 )
-from .recall_continuity_note_ingestion_service import (
+from .recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )
-from .recall_detail_ingestion_service import RecallDetailIngestionService
-from .recall_retired_foreshadow_ingestion_service import (
+from .recall.detail_ingestion_service import RecallDetailIngestionService
+from .recall.retired_foreshadow_ingestion_service import (
     RecallRetiredForeshadowIngestionService,
 )
-from .recall_summary_ingestion_service import RecallSummaryIngestionService
+from .recall.summary_ingestion_service import RecallSummaryIngestionService
 from .story_session_service import StorySessionService
 
 

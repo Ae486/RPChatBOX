@@ -60,24 +60,24 @@ from rp.services.provenance_read_service import ProvenanceReadService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
-from rp.services.recall_character_long_history_ingestion_service import (
+from rp.services.recall.character_long_history_ingestion_service import (
     RecallCharacterLongHistoryIngestionService,
 )
-from rp.services.recall_continuity_note_ingestion_service import (
+from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )
-from rp.services.recall_detail_ingestion_service import RecallDetailIngestionService
-from rp.services.recall_retired_foreshadow_ingestion_service import (
+from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
+from rp.services.recall.retired_foreshadow_ingestion_service import (
     RecallRetiredForeshadowIngestionService,
 )
-from rp.services.recall_lifecycle_service import RecallLifecycleService
-from rp.services.recall_scene_transcript_ingestion_service import (
+from rp.services.recall.lifecycle_service import RecallLifecycleService
+from rp.services.recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
 from rp.services.revision_overlay_service import RevisionOverlayService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.retrieval_broker import RetrievalBroker
-from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
+from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.runtime_read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestService,

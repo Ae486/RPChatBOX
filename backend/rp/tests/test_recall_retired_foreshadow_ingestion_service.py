@@ -28,7 +28,7 @@ from rp.services.projection_state_service import ProjectionStateService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
-from rp.services.recall_retired_foreshadow_ingestion_service import (
+from rp.services.recall.retired_foreshadow_ingestion_service import (
     RecallRetiredForeshadowIngestionService,
 )
 from rp.services.retrieval_broker import RetrievalBroker

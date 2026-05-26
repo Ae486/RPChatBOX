@@ -25,7 +25,7 @@ from rp.services.chapter_workspace_projection_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.projection_state_service import ProjectionStateService
-from rp.services.recall_scene_transcript_ingestion_service import (
+from rp.services.recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
     SceneTranscriptPromotionInput,
 )

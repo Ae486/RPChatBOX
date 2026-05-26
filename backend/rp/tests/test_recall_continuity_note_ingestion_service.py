@@ -13,7 +13,7 @@ from rp.models.dsl import Domain
 from rp.models.memory_crud import MemorySearchRecallInput
 from rp.models.retrieval_records import IndexJob
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.recall_continuity_note_ingestion_service import (
+from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )
 from rp.services.retrieval_broker import RetrievalBroker

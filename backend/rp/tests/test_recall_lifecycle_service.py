@@ -9,8 +9,8 @@ from rp.models.memory_materialization import (
     build_recall_materialization_metadata,
 )
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.recall_lifecycle_service import RecallLifecycleService
-from rp.services.recall_summary_ingestion_service import RecallSummaryIngestionService
+from rp.services.recall.lifecycle_service import RecallLifecycleService
+from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.retrieval_document_service import RetrievalDocumentService
 from rp.services.story_session_service import StorySessionService
 
