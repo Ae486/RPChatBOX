@@ -37,7 +37,7 @@ from rp.services.memory_contract_registry import MemoryContractRegistryService
 from rp.services.memory_registry_management_service import (
     MemoryRegistryManagementService,
 )
-from rp.services.retrieval_runtime_config_service import RetrievalRuntimeConfigService
+from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
 
 
 def _utcnow() -> datetime:

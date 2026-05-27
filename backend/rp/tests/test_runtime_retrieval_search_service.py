@@ -16,7 +16,7 @@ from rp.models.retrieval_runtime_contracts import RuntimeRetrievalSearchInput
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterial
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialVisibility
-from rp.services.runtime_retrieval_search_service import RuntimeRetrievalSearchService
+from rp.services.retrieval.runtime_search_service import RuntimeRetrievalSearchService
 
 
 def _identity() -> MemoryRuntimeIdentity:

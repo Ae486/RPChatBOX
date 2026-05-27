@@ -49,7 +49,7 @@ from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.draft_materialization_service import DraftMaterializationService
 from rp.services.draft_selection_service import DraftSelectionService
 from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
-from rp.services.retrieval_broker import RetrievalBroker
+from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.revision_overlay_service import RevisionOverlayService
 from rp.services.rewrite_candidate_service import RewriteCandidateService
 from rp.services.rewrite_request_builder_service import RewriteRequestBuilderService

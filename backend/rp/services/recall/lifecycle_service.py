@@ -13,8 +13,8 @@ from rp.models.memory_materialization import (
     RecallLifecycleMetadata,
 )
 
-from ..retrieval_document_service import RetrievalDocumentService
-from ..retrieval_ingestion_service import RetrievalIngestionService
+from ..retrieval.document_service import RetrievalDocumentService
+from ..retrieval.ingestion_service import RetrievalIngestionService
 
 
 class RecallLifecycleService:

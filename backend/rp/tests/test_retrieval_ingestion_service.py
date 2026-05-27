@@ -17,9 +17,9 @@ from rp.models.retrieval_records import SourceAsset
 from rp.retrieval.embedder import Embedder
 from rp.retrieval.parser import Parser
 from rp.models.setup_workspace import StoryMode
-from rp.services.retrieval_collection_service import RetrievalCollectionService
-from rp.services.retrieval_document_service import RetrievalDocumentService
-from rp.services.retrieval_ingestion_service import RetrievalIngestionService
+from rp.services.retrieval.collection_service import RetrievalCollectionService
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 
 
 def _utcnow() -> datetime:

@@ -29,8 +29,8 @@ from rp.services.recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
     SceneTranscriptPromotionInput,
 )
-from rp.services.retrieval_broker import RetrievalBroker
-from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval.broker import RetrievalBroker
+from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.story_runtime_controller import StoryRuntimeController

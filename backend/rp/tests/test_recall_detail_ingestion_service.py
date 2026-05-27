@@ -15,8 +15,8 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
-from rp.services.retrieval_broker import RetrievalBroker
-from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval.broker import RetrievalBroker
+from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.story_session_service import StorySessionService
 
 

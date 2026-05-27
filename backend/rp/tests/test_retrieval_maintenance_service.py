@@ -9,10 +9,10 @@ from sqlmodel import select
 from models.rp_retrieval_store import EmbeddingRecordRecord, KnowledgeChunkRecord
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_workspace import StoryMode
-from rp.services.retrieval_collection_service import RetrievalCollectionService
-from rp.services.retrieval_document_service import RetrievalDocumentService
-from rp.services.retrieval_ingestion_service import RetrievalIngestionService
-from rp.services.retrieval_maintenance_service import RetrievalMaintenanceService
+from rp.services.retrieval.collection_service import RetrievalCollectionService
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
+from rp.services.retrieval.maintenance_service import RetrievalMaintenanceService
 
 
 def _utcnow() -> datetime:

@@ -29,7 +29,7 @@ from rp.models.writing_runtime import WritingPacket
 from .projection.builder_context_service import BuilderProjectionContextService
 from .longform_chapter_runtime_service import LongformChapterRuntimeService
 from .runtime_read_manifest_service import RuntimeReadManifestService
-from .runtime_retrieval_card_service import RuntimeRetrievalCardService
+from .retrieval.runtime_card_service import RuntimeRetrievalCardService
 from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 from .story_session_service import StorySessionService

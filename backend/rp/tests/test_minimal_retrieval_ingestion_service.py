@@ -25,10 +25,10 @@ from rp.models.memory_graph_projection import (
     GRAPH_JOB_STATUS_QUEUED,
 )
 from rp.models.memory_crud import MemorySearchArchivalInput
-from rp.services.minimal_retrieval_ingestion_service import (
+from rp.services.retrieval.minimal_ingestion_service import (
     MinimalRetrievalIngestionService,
 )
-from rp.services.retrieval_broker import RetrievalBroker
+from rp.services.retrieval.broker import RetrievalBroker
 
 
 def _utcnow() -> datetime:

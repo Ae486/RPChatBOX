@@ -29,7 +29,7 @@ from rp.models.setup_workspace import (
     SetupWorkspaceState,
     StoryMode,
 )
-from rp.services.minimal_retrieval_ingestion_service import (
+from rp.services.retrieval.minimal_ingestion_service import (
     MinimalRetrievalIngestionService,
 )
 from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService

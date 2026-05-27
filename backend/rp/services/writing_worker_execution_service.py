@@ -7,7 +7,7 @@ from typing import AsyncIterator
 
 from models.chat import ChatMessage
 from rp.models.worker_memory import WorkerSourceRefBundle
-from rp.services.runtime_retrieval_card_service import RuntimeRetrievalCardService
+from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.models.writing_worker_contracts import (
     WritingWorkerExecutionRequest,
     WritingWorkerExecutionResult,

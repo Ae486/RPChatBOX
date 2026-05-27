@@ -49,8 +49,8 @@ def _seed_story_assets(client):
     from sqlmodel import Session
 
     from models.rp_retrieval_store import SourceAssetRecord
-    from rp.services.retrieval_collection_service import RetrievalCollectionService
-    from rp.services.retrieval_ingestion_service import RetrievalIngestionService
+    from rp.services.retrieval.collection_service import RetrievalCollectionService
+    from rp.services.retrieval.ingestion_service import RetrievalIngestionService
     from services.database import get_engine
 
     with Session(get_engine()) as session:
@@ -114,7 +114,7 @@ def test_retry_failed_story_jobs_and_single_job_retry(client):
     from models.rp_retrieval_store import EmbeddingRecordRecord, KnowledgeChunkRecord
     from rp.models.retrieval_records import EmbeddingRecord, KnowledgeChunk
     from rp.retrieval.embedder import Embedder
-    from rp.services.retrieval_ingestion_service import RetrievalIngestionService
+    from rp.services.retrieval.ingestion_service import RetrievalIngestionService
     from services.database import get_engine
 
     class InvalidEmbedder(Embedder):

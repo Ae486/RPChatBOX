@@ -38,11 +38,11 @@ from rp.services.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
-from rp.services.retrieval_broker import RetrievalBroker
-from rp.services.retrieval_collection_service import RetrievalCollectionService
-from rp.services.retrieval_document_service import RetrievalDocumentService
-from rp.services.retrieval_ingestion_service import RetrievalIngestionService
-from rp.services.retrieval_index_job_service import RetrievalIndexJobService
+from rp.services.retrieval.broker import RetrievalBroker
+from rp.services.retrieval.collection_service import RetrievalCollectionService
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
+from rp.services.retrieval.index_job_service import RetrievalIndexJobService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_evolution_service import (
     StoryEvolutionService,

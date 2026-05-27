@@ -6,7 +6,7 @@ import pytest
 
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_crud import RetrievalHit
-from rp.services.retrieval_block_adapter_service import RetrievalBlockAdapterService
+from rp.services.retrieval.block_adapter_service import RetrievalBlockAdapterService
 
 
 def test_build_block_views_maps_retrieval_hits_without_mutating_metadata():

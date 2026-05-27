@@ -21,8 +21,8 @@ from rp.services.longform_regression_service import LongformRegressionService
 from rp.services.recall.character_long_history_ingestion_service import (
     RecallCharacterLongHistoryIngestionService,
 )
-from rp.services.retrieval_broker import RetrievalBroker
-from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval.broker import RetrievalBroker
+from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.story_session_service import StorySessionService
 
 

@@ -12,8 +12,8 @@ from rp.models.memory_graph_projection import (
     GRAPH_TAXONOMY_VERSION,
 )
 from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
-from rp.services.retrieval_ingestion_service import RetrievalIngestionService
-from rp.services.retrieval_maintenance_service import RetrievalMaintenanceService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
+from rp.services.retrieval.maintenance_service import RetrievalMaintenanceService
 from services.database import get_session
 
 router = APIRouter()

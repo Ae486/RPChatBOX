@@ -14,7 +14,7 @@ from rp.models.memory_crud import (
     SummaryReadResult,
     VersionListResult,
 )
-from rp.services.retrieval_broker import RetrievalBroker
+from rp.services.retrieval.broker import RetrievalBroker
 
 
 class MemoryOsService:

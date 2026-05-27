@@ -34,8 +34,8 @@ from .post_write_apply_handler import PostWriteApplyHandler
 from .proposal_apply_service import ProposalApplyService
 from .proposal_repository import ProposalRepository
 from .proposal_workflow_service import ProposalWorkflowService
-from .retrieval_broker import RetrievalBroker
-from .runtime_retrieval_card_service import RuntimeRetrievalCardService
+from .retrieval.broker import RetrievalBroker
+from .retrieval.runtime_card_service import RuntimeRetrievalCardService
 from .story_session_service import StorySessionService
 from .story_state_apply_service import StoryStateApplyService
 

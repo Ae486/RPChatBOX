@@ -10,7 +10,7 @@ import litellm
 from models.model_registry import ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
 from ragas.llms import LiteLLMStructuredLLM
-from rp.services.retrieval_runtime_config_service import RetrievalRuntimeConfigService
+from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from services.litellm_service import LiteLLMService
 from services.model_registry import get_model_registry_service
 from services.provider_registry import get_provider_registry_service

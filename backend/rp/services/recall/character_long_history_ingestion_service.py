@@ -22,9 +22,9 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from .lifecycle_service import RecallLifecycleService
-from ..retrieval_collection_service import RetrievalCollectionService
-from ..retrieval_document_service import RetrievalDocumentService
-from ..retrieval_ingestion_service import RetrievalIngestionService
+from ..retrieval.collection_service import RetrievalCollectionService
+from ..retrieval.document_service import RetrievalDocumentService
+from ..retrieval.ingestion_service import RetrievalIngestionService
 
 
 def _utcnow() -> datetime:

@@ -58,13 +58,13 @@ from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal_apply_service import ProposalApplyService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
-from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.runtime_read_manifest_service import BranchVisibilityResolver
 from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.story_block_mutation_service import StoryBlockMutationService
 from rp.services.story_state_apply_service import StoryStateApplyService
-from rp.services.retrieval_broker import RetrievalBroker
+from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter

@@ -10,7 +10,7 @@ from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySour
 from rp.models.retrieval_records import IndexJob
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
-from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.story_session_service import StorySessionService
 
 

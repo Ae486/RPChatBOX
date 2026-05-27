@@ -23,9 +23,9 @@ from rp.models.worker_runtime_contracts import WorkerContextPacket
 from .authoritative_state_view_service import AuthoritativeStateViewService
 from .memory_os_service import MemoryOsService
 from .projection.state_service import ProjectionStateService
-from .runtime_retrieval_card_service import RuntimeRetrievalCardService
-from .retrieval_block_adapter_service import RetrievalBlockAdapterService
-from .retrieval_broker import RetrievalBroker
+from .retrieval.runtime_card_service import RuntimeRetrievalCardService
+from .retrieval.block_adapter_service import RetrievalBlockAdapterService
+from .retrieval.broker import RetrievalBroker
 from .story_block_prompt_compile_service import StoryBlockPromptCompileService
 from .story_block_prompt_context_service import StoryBlockPromptContextService
 from .story_block_prompt_render_service import StoryBlockPromptRenderService

@@ -64,7 +64,7 @@ from rp.models.memory_graph_projection import (
 )
 from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
 from .memory_graph_projection_repository import MemoryGraphProjectionRepository
-from .retrieval_runtime_config_service import RetrievalRuntimeConfigService
+from .retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from .story_llm_gateway import StoryLlmGateway
 
 

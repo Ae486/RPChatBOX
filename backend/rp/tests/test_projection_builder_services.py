@@ -76,7 +76,7 @@ from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_retrieval_card_service import RuntimeRetrievalCardService
+from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,

@@ -69,9 +69,9 @@ from rp.services.proposal_repository import ProposalRepository
 from rp.services.proposal_workflow_service import ProposalWorkflowService
 from rp.services.projection.read_service import ProjectionReadService
 from rp.services.provenance_read_service import ProvenanceReadService
-from rp.services.retrieval_collection_service import RetrievalCollectionService
-from rp.services.retrieval_document_service import RetrievalDocumentService
-from rp.services.retrieval_ingestion_service import RetrievalIngestionService
+from rp.services.retrieval.collection_service import RetrievalCollectionService
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.runtime_config_control_service import RuntimeConfigControlService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService

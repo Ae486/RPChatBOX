@@ -344,7 +344,7 @@ async def test_eval_runner_surfaces_failed_retrieval_ingestion_jobs(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "rp.services.retrieval_ingestion_service.Chunker.chunk",
+        "rp.services.retrieval.ingestion_service.Chunker.chunk",
         lambda self, document, **kwargs: [],
     )
 

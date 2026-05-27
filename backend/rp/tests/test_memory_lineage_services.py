@@ -35,7 +35,7 @@ from rp.services.runtime_read_manifest_service import (
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.retrieval_broker import RetrievalBroker
+from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService

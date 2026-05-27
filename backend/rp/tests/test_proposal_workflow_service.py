@@ -33,8 +33,8 @@ from rp.services.recall.continuity_note_ingestion_service import (
 )
 from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
 from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
-from rp.services.retrieval_broker import RetrievalBroker
-from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval.broker import RetrievalBroker
+from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService

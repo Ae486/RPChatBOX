@@ -53,10 +53,10 @@ from rp.models.story_runtime import LongformChapterPhase
 from rp.models.setup_workspace import StoryMode
 from rp.services.memory_graph_extraction_service import MemoryGraphExtractionService
 from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
-from rp.services.retrieval_broker import RetrievalBroker
-from rp.services.retrieval_collection_service import RetrievalCollectionService
-from rp.services.retrieval_document_service import RetrievalDocumentService
-from rp.services.retrieval_ingestion_service import RetrievalIngestionService
+from rp.services.retrieval.broker import RetrievalBroker
+from rp.services.retrieval.collection_service import RetrievalCollectionService
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
 

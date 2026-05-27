@@ -20,10 +20,10 @@ from rp.retrieval.query_preprocessor import DefaultQueryPreprocessor
 from rp.retrieval.rrf_fusion import reciprocal_rank_fusion
 from rp.retrieval.rag_context_builder import RagContextBuilder
 from rp.retrieval.reranker import SimpleMetadataReranker
-from rp.services.retrieval_collection_service import RetrievalCollectionService
-from rp.services.retrieval_document_service import RetrievalDocumentService
-from rp.services.retrieval_ingestion_service import RetrievalIngestionService
-from rp.services.retrieval_service import RetrievalService
+from rp.services.retrieval.collection_service import RetrievalCollectionService
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
+from rp.services.retrieval.service import RetrievalService
 
 
 def _utcnow() -> datetime:

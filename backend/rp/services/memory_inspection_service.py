@@ -30,7 +30,7 @@ from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialLifecyc
 from .archival_evolution_service import ArchivalEvolutionService
 from .memory_inspection_read_service import MemoryInspectionReadService
 from .recall.lifecycle_service import RecallLifecycleService
-from .retrieval_document_service import RetrievalDocumentService
+from .retrieval.document_service import RetrievalDocumentService
 from .rp_block_read_service import RpBlockReadService
 from .runtime_read_manifest_service import BranchVisibilityResolver
 from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService

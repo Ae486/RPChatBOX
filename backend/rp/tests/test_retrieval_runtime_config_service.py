@@ -5,7 +5,7 @@ from __future__ import annotations
 from rp.models.setup_drafts import StoryConfigDraft
 from rp.models.story_runtime import LongformChapterPhase
 from rp.models.setup_workspace import StoryMode
-from rp.services.retrieval_runtime_config_service import RetrievalRuntimeConfigService
+from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.setup_workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
 

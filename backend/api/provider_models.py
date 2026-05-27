@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException
 
 from models.model_registry import ModelRegistryEntry, ModelRegistrySummary
-from rp.services.local_rerank_readiness_service import LocalRerankReadinessService
+from rp.services.retrieval.local_rerank_readiness_service import LocalRerankReadinessService
 from services.model_capability_service import (
     hydrate_registry_model_entry,
     normalize_registry_capabilities,

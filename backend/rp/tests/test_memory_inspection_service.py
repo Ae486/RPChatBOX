@@ -30,7 +30,7 @@ from rp.services.memory_inspection_service import (
     MemoryInspectionError,
     MemoryInspectionService,
 )
-from rp.services.retrieval_document_service import RetrievalDocumentService
+from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime_read_manifest_service import BranchVisibilityResolver
 from rp.services.runtime_workspace_material_service import (

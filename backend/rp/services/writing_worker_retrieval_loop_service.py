@@ -14,13 +14,13 @@ from rp.models.retrieval_runtime_contracts import (
     WriterRetrievalUsageToolInput,
 )
 from rp.models.worker_memory import WorkerSourceRefBundle
-from rp.services.runtime_retrieval_card_service import (
+from rp.services.retrieval.runtime_card_service import (
     RuntimeRetrievalCardService,
     RuntimeRetrievalCardServiceError,
 )
-from rp.services.runtime_retrieval_search_service import RuntimeRetrievalSearchService
+from rp.services.retrieval.runtime_search_service import RuntimeRetrievalSearchService
 from rp.services.story_llm_gateway import StoryLlmGateway
-from rp.services.writer_retrieval_usage_guard_service import (
+from rp.services.retrieval.writer_usage_guard_service import (
     WriterRetrievalUsageGuardService,
     WriterRetrievalUsageGuardServiceError,
 )

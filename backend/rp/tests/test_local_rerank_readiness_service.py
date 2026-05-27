@@ -5,7 +5,7 @@ from __future__ import annotations
 from models.model_registry import ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
 from rp.models.retrieval_local_rerank import LocalRerankDependencyStatus
-from rp.services.local_rerank_readiness_service import LocalRerankReadinessService
+from rp.services.retrieval.local_rerank_readiness_service import LocalRerankReadinessService
 
 
 class _FakeModelRegistryService:

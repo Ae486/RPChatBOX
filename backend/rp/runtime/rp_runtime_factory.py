@@ -44,7 +44,7 @@ from rp.services.memory_inspection_read_service import MemoryInspectionReadServi
 from rp.services.memory_inspection_service import MemoryInspectionService
 from rp.services.memory_trace_read_service import MemoryTraceReadService
 from rp.services.memory_os_service import MemoryOsService
-from rp.services.minimal_retrieval_ingestion_service import (
+from rp.services.retrieval.minimal_ingestion_service import (
     MinimalRetrievalIngestionService,
 )
 from rp.services.post_write_apply_handler import PostWriteApplyHandler
@@ -75,14 +75,14 @@ from rp.services.recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
 from rp.services.revision_overlay_service import RevisionOverlayService
-from rp.services.retrieval_document_service import RetrievalDocumentService
-from rp.services.retrieval_broker import RetrievalBroker
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.runtime_read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestService,
 )
-from rp.services.runtime_retrieval_card_service import RuntimeRetrievalCardService
+from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.services.runtime_config_control_service import RuntimeConfigControlService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
