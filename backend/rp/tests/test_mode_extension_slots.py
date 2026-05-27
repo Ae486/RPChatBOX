@@ -36,7 +36,7 @@ from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.services.story_session_service import StorySessionService
 from rp.services.worker_execution_service import WorkerExecutionService

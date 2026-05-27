@@ -35,7 +35,7 @@ from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.context_orchestration_service import ContextOrchestrationService
-from rp.services.draft_materialization_service import DraftMaterializationService
+from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
@@ -89,11 +89,11 @@ from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.rp_block_read_service import RpBlockReadService
-from rp.services.setup_agent_execution_service import SetupAgentExecutionService
-from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
-from rp.services.setup_context_builder import SetupContextBuilder
-from rp.services.setup_runtime_controller import SetupRuntimeController
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
+from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
+from rp.services.setup_agent.context_builder import SetupContextBuilder
+from rp.services.setup_agent.runtime_controller import SetupRuntimeController
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_activation_service import StoryActivationService
 from rp.services.story_block_consumer_state_service import (
     StoryBlockConsumerStateService,

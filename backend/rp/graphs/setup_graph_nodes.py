@@ -4,8 +4,8 @@ from __future__ import annotations
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_workspace import SetupStepId
-from rp.services.setup_agent_execution_service import SetupAgentExecutionService
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 
 from .setup_graph_state import SetupGraphState
 

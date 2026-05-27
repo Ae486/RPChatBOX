@@ -18,7 +18,7 @@ from rp.agent_runtime.profiles import (
 from rp.models.setup_handoff import SetupContextPacket
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
-from rp.services.setup_agent_prompt_service import SetupAgentPromptService
+from rp.services.setup_agent.agent_prompt_service import SetupAgentPromptService
 
 
 def _packet(

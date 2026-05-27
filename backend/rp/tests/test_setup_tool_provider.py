@@ -22,7 +22,7 @@ from rp.models.setup_workspace import (
     SetupStepId,
     StoryMode,
 )
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.tools.setup_tool_provider import SetupToolProvider
 from rp.tools.setup_tool_registry import SETUP_TOOL_REGISTRY
 

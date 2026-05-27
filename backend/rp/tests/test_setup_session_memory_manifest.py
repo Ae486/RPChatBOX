@@ -10,7 +10,7 @@ from rp.models.setup_drafts import (
 )
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import StoryMode
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.setup_agent_memory.service import SetupSessionMemoryService
 
 

@@ -1,0 +1,722 @@
+"""Setup context packet assembly for the SetupAgent MVP."""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from rp.models.setup_handoff import (
+    SetupContextBuilderInput,
+    SetupContextPacket,
+    SetupStageChunkDescription,
+    SetupStageHandoffPacket,
+    SetupStageHandoffSourceBasis,
+)
+from rp.models.setup_stage import SetupStageId
+from rp.models.setup_workspace import SetupStepId
+from .workspace_service import SetupWorkspaceService
+
+
+class SetupContextBuilder:
+    """Build a stable setup context packet from SetupWorkspace state."""
+
+    _COMPACT_CONTEXT_TOKEN_BUDGET = 1200
+    _STEP_ORDER = SetupWorkspaceService._STEP_ORDER
+
+    def __init__(self, workspace_service: SetupWorkspaceService):
+        self._workspace_service = workspace_service
+
+    def build(self, input_model: SetupContextBuilderInput) -> SetupContextPacket:
+        workspace = self._workspace_service.get_workspace(input_model.workspace_id)
+        if workspace is None:
+            raise ValueError(f"SetupWorkspace not found: {input_model.workspace_id}")
+
+        current_stage = self._resolve_current_stage(input_model)
+        current_step = self._resolve_current_step(
+            input_model=input_model,
+            current_stage=current_stage,
+        )
+        context_profile = self._context_profile(input_model.token_budget)
+        prior_stage_handoffs = self._collect_prior_stage_handoffs(
+            workspace=workspace,
+            current_step=current_step,
+            current_stage=current_stage,
+            context_profile=context_profile,
+        )
+        current_draft_snapshot = self._current_draft_snapshot(
+            workspace=workspace,
+            current_step=current_step,
+            current_stage=current_stage,
+        )
+        step_asset_preview = [
+            {
+                "asset_id": asset.asset_id,
+                "asset_kind": asset.asset_kind,
+                "title": asset.title,
+                "parse_status": asset.parse_status.value,
+                "mapped_targets": list(asset.mapped_targets),
+            }
+            for asset in workspace.imported_assets
+            if asset.step_id == current_step
+        ]
+        delta_ids = set(input_model.user_edit_delta_ids)
+        user_edit_deltas = [
+            {
+                "delta_id": delta.delta_id,
+                "target_block": delta.target_block,
+                "target_ref": delta.target_ref,
+                "changes": [
+                    item.model_dump(mode="json", exclude_none=True)
+                    for item in delta.changes
+                ],
+            }
+            for delta in workspace.pending_user_edit_deltas
+            if (
+                not delta_ids
+                and delta.step_id == current_step
+                and delta.consumed_at is None
+            )
+            or delta.delta_id in delta_ids
+        ]
+        committed_summaries = [handoff.summary for handoff in prior_stage_handoffs]
+        spotlights = [
+            spotlight
+            for handoff in prior_stage_handoffs
+            for spotlight in handoff.spotlights
+        ]
+
+        return SetupContextPacket(
+            workspace_id=workspace.workspace_id,
+            current_step=current_step.value,
+            current_stage=current_stage,
+            context_profile=context_profile,
+            committed_summaries=committed_summaries,
+            current_draft_snapshot=current_draft_snapshot,
+            step_asset_preview=step_asset_preview,
+            user_prompt=input_model.user_prompt,
+            user_edit_deltas=user_edit_deltas,
+            spotlights=spotlights[:10],
+            prior_stage_handoffs=prior_stage_handoffs,
+        )
+
+    @staticmethod
+    def _resolve_current_stage(
+        input_model: SetupContextBuilderInput,
+    ) -> SetupStageId | None:
+        if input_model.current_stage:
+            return SetupStageId(input_model.current_stage)
+        try:
+            return SetupStageId(input_model.current_step)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _resolve_current_step(
+        *,
+        input_model: SetupContextBuilderInput,
+        current_stage: SetupStageId | None,
+    ) -> SetupStepId:
+        try:
+            return SetupStepId(input_model.current_step)
+        except ValueError:
+            if current_stage is None:
+                raise
+            return SetupWorkspaceService.legacy_step_for_stage(current_stage)
+
+    @staticmethod
+    def _context_profile(
+        token_budget: int | None,
+    ) -> Literal["standard", "compact"]:
+        if (
+            token_budget is not None
+            and token_budget < SetupContextBuilder._COMPACT_CONTEXT_TOKEN_BUDGET
+        ):
+            return "compact"
+        return "standard"
+
+    @classmethod
+    def _collect_prior_stage_handoffs(
+        cls,
+        *,
+        workspace,
+        current_step: SetupStepId,
+        current_stage: SetupStageId | None,
+        context_profile: str,
+    ) -> list[SetupStageHandoffPacket]:
+        if current_stage is not None:
+            return cls._collect_prior_canonical_stage_handoffs(
+                workspace=workspace,
+                current_step=current_step,
+                current_stage=current_stage,
+                context_profile=context_profile,
+            )
+
+        try:
+            current_index = cls._STEP_ORDER.index(current_step)
+        except ValueError:
+            return []
+        if current_index <= 0:
+            return []
+
+        latest_commit_by_lifecycle = cls._latest_commit_by_lifecycle(workspace)
+        handoffs: list[SetupStageHandoffPacket] = []
+        for step_id in cls._STEP_ORDER[:current_index]:
+            commit = latest_commit_by_lifecycle.get(step_id.value)
+            if commit is None:
+                continue
+            handoffs.append(
+                cls._build_stage_handoff(
+                    workspace=workspace,
+                    commit=commit,
+                    to_step=current_step,
+                    to_stage=None,
+                    context_profile=context_profile,
+                )
+            )
+        return handoffs
+
+    @classmethod
+    def _collect_prior_canonical_stage_handoffs(
+        cls,
+        *,
+        workspace,
+        current_step: SetupStepId,
+        current_stage: SetupStageId,
+        context_profile: str,
+    ) -> list[SetupStageHandoffPacket]:
+        stage_plan = list(workspace.stage_plan)
+        if not stage_plan:
+            return []
+        try:
+            current_index = stage_plan.index(current_stage)
+        except ValueError:
+            return []
+        if current_index <= 0:
+            return []
+
+        latest_commit_by_lifecycle = cls._latest_commit_by_lifecycle(workspace)
+        handoffs: list[SetupStageHandoffPacket] = []
+        seen_commit_ids: set[str] = set()
+        for stage_id in stage_plan[:current_index]:
+            commit = latest_commit_by_lifecycle.get(
+                stage_id.value
+            ) or latest_commit_by_lifecycle.get(
+                SetupWorkspaceService.legacy_step_for_stage(stage_id).value
+            )
+            if commit is None:
+                continue
+            if commit.commit_id in seen_commit_ids:
+                continue
+            seen_commit_ids.add(commit.commit_id)
+            handoffs.append(
+                cls._build_stage_handoff(
+                    workspace=workspace,
+                    commit=commit,
+                    to_step=current_step,
+                    to_stage=current_stage,
+                    context_profile=context_profile,
+                )
+            )
+        return handoffs
+
+    @classmethod
+    def _latest_commit_by_lifecycle(cls, workspace) -> dict[str, Any]:
+        latest: dict[str, Any] = {}
+        ordered_commits = sorted(
+            workspace.accepted_commits,
+            key=lambda item: (item.created_at, cls._lifecycle_value(item.step_id)),
+        )
+        for commit in ordered_commits:
+            latest[cls._lifecycle_value(commit.step_id)] = commit
+        return latest
+
+    @classmethod
+    def _build_stage_handoff(
+        cls,
+        *,
+        workspace,
+        commit,
+        to_step: SetupStepId,
+        to_stage: SetupStageId | None,
+        context_profile: str,
+    ) -> SetupStageHandoffPacket:
+        compact = context_profile == "compact"
+        from_stage = cls._coerce_stage_id(cls._lifecycle_value(commit.step_id))
+        from_step = (
+            SetupWorkspaceService.legacy_step_for_stage(from_stage)
+            if from_stage is not None
+            else SetupStepId(cls._lifecycle_value(commit.step_id))
+        )
+        return SetupStageHandoffPacket(
+            workspace_id=workspace.workspace_id,
+            from_step=from_step,
+            to_step=to_step,
+            step_id=from_step,
+            from_stage=from_stage,
+            to_stage=to_stage,
+            stage_id=from_stage,
+            commit_id=commit.commit_id,
+            summary=cls._commit_summary(commit=commit, compact=compact),
+            summary_tier_0=(
+                str(commit.summary_tier_0)
+                if commit.summary_tier_0 is not None
+                else None
+            ),
+            summary_tier_1=(
+                str(commit.summary_tier_1 or commit.summary_tier_2)
+                if (commit.summary_tier_1 or commit.summary_tier_2) is not None
+                else None
+            ),
+            committed_refs=list(commit.committed_refs),
+            spotlights=list(commit.spotlights[:5]),
+            chunk_descriptions=(
+                []
+                if compact
+                else cls._build_chunk_descriptions(
+                    commit=commit,
+                    compact=False,
+                )
+            ),
+            open_issues=cls._build_open_issues(commit=commit),
+            retrieval_refs=cls._build_retrieval_refs(
+                workspace=workspace,
+                commit_id=commit.commit_id,
+            ),
+            warnings=cls._build_handoff_warnings(
+                workspace=workspace,
+                proposal_id=commit.proposal_id,
+            ),
+            source_basis=SetupStageHandoffSourceBasis(
+                workspace_id=workspace.workspace_id,
+                commit_id=commit.commit_id,
+                snapshot_block_types=[
+                    str(snapshot.block_type) for snapshot in commit.snapshots
+                ],
+            ),
+            created_at=commit.created_at,
+        )
+
+    @staticmethod
+    def _lifecycle_value(value: Any) -> str:
+        enum_value = getattr(value, "value", None)
+        return str(enum_value if enum_value is not None else value)
+
+    @staticmethod
+    def _coerce_stage_id(value: str | None) -> SetupStageId | None:
+        if not value:
+            return None
+        try:
+            return SetupStageId(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _commit_summary(*, commit, compact: bool) -> str:
+        summary = (
+            commit.summary_tier_0
+            if compact
+            else commit.summary_tier_1 or commit.summary_tier_2
+        )
+        summary = (
+            summary or commit.summary_tier_0 or f"Committed {commit.step_id.value}"
+        )
+        return summary if isinstance(summary, str) else str(summary)
+
+    @classmethod
+    def _build_chunk_descriptions(
+        cls,
+        *,
+        commit,
+        compact: bool,
+    ) -> list[SetupStageChunkDescription]:
+        chunks: list[SetupStageChunkDescription] = []
+        for snapshot in commit.snapshots:
+            stage_id = cls._coerce_stage_id(snapshot.block_type)
+            if stage_id is not None:
+                chunks.extend(
+                    cls._stage_chunk_descriptions(
+                        stage_id=stage_id,
+                        payload=snapshot.payload,
+                    )
+                )
+                continue
+            if snapshot.block_type == "foundation":
+                chunks.extend(cls._foundation_chunk_descriptions(snapshot.payload))
+                continue
+            if snapshot.block_type == "longform_blueprint":
+                chunks.extend(cls._blueprint_chunk_descriptions(snapshot.payload))
+                continue
+            description = cls._generic_snapshot_description(
+                block_type=snapshot.block_type,
+                payload=snapshot.payload,
+            )
+            if description is None:
+                continue
+            chunks.append(
+                SetupStageChunkDescription(
+                    chunk_ref=f"{snapshot.block_type}:{commit.commit_id}",
+                    block_type=snapshot.block_type,
+                    title=snapshot.block_type,
+                    description=description,
+                )
+            )
+        return chunks[: (4 if compact else 8)]
+
+    @classmethod
+    def _stage_chunk_descriptions(
+        cls,
+        *,
+        stage_id: SetupStageId,
+        payload: dict[str, Any],
+    ) -> list[SetupStageChunkDescription]:
+        descriptions: list[SetupStageChunkDescription] = []
+        for entry in payload.get("entries", [])[:6]:
+            entry_id = str(
+                entry.get("entry_id")
+                or entry.get("semantic_path")
+                or entry.get("title")
+                or "entry"
+            )
+            title = str(
+                entry.get("title")
+                or entry.get("display_label")
+                or entry.get("semantic_path")
+                or entry_id
+            )
+            description = cls._join_parts(
+                [
+                    cls._coerce_preview_text(entry.get("summary")),
+                    cls._coerce_preview_text(entry.get("semantic_path")),
+                    cls._stage_section_preview(entry.get("sections", []), "summary"),
+                ]
+            )
+            if not description:
+                description = "Accepted stage entry."
+            descriptions.append(
+                SetupStageChunkDescription(
+                    chunk_ref=f"stage:{stage_id.value}:{entry_id}",
+                    block_type=stage_id.value,
+                    title=title,
+                    description=description,
+                    metadata={
+                        "stage_id": stage_id.value,
+                        "entry_id": entry.get("entry_id"),
+                        "entry_type": entry.get("entry_type"),
+                        "semantic_path": entry.get("semantic_path"),
+                    },
+                )
+            )
+            for section in entry.get("sections", [])[:4]:
+                section_id = str(section.get("section_id") or "section")
+                section_description = cls._stage_section_description(section)
+                if not section_description:
+                    continue
+                descriptions.append(
+                    SetupStageChunkDescription(
+                        chunk_ref=f"stage:{stage_id.value}:{entry_id}:{section_id}",
+                        block_type=stage_id.value,
+                        title=str(section.get("title") or f"{title} / {section_id}"),
+                        description=section_description,
+                        metadata={
+                            "stage_id": stage_id.value,
+                            "entry_id": entry.get("entry_id"),
+                            "section_id": section_id,
+                            "retrieval_role": section.get("retrieval_role"),
+                        },
+                    )
+                )
+        return descriptions
+
+    @classmethod
+    def _build_open_issues(cls, *, commit) -> list[str]:
+        issues: list[str] = []
+        for snapshot in commit.snapshots:
+            cls._collect_open_issues(snapshot.payload, issues)
+        deduped: list[str] = []
+        for item in issues:
+            if item not in deduped:
+                deduped.append(item)
+        return deduped[:6]
+
+    @classmethod
+    def _collect_open_issues(cls, payload: Any, issues: list[str]) -> None:
+        if isinstance(payload, dict):
+            for key in ("open_issues", "remaining_open_issues", "unresolved_issues"):
+                values = payload.get(key)
+                if isinstance(values, list):
+                    for item in values:
+                        text = cls._coerce_preview_text(item)
+                        if text:
+                            issues.append(text)
+            for key in ("entries", "chapter_blueprints"):
+                items = payload.get(key)
+                if isinstance(items, list):
+                    for item in items[:8]:
+                        cls._collect_open_issues(item, issues)
+            for value in payload.values():
+                if isinstance(value, (dict, list)):
+                    cls._collect_open_issues(value, issues)
+            return
+        if isinstance(payload, list):
+            for item in payload[:8]:
+                cls._collect_open_issues(item, issues)
+
+    @staticmethod
+    def _build_retrieval_refs(*, workspace, commit_id: str) -> list[str]:
+        refs: list[str] = []
+        for job in workspace.retrieval_ingestion_jobs:
+            if job.commit_id != commit_id:
+                continue
+            ref = str(job.target_ref).strip()
+            if ref and ref not in refs:
+                refs.append(ref)
+        return refs[:8]
+
+    @staticmethod
+    def _build_handoff_warnings(*, workspace, proposal_id: str | None) -> list[str]:
+        if not proposal_id:
+            return []
+        for proposal in workspace.commit_proposals:
+            if proposal.proposal_id == proposal_id:
+                return list(proposal.unresolved_warnings[:4])
+        return []
+
+    @classmethod
+    def _foundation_chunk_descriptions(
+        cls,
+        payload: dict[str, Any],
+    ) -> list[SetupStageChunkDescription]:
+        descriptions: list[SetupStageChunkDescription] = []
+        for entry in payload.get("entries", [])[:6]:
+            entry_id = str(entry.get("entry_id") or entry.get("path") or "foundation")
+            domain = str(entry.get("domain") or "foundation")
+            path = str(entry.get("path") or entry_id)
+            title = str(entry.get("title") or path)
+            description = f"{domain} | {path}"
+            summary = cls._content_summary(entry.get("content"))
+            if summary:
+                description = f"{description} - {summary}"
+            descriptions.append(
+                SetupStageChunkDescription(
+                    chunk_ref=f"foundation:{entry_id}",
+                    block_type="foundation_entry",
+                    title=title,
+                    description=description,
+                    metadata={
+                        "domain": domain,
+                        "path": path,
+                        "entry_id": entry.get("entry_id"),
+                    },
+                )
+            )
+        return descriptions
+
+    @classmethod
+    def _blueprint_chunk_descriptions(
+        cls,
+        payload: dict[str, Any],
+    ) -> list[SetupStageChunkDescription]:
+        descriptions: list[SetupStageChunkDescription] = []
+        overview = cls._join_parts(
+            [
+                cls._coerce_preview_text(payload.get("premise")),
+                cls._coerce_preview_text(payload.get("central_conflict")),
+                cls._coerce_preview_text(payload.get("chapter_strategy")),
+            ]
+        )
+        if overview:
+            descriptions.append(
+                SetupStageChunkDescription(
+                    chunk_ref="longform_blueprint:overview",
+                    block_type="longform_blueprint",
+                    title="Blueprint Overview",
+                    description=overview,
+                    metadata={"kind": "overview"},
+                )
+            )
+        for chapter in payload.get("chapter_blueprints", [])[:6]:
+            chapter_id = str(chapter.get("chapter_id") or "chapter")
+            title = str(chapter.get("title") or chapter_id)
+            description = cls._join_parts(
+                [
+                    cls._coerce_preview_text(chapter.get("purpose")),
+                    cls._coerce_preview_text(
+                        ", ".join(chapter.get("major_beats", [])[:2])
+                    ),
+                ]
+            )
+            if not description:
+                description = "Chapter scaffold accepted for later drafting."
+            descriptions.append(
+                SetupStageChunkDescription(
+                    chunk_ref=f"longform_blueprint:{chapter_id}",
+                    block_type="chapter_blueprint",
+                    title=title,
+                    description=description,
+                    metadata={
+                        "chapter_id": chapter_id,
+                        "purpose": chapter.get("purpose"),
+                    },
+                )
+            )
+        return descriptions
+
+    @classmethod
+    def _generic_snapshot_description(
+        cls,
+        *,
+        block_type: str,
+        payload: dict[str, Any],
+    ) -> str | None:
+        if block_type == "writing_contract":
+            return (
+                cls._join_parts(
+                    [
+                        cls._prefixed_preview("POV", payload.get("pov_rules")),
+                        cls._prefixed_preview("Style", payload.get("style_rules")),
+                        cls._prefixed_preview(
+                            "Constraints",
+                            payload.get("writing_constraints"),
+                        ),
+                    ]
+                )
+                or None
+            )
+        if block_type == "story_config":
+            return (
+                cls._join_parts(
+                    [
+                        cls._prefixed_preview(
+                            "Model",
+                            payload.get("model_profile_ref"),
+                        ),
+                        cls._prefixed_preview(
+                            "Worker",
+                            payload.get("worker_profile_ref"),
+                        ),
+                        cls._coerce_preview_text(payload.get("notes")),
+                    ]
+                )
+                or None
+            )
+        return None
+
+    @staticmethod
+    def _content_summary(content: Any) -> str | None:
+        if isinstance(content, dict):
+            for key in ("summary", "description", "premise"):
+                value = content.get(key)
+                if value:
+                    return str(value)
+            for value in content.values():
+                if isinstance(value, str) and value:
+                    return value
+        if isinstance(content, str) and content:
+            return content
+        return None
+
+    @staticmethod
+    def _prefixed_preview(label: str, value: Any) -> str | None:
+        preview = SetupContextBuilder._coerce_preview_text(value)
+        if not preview:
+            return None
+        return f"{label}: {preview}"
+
+    @staticmethod
+    def _coerce_preview_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            preview = value.strip()
+            return preview or None
+        if isinstance(value, list):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            if not items:
+                return None
+            return ", ".join(items[:3])
+        return str(value).strip() or None
+
+    @staticmethod
+    def _join_parts(parts: list[str | None]) -> str:
+        return " | ".join(part for part in parts if part)
+
+    @staticmethod
+    def _stage_section_preview(
+        sections: list[dict[str, Any]],
+        retrieval_role: str,
+    ) -> str | None:
+        for section in sections:
+            if section.get("retrieval_role") == retrieval_role:
+                preview = SetupContextBuilder._stage_section_description(section)
+                if preview:
+                    return preview
+        return None
+
+    @staticmethod
+    def _stage_section_description(section: dict[str, Any]) -> str | None:
+        content = section.get("content")
+        if isinstance(content, dict):
+            text = content.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+            items = content.get("items")
+            if isinstance(items, list):
+                item_values = [str(item).strip() for item in items if str(item).strip()]
+                if item_values:
+                    return ", ".join(item_values[:3])
+            value_map = content.get("values")
+            if isinstance(value_map, dict):
+                parts = [
+                    str(item).strip()
+                    for item in value_map.values()
+                    if str(item).strip()
+                ]
+                if parts:
+                    return ", ".join(parts[:3])
+        preview = SetupContextBuilder._coerce_preview_text(section.get("summary"))
+        if preview:
+            return preview
+        return SetupContextBuilder._coerce_preview_text(section.get("title"))
+
+    @staticmethod
+    def _current_draft_snapshot(
+        workspace,
+        current_step: SetupStepId,
+        current_stage: SetupStageId | None,
+    ) -> dict:
+        if current_stage is not None:
+            stage_block = workspace.draft_blocks.get(current_stage.value)
+            if stage_block is not None:
+                return stage_block.model_dump(mode="json", exclude_none=True)
+        if (
+            current_step == SetupStepId.STORY_CONFIG
+            and workspace.story_config_draft is not None
+        ):
+            return workspace.story_config_draft.model_dump(
+                mode="json",
+                exclude_none=True,
+            )
+        if (
+            current_step == SetupStepId.WRITING_CONTRACT
+            and workspace.writing_contract_draft is not None
+        ):
+            return workspace.writing_contract_draft.model_dump(
+                mode="json",
+                exclude_none=True,
+            )
+        if (
+            current_step == SetupStepId.FOUNDATION
+            and workspace.foundation_draft is not None
+        ):
+            return workspace.foundation_draft.model_dump(
+                mode="json",
+                exclude_none=True,
+            )
+        if (
+            current_step == SetupStepId.LONGFORM_BLUEPRINT
+            and workspace.longform_blueprint_draft is not None
+        ):
+            return workspace.longform_blueprint_draft.model_dump(
+                mode="json",
+                exclude_none=True,
+            )
+        return {}

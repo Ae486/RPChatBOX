@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.revision_overlay_contracts import DraftDocumentBlock, DraftDocumentRecord
-from rp.services.draft_materialization_service import DraftMaterializationService
+from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 
 
 def test_markdown_materialization_keeps_stable_block_ids_for_unchanged_draft():

@@ -13,7 +13,7 @@ from rp.models.revision_overlay_contracts import (
     RevisionCommentRecord,
 )
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.services.draft_materialization_service import DraftMaterializationService
+from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.revision_overlay_service import (
     RevisionOverlayService,
     RevisionOverlayServiceError,

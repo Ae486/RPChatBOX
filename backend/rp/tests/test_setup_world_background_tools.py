@@ -12,9 +12,9 @@ from rp.agent_runtime.profiles import (
 )
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import StoryMode
-from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
-from rp.services.setup_context_builder import SetupContextBuilder
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
+from rp.services.setup_agent.context_builder import SetupContextBuilder
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.tools.setup_tool_provider import SetupToolProvider
 from rp.tools.setup_tool_registry import SETUP_TOOL_REGISTRY
 

@@ -28,7 +28,7 @@ async def test_eval_suite_runner_runs_case_path_and_writes_summary(
     tmp_path,
 ):
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
     )
 
@@ -51,7 +51,7 @@ async def test_eval_suite_runner_repeat_override_runs_case_multiple_times(
     tmp_path,
 ):
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
     )
 

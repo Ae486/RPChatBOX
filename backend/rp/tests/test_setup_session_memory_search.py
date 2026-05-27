@@ -11,13 +11,13 @@ from rp.models.setup_drafts import (
 )
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import StoryMode
-from rp.services.setup_context_builder import SetupContextBuilder
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.context_builder import SetupContextBuilder
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.setup_agent_memory.contracts import SetupSessionMemorySearchFilters
 from rp.setup_agent_memory.service import SetupSessionMemoryService
 from rp.tools.setup_tools.read_draft_refs import ReadDraftRefsTool
-from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
-from rp.services.setup_truth_index_service import SetupTruthIndexService
+from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
+from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 
 
 def _seed_workspace(

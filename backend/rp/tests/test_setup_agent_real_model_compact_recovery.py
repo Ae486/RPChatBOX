@@ -26,7 +26,7 @@ from rp.models.setup_drafts import (
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId, StoryMode
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from services.model_registry import get_model_registry_service
 from services.provider_registry import get_provider_registry_service
 
@@ -694,7 +694,7 @@ async def test_real_deepseek_stage_entry_write_uses_current_stage_tool_chain(
     llm = _CapturingRealSetupLLMService(real_litellm_service())
     llm.start_stage_entry_phase()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: llm,
     )
 
@@ -805,7 +805,7 @@ async def test_real_model_memory_behavior_probe_recovers_hidden_stage_detail(
     llm = _CapturingRealSetupLLMService(real_litellm_service())
     llm.start_memory_behavior_phase()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: llm,
     )
 
@@ -885,7 +885,7 @@ async def test_real_model_compact_recovery_reads_draft_ref_before_using_detail(
 
     llm = _CapturingRealSetupLLMService(real_litellm_service())
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: llm,
     )
 

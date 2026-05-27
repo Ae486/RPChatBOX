@@ -9,8 +9,8 @@ from models.mcp_config import McpToolInfo
 from pydantic import BaseModel, ValidationError
 from rp.models.setup_handoff import SetupContextBuilderInput
 from rp.services.memory_crud_serialization_service import MemoryCrudSerializationService
-from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
-from rp.services.setup_truth_index_service import SetupTruthIndexService
+from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
+from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 from rp.setup_agent_memory.service import SetupSessionMemoryService
 from rp.tools.setup_tools import (
     AssetRegisterTool,
@@ -25,7 +25,7 @@ from rp.tools.setup_tools import (
 )
 from rp.tools.setup_tools.base import setup_tool_error_details
 from rp.tools.setup_tools.read_draft_refs import ReadDraftRefsTool
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.tools.setup_tool_contracts import SetupToolContractError
 from rp.tools.setup_tool_registry import (
     SETUP_TOOL_REGISTRY,

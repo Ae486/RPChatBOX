@@ -44,7 +44,7 @@ from .policies import (
 from .prompts.setup_agent import runtime_overlay_instruction
 from .state import RpAgentRunState
 from .tools import RuntimeToolExecutor
-from rp.services.setup_context_governor import SetupContextGovernorService
+from rp.services.setup_agent.context_governor import SetupContextGovernorService
 
 _SENTINEL = object()
 

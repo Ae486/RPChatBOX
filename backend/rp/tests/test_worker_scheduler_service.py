@@ -18,7 +18,7 @@ from rp.models.story_runtime import (
 )
 from rp.models.worker_runtime_contracts import WorkerPlanSource
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.projection.builder_context_service import (

@@ -17,7 +17,7 @@ from rp.models.story_runtime import (
     StorySession,
     StorySessionState,
 )
-from rp.services.draft_materialization_service import DraftMaterializationService
+from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.revision_overlay_service import RevisionOverlayService
 from rp.services.rewrite_request_builder_service import (
     RewriteRequestBuilderService,

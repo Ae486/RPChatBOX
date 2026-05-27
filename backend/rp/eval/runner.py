@@ -40,8 +40,8 @@ from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.retrieval.service import RetrievalService
-from rp.services.setup_agent_runtime_state_service import SetupAgentRuntimeStateService
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_activation_service import StoryActivationService
 from rp.services.story_session_service import StorySessionService
 from sqlmodel import Session, select

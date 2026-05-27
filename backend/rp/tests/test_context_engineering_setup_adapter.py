@@ -18,7 +18,7 @@ from rp.context_engineering.contracts import ContextCompactPromptRequest
 from rp.context_engineering.fingerprinting import fingerprint_source_items
 from rp.context_engineering.selection import select_context_sections
 from rp.models.setup_agent import SetupAgentDialogueMessage
-from rp.services.setup_context_compaction_service import SetupContextCompactionService
+from rp.services.setup_agent.context_compaction_service import SetupContextCompactionService
 
 
 def _history() -> list[SetupAgentDialogueMessage]:

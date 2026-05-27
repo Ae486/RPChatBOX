@@ -80,7 +80,7 @@ from rp.services.runtime_workspace_material_service import (
 )
 from rp.services.runtime_read_manifest_service import RuntimeReadManifestService
 from rp.services.rp_block_read_service import RpBlockReadService
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_activation_service import StoryActivationService
 from rp.services.story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,

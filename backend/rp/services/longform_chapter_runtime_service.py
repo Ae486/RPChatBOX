@@ -36,7 +36,7 @@ from rp.models.story_runtime import (
     StorySession,
 )
 from rp.services.chapter_bridge_provider import ChapterBridgeProvider
-from rp.services.draft_selection_service import DraftSelectionService
+from rp.services.setup_agent.draft_selection_service import DraftSelectionService
 from rp.services.rewrite_candidate_service import RewriteCandidateService
 from rp.services.runtime_read_manifest_service import (
     BranchVisibilityResolver,

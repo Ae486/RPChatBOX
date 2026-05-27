@@ -35,7 +35,7 @@ from rp.models.setup_workspace import (
     QuestionStatus,
     SetupStepId,
 )
-from rp.services.setup_agent_prompt_service import SetupAgentPromptService
+from rp.services.setup_agent.agent_prompt_service import SetupAgentPromptService
 
 
 class SetupRuntimeAdapter:

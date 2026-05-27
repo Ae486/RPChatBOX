@@ -7,12 +7,12 @@ from typing import Any, Protocol
 from rp.models.setup_handoff import SetupContextBuilderInput
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import SetupStepId
-from rp.services.setup_agent_runtime_state_service import (
+from rp.services.setup_agent.agent_runtime_state_service import (
     SetupAgentRuntimeStateService,
 )
-from rp.services.setup_truth_index_service import SetupTruthIndexService
+from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 from rp.setup_agent_memory.service import SetupSessionMemoryService
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 
 
 class SetupContextBuilderLike(Protocol):

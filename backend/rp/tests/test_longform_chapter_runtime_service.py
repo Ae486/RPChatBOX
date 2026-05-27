@@ -26,8 +26,8 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.context_orchestration_service import (
     ContextOrchestrationService,
 )
-from rp.services.draft_materialization_service import DraftMaterializationService
-from rp.services.draft_selection_service import DraftSelectionService
+from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
+from rp.services.setup_agent.draft_selection_service import DraftSelectionService
 from rp.services.longform_chapter_runtime_service import (
     LongformChapterRuntimeService,
     LongformChapterRuntimeServiceError,

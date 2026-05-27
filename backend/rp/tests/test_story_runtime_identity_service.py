@@ -34,7 +34,7 @@ from rp.models.story_runtime import (
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_runtime_identity_service import (
     StoryRuntimeIdentityService,
     StoryRuntimeIdentityServiceError,

@@ -46,8 +46,8 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from rp.services.archival_evolution_service import ArchivalEvolutionService
-from rp.services.draft_materialization_service import DraftMaterializationService
-from rp.services.draft_selection_service import DraftSelectionService
+from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
+from rp.services.setup_agent.draft_selection_service import DraftSelectionService
 from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.revision_overlay_service import RevisionOverlayService

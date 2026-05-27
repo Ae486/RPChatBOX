@@ -283,7 +283,7 @@ def test_setup_agent_stream_turn_applies_setup_patch(client, monkeypatch):
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _MockSetupLLMService(),
     )
 
@@ -318,7 +318,7 @@ def test_setup_agent_turn_emits_langfuse_root_observation(client, monkeypatch):
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepLLMService(),
     )
     monkeypatch.setattr(
@@ -384,7 +384,7 @@ def test_setup_agent_turn_creates_commit_proposal(client, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _MockSetupLLMService(),
     )
 
@@ -528,7 +528,7 @@ def test_setup_agent_turn_accepts_model_when_tool_support_inferred_from_supporte
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepLLMService(),
     )
 
@@ -649,7 +649,7 @@ def test_setup_agent_target_step_overrides_workspace_current_step(client, monkey
         session.add(record)
         session.commit()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepLLMService(),
     )
 
@@ -676,7 +676,7 @@ def test_setup_agent_target_stage_override_survives_runtime_debug(client, monkey
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepStageLLMService(),
     )
 
@@ -715,7 +715,7 @@ def test_setup_agent_turn_rejects_mismatched_target_stage_and_step(client, monke
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepStageLLMService(),
     )
 
@@ -746,7 +746,7 @@ def test_setup_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepLLMService(),
     )
 
@@ -792,7 +792,7 @@ def test_setup_turn_recovers_after_failed_stream_on_same_thread(client, monkeypa
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _RecoverableSetupLLMService(),
     )
 
@@ -833,7 +833,7 @@ def test_setup_agent_turn_uses_runtime_v2(client, monkeypatch):
     )
     workspace_id = _create_workspace(client)
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepLLMService(),
     )
 
@@ -883,7 +883,7 @@ def test_setup_agent_turn_passes_selected_user_edit_deltas_into_context(client, 
         )
         session.commit()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureDeltaCountLLMService(),
     )
 
@@ -935,7 +935,7 @@ def test_setup_runtime_debug_exposes_cognitive_summary_when_present(client, monk
         )
         session.commit()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CaptureStepLLMService(),
     )
 

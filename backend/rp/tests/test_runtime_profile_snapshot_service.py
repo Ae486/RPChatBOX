@@ -10,7 +10,7 @@ from rp.models.setup_drafts import StoryConfigDraft
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
 
 

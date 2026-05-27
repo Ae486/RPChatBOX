@@ -13,8 +13,8 @@ from rp.models.revision_overlay_contracts import (
 )
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
-from rp.services.draft_materialization_service import DraftMaterializationService
-from rp.services.draft_selection_service import (
+from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
+from rp.services.setup_agent.draft_selection_service import (
     DraftSelectionService,
     DraftSelectionServiceError,
 )

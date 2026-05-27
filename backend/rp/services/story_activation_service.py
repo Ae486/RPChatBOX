@@ -5,8 +5,8 @@ from __future__ import annotations
 from rp.models.story_runtime import LongformChapterPhase, StoryActivationResult
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.setup_runtime_controller import SetupRuntimeController
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.runtime_controller import SetupRuntimeController
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
 
 

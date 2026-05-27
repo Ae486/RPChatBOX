@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rp.agent_runtime.contracts import SetupDraftRefReadInput, SetupDraftRefReadResult
-from rp.services.setup_truth_index_service import SetupTruthIndexService
+from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 
 from .contracts import (
     SetupSessionMemoryManifest,

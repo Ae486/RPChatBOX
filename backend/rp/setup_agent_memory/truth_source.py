@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.services.setup_truth_index_service import SetupTruthIndexService
+from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 
 from .contracts import SetupSessionMemoryManifestItem
 from .sources import join_search_text, make_freshness

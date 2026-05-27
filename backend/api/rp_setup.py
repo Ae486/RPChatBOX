@@ -28,8 +28,8 @@ from rp.observability.langfuse_scores import (
     emit_activation_trace_scores,
     emit_setup_trace_scores,
 )
-from rp.services.setup_runtime_controller import SetupRuntimeController
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.runtime_controller import SetupRuntimeController
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from services.database import get_session
 from services.langfuse_service import get_langfuse_service

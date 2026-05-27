@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from rp.agent_runtime.contracts import RpAgentTurnResult
 from rp.models.setup_agent import SetupAgentTurnRequest, SetupAgentTurnResponse
-from rp.services.setup_agent_execution_service import SetupAgentExecutionService
+from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
 
 from .checkpoints import (
     build_thread_config,

@@ -54,7 +54,7 @@ async def test_setup_eval_report_includes_capability_and_diagnostic_summary(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _TruthWriteAskUserLLMService(),
     )
 
@@ -127,7 +127,7 @@ async def test_setup_eval_infra_provider_failure_case_surfaces_diagnostic_contra
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _ProviderFailureSetupLLMService(),
     )
 

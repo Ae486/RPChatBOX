@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rp.services.setup_truth_index_service import SetupTruthIndexService
+from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 
 from .contracts import SetupSessionMemoryManifest, SetupSessionMemoryManifestItem
 from .draft_source import EditableDraftMemorySource

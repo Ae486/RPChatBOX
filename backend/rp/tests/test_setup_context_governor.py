@@ -16,8 +16,8 @@ from rp.agent_runtime.contracts import (
     SetupWorkingDigest,
 )
 from rp.models.setup_agent import SetupAgentDialogueMessage
-from rp.services.setup_context_compaction_service import SetupContextCompactionService
-from rp.services.setup_context_governor import SetupContextGovernorService
+from rp.services.setup_agent.context_compaction_service import SetupContextCompactionService
+from rp.services.setup_agent.context_governor import SetupContextGovernorService
 
 
 def _history(count: int) -> list[SetupAgentDialogueMessage]:

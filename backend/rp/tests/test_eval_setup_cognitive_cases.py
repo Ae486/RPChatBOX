@@ -496,7 +496,7 @@ async def test_eval_setup_cognitive_cases_from_files(
     expected_report: dict,
 ):
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: llm_factory(),
     )
 

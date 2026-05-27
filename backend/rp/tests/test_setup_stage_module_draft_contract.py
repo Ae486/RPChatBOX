@@ -13,7 +13,7 @@ from rp.models.setup_drafts import (
 )
 from rp.models.setup_stage import SetupStageId, get_stage_module
 from rp.models.setup_workspace import SetupStepId, SetupStepLifecycleState, StoryMode
-from rp.services.setup_workspace_service import SetupWorkspaceService
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 
 
 def _text_section(section_id: str, title: str, text: str) -> SetupDraftSection:

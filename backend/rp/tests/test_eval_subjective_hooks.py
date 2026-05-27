@@ -82,7 +82,7 @@ async def test_eval_runner_materializes_setup_subjective_hooks(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _TruthWriteAskUserLLMService(),
     )
 
@@ -156,7 +156,7 @@ async def test_eval_runner_executes_setup_subjective_judge(
 ):
     _seed_judge_model_registry()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _TruthWriteAskUserLLMService(),
     )
     monkeypatch.setattr(
@@ -429,7 +429,7 @@ async def test_eval_runner_executes_skill_pack_persona_alignment_judge(
 
     _seed_judge_model_registry()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
     )
     monkeypatch.setattr(
@@ -504,7 +504,7 @@ async def test_skill_pack_persona_alignment_score_band_assignment(
 
     _seed_judge_model_registry()
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
     )
     monkeypatch.setattr(

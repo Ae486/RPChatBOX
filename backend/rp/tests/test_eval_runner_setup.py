@@ -176,7 +176,7 @@ async def test_eval_runner_executes_setup_case_and_creates_proposal(
     )
 
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CommitProposalLLMService(),
     )
 
@@ -289,7 +289,7 @@ async def test_eval_runner_http_mode_uses_real_setup_turn_route(
     )
 
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _CommitProposalLLMService(),
     )
 
@@ -401,7 +401,7 @@ async def test_eval_runner_http_stream_mode_uses_real_setup_turn_stream_route(
     )
 
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _StreamCommitProposalLLMService(),
     )
 
@@ -517,7 +517,7 @@ async def test_eval_runner_can_seed_cognitive_state_and_expose_eval_artifacts(
     )
 
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _DiscussionOnlyLLMService(),
     )
 
@@ -640,7 +640,7 @@ async def test_eval_runner_scores_stage_aware_setup_expectations(
     )
 
     monkeypatch.setattr(
-        "rp.services.setup_agent_execution_service.get_litellm_service",
+        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
         lambda: _DiscussionOnlyLLMService(),
     )
 
