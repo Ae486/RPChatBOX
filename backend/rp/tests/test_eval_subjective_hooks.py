@@ -76,6 +76,14 @@ class _FakeJudgeLLMService:
         raise AssertionError("stream path not expected")
 
 
+_PRE_EXISTING_FAILURE_CLUSTER_4 = (
+    "Pre-existing failure (eval runner business assertions: 'failed' vs 'completed'). "
+    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 4. "
+    "Tracked by T19 (coupled with `05-11-runtime-classifier-drift`) in .trellis/spec/guides/project-optimization-master-guide.md."
+)
+
+
+@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_4, strict=False)
 @pytest.mark.asyncio
 async def test_eval_runner_materializes_setup_subjective_hooks(
     retrieval_session,

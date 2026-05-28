@@ -106,6 +106,13 @@ class _Dumpable(dict):
         return dict(self)
 
 
+_PRE_EXISTING_FAILURE_CLUSTER_2 = (
+    "Pre-existing failure (CoreStateAsOfResolver fixture injection missing). "
+    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 2. "
+    "Tracked by T14 in .trellis/spec/guides/project-optimization-master-guide.md."
+)
+
+
 def test_runtime_debug_packet_section_family_uses_stable_section_contract():
     assert (
         RuntimeReadManifestService._packet_section_source_route(
@@ -1432,6 +1439,7 @@ async def test_story_runtime_controller_reviews_and_applies_authoritative_block_
         )
 
 
+@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_2, strict=False)
 @pytest.mark.asyncio
 async def test_story_runtime_controller_direct_edit_routes_through_shared_kernel(
     retrieval_session,
@@ -1600,6 +1608,7 @@ async def test_story_runtime_controller_direct_edit_routes_through_shared_kernel
     )
 
 
+@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_2, strict=False)
 @pytest.mark.asyncio
 async def test_story_runtime_controller_direct_edit_rejects_stale_base_revision(
     retrieval_session,

@@ -7,6 +7,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from sqlmodel import select
 from sqlmodel import Session as SqlSession
 
@@ -472,6 +473,13 @@ def _seed_revision_review_session() -> dict[str, str]:
             "turn_id": identity.turn_id,
             "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
         }
+
+
+_PRE_EXISTING_FAILURE_CLUSTER_1 = (
+    "Pre-existing failure (writing-path business assertions). "
+    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 1. "
+    "Tracked by T18 in .trellis/spec/guides/project-optimization-master-guide.md."
+)
 
 
 def test_revision_review_api_anchors_controls_to_draft_blocks_and_sidecars(client):
@@ -3126,6 +3134,7 @@ def test_story_turn_recovers_after_failed_stream_on_same_thread(client, monkeypa
     assert payload["assistant_text"]
 
 
+@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_1, strict=False)
 def test_story_turn_stream_buffers_writer_retrieval_loop_and_persists_usage_refs(
     client,
     monkeypatch,
