@@ -26,7 +26,7 @@ from rp.models.runtime_workspace_material import (
 )
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.memory_inspection_service import (
+from rp.services.memory.inspection_service import (
     MemoryInspectionError,
     MemoryInspectionService,
 )

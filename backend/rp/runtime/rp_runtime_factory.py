@@ -40,10 +40,10 @@ from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.writer.local_tool_provider_registry import LocalToolProviderRegistry
-from rp.services.memory_inspection_read_service import MemoryInspectionReadService
-from rp.services.memory_inspection_service import MemoryInspectionService
-from rp.services.memory_trace_read_service import MemoryTraceReadService
-from rp.services.memory_os_service import MemoryOsService
+from rp.services.memory.inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.inspection_service import MemoryInspectionService
+from rp.services.memory.trace_read_service import MemoryTraceReadService
+from rp.services.memory.os_service import MemoryOsService
 from rp.services.retrieval.minimal_ingestion_service import (
     MinimalRetrievalIngestionService,
 )
@@ -58,7 +58,7 @@ from rp.services.projection.compatibility_mirror_service import (
 from rp.services.projection.read_service import ProjectionReadService
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.projection.refresh_service import ProjectionRefreshService
-from rp.services.provenance_read_service import ProvenanceReadService
+from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
@@ -90,7 +90,7 @@ from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
 from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_agent.context_builder import SetupContextBuilder
@@ -125,7 +125,7 @@ from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.version_history_read_service import VersionHistoryReadService
+from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.writer.worker_execution_service import WorkerExecutionService
 from rp.services.writer.worker_memory_service import WorkerMemoryService
 from rp.services.writer.worker_registry_service import WorkerRegistryService

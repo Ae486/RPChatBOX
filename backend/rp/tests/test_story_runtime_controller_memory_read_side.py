@@ -60,15 +60,15 @@ from rp.services.projection.chapter_workspace_adapter import (
 )
 from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.memory_inspection_read_service import MemoryInspectionReadService
-from rp.services.memory_change_event_service import MemoryChangeEventService
+from rp.services.memory.inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.projection.read_service import ProjectionReadService
-from rp.services.provenance_read_service import ProvenanceReadService
+from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
@@ -79,7 +79,7 @@ from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.runtime_read_manifest_service import RuntimeReadManifestService
-from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_activation_service import StoryActivationService
 from rp.services.story_block_mutation_service import (
@@ -97,8 +97,8 @@ from rp.services.story_runtime_migration_service import StoryRuntimeMigrationSer
 from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
-from rp.services.version_history_read_service import VersionHistoryReadService
-from rp.services.memory_trace_read_service import MemoryTraceReadService
+from rp.services.memory.version_history_read_service import VersionHistoryReadService
+from rp.services.memory.trace_read_service import MemoryTraceReadService
 
 
 class _Dumpable(dict):

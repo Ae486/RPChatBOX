@@ -1,41 +1,14 @@
-"""Canonical JSON serialization for memory CRUD tool results."""
+"""DEPRECATED: moved to rp.services.memory.crud_serialization_service."""
 from __future__ import annotations
 
-import json
-from typing import Any
+import warnings
 
-from pydantic import BaseModel
+from rp.services.memory.crud_serialization_service import *  # noqa: F401, F403
+from rp.services.memory.crud_serialization_service import MemoryCrudSerializationService  # noqa: F401
 
-from rp.models.memory_crud import ToolErrorPayload
-
-
-class MemoryCrudSerializationService:
-    """Serialize pydantic results and errors into canonical JSON strings."""
-
-    @staticmethod
-    def serialize_result(result: BaseModel | dict[str, Any] | list[Any]) -> str:
-        payload: Any
-        if isinstance(result, BaseModel):
-            payload = result.model_dump(mode="json", exclude_none=True)
-        else:
-            payload = result
-        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
-
-    @classmethod
-    def serialize_error(
-        cls,
-        *,
-        code: str,
-        message: str,
-        retryable: bool = False,
-        details: dict[str, Any] | None = None,
-    ) -> str:
-        return cls.serialize_result(
-            ToolErrorPayload(
-                code=code,
-                message=message,
-                retryable=retryable,
-                details=details,
-            )
-        )
-
+warnings.warn(
+    "rp.services.memory_crud_serialization_service is deprecated and will be removed next release; "
+    "use rp.services.memory.crud_serialization_service instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

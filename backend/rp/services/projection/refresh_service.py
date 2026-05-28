@@ -13,7 +13,7 @@ from rp.models.projection_refresh import (
 from rp.models.story_runtime import ChapterWorkspace, SpecialistResultBundle
 
 from ..core_state.dual_write_service import CoreStateDualWriteService
-from ..memory_change_event_service import MemoryChangeEventService
+from ..memory.change_event_service import MemoryChangeEventService
 from .compatibility_mirror_service import (
     ProjectionCompatibilityMirrorService,
 )

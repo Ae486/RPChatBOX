@@ -22,7 +22,7 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialLifecycle,
 )
 
-from .memory_trace_read_service import MemoryTraceReadService
+from .memory.trace_read_service import MemoryTraceReadService
 from .runtime_profile_snapshot_service import (
     RuntimeProfileSnapshotService,
     RuntimeProfileSnapshotServiceError,

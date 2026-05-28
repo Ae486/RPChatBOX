@@ -8,7 +8,7 @@ from typing import Any, Protocol
 from models.mcp_config import McpToolInfo
 from pydantic import BaseModel, ValidationError
 from rp.models.setup_handoff import SetupContextBuilderInput
-from rp.services.memory_crud_serialization_service import MemoryCrudSerializationService
+from rp.services.memory.crud_serialization_service import MemoryCrudSerializationService
 from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 from rp.setup_agent_memory.service import SetupSessionMemoryService

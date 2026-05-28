@@ -24,8 +24,8 @@ from rp.models.worker_runtime_contracts import (
     WorkerExecutionClass,
     WorkerExecutionPolicy,
 )
-from rp.services.memory_contract_registry import MemoryContractRegistryService
-from rp.services.memory_registry_management_service import (
+from rp.services.memory.contract_registry import MemoryContractRegistryService
+from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService

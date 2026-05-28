@@ -27,7 +27,7 @@ LEGACY_MEMORY_BACKEND_ALLOWLIST = {
     "backfill_service.py",
     "read_service.py",
     "dual_write_service.py",
-    "memory_inspection_read_service.py",
+    "inspection_read_service.py",
     "compatibility_mirror_service.py",
     "read_service.py",
     "provenance_read_service.py",

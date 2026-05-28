@@ -20,8 +20,8 @@ from rp.models.runtime_config_contracts import (
     RuntimeConfigPatchRequest,
     RuntimeConfigPreview,
 )
-from rp.services.memory_contract_registry import MemoryContractRegistryError
-from rp.services.memory_registry_management_service import (
+from rp.services.memory.contract_registry import MemoryContractRegistryError
+from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
 from rp.services.runtime_profile_snapshot_service import (

@@ -16,7 +16,7 @@ from rp.models.memory_contract_registry import (
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
-from rp.services.memory_contract_registry import (
+from rp.services.memory.contract_registry import (
     ARCHIVAL_LAYER,
     BOOTSTRAP_MEMORY_DOMAIN_IDS,
     CORE_STATE_AUTHORITATIVE_LAYER,

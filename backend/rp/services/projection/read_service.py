@@ -17,7 +17,7 @@ from rp.models.memory_crud import (
 from ..core_state.backfill_service import CoreStateBackfillService
 from ..core_state.store_repository import CoreStateStoreRepository
 from .chapter_workspace_adapter import ChapterWorkspaceProjectionAdapter
-from ..memory_object_mapper import (
+from ..memory.object_mapper import (
     normalize_projection_summary_id,
     projection_summary_ids_for_domain,
     resolve_projection_binding,

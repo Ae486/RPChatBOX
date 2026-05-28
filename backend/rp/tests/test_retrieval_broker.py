@@ -44,8 +44,8 @@ from rp.models.story_runtime import (
 )
 from rp.retrieval.search_utils import build_chunk_hit
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.memory_os_service import MemoryOsService
-from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
+from rp.services.memory.os_service import MemoryOsService
+from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
 from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )

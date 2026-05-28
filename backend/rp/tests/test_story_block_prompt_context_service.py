@@ -15,10 +15,10 @@ from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.memory_inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal.repository import ProposalRepository
-from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.story_block_consumer_state_service import (
     StoryBlockConsumerStateService,
 )
@@ -27,7 +27,7 @@ from rp.services.story_block_prompt_context_service import (
 )
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
-from rp.services.version_history_read_service import VersionHistoryReadService
+from rp.services.memory.version_history_read_service import VersionHistoryReadService
 
 
 def _seed_story_runtime(retrieval_session):

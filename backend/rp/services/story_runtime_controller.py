@@ -47,10 +47,10 @@ from rp.models.story_brainstorm import (
     BrainstormSessionStartRequest,
     BrainstormSummarizeRequest,
 )
-from .memory_inspection_read_service import MemoryInspectionReadService
-from .memory_inspection_service import MemoryInspectionService
+from .memory.inspection_read_service import MemoryInspectionReadService
+from .memory.inspection_service import MemoryInspectionService
 from .projection.read_service import ProjectionReadService
-from .provenance_read_service import ProvenanceReadService
+from .memory.provenance_read_service import ProvenanceReadService
 from .recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
@@ -62,7 +62,7 @@ from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from .setup_agent.draft_materialization_service import DraftMaterializationService
 from .core_state.revision_overlay_service import RevisionOverlayService
 from .runtime_workspace_material_service import RuntimeWorkspaceMaterialServiceError
-from .rp_block_read_service import RpBlockReadService
+from .memory.rp_block_read_service import RpBlockReadService
 from .story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
     MemoryBlockProposalNotFoundError,
@@ -72,7 +72,7 @@ from .story_brainstorm_service import StoryBrainstormService
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
 from .story_activation_service import StoryActivationService
 from .story_session_service import StorySessionService
-from .version_history_read_service import VersionHistoryReadService
+from .memory.version_history_read_service import VersionHistoryReadService
 
 
 class MemoryBlockHistoryUnsupportedError(RuntimeError):

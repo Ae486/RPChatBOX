@@ -23,7 +23,7 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.services.memory_contract_registry import (
+from rp.services.memory.contract_registry import (
     CORE_STATE_AUTHORITATIVE_LAYER,
     MemoryContractRegistryService,
     RUNTIME_WORKSPACE_LAYER,

@@ -49,17 +49,17 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.memory_change_event_service import MemoryChangeEventService
-from rp.services.memory_inspection_service import MemoryInspectionService
+from rp.services.memory.change_event_service import MemoryChangeEventService
+from rp.services.memory.inspection_service import MemoryInspectionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
-from rp.services.memory_inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.retrieval.document_service import RetrievalDocumentService
-from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.runtime_read_manifest_service import BranchVisibilityResolver
 from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.story_block_mutation_service import StoryBlockMutationService
@@ -69,7 +69,7 @@ from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
-from rp.services.version_history_read_service import VersionHistoryReadService
+from rp.services.memory.version_history_read_service import VersionHistoryReadService
 
 
 def _utcnow() -> datetime:

@@ -33,7 +33,7 @@ from rp.models.memory_contract_registry import (
 )
 from rp.models.memory_materialization import ARCHIVAL_LAYER
 from rp.models.retrieval_records import SourceAsset
-from rp.services.memory_change_event_service import MemoryChangeEventService
+from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 

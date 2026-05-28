@@ -24,11 +24,11 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialReceipt,
 )
-from rp.services.memory_contract_registry import (
+from rp.services.memory.contract_registry import (
     MemoryContractRegistryError,
     MemoryContractRegistryService,
 )
-from rp.services.memory_change_event_service import MemoryChangeEventService
+from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.runtime_memory_persistence_repository import (
     RuntimeWorkspaceMaterialRepository,
     clone_json_value,

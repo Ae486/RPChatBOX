@@ -16,7 +16,7 @@ from rp.models.block_consumer import (
 )
 from rp.models.block_view import RpBlockView
 
-from .rp_block_read_service import RpBlockReadService
+from .memory.rp_block_read_service import RpBlockReadService
 from .story_session_service import StorySessionService
 
 

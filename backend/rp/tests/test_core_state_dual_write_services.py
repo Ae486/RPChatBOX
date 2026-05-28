@@ -32,7 +32,7 @@ from rp.services.projection.chapter_workspace_adapter import (
 )
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.memory_change_event_service import MemoryChangeEventService
+from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.projection.state_service import ProjectionStateService

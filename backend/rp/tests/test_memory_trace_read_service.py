@@ -38,8 +38,8 @@ from rp.models.runtime_workspace_material import (
 )
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.memory_change_event_service import MemoryChangeEventService
-from rp.services.memory_trace_read_service import MemoryTraceReadService
+from rp.services.memory.change_event_service import MemoryChangeEventService
+from rp.services.memory.trace_read_service import MemoryTraceReadService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime_workspace_material_service import (

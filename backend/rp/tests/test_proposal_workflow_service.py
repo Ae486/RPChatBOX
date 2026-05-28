@@ -23,7 +23,7 @@ from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.writer.longform_regression_service import LongformRegressionService
-from rp.services.memory_change_event_service import MemoryChangeEventService
+from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository

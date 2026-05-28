@@ -33,7 +33,7 @@ from rp.models.story_evolution_contracts import (
 )
 from rp.models.worker_memory import WorkerProposalGovernanceMetadata
 from rp.services.archival_evolution_service import ArchivalEvolutionService
-from rp.services.memory_change_event_service import MemoryChangeEventService
+from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository

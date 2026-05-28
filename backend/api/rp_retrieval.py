@@ -11,7 +11,7 @@ from rp.models.memory_graph_projection import (
     GRAPH_JOB_REASON_MANUAL_REBUILD,
     GRAPH_TAXONOMY_VERSION,
 )
-from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
+from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.retrieval.maintenance_service import RetrievalMaintenanceService
 from services.database import get_session

@@ -65,7 +65,7 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.writer.longform_specialist_service import LongformSpecialistService
-from rp.services.memory_inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.proposal.post_write_governance_service import PostWriteGovernanceService
 from rp.services.proposal.post_write_scheduler_service import (
     POST_WRITE_MAINTENANCE_PHASE,
@@ -74,7 +74,7 @@ from rp.services.proposal.post_write_scheduler_service import (
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.proposal.repository import ProposalRepository
-from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
@@ -98,7 +98,7 @@ from rp.services.story_runtime_identity_service import StoryRuntimeIdentityServi
 from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
-from rp.services.version_history_read_service import VersionHistoryReadService
+from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
 from rp.services.writer.worker_scheduler_service import PRE_WRITE_CONTEXT_PHASE
 from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService

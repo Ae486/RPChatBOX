@@ -23,7 +23,7 @@ from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.projection.state_service import ProjectionStateService
-from rp.services.rp_block_read_service import RpBlockReadService
+from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.story_runtime_controller import StoryRuntimeController
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService

@@ -18,7 +18,7 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.services.memory_change_event_service import (
+from rp.services.memory.change_event_service import (
     MemoryChangeEventService,
     MemoryChangeEventServiceError,
 )

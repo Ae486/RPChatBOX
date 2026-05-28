@@ -33,8 +33,8 @@ from rp.models.runtime_identity import (
     RuntimeWorkerActivation,
 )
 from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
-from rp.services.memory_contract_registry import MemoryContractRegistryService
-from rp.services.memory_registry_management_service import (
+from rp.services.memory.contract_registry import MemoryContractRegistryService
+from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
 from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService

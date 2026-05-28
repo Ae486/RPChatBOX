@@ -14,7 +14,7 @@ from rp.models.memory_graph_projection import (
     MemoryGraphExtractionJobUpsert,
     MemoryGraphNodeUpsert,
 )
-from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
+from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
 from services.database import get_engine
 
 

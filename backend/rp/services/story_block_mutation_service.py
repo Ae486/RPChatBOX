@@ -17,10 +17,10 @@ from rp.models.memory_crud import (
 )
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 
-from .memory_inspection_read_service import MemoryInspectionReadService
+from .memory.inspection_read_service import MemoryInspectionReadService
 from .proposal.apply_service import ProposalApplyService
 from .proposal.workflow_service import ProposalWorkflowService
-from .rp_block_read_service import RpBlockReadService
+from .memory.rp_block_read_service import RpBlockReadService
 from .story_session_service import StorySessionService
 
 

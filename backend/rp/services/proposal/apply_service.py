@@ -34,8 +34,8 @@ from ..core_state.authoritative_compatibility_mirror_service import (
 )
 from ..core_state.dual_write_service import CoreStateDualWriteService
 from ..core_state.as_of_resolver import CoreStateAsOfResolver
-from ..memory_change_event_service import MemoryChangeEventService
-from ..memory_object_mapper import (
+from ..memory.change_event_service import MemoryChangeEventService
+from ..memory.object_mapper import (
     normalize_authoritative_ref,
     resolve_authoritative_binding,
 )

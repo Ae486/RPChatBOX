@@ -18,7 +18,7 @@ from rp.models.projection_refresh import (
 from rp.models.story_runtime import ChapterWorkspace, StorySession
 
 from .store_repository import CoreStateStoreRepository
-from ..memory_object_mapper import (
+from ..memory.object_mapper import (
     authoritative_bindings,
     normalize_authoritative_ref,
     projection_bindings,

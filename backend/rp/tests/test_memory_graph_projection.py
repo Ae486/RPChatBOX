@@ -51,8 +51,8 @@ from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_drafts import StoryConfigDraft
 from rp.models.story_runtime import LongformChapterPhase
 from rp.models.setup_workspace import StoryMode
-from rp.services.memory_graph_extraction_service import MemoryGraphExtractionService
-from rp.services.memory_graph_projection_service import MemoryGraphProjectionService
+from rp.services.memory.graph_extraction_service import MemoryGraphExtractionService
+from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService

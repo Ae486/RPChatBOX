@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlmodel import Session
 
 from rp.models.memory_crud import ProposalReceipt, ProposalSubmitInput
-from rp.services.memory_crud_validation_service import MemoryCrudValidationService
+from rp.services.memory.crud_validation_service import MemoryCrudValidationService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from services.database import get_engine

@@ -16,11 +16,11 @@ from rp.models.memory_contract_registry import (
 )
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.memory_contract_registry import (
+from rp.services.memory.contract_registry import (
     CORE_STATE_AUTHORITATIVE_LAYER,
     RUNTIME_WORKSPACE_LAYER,
 )
-from rp.services.memory_registry_management_service import (
+from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService

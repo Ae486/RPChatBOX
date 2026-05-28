@@ -6,7 +6,7 @@ import json
 
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.memory_registry_management_service import (
+from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService

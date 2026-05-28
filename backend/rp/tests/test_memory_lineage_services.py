@@ -22,12 +22,12 @@ from rp.services.projection.state_service import ProjectionStateService
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
-from rp.services.memory_inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
-from rp.services.provenance_read_service import ProvenanceReadService
+from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.runtime_read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestService,
@@ -42,7 +42,7 @@ from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
-from rp.services.version_history_read_service import VersionHistoryReadService
+from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,

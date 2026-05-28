@@ -15,7 +15,7 @@ from rp.models.post_write_policy import (
 )
 from rp.models.memory_crud import ProposalReceipt, ProposalSubmitInput
 from rp.models.worker_memory import WorkerProposalGovernanceMetadata
-from rp.services.memory_crud_validation_service import MemoryCrudValidationService
+from rp.services.memory.crud_validation_service import MemoryCrudValidationService
 
 from .post_write_apply_handler import PostWriteApplyHandler
 from .apply_service import ProposalApplyService

@@ -22,7 +22,7 @@ from rp.models.memory_crud import (
     VersionListResult,
 )
 
-from ..memory_object_mapper import (
+from ..memory.object_mapper import (
     default_authoritative_ref_for_domain,
     normalize_authoritative_ref,
     resolve_authoritative_binding,

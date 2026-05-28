@@ -8,11 +8,11 @@ from rp.models.block_consumer import BlockConsumerKey
 from rp.models.block_prompt_context import RpBlockPromptContextView
 from rp.models.dsl import ObjectRef
 
-from .memory_object_mapper import (
+from .memory.object_mapper import (
     resolve_authoritative_binding,
     resolve_projection_binding,
 )
-from .rp_block_read_service import RpBlockReadService
+from .memory.rp_block_read_service import RpBlockReadService
 from .projection.settled_mapper import settled_projection_slots
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
 

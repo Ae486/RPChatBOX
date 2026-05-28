@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .store_repository import CoreStateStoreRepository
-from ..memory_object_mapper import authoritative_bindings
+from ..memory.object_mapper import authoritative_bindings
 from ..story_session_core_state_adapter import StorySessionCoreStateAdapter
 
 

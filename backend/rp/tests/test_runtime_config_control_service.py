@@ -28,7 +28,7 @@ from rp.services.runtime_config_control_service import (
     RuntimeConfigControlServiceError,
 )
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.memory_registry_management_service import MemoryRegistryManagementService
+from rp.services.memory.registry_management_service import MemoryRegistryManagementService
 from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
