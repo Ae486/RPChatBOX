@@ -30,10 +30,10 @@ from rp.models.worker_memory import (
 )
 from services.database import get_engine
 
-from ..post_write_apply_handler import PostWriteApplyHandler
-from ..proposal_apply_service import ProposalApplyService
-from ..proposal_repository import ProposalRepository
-from ..proposal_workflow_service import ProposalWorkflowService
+from ..proposal.post_write_apply_handler import PostWriteApplyHandler
+from ..proposal.apply_service import ProposalApplyService
+from ..proposal.repository import ProposalRepository
+from ..proposal.workflow_service import ProposalWorkflowService
 from ..retrieval.broker import RetrievalBroker
 from ..retrieval.runtime_card_service import RuntimeRetrievalCardService
 from ..story_session_service import StorySessionService

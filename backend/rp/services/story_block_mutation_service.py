@@ -18,8 +18,8 @@ from rp.models.memory_crud import (
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 
 from .memory_inspection_read_service import MemoryInspectionReadService
-from .proposal_apply_service import ProposalApplyService
-from .proposal_workflow_service import ProposalWorkflowService
+from .proposal.apply_service import ProposalApplyService
+from .proposal.workflow_service import ProposalWorkflowService
 from .rp_block_read_service import RpBlockReadService
 from .story_session_service import StorySessionService
 

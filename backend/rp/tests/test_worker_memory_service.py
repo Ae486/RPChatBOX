@@ -15,7 +15,7 @@ from rp.models.memory_crud import (
 )
 from rp.models.projection_refresh import ProjectionRefreshRequest
 from rp.models.worker_memory import WorkerMemoryContext
-from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal.repository import ProposalRepository
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService

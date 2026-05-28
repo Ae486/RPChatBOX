@@ -9,7 +9,7 @@ from rp.models.dsl import Layer, ObjectRef
 
 from .core_state_store_repository import CoreStateStoreRepository
 from .memory_object_mapper import authoritative_bindings, projection_bindings
-from .proposal_repository import ProposalRepository
+from .proposal.repository import ProposalRepository
 from .story_session_service import StorySessionService
 
 

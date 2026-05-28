@@ -7,7 +7,7 @@ from rp.models.dsl import ObjectRef
 from rp.models.memory_crud import VersionListResult
 
 from .memory_object_mapper import normalize_authoritative_ref
-from .proposal_repository import ProposalRepository
+from .proposal.repository import ProposalRepository
 from .story_session_core_state_adapter import StorySessionCoreStateAdapter
 
 

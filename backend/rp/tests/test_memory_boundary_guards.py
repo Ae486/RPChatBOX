@@ -12,7 +12,7 @@ BUSINESS_SERVICE_FILES = [
     SERVICE_ROOT / "story_turn_domain_service.py",
 ]
 PRIMARY_MEMORY_WRITE_SERVICE_FILES = [
-    SERVICE_ROOT / "proposal_apply_service.py",
+    SERVICE_ROOT / "proposal" / "apply_service.py",
     SERVICE_ROOT / "projection" / "refresh_service.py",
     SERVICE_ROOT / "projection" / "state_service.py",
     SERVICE_ROOT / "story_state_apply_service.py",

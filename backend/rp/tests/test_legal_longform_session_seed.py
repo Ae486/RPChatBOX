@@ -53,11 +53,11 @@ from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.memory_inspection_service import MemoryInspectionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
-from rp.services.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection.state_service import ProjectionStateService
-from rp.services.proposal_apply_service import ProposalApplyService
-from rp.services.proposal_repository import ProposalRepository
-from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.proposal.apply_service import ProposalApplyService
+from rp.services.proposal.repository import ProposalRepository
+from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.runtime_read_manifest_service import BranchVisibilityResolver

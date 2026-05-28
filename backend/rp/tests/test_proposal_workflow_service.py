@@ -24,10 +24,10 @@ from rp.services.legacy_state_patch_proposal_builder import (
 )
 from rp.services.writer.longform_regression_service import LongformRegressionService
 from rp.services.memory_change_event_service import MemoryChangeEventService
-from rp.services.post_write_apply_handler import PostWriteApplyHandler
-from rp.services.proposal_apply_service import ProposalApplyService
-from rp.services.proposal_repository import ProposalRepository
-from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.proposal.apply_service import ProposalApplyService
+from rp.services.proposal.repository import ProposalRepository
+from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )

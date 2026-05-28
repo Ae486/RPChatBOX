@@ -5,7 +5,7 @@ from rp.models.post_write_policy import (
     PostWriteMaintenancePolicy,
     build_balanced_policy,
 )
-from rp.services.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 
 
 def test_exact_policy_rule_match():
@@ -70,4 +70,3 @@ def test_unmatched_rule_falls_back_to_review_required():
     )
 
     assert decision == PolicyDecision.REVIEW_REQUIRED
-

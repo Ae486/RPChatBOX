@@ -17,7 +17,7 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.projection.state_service import ProjectionStateService
-from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal.repository import ProposalRepository
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.story_block_consumer_state_service import (
     StoryBlockConsumerStateService,

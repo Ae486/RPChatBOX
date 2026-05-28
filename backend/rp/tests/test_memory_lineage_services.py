@@ -23,10 +23,10 @@ from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
-from rp.services.post_write_apply_handler import PostWriteApplyHandler
-from rp.services.proposal_apply_service import ProposalApplyService
-from rp.services.proposal_repository import ProposalRepository
-from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.proposal.apply_service import ProposalApplyService
+from rp.services.proposal.repository import ProposalRepository
+from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.provenance_read_service import ProvenanceReadService
 from rp.services.runtime_read_manifest_service import (
     BranchVisibilityResolver,

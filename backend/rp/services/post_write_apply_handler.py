@@ -1,60 +1,16 @@
-"""Post-write maintenance policy matching for RP Phase A."""
+"""DEPRECATED: moved to rp.services.proposal.post_write_apply_handler."""
 from __future__ import annotations
 
-from fnmatch import fnmatchcase
+import warnings
 
-from rp.models.post_write_policy import (
-    PolicyDecision,
-    PolicyRule,
-    PostWriteMaintenancePolicy,
+from rp.services.proposal.post_write_apply_handler import *  # noqa: F401, F403
+from rp.services.proposal.post_write_apply_handler import (  # noqa: F401
+    PostWriteApplyHandler,
 )
 
-
-class PostWriteApplyHandler:
-    """Decide how one proposal should be governed under the current policy."""
-
-    def decide(
-        self,
-        *,
-        mode: str,
-        domain: str,
-        operation_kind: str,
-        policy: PostWriteMaintenancePolicy,
-        domain_path: str | None = None,
-    ) -> PolicyDecision:
-        candidate = domain_path or f"{domain}.*"
-        matching_rules = [
-            rule
-            for rule in policy.rules
-            if self._matches(rule, mode=mode, operation_kind=operation_kind, candidate=candidate)
-        ]
-        if not matching_rules:
-            return policy.fallback_decision
-
-        best_rule = sorted(
-            matching_rules,
-            key=self._specificity_key,
-            reverse=True,
-        )[0]
-        return best_rule.decision
-
-    @staticmethod
-    def _matches(
-        rule: PolicyRule,
-        *,
-        mode: str,
-        operation_kind: str,
-        candidate: str,
-    ) -> bool:
-        if rule.mode != mode:
-            return False
-        if rule.operation_kind not in {"*", operation_kind}:
-            return False
-        return fnmatchcase(candidate, rule.domain_pattern)
-
-    @staticmethod
-    def _specificity_key(rule: PolicyRule) -> tuple[int, int, int]:
-        wildcard_count = rule.domain_pattern.count("*")
-        exact_operation = 0 if rule.operation_kind == "*" else 1
-        return (exact_operation, -wildcard_count, len(rule.domain_pattern))
-
+warnings.warn(
+    "rp.services.post_write_apply_handler is deprecated and will be removed next release; "
+    "use rp.services.proposal.post_write_apply_handler instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

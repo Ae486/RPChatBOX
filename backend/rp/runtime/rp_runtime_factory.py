@@ -47,9 +47,11 @@ from rp.services.memory_os_service import MemoryOsService
 from rp.services.retrieval.minimal_ingestion_service import (
     MinimalRetrievalIngestionService,
 )
-from rp.services.post_write_apply_handler import PostWriteApplyHandler
-from rp.services.post_write_governance_service import PostWriteGovernanceService
-from rp.services.post_write_scheduler_service import PostWriteSchedulerService
+from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.proposal.post_write_governance_service import (
+    PostWriteGovernanceService,
+)
+from rp.services.proposal.post_write_scheduler_service import PostWriteSchedulerService
 from rp.services.projection.compatibility_mirror_service import (
     ProjectionCompatibilityMirrorService,
 )
@@ -57,9 +59,9 @@ from rp.services.projection.read_service import ProjectionReadService
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.provenance_read_service import ProvenanceReadService
-from rp.services.proposal_apply_service import ProposalApplyService
-from rp.services.proposal_repository import ProposalRepository
-from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.proposal.apply_service import ProposalApplyService
+from rp.services.proposal.repository import ProposalRepository
+from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.recall.character_long_history_ingestion_service import (
     RecallCharacterLongHistoryIngestionService,
 )

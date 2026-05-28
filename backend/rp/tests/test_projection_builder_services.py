@@ -66,14 +66,14 @@ from rp.services.context_orchestration_service import ContextOrchestrationServic
 from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.writer.longform_specialist_service import LongformSpecialistService
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
-from rp.services.post_write_governance_service import PostWriteGovernanceService
-from rp.services.post_write_scheduler_service import (
+from rp.services.proposal.post_write_governance_service import PostWriteGovernanceService
+from rp.services.proposal.post_write_scheduler_service import (
     POST_WRITE_MAINTENANCE_PHASE,
     PostWriteSchedulerService,
 )
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.projection.refresh_service import ProjectionRefreshService
-from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal.repository import ProposalRepository
 from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService

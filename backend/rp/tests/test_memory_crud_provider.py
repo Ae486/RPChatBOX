@@ -9,7 +9,7 @@ from rp.models.dsl import Domain, Layer
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_os_service import MemoryOsService
-from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal.repository import ProposalRepository
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.writer.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.services.story_session_service import StorySessionService

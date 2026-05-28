@@ -50,7 +50,7 @@ from rp.services.core_state_read_service import CoreStateReadService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.projection.state_service import ProjectionStateService
-from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal.repository import ProposalRepository
 from rp.services.provenance_read_service import ProvenanceReadService
 from rp.services.projection.read_service import ProjectionReadService
 from rp.services.retrieval.observability_service import RetrievalObservabilityService

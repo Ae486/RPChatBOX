@@ -34,10 +34,10 @@ from rp.models.story_evolution_contracts import (
 from rp.models.worker_memory import WorkerProposalGovernanceMetadata
 from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.memory_change_event_service import MemoryChangeEventService
-from rp.services.post_write_apply_handler import PostWriteApplyHandler
-from rp.services.proposal_apply_service import ProposalApplyService
-from rp.services.proposal_repository import ProposalRepository
-from rp.services.proposal_workflow_service import ProposalWorkflowService
+from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
+from rp.services.proposal.apply_service import ProposalApplyService
+from rp.services.proposal.repository import ProposalRepository
+from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService

@@ -62,8 +62,8 @@ from rp.models.setup_workspace import StoryMode
 from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.memory_change_event_service import MemoryChangeEventService
-from rp.services.proposal_apply_service import ProposalApplyService
-from rp.services.proposal_repository import ProposalRepository
+from rp.services.proposal.apply_service import ProposalApplyService
+from rp.services.proposal.repository import ProposalRepository
 from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService

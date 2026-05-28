@@ -19,7 +19,7 @@ from ..legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilde
 from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.writer.longform_specialist_service import LongformSpecialistService
 from ..projection.refresh_service import ProjectionRefreshService
-from ..proposal_workflow_service import ProposalWorkflowService
+from ..proposal.workflow_service import ProposalWorkflowService
 from ..recall.character_long_history_ingestion_service import (
     RecallCharacterLongHistoryIngestionService,
 )

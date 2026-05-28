@@ -18,7 +18,7 @@ from rp.models.memory_crud import (
 from rp.services.memory_crud_serialization_service import MemoryCrudSerializationService
 from rp.services.memory_crud_validation_service import MemoryCrudValidationService
 from rp.services.memory_os_service import MemoryOsService
-from rp.services.proposal_service import ProposalService
+from rp.services.proposal.service import ProposalService
 
 
 class MemoryCrudToolProvider:

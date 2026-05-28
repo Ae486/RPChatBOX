@@ -40,8 +40,8 @@ from .writer.longform_chapter_runtime_service import LongformChapterRuntimeServi
 from .writer.longform_orchestrator_service import LongformOrchestratorService
 from .writer.longform_regression_service import LongformRegressionService
 from .writer.longform_specialist_service import LongformSpecialistService
-from .post_write_governance_service import PostWriteGovernanceService
-from .post_write_scheduler_service import PostWriteSchedulerService
+from .proposal.post_write_governance_service import PostWriteGovernanceService
+from .proposal.post_write_scheduler_service import PostWriteSchedulerService
 from .projection.builder_context_service import BuilderProjectionContextService
 from .projection.state_service import ProjectionStateService
 from .recall.scene_transcript_ingestion_service import (
