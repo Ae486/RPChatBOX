@@ -33,17 +33,17 @@ from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.services.worker_execution_service import WorkerExecutionService
-from rp.services.worker_registry_service import (
+from rp.services.writer.worker_execution_service import WorkerExecutionService
+from rp.services.writer.worker_registry_service import (
     LONGFORM_MEMORY_WORKER_ID,
     WRITING_WORKER_ID,
     WorkerRegistryService,
 )
-from rp.services.worker_scheduler_service import (
+from rp.services.writer.worker_scheduler_service import (
     PRE_WRITE_CONTEXT_PHASE,
     WorkerSchedulerService,
 )
-from rp.services.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 
 def _seed_story_runtime(retrieval_session, *, story_id: str):

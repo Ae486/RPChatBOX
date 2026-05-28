@@ -15,11 +15,11 @@ from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.revision_overlay_service import RevisionOverlayService
-from rp.services.rewrite_candidate_service import (
+from rp.services.writer.rewrite_candidate_service import (
     RewriteCandidateService,
     RewriteCandidateServiceError,
 )
-from rp.services.rewrite_request_builder_service import RewriteRequestBuilderService
+from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 
 

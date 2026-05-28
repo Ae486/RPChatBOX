@@ -19,7 +19,7 @@ from rp.services.proposal_repository import ProposalRepository
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService
-from rp.services.worker_memory_service import (
+from rp.services.writer.worker_memory_service import (
     WorkerMemoryPermissionError,
     WorkerMemoryService,
 )

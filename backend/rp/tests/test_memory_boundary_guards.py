@@ -7,8 +7,8 @@ from pathlib import Path
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1] / "services"
 BUSINESS_SERVICE_FILES = [
-    SERVICE_ROOT / "longform_orchestrator_service.py",
-    SERVICE_ROOT / "longform_specialist_service.py",
+    SERVICE_ROOT / "writer" / "longform_orchestrator_service.py",
+    SERVICE_ROOT / "writer" / "longform_specialist_service.py",
     SERVICE_ROOT / "story_turn_domain_service.py",
 ]
 PRIMARY_MEMORY_WRITE_SERVICE_FILES = [

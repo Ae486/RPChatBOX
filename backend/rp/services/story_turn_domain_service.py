@@ -35,11 +35,11 @@ from rp.models.writing_worker_contracts import (
 )
 from rp.models.writing_runtime import WritingPacket
 from .context_orchestration_service import ContextOrchestrationService
-from .longform_chapter_runtime_service import LongformChapterRuntimeService
-from .longform_chapter_runtime_service import LongformChapterRuntimeServiceError
-from .longform_orchestrator_service import LongformOrchestratorService
-from .longform_regression_service import LongformRegressionService
-from .longform_specialist_service import LongformSpecialistService
+from .writer.longform_chapter_runtime_service import LongformChapterRuntimeService
+from .writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
+from .writer.longform_orchestrator_service import LongformOrchestratorService
+from .writer.longform_regression_service import LongformRegressionService
+from .writer.longform_specialist_service import LongformSpecialistService
 from .post_write_governance_service import PostWriteGovernanceService
 from .post_write_scheduler_service import PostWriteSchedulerService
 from .projection.builder_context_service import BuilderProjectionContextService
@@ -47,7 +47,7 @@ from .projection.state_service import ProjectionStateService
 from .recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
-from .rewrite_packet_constraint_service import RewritePacketConstraintService
+from .writer.rewrite_packet_constraint_service import RewritePacketConstraintService
 from .story_block_consumer_state_service import StoryBlockConsumerStateService
 from .story_runtime_identity_service import StoryRuntimeIdentityService
 from .story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
@@ -59,13 +59,13 @@ from .runtime_workflow_job_service import (
 )
 from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 from .story_runtime_adapter_service import StoryRuntimeAdapterService
-from .worker_execution_service import WorkerExecutionService
-from .worker_scheduler_service import (
+from .writer.worker_execution_service import WorkerExecutionService
+from .writer.worker_scheduler_service import (
     PRE_WRITE_CONTEXT_PHASE,
     WorkerSchedulerService,
 )
-from .writing_packet_builder import WritingPacketBuilder
-from .writing_worker_execution_service import WritingWorkerExecutionService
+from .writer.writing_packet_builder import WritingPacketBuilder
+from .writer.writing_worker_execution_service import WritingWorkerExecutionService
 
 
 class StoryTurnDomainService:

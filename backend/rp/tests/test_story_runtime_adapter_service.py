@@ -18,7 +18,7 @@ from rp.services.story_runtime_adapter_service import (
     LONGFORM_ADAPTER_POLICY_ID,
     StoryRuntimeAdapterService,
 )
-from rp.services.worker_registry_service import LONGFORM_MEMORY_WORKER_ID
+from rp.services.writer.worker_registry_service import LONGFORM_MEMORY_WORKER_ID
 
 
 def test_legacy_command_translation_is_adapter_metadata_not_worker_plan():

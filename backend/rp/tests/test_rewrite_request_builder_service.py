@@ -19,11 +19,11 @@ from rp.models.story_runtime import (
 )
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.revision_overlay_service import RevisionOverlayService
-from rp.services.rewrite_request_builder_service import (
+from rp.services.writer.rewrite_request_builder_service import (
     RewriteRequestBuilderService,
     RewriteRequestBuilderServiceError,
 )
-from rp.services.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 
 def test_full_rewrite_comments_only_includes_old_draft_text_in_sidecar(

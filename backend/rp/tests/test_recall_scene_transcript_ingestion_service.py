@@ -32,11 +32,11 @@ from rp.services.recall.scene_transcript_ingestion_service import (
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.rp_block_read_service import RpBlockReadService
-from rp.services.longform_regression_service import LongformRegressionService
+from rp.services.writer.longform_regression_service import LongformRegressionService
 from rp.services.story_runtime_controller import StoryRuntimeController
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
-from rp.services.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 
 def _utcnow() -> datetime:

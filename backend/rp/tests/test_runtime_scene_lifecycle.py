@@ -27,7 +27,7 @@ from rp.services.rp_block_read_service import RpBlockReadService
 from rp.services.story_runtime_controller import StoryRuntimeController
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
-from rp.services.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 
 def _seed_story_runtime(retrieval_session):

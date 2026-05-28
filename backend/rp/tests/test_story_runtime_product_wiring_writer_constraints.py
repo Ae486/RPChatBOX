@@ -21,15 +21,15 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
-from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
-from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
+from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
+from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
 from rp.services.revision_overlay_service import RevisionOverlayService
-from rp.services.rewrite_request_builder_service import (
+from rp.services.writer.rewrite_request_builder_service import (
     RewriteRequestBuilderServiceError,
 )
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.writing_worker_execution_service import (
+from rp.services.writer.writing_worker_execution_service import (
     WritingWorkerExecutionService,
 )
 from rp.models.writing_worker_contracts import WritingWorkerExecutionResult

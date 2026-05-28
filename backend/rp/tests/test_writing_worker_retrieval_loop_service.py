@@ -22,8 +22,8 @@ from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService
-from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
-from rp.services.writing_worker_retrieval_loop_service import (
+from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
+from rp.services.writer.writing_worker_retrieval_loop_service import (
     WritingWorkerRetrievalLoopService,
     WritingWorkerRetrievalLoopServiceError,
 )

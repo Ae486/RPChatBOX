@@ -19,16 +19,16 @@ from rp.services.authoritative_compatibility_mirror_service import (
 )
 from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
 from rp.services.archival_evolution_service import ArchivalEvolutionService
-from rp.services.longform_orchestrator_service import LongformOrchestratorService
-from rp.services.longform_regression_service import LongformRegressionService
-from rp.services.longform_specialist_service import LongformSpecialistService
+from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
+from rp.services.writer.longform_regression_service import LongformRegressionService
+from rp.services.writer.longform_specialist_service import LongformSpecialistService
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.longform_chapter_runtime_service import (
+from rp.services.writer.longform_chapter_runtime_service import (
     LongformChapterRuntimeService,
 )
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
@@ -39,7 +39,7 @@ from rp.services.setup_agent.draft_materialization_service import DraftMateriali
 from rp.services.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
-from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
+from rp.services.writer.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.memory_inspection_service import MemoryInspectionService
 from rp.services.memory_trace_read_service import MemoryTraceReadService
@@ -124,12 +124,12 @@ from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.version_history_read_service import VersionHistoryReadService
-from rp.services.worker_execution_service import WorkerExecutionService
-from rp.services.worker_memory_service import WorkerMemoryService
-from rp.services.worker_registry_service import WorkerRegistryService
-from rp.services.worker_scheduler_service import WorkerSchedulerService
-from rp.services.writing_packet_builder import WritingPacketBuilder
-from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
+from rp.services.writer.worker_execution_service import WorkerExecutionService
+from rp.services.writer.worker_memory_service import WorkerMemoryService
+from rp.services.writer.worker_registry_service import WorkerRegistryService
+from rp.services.writer.worker_scheduler_service import WorkerSchedulerService
+from rp.services.writer.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
 from rp.tools.setup_tool_provider import SetupToolProvider
 from rp.tools.setup_scoped_mcp_manager import SetupScopedMcpManager
 from services.mcp_manager import McpManager, get_mcp_manager

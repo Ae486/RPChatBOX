@@ -34,7 +34,7 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from rp.services.archival_evolution_service import ArchivalEvolutionService
-from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
+from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.runtime_config_control_service import RuntimeConfigControlService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService

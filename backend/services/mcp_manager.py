@@ -16,7 +16,7 @@ from models.mcp_config import (
     McpServerView,
     McpToolInfo,
 )
-from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
+from rp.services.writer.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
 
 logger = logging.getLogger(__name__)

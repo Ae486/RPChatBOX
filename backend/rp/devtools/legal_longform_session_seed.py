@@ -71,7 +71,7 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state_dual_write_service import CoreStateDualWriteService
 from rp.services.core_state_store_repository import CoreStateStoreRepository
-from rp.services.longform_chapter_runtime_service import LongformChapterRuntimeService
+from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
 from rp.services.retrieval.collection_service import RetrievalCollectionService

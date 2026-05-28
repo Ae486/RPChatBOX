@@ -22,7 +22,7 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.services.rewrite_candidate_service import RewriteCandidateService
+from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
 
 

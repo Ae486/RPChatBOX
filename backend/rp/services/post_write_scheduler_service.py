@@ -10,7 +10,7 @@ from rp.models.worker_runtime_contracts import WorkerExecutionPlan
 from rp.services.runtime_workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.worker_scheduler_service import WorkerSchedulerService
+from rp.services.writer.worker_scheduler_service import WorkerSchedulerService
 
 
 POST_WRITE_MAINTENANCE_PHASE = "post_write_maintenance"

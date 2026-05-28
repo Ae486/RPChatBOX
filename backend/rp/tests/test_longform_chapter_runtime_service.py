@@ -28,19 +28,19 @@ from rp.services.context_orchestration_service import (
 )
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.setup_agent.draft_selection_service import DraftSelectionService
-from rp.services.longform_chapter_runtime_service import (
+from rp.services.writer.longform_chapter_runtime_service import (
     LongformChapterRuntimeService,
     LongformChapterRuntimeServiceError,
 )
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.revision_overlay_service import RevisionOverlayService
-from rp.services.rewrite_candidate_service import RewriteCandidateService
-from rp.services.rewrite_request_builder_service import RewriteRequestBuilderService
+from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
+from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
-from rp.services.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 
 class _NoopRegressionService:

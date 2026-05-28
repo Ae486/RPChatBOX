@@ -78,7 +78,7 @@ from rp.services.story_runtime_identity_service import StoryRuntimeIdentityServi
 from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
-from rp.services.worker_execution_service import WorkerExecutionOutcome
+from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
 from services.database import get_engine
 
 
@@ -3236,7 +3236,7 @@ def test_story_turn_stream_buffers_writer_retrieval_loop_and_persists_usage_refs
         return SimpleNamespace(hits=[], warnings=[]), [material], None
 
     monkeypatch.setattr(
-        "rp.services.worker_execution_service.WorkerExecutionService.execute_plan",
+        "rp.services.writer.worker_execution_service.WorkerExecutionService.execute_plan",
         _fake_execute_plan,
     )
     monkeypatch.setattr(

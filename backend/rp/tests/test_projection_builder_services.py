@@ -63,8 +63,8 @@ from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.context_orchestration_service import ContextOrchestrationService
-from rp.services.longform_orchestrator_service import LongformOrchestratorService
-from rp.services.longform_specialist_service import LongformSpecialistService
+from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
+from rp.services.writer.longform_specialist_service import LongformSpecialistService
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.post_write_governance_service import PostWriteGovernanceService
 from rp.services.post_write_scheduler_service import (
@@ -99,10 +99,10 @@ from rp.services.story_session_core_state_adapter import StorySessionCoreStateAd
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
 from rp.services.version_history_read_service import VersionHistoryReadService
-from rp.services.worker_execution_service import WorkerExecutionOutcome
-from rp.services.worker_scheduler_service import PRE_WRITE_CONTEXT_PHASE
-from rp.services.writing_worker_execution_service import WritingWorkerExecutionService
-from rp.services.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
+from rp.services.writer.worker_scheduler_service import PRE_WRITE_CONTEXT_PHASE
+from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
+from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 from rp.models.worker_runtime_contracts import (
     WorkerExecutionItem,
     WorkerExecutionPlan,

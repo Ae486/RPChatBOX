@@ -11,7 +11,7 @@ from rp.services.core_state_store_repository import CoreStateStoreRepository
 from rp.services.memory_os_service import MemoryOsService
 from rp.services.proposal_repository import ProposalRepository
 from rp.services.retrieval.broker import RetrievalBroker
-from rp.services.local_tool_provider_registry import LocalToolProviderRegistry
+from rp.services.writer.local_tool_provider_registry import LocalToolProviderRegistry
 from rp.services.story_session_service import StorySessionService
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
 from services.mcp_manager import McpManager
