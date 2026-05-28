@@ -15,7 +15,7 @@ from rp.models.story_runtime import (
     StorySession,
 )
 
-from ..revision_overlay_service import RevisionOverlayService
+from ..core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from ..story_session_service import StorySessionService
 

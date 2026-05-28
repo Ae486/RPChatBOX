@@ -60,7 +60,7 @@ from .story_runtime_migration_service import StoryRuntimeMigrationService
 from .runtime_config_control_service import RuntimeConfigControlService
 from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
 from .setup_agent.draft_materialization_service import DraftMaterializationService
-from .revision_overlay_service import RevisionOverlayService
+from .core_state.revision_overlay_service import RevisionOverlayService
 from .runtime_workspace_material_service import RuntimeWorkspaceMaterialServiceError
 from .rp_block_read_service import RpBlockReadService
 from .story_block_mutation_service import (

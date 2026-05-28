@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .core_state_store_repository import CoreStateStoreRepository
+from .core_state.store_repository import CoreStateStoreRepository
 from rp.models.dsl import ObjectRef
 from rp.models.memory_crud import ProvenanceResult
 

@@ -17,7 +17,7 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
+from rp.services.core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )

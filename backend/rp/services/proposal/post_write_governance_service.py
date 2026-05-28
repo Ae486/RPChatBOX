@@ -22,8 +22,8 @@ from rp.models.runtime_workflow_job import (
 from rp.models.story_runtime import ChapterWorkspace, SpecialistResultBundle, StorySession
 from rp.models.worker_memory import WorkerProposalGovernanceMetadata
 from rp.models.worker_runtime_contracts import WorkerExecutionPlan, WorkerResult
-from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
-from rp.services.legacy_state_patch_proposal_builder import (
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.projection.refresh_service import ProjectionRefreshService

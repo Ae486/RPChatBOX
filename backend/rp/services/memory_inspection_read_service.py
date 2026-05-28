@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from .core_state_store_repository import CoreStateStoreRepository
+from .core_state.store_repository import CoreStateStoreRepository
 from rp.models.dsl import Layer, ObjectRef
 
 from .projection.builder_context_service import BuilderProjectionContextService

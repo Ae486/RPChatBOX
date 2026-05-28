@@ -59,7 +59,7 @@ from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.archival_evolution_service import ArchivalEvolutionService
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler

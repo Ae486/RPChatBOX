@@ -30,8 +30,8 @@ from rp.models.story_runtime import LongformChapterPhase, SpecialistResultBundle
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.core_state_dual_write_service import CoreStateDualWriteService
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection.refresh_service import ProjectionRefreshService

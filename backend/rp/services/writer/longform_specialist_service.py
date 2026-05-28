@@ -20,7 +20,7 @@ from rp.models.story_runtime import (
     StorySession,
 )
 from rp.models.worker_runtime_contracts import WorkerContextPacket
-from ..authoritative_state_view_service import AuthoritativeStateViewService
+from ..core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from ..memory_os_service import MemoryOsService
 from ..projection.state_service import ProjectionStateService
 from ..retrieval.runtime_card_service import RuntimeRetrievalCardService

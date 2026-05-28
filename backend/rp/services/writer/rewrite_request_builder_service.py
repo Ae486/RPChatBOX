@@ -14,7 +14,7 @@ from rp.models.revision_overlay_contracts import (
     RevisionCommentRecord,
     TrackedChangeRecord,
 )
-from rp.services.revision_overlay_service import (
+from rp.services.core_state.revision_overlay_service import (
     RevisionOverlayService,
 )
 

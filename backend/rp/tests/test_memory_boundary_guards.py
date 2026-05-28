@@ -24,9 +24,9 @@ FORBIDDEN_BACKEND_KEYS = [
 LEGACY_MEMORY_BACKEND_ALLOWLIST = {
     "authoritative_compatibility_mirror_service.py",
     "chapter_workspace_adapter.py",
-    "core_state_backfill_service.py",
-    "core_state_read_service.py",
-    "core_state_dual_write_service.py",
+    "backfill_service.py",
+    "read_service.py",
+    "dual_write_service.py",
     "memory_inspection_read_service.py",
     "compatibility_mirror_service.py",
     "read_service.py",

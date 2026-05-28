@@ -14,10 +14,10 @@ from rp.graphs.setup_graph_nodes import SetupGraphNodes
 from rp.graphs.setup_graph_runner import SetupGraphRunner
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.graphs.story_graph_runner import StoryGraphRunner
-from rp.services.authoritative_compatibility_mirror_service import (
+from rp.services.core_state.authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,
 )
-from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
+from rp.services.core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.writer.longform_regression_service import LongformRegressionService
@@ -31,12 +31,12 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.writer.longform_chapter_runtime_service import (
     LongformChapterRuntimeService,
 )
-from rp.services.core_state_dual_write_service import CoreStateDualWriteService
-from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
-from rp.services.legacy_state_patch_proposal_builder import (
+from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.writer.local_tool_provider_registry import LocalToolProviderRegistry
@@ -76,7 +76,7 @@ from rp.services.recall.lifecycle_service import RecallLifecycleService
 from rp.services.recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
 )
-from rp.services.revision_overlay_service import RevisionOverlayService
+from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService

@@ -68,9 +68,9 @@ from rp.models.story_runtime import (
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
-from rp.services.core_state_dual_write_service import CoreStateDualWriteService
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService

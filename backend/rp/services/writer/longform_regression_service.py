@@ -15,7 +15,7 @@ from rp.models.story_runtime import (
     StorySession,
 )
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from ..legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
+from ..core_state.legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
 from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.writer.longform_specialist_service import LongformSpecialistService
 from ..projection.refresh_service import ProjectionRefreshService

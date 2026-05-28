@@ -15,8 +15,8 @@ from rp.models.dsl import Domain, Layer
 from rp.models.memory_crud import ProposalSubmitInput
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from rp.models.story_runtime import LongformChapterPhase
-from rp.services.core_state_backfill_service import CoreStateBackfillService
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.backfill_service import CoreStateBackfillService
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository

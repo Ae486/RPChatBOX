@@ -33,7 +33,7 @@ from rp.services.writer.longform_chapter_runtime_service import (
     LongformChapterRuntimeServiceError,
 )
 from rp.services.projection.state_service import ProjectionStateService
-from rp.services.revision_overlay_service import RevisionOverlayService
+from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService

@@ -13,16 +13,16 @@ from rp.models.memory_crud import (
     MemoryListVersionsInput,
     MemoryReadProvenanceInput,
 )
-from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
+from rp.services.core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.core_state_dual_write_service import CoreStateDualWriteService
-from rp.services.core_state_read_service import CoreStateReadService
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
+from rp.services.core_state.read_service import CoreStateReadService
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory_inspection_read_service import MemoryInspectionReadService
 from rp.services.projection.read_service import ProjectionReadService
 from rp.services.projection.state_service import ProjectionStateService

@@ -19,7 +19,7 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.services.legacy_state_patch_proposal_builder import (
+from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.writer.longform_regression_service import LongformRegressionService

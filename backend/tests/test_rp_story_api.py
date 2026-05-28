@@ -59,7 +59,7 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
 )
 from rp.models.setup_workspace import StoryMode
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.context_orchestration_service import ContextOrchestrationService
 from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.proposal.apply_service import ProposalApplyService

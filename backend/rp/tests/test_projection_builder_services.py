@@ -55,7 +55,7 @@ from rp.models.writing_worker_contracts import (
 from rp.models.writing_runtime import WritingPacket
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.graphs.story_graph_runner import StoryGraphRunner
-from rp.services.authoritative_state_view_service import AuthoritativeStateViewService
+from rp.services.core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )

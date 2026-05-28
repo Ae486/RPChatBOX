@@ -1,40 +1,14 @@
-"""Compatibility mirror access for legacy authoritative session state."""
-
+"""DEPRECATED: moved to rp.services.core_state.authoritative_compatibility_mirror_service."""
 from __future__ import annotations
 
-from copy import deepcopy
+import warnings
 
-from rp.models.story_runtime import StorySession
+from rp.services.core_state.authoritative_compatibility_mirror_service import *  # noqa: F401, F403
+from rp.services.core_state.authoritative_compatibility_mirror_service import AuthoritativeCompatibilityMirrorService  # noqa: F401
 
-from .story_session_service import StorySessionService
-
-
-class AuthoritativeCompatibilityMirrorService:
-    """Read/write the legacy authoritative mirror without treating it as truth source."""
-
-    def __init__(self, *, story_session_service: StorySessionService) -> None:
-        self._story_session_service = story_session_service
-
-    def read_mirror_state(
-        self,
-        *,
-        session: StorySession | None = None,
-        session_id: str | None = None,
-    ) -> dict:
-        resolved = session
-        if resolved is None and session_id is not None:
-            resolved = self._story_session_service.get_session(session_id)
-        if resolved is None:
-            return {}
-        return deepcopy(resolved.current_state_json or {})
-
-    def sync_mirror_state(
-        self,
-        *,
-        session_id: str,
-        state_map: dict,
-    ) -> StorySession:
-        return self._story_session_service.update_session(
-            session_id=session_id,
-            current_state_json=state_map,
-        )
+warnings.warn(
+    "rp.services.authoritative_compatibility_mirror_service is deprecated and will be removed next release; "
+    "use rp.services.core_state.authoritative_compatibility_mirror_service instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

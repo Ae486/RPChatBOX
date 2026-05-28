@@ -13,7 +13,7 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StorySession,
 )
-from ..authoritative_state_view_service import AuthoritativeStateViewService
+from ..core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from ..projection.state_service import ProjectionStateService
 from ..story_block_prompt_compile_service import StoryBlockPromptCompileService
 from ..story_block_prompt_context_service import StoryBlockPromptContextService

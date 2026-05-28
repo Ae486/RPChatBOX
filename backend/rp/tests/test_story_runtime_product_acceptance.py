@@ -50,7 +50,7 @@ from rp.services.setup_agent.draft_materialization_service import DraftMateriali
 from rp.services.setup_agent.draft_selection_service import DraftSelectionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.retrieval.broker import RetrievalBroker
-from rp.services.revision_overlay_service import RevisionOverlayService
+from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime_config_control_service import RuntimeConfigControlService

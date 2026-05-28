@@ -46,9 +46,9 @@ from rp.services.projection.builder_context_service import (
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.core_state_as_of_resolver import CoreStateAsOfResolver
-from rp.services.core_state_dual_write_service import CoreStateDualWriteService
-from rp.services.core_state_store_repository import CoreStateStoreRepository
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory_change_event_service import MemoryChangeEventService
 from rp.services.memory_inspection_service import MemoryInspectionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
