@@ -13,9 +13,9 @@ from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.read_service import CoreStateReadService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_read_manifest_service import RuntimeReadManifestService
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.read_manifest_service import RuntimeReadManifestService
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService

@@ -34,7 +34,7 @@ from rp.models.writing_worker_contracts import (
     WritingWorkerExecutionResult,
 )
 from rp.models.writing_runtime import WritingPacket
-from .context_orchestration_service import ContextOrchestrationService
+from .runtime.context_orchestration_service import ContextOrchestrationService
 from .writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from .writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
 from .writer.longform_orchestrator_service import LongformOrchestratorService
@@ -52,12 +52,12 @@ from .story_block_consumer_state_service import StoryBlockConsumerStateService
 from .story_runtime_identity_service import StoryRuntimeIdentityService
 from .story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from .story_session_service import StorySessionService
-from .runtime_read_manifest_service import RuntimeReadManifestService
-from .runtime_workflow_job_service import (
+from .runtime.read_manifest_service import RuntimeReadManifestService
+from .runtime.workflow_job_service import (
     RuntimeWorkflowJobService,
     TurnSettlementEvaluation,
 )
-from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from .runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from .story_runtime_adapter_service import StoryRuntimeAdapterService
 from .writer.worker_execution_service import WorkerExecutionService
 from .writer.worker_scheduler_service import (

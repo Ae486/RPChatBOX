@@ -32,8 +32,8 @@ from .inspection_read_service import MemoryInspectionReadService
 from ..recall.lifecycle_service import RecallLifecycleService
 from ..retrieval.document_service import RetrievalDocumentService
 from .rp_block_read_service import RpBlockReadService
-from ..runtime_read_manifest_service import BranchVisibilityResolver
-from ..runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from ..runtime.read_manifest_service import BranchVisibilityResolver
+from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from ..story_block_mutation_service import StoryBlockMutationService
 
 

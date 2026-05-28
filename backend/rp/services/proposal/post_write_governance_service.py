@@ -27,7 +27,7 @@ from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.projection.refresh_service import ProjectionRefreshService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 
 from .workflow_service import ProposalWorkflowService
 

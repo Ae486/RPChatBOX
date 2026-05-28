@@ -23,12 +23,12 @@ from rp.models.runtime_workspace_material import (
 )
 
 from .memory.trace_read_service import MemoryTraceReadService
-from .runtime_profile_snapshot_service import (
+from .runtime.profile_snapshot_service import (
     RuntimeProfileSnapshotService,
     RuntimeProfileSnapshotServiceError,
 )
-from .runtime_read_manifest_service import BranchVisibilityResolver
-from .runtime_workflow_job_service import RuntimeWorkflowJobService
+from .runtime.read_manifest_service import BranchVisibilityResolver
+from .runtime.workflow_job_service import RuntimeWorkflowJobService
 from .story_runtime_identity_service import StoryRuntimeIdentityService
 from .story_session_service import StorySessionService
 

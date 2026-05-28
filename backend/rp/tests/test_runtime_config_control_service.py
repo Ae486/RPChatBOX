@@ -23,13 +23,13 @@ from rp.models.runtime_workflow_job import (
 )
 from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase, LongformTurnCommandKind
-from rp.services.runtime_config_control_service import (
+from rp.services.runtime.config_control_service import (
     RuntimeConfigControlService,
     RuntimeConfigControlServiceError,
 )
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.memory.registry_management_service import MemoryRegistryManagementService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService

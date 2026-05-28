@@ -28,7 +28,7 @@ from rp.services.memory.contract_registry import MemoryContractRegistryService
 from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 
 LONGFORM_MEMORY_WORKER_ID = "LongformMemoryWorker"
 WRITING_WORKER_ID = "WritingWorker"

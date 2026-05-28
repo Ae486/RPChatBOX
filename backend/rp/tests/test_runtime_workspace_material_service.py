@@ -29,7 +29,7 @@ from rp.services.memory.contract_registry import (
     RUNTIME_WORKSPACE_LAYER,
     build_bootstrap_memory_contract_registry,
 )
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.workspace_material_service import (
     RUNTIME_WORKSPACE_TRACE_ROLE,
     RuntimeWorkspaceMaterialService,
     RuntimeWorkspaceMaterialServiceError,

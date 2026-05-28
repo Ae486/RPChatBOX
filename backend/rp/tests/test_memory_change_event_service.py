@@ -22,7 +22,7 @@ from rp.services.memory.change_event_service import (
     MemoryChangeEventService,
     MemoryChangeEventServiceError,
 )
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from services.database import get_engine

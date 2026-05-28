@@ -37,7 +37,7 @@ from rp.models.story_brainstorm import (
     BrainstormSummarizeOutput,
     BrainstormSummarizeRequest,
 )
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
     RuntimeWorkspaceMaterialServiceError,
 )

@@ -18,7 +18,7 @@ from rp.services.core_state.revision_overlay_service import (
     RevisionOverlayService,
     RevisionOverlayServiceError,
 )
-from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from services.database import get_engine
 
 

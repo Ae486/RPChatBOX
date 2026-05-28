@@ -21,7 +21,7 @@ from rp.services.setup_agent.draft_selection_service import (
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
-from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 def test_unique_candidate_can_be_adopted_without_prior_selection(retrieval_session):

@@ -27,7 +27,7 @@ from rp.services.core_state.revision_overlay_service import RevisionOverlayServi
 from rp.services.writer.rewrite_request_builder_service import (
     RewriteRequestBuilderServiceError,
 )
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.writer.writing_worker_execution_service import (
     WritingWorkerExecutionService,

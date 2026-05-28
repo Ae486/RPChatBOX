@@ -57,11 +57,11 @@ from .recall.scene_transcript_ingestion_service import (
 from .story_runtime_debug_query_service import StoryRuntimeDebugQueryService
 from .story_runtime_identity_service import StoryRuntimeIdentityService
 from .story_runtime_migration_service import StoryRuntimeMigrationService
-from .runtime_config_control_service import RuntimeConfigControlService
-from .runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from .runtime.config_control_service import RuntimeConfigControlService
+from .runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from .setup_agent.draft_materialization_service import DraftMaterializationService
 from .core_state.revision_overlay_service import RevisionOverlayService
-from .runtime_workspace_material_service import RuntimeWorkspaceMaterialServiceError
+from .runtime.workspace_material_service import RuntimeWorkspaceMaterialServiceError
 from .memory.rp_block_read_service import RpBlockReadService
 from .story_block_mutation_service import (
     MemoryBlockMutationUnsupportedError,

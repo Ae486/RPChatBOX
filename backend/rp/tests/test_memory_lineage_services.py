@@ -28,11 +28,11 @@ from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.memory.provenance_read_service import ProvenanceReadService
-from rp.services.runtime_read_manifest_service import (
+from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestService,
 )
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.retrieval.broker import RetrievalBroker
@@ -40,8 +40,8 @@ from rp.services.story_session_core_state_adapter import StorySessionCoreStateAd
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,

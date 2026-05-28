@@ -34,7 +34,7 @@ from rp.services.writer.longform_chapter_runtime_service import (
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.context_orchestration_service import ContextOrchestrationService
+from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
@@ -80,14 +80,14 @@ from rp.services.core_state.revision_overlay_service import RevisionOverlayServi
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
-from rp.services.runtime_read_manifest_service import (
+from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestService,
 )
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
-from rp.services.runtime_config_control_service import RuntimeConfigControlService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.config_control_service import RuntimeConfigControlService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.memory.rp_block_read_service import RpBlockReadService
@@ -124,7 +124,7 @@ from rp.services.story_session_core_state_adapter import StorySessionCoreStateAd
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_state_apply_service import StoryStateApplyService
 from rp.services.story_turn_domain_service import StoryTurnDomainService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.writer.worker_execution_service import WorkerExecutionService
 from rp.services.writer.worker_memory_service import WorkerMemoryService

@@ -23,7 +23,7 @@ from rp.services.memory.contract_registry import (
 from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_session_service import StorySessionService

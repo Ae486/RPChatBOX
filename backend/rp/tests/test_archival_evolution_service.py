@@ -43,7 +43,7 @@ from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.retrieval.index_job_service import RetrievalIndexJobService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story_evolution_service import (
     StoryEvolutionService,
     StoryEvolutionServiceError,

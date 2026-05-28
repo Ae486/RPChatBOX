@@ -23,7 +23,7 @@ from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialVisibility,
 )
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
-from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 DRAFT_SELECTION_PAYLOAD_VERSION = "draft-selection.v1"

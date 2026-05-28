@@ -22,7 +22,7 @@ from rp.models.worker_runtime_contracts import WorkerExecutionRequest, WorkerRes
 from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.models.writing_runtime import WritingPacket
 
-from .runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from .runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 _RUNTIME_WORKSPACE_DOMAIN = "chapter"

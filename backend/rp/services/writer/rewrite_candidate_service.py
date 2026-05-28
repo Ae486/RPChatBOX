@@ -26,7 +26,7 @@ from rp.models.runtime_workspace_material import (
 )
 from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
-from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 REWRITE_CANDIDATE_PAYLOAD_VERSION = "rewrite-candidate.v1"

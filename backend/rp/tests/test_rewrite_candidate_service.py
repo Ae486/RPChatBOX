@@ -20,7 +20,7 @@ from rp.services.writer.rewrite_candidate_service import (
     RewriteCandidateServiceError,
 )
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
-from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 def test_full_rewrite_candidate_is_saved_without_auto_adoption(retrieval_session):

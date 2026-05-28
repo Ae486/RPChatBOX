@@ -56,7 +56,7 @@ from rp.services.projection.read_service import ProjectionReadService
 from rp.services.retrieval.observability_service import RetrievalObservabilityService
 from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.retrieval.service import RetrievalService
-from rp.services.runtime_read_manifest_service import (
+from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestServiceError,
     filter_hits_by_branch_visibility,

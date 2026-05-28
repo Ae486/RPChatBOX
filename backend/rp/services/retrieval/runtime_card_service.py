@@ -28,7 +28,7 @@ from rp.models.runtime_workspace_material import (
 from rp.models.worker_memory import WorkerSourceRefBundle
 
 from .broker import RetrievalBroker
-from ..runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 class RuntimeRetrievalCardServiceError(ValueError):

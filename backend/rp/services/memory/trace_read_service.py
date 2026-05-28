@@ -16,16 +16,16 @@ from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_trace import MemoryTraceBundle
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from rp.services.proposal.repository import ProposalRepository
-from rp.services.runtime_memory_persistence_repository import (
+from rp.services.runtime.memory_persistence_repository import (
     MemoryChangeEventRepository,
     RuntimeWorkspaceMaterialRepository,
     clone_json_value,
 )
-from rp.services.runtime_read_manifest_service import (
+from rp.services.runtime.read_manifest_service import (
     RuntimeReadManifestService,
     RuntimeReadManifestServiceError,
 )
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 

@@ -72,13 +72,13 @@ from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
-from rp.services.runtime_config_control_service import RuntimeConfigControlService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.config_control_service import RuntimeConfigControlService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.runtime_read_manifest_service import RuntimeReadManifestService
+from rp.services.runtime.read_manifest_service import RuntimeReadManifestService
 from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_activation_service import StoryActivationService

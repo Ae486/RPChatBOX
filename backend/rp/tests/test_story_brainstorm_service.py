@@ -19,14 +19,14 @@ from rp.models.story_brainstorm import (
 from rp.models.story_runtime import LongformChapterPhase
 from rp.models.story_runtime import StoryArtifactKind, StoryArtifactStatus
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.story_brainstorm_service import (
     StoryBrainstormService,
     StoryBrainstormServiceError,
 )
 from rp.services.story_session_service import StorySessionService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 
 
 class _StubStoryLlmGateway:

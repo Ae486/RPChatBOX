@@ -9,7 +9,7 @@ from rp.models.story_runtime import LongformChapterPhase
 from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story_session_service import StorySessionService
 from rp.services.writer.worker_registry_service import (

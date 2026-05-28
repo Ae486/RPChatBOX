@@ -41,8 +41,8 @@ from rp.models.story_runtime import LongformChapterPhase
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.memory.trace_read_service import MemoryTraceReadService
 from rp.services.proposal.repository import ProposalRepository
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService

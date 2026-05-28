@@ -22,7 +22,7 @@ from rp.models.runtime_read_contract import (
 
 from .store_repository import CoreStateStoreRepository
 from ..memory.object_mapper import authoritative_bindings, normalize_authoritative_ref
-from ..runtime_read_manifest_service import BranchVisibilityResolver
+from ..runtime.read_manifest_service import BranchVisibilityResolver
 
 
 class CoreStateAsOfResolverError(ValueError):

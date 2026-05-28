@@ -22,7 +22,7 @@ from rp.models.worker_runtime_contracts import (
     WorkerResult,
     WorkerResultStatus,
 )
-from rp.services.context_orchestration_service import ContextOrchestrationService
+from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
 from rp.services.writer.longform_specialist_service import LongformSpecialistService
 from rp.services.story_runtime_adapter_service import StoryRuntimeAdapterService
 from rp.services.story_runtime_workspace_facade import (

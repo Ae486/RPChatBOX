@@ -7,7 +7,7 @@ from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.postwrite_runtime_contracts import PostWriteTriggerContext
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.worker_runtime_contracts import WorkerExecutionPlan
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.writer.worker_scheduler_service import WorkerSchedulerService

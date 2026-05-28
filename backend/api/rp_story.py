@@ -31,7 +31,7 @@ from rp.models.story_brainstorm import (
 )
 from rp.models.story_runtime import ChapterWorkspaceSnapshot
 from rp.models.story_runtime import LongformTurnRequest
-from rp.services.runtime_config_control_service import (
+from rp.services.runtime.config_control_service import (
     RuntimeConfigControlServiceError,
 )
 from rp.services.story_runtime_identity_service import (

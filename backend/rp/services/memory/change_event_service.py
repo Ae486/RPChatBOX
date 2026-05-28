@@ -19,7 +19,7 @@ from .contract_registry import (
     MemoryContractRegistryError,
     MemoryContractRegistryService,
 )
-from rp.services.runtime_memory_persistence_repository import (
+from rp.services.runtime.memory_persistence_repository import (
     MemoryChangeEventRepository,
     clone_json_value,
     utcnow,

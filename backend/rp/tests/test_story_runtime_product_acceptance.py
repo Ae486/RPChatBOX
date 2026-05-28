@@ -53,10 +53,10 @@ from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
-from rp.services.runtime_config_control_service import RuntimeConfigControlService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.config_control_service import RuntimeConfigControlService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService

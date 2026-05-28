@@ -36,10 +36,10 @@ from rp.models.story_runtime import (
 from rp.services.archival_evolution_service import ArchivalEvolutionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.retrieval.broker import RetrievalBroker
-from rp.services.runtime_config_control_service import RuntimeConfigControlService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
-from rp.services.runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from rp.services.runtime.config_control_service import RuntimeConfigControlService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.tests.test_archival_evolution_service import (

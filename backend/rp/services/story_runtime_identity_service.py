@@ -27,11 +27,11 @@ from rp.models.runtime_identity import (
     StoryTurnStatus,
 )
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialLifecycle
-from rp.services.runtime_profile_snapshot_service import (
+from rp.services.runtime.profile_snapshot_service import (
     RuntimeProfileSnapshotService,
     RuntimeProfileSnapshotServiceError,
 )
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 
 
 def _utcnow() -> datetime:

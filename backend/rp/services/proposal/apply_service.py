@@ -44,7 +44,7 @@ from .repository import (
     extract_core_mutation_envelope,
     extract_worker_governance_metadata,
 )
-from ..runtime_workspace_material_service import RuntimeWorkspaceMaterialService
+from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from ..story_session_service import StorySessionService
 from ..story_state_apply_service import StoryStateApplyService
 

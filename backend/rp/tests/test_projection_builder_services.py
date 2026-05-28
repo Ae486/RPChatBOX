@@ -62,7 +62,7 @@ from rp.services.projection.builder_context_service import (
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.context_orchestration_service import ContextOrchestrationService
+from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
 from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.writer.longform_specialist_service import LongformSpecialistService
 from rp.services.memory.inspection_read_service import MemoryInspectionReadService
@@ -75,10 +75,10 @@ from rp.services.projection.state_service import ProjectionStateService
 from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.memory.rp_block_read_service import RpBlockReadService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
-from rp.services.runtime_workflow_job_service import RuntimeWorkflowJobService
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.story_block_consumer_state_service import (

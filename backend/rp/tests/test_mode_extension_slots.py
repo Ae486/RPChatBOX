@@ -30,10 +30,10 @@ from rp.services.projection.builder_context_service import (
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.context_orchestration_service import ContextOrchestrationService
+from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
 from rp.services.projection.state_service import ProjectionStateService
-from rp.services.runtime_profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.runtime_workspace_material_service import (
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
