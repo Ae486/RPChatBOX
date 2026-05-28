@@ -35,7 +35,7 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
     StorySession,
 )
-from rp.services.chapter_bridge_provider import ChapterBridgeProvider
+from rp.services.story.chapter_bridge_provider import ChapterBridgeProvider
 from rp.services.setup_agent.draft_selection_service import DraftSelectionService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.runtime.read_manifest_service import (
@@ -43,8 +43,8 @@ from rp.services.runtime.read_manifest_service import (
     RuntimeReadManifestServiceError,
 )
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_service import StorySessionService
 
 
 CHAPTER_BRIDGE_PAYLOAD_VERSION = "longform-chapter-bridge.v1"

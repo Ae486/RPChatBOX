@@ -32,7 +32,7 @@ from .read_manifest_service import RuntimeReadManifestService
 from ..retrieval.runtime_card_service import RuntimeRetrievalCardService
 from .profile_snapshot_service import RuntimeProfileSnapshotService
 from .workspace_material_service import RuntimeWorkspaceMaterialService
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 from ..writer.writing_packet_builder import WritingPacketBuilder
 
 

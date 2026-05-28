@@ -24,9 +24,9 @@ from rp.services.projection.chapter_workspace_adapter import (
 )
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.memory.rp_block_read_service import RpBlockReadService
-from rp.services.story_runtime_controller import StoryRuntimeController
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.story.runtime_controller import StoryRuntimeController
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.turn_domain_service import StoryTurnDomainService
 from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 

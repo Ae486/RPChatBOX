@@ -26,10 +26,10 @@ from ..projection.state_service import ProjectionStateService
 from ..retrieval.runtime_card_service import RuntimeRetrievalCardService
 from ..retrieval.block_adapter_service import RetrievalBlockAdapterService
 from ..retrieval.broker import RetrievalBroker
-from ..story_block_prompt_compile_service import StoryBlockPromptCompileService
-from ..story_block_prompt_context_service import StoryBlockPromptContextService
-from ..story_block_prompt_render_service import StoryBlockPromptRenderService
-from ..story_llm_gateway import StoryLlmGateway
+from ..story.block_prompt_compile_service import StoryBlockPromptCompileService
+from ..story.block_prompt_context_service import StoryBlockPromptContextService
+from ..story.block_prompt_render_service import StoryBlockPromptRenderService
+from ..story.llm_gateway import StoryLlmGateway
 
 
 class LongformSpecialistService:

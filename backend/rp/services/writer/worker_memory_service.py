@@ -36,8 +36,8 @@ from ..proposal.repository import ProposalRepository
 from ..proposal.workflow_service import ProposalWorkflowService
 from ..retrieval.broker import RetrievalBroker
 from ..retrieval.runtime_card_service import RuntimeRetrievalCardService
-from ..story_session_service import StorySessionService
-from ..story_state_apply_service import StoryStateApplyService
+from ..story.session_service import StorySessionService
+from ..story.state_apply_service import StoryStateApplyService
 
 
 class WorkerMemoryPermissionError(ValueError):

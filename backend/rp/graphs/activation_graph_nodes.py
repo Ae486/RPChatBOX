@@ -4,8 +4,8 @@ from __future__ import annotations
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.setup_agent.runtime_controller import SetupRuntimeController
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_activation_service import StoryActivationService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.activation_service import StoryActivationService
+from rp.services.story.session_service import StorySessionService
 
 from .activation_graph_state import ActivationGraphState
 

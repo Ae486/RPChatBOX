@@ -8,7 +8,7 @@ from rp.models.memory_crud import ProvenanceResult
 
 from .object_mapper import normalize_authoritative_ref
 from ..proposal.repository import ProposalRepository
-from ..story_session_core_state_adapter import StorySessionCoreStateAdapter
+from ..story.session_core_state_adapter import StorySessionCoreStateAdapter
 
 
 class ProvenanceReadService:

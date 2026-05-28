@@ -13,7 +13,7 @@ from rp.models.writing_worker_contracts import (
     WritingWorkerExecutionResult,
 )
 from rp.models.writing_runtime import WritingPacket
-from ..story_llm_gateway import StoryLlmGateway
+from ..story.llm_gateway import StoryLlmGateway
 from rp.services.writer.writing_worker_retrieval_loop_service import (
     WritingWorkerRetrievalLoopService,
 )

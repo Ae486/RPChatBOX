@@ -9,13 +9,13 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1] / "services"
 BUSINESS_SERVICE_FILES = [
     SERVICE_ROOT / "writer" / "longform_orchestrator_service.py",
     SERVICE_ROOT / "writer" / "longform_specialist_service.py",
-    SERVICE_ROOT / "story_turn_domain_service.py",
+    SERVICE_ROOT / "story" / "turn_domain_service.py",
 ]
 PRIMARY_MEMORY_WRITE_SERVICE_FILES = [
     SERVICE_ROOT / "proposal" / "apply_service.py",
     SERVICE_ROOT / "projection" / "refresh_service.py",
     SERVICE_ROOT / "projection" / "state_service.py",
-    SERVICE_ROOT / "story_state_apply_service.py",
+    SERVICE_ROOT / "story" / "state_apply_service.py",
 ]
 FORBIDDEN_BACKEND_KEYS = [
     "current_state_json",
@@ -31,9 +31,9 @@ LEGACY_MEMORY_BACKEND_ALLOWLIST = {
     "compatibility_mirror_service.py",
     "read_service.py",
     "provenance_read_service.py",
-    "story_activation_service.py",
-    "story_session_core_state_adapter.py",
-    "story_session_service.py",
+    "activation_service.py",
+    "session_core_state_adapter.py",
+    "session_service.py",
 }
 
 

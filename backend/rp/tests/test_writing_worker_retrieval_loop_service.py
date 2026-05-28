@@ -20,8 +20,8 @@ from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_service import StorySessionService
 from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
 from rp.services.writer.writing_worker_retrieval_loop_service import (
     WritingWorkerRetrievalLoopService,

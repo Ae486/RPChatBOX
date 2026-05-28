@@ -21,8 +21,8 @@ from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
 
 
 async def _seed_session_with_apply(retrieval_session):

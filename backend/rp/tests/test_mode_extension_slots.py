@@ -37,8 +37,8 @@ from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
+from rp.services.story.session_service import StorySessionService
 from rp.services.writer.worker_execution_service import WorkerExecutionService
 from rp.services.writer.worker_registry_service import (
     WRITING_WORKER_ID,

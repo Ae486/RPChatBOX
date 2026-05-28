@@ -18,9 +18,9 @@ from rp.services.runtime.read_manifest_service import RuntimeReadManifestService
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
 
 
 def _seed_runtime(retrieval_session):

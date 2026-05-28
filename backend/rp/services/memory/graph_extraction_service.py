@@ -65,7 +65,7 @@ from rp.models.memory_graph_projection import (
 from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
 from .graph_projection_repository import MemoryGraphProjectionRepository
 from ..retrieval.runtime_config_service import RetrievalRuntimeConfigService
-from ..story_llm_gateway import StoryLlmGateway
+from ..story.llm_gateway import StoryLlmGateway
 
 
 def _utcnow() -> datetime:

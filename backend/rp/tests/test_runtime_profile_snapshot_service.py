@@ -11,7 +11,7 @@ from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.session_service import StorySessionService
 
 
 def _seed_story_session(

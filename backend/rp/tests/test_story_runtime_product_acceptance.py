@@ -45,7 +45,7 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.services.archival_evolution_service import ArchivalEvolutionService
+from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.setup_agent.draft_selection_service import DraftSelectionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
@@ -59,8 +59,8 @@ from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.tests.test_archival_evolution_service import (
     _seed_archival_asset,
     _seed_branch_identity,

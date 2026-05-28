@@ -8,7 +8,7 @@ from typing import Any
 
 from models.chat import ChatMessage
 from pydantic import BaseModel, ConfigDict, Field
-from rp.services.story_llm_gateway import StoryLlmGateway
+from rp.services.story.llm_gateway import StoryLlmGateway
 
 from ..models import EvalArtifact, EvalCase, EvalScore, EvalSubjectiveHook
 from .judge_registry import JudgeRubricSpec, get_judge_rubric

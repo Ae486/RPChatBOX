@@ -42,8 +42,8 @@ from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.retrieval.service import RetrievalService
 from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_activation_service import StoryActivationService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.activation_service import StoryActivationService
+from rp.services.story.session_service import StorySessionService
 from sqlmodel import Session, select
 
 from rp.observability.langfuse_scores import emit_ragas_metric_scores

@@ -45,8 +45,8 @@ from .repository import (
     extract_worker_governance_metadata,
 )
 from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
-from ..story_session_service import StorySessionService
-from ..story_state_apply_service import StoryStateApplyService
+from ..story.session_service import StorySessionService
+from ..story.state_apply_service import StoryStateApplyService
 
 
 def _utcnow() -> datetime:

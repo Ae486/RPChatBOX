@@ -21,7 +21,7 @@ from .object_mapper import (
     normalize_projection_summary_id,
     resolve_projection_binding,
 )
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 
 
 class RpBlockReadService:

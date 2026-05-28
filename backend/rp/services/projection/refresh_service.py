@@ -17,7 +17,7 @@ from ..memory.change_event_service import MemoryChangeEventService
 from .compatibility_mirror_service import (
     ProjectionCompatibilityMirrorService,
 )
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 
 
 class ProjectionRefreshService:

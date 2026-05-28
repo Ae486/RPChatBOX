@@ -23,7 +23,7 @@ from rp.services.recall.character_long_history_ingestion_service import (
 )
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.retrieval.document_service import RetrievalDocumentService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.session_service import StorySessionService
 
 
 def _utcnow() -> datetime:

@@ -20,8 +20,8 @@ from rp.services.retrieval.runtime_card_service import (
     RuntimeRetrievalCardService,
     RuntimeRetrievalCardServiceError,
 )
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_service import StorySessionService
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialVisibility,
 )

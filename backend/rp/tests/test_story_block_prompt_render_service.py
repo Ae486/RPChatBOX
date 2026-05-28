@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from rp.models.block_prompt_context import RpBlockPromptContextView
 from rp.models.block_view import RpBlockView
 from rp.models.dsl import Domain, Layer
-from rp.services.story_block_prompt_render_service import StoryBlockPromptRenderService
+from rp.services.story.block_prompt_render_service import StoryBlockPromptRenderService
 
 
 def _utcnow() -> datetime:

@@ -21,11 +21,11 @@ from rp.services.memory.inspection_read_service import MemoryInspectionReadServi
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.memory.rp_block_read_service import RpBlockReadService
-from rp.services.story_block_consumer_state_service import (
+from rp.services.story.block_consumer_state_service import (
     StoryBlockConsumerStateService,
 )
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 
 

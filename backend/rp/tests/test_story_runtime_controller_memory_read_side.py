@@ -58,7 +58,7 @@ from rp.services.projection.builder_context_service import (
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
-from rp.services.archival_evolution_service import ArchivalEvolutionService
+from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.memory.change_event_service import MemoryChangeEventService
@@ -81,22 +81,22 @@ from rp.services.runtime.workspace_material_service import (
 from rp.services.runtime.read_manifest_service import RuntimeReadManifestService
 from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_activation_service import StoryActivationService
-from rp.services.story_block_mutation_service import (
+from rp.services.story.activation_service import StoryActivationService
+from rp.services.story.block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
     StoryBlockMutationService,
 )
-from rp.services.story_runtime_controller import (
+from rp.services.story.runtime_controller import (
     MemoryBlockHistoryUnsupportedError,
     StoryRuntimeController,
 )
-from rp.services.story_runtime_debug_query_service import StoryRuntimeDebugQueryService
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_runtime_migration_service import StoryRuntimeMigrationService
-from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.runtime_debug_query_service import StoryRuntimeDebugQueryService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.runtime_migration_service import StoryRuntimeMigrationService
+from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.memory.trace_read_service import MemoryTraceReadService
 

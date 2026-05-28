@@ -19,7 +19,7 @@ from rp.models.story_runtime import (
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
-from rp.services.chapter_bridge_provider import ChapterBridgeProvider
+from rp.services.story.chapter_bridge_provider import ChapterBridgeProvider
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
@@ -37,9 +37,9 @@ from rp.services.core_state.revision_overlay_service import RevisionOverlayServi
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.turn_domain_service import StoryTurnDomainService
 from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 
@@ -73,13 +73,13 @@ class _RecordingChapterBridgeProvider:
         self.calls: list[dict[str, object]] = []
 
     def build_bridge_material(self, **kwargs):
-        from rp.services.chapter_bridge_provider import ChapterBridgeProvider
+        from rp.services.story.chapter_bridge_provider import ChapterBridgeProvider
 
         self.calls.append({"mode": "sync", **kwargs})
         return ChapterBridgeProvider().build_bridge_material(**kwargs)
 
     async def build_bridge_material_with_summary(self, **kwargs):
-        from rp.services.chapter_bridge_provider import ChapterBridgeProvider
+        from rp.services.story.chapter_bridge_provider import ChapterBridgeProvider
 
         self.calls.append({"mode": "async", **kwargs})
         bridge = ChapterBridgeProvider().build_bridge_material(

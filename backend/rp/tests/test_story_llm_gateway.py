@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from models.chat import ChatMessage, ProviderConfig
-from rp.services.story_llm_gateway import StoryLlmGateway
+from rp.services.story.llm_gateway import StoryLlmGateway
 
 
 class _RecordingLiteLLMService:

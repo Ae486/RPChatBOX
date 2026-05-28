@@ -7,7 +7,7 @@ from ..core_state.dual_write_service import CoreStateDualWriteService
 from ..core_state.store_repository import CoreStateStoreRepository
 from .compatibility_mirror_service import ProjectionCompatibilityMirrorService
 from .settled_mapper import settled_projection_slots
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 
 
 class ProjectionStateService:

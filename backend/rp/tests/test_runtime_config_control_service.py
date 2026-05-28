@@ -31,8 +31,8 @@ from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.memory.registry_management_service import MemoryRegistryManagementService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_service import StorySessionService
 
 
 class _FakeProviderRegistry:

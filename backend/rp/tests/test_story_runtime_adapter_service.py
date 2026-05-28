@@ -14,7 +14,7 @@ from rp.models.worker_runtime_contracts import (
     WorkerExecutionPolicy,
     WorkerExecutionRequest,
 )
-from rp.services.story_runtime_adapter_service import (
+from rp.services.story.runtime_adapter_service import (
     LONGFORM_ADAPTER_POLICY_ID,
     StoryRuntimeAdapterService,
 )

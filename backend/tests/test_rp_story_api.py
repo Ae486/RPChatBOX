@@ -64,7 +64,7 @@ from rp.services.runtime.context_orchestration_service import ContextOrchestrati
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
-from rp.services.archival_evolution_service import ArchivalEvolutionService
+from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
@@ -74,10 +74,10 @@ from rp.services.runtime.workspace_material_service import (
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_runtime_workspace_facade import StoryRuntimeWorkspaceFacade
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
 from services.database import get_engine
 
@@ -1521,7 +1521,7 @@ def _create_story_session_with_pending_segment(client, monkeypatch) -> tuple[str
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
     session_id = client.post(
@@ -1750,7 +1750,7 @@ def test_story_activation_bootstraps_session(client, monkeypatch):
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
 
@@ -1832,7 +1832,7 @@ def test_activation_bootstrap_emits_langfuse_scores(client, monkeypatch):
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
     monkeypatch.setattr(
@@ -1908,7 +1908,7 @@ def test_story_runtime_config_patch_updates_session_snapshot(client, monkeypatch
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
 
@@ -1982,7 +1982,7 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
     session_id = client.post(
@@ -2255,7 +2255,7 @@ def test_story_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
     session_id = client.post(
@@ -3008,7 +3008,7 @@ def test_story_turn_stream_backfills_stale_active_snapshot_and_completes(
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
     activation = client.post(f"/api/rp/setup/workspaces/{workspace_id}/activate")
@@ -3089,7 +3089,7 @@ def test_story_turn_recovers_after_failed_stream_on_same_thread(client, monkeypa
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _RecoverableStoryLLMService(),
     )
     session_id = client.post(
@@ -3151,7 +3151,7 @@ def test_story_turn_stream_buffers_writer_retrieval_loop_and_persists_usage_refs
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
     session_id = client.post(
@@ -3251,7 +3251,7 @@ def test_story_turn_stream_buffers_writer_retrieval_loop_and_persists_usage_refs
     )
 
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _ToolLoopStoryLLMService(),
     )
     with client.stream(
@@ -3288,7 +3288,7 @@ def test_story_memory_read_only_routes_expose_session_scoped_views(client, monke
     )
     workspace_id = _create_ready_workspace(client)
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
     session_id = client.post(
@@ -4747,7 +4747,7 @@ def test_story_memory_routes_do_not_fall_back_to_story_latest_session(
         json=_model_payload(),
     )
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _MockStoryLLMService(),
     )
 

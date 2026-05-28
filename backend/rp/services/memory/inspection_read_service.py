@@ -11,7 +11,7 @@ from rp.models.dsl import Layer, ObjectRef
 from ..projection.builder_context_service import BuilderProjectionContextService
 from .object_mapper import authoritative_bindings, normalize_authoritative_ref
 from ..proposal.repository import ProposalRepository
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 from .version_history_read_service import VersionHistoryReadService
 
 

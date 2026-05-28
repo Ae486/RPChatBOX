@@ -31,9 +31,9 @@ from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.models.memory_crud import ProposalSubmitInput
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy

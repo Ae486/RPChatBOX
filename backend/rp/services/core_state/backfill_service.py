@@ -10,7 +10,7 @@ from rp.models.dsl import Layer, ObjectRef
 from .store_repository import CoreStateStoreRepository
 from ..memory.object_mapper import authoritative_bindings, projection_bindings
 from ..proposal.repository import ProposalRepository
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 
 
 class CoreStateBackfillService:

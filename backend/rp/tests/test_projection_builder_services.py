@@ -81,23 +81,23 @@ from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.story_block_consumer_state_service import (
+from rp.services.story.block_consumer_state_service import (
     StoryBlockConsumerStateService,
 )
-from rp.services.story_block_prompt_compile_service import (
+from rp.services.story.block_prompt_compile_service import (
     StoryBlockPromptCompileService,
 )
-from rp.services.story_brainstorm_service import StoryBrainstormService
-from rp.services.story_block_prompt_context_service import (
+from rp.services.story.brainstorm_service import StoryBrainstormService
+from rp.services.story.block_prompt_context_service import (
     StoryBlockPromptContextService,
 )
-from rp.services.story_block_prompt_render_service import (
+from rp.services.story.block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.turn_domain_service import StoryTurnDomainService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
 from rp.services.writer.worker_scheduler_service import PRE_WRITE_CONTEXT_PHASE

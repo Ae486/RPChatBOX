@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from rp.models.story_runtime import StorySession
 
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 
 
 class AuthoritativeCompatibilityMirrorService:

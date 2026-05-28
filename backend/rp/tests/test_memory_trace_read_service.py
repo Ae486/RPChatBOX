@@ -45,8 +45,8 @@ from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_service import StorySessionService
 from services.database import get_engine
 
 

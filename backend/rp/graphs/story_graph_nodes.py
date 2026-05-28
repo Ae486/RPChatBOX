@@ -14,8 +14,8 @@ from rp.models.story_runtime import (
 )
 from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.models.writing_runtime import WritingPacket
-from rp.services.story_command_policy import validate_story_command
-from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.story.command_policy import validate_story_command
+from rp.services.story.turn_domain_service import StoryTurnDomainService
 
 from .story_graph_state import StoryGraphState
 

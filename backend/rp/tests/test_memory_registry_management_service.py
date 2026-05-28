@@ -25,8 +25,8 @@ from rp.services.memory.registry_management_service import (
 )
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_service import StorySessionService
 
 
 def _seed_story_session(retrieval_session, *, story_id: str):

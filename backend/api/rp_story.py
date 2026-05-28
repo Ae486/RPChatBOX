@@ -34,20 +34,20 @@ from rp.models.story_runtime import LongformTurnRequest
 from rp.services.runtime.config_control_service import (
     RuntimeConfigControlServiceError,
 )
-from rp.services.story_runtime_identity_service import (
+from rp.services.story.runtime_identity_service import (
     StoryRuntimeIdentityServiceError,
 )
-from rp.services.story_block_mutation_service import (
+from rp.services.story.block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
     MemoryBlockProposalNotFoundError,
     MemoryBlockTargetMismatchError,
 )
-from rp.services.story_runtime_controller import (
+from rp.services.story.runtime_controller import (
     MemoryBlockHistoryUnsupportedError,
     StoryRuntimeController,
 )
-from rp.services.story_brainstorm_service import StoryBrainstormServiceError
-from rp.services.story_runtime_debug_query_service import (
+from rp.services.story.brainstorm_service import StoryBrainstormServiceError
+from rp.services.story.runtime_debug_query_service import (
     StoryRuntimeDebugQueryServiceError,
 )
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory

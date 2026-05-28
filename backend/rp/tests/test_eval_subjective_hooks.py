@@ -160,7 +160,7 @@ async def test_eval_runner_executes_setup_subjective_judge(
         lambda: _TruthWriteAskUserLLMService(),
     )
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": "pass",
@@ -217,7 +217,7 @@ async def test_eval_runner_executes_retrieval_subjective_judge(
 ):
     _seed_judge_model_registry()
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": "warn",
@@ -257,7 +257,7 @@ async def test_eval_runner_executes_activation_subjective_judge(
 ):
     _seed_judge_model_registry()
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": "pass",
@@ -299,7 +299,7 @@ async def test_eval_runner_can_fallback_subjective_status_from_score_band(
 ):
     _seed_judge_model_registry()
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": "strong",
@@ -340,7 +340,7 @@ async def test_eval_runner_replay_persists_subjective_hook_artifacts(
 ):
     _seed_judge_model_registry()
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": "warn",
@@ -433,7 +433,7 @@ async def test_eval_runner_executes_skill_pack_persona_alignment_judge(
         lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
     )
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": "pass",
@@ -508,7 +508,7 @@ async def test_skill_pack_persona_alignment_score_band_assignment(
         lambda: _CharacterDesignSkillPackFacilitatorLLMService(),
     )
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": judge_status,

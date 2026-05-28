@@ -5,8 +5,8 @@ from sqlmodel import Session
 
 from rp.models.memory_crud import ProposalReceipt, ProposalSubmitInput
 from rp.services.memory.crud_validation_service import MemoryCrudValidationService
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
 from services.database import get_engine
 
 from .apply_service import ProposalApplyService

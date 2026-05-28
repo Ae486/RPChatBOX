@@ -62,13 +62,13 @@ from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.runtime.read_manifest_service import BranchVisibilityResolver
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
-from rp.services.story_block_mutation_service import StoryBlockMutationService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.block_mutation_service import StoryBlockMutationService
+from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 
 

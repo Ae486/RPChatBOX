@@ -36,10 +36,10 @@ from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.services.retrieval.broker import RetrievalBroker
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService

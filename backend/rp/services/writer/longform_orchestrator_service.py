@@ -15,10 +15,10 @@ from rp.models.story_runtime import (
 )
 from ..core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from ..projection.state_service import ProjectionStateService
-from ..story_block_prompt_compile_service import StoryBlockPromptCompileService
-from ..story_block_prompt_context_service import StoryBlockPromptContextService
-from ..story_block_prompt_render_service import StoryBlockPromptRenderService
-from ..story_llm_gateway import StoryLlmGateway
+from ..story.block_prompt_compile_service import StoryBlockPromptCompileService
+from ..story.block_prompt_context_service import StoryBlockPromptContextService
+from ..story.block_prompt_render_service import StoryBlockPromptRenderService
+from ..story.llm_gateway import StoryLlmGateway
 
 
 class LongformOrchestratorService:

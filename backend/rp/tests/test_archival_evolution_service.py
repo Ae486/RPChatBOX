@@ -32,7 +32,7 @@ from rp.models.story_evolution_contracts import (
     StoryEvolutionTargetLayer,
 )
 from rp.models.worker_memory import WorkerProposalGovernanceMetadata
-from rp.services.archival_evolution_service import ArchivalEvolutionService
+from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
@@ -44,13 +44,13 @@ from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.retrieval.index_job_service import RetrievalIndexJobService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.story_evolution_service import (
+from rp.services.story.evolution_service import (
     StoryEvolutionService,
     StoryEvolutionServiceError,
 )
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.state_apply_service import StoryStateApplyService
 
 
 def _seed_runtime_identities(retrieval_session):

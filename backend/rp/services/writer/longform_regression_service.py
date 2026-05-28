@@ -31,7 +31,7 @@ from ..recall.retired_foreshadow_ingestion_service import (
     RecallRetiredForeshadowIngestionService,
 )
 from ..recall.summary_ingestion_service import RecallSummaryIngestionService
-from ..story_session_service import StorySessionService
+from ..story.session_service import StorySessionService
 
 
 class LongformRegressionService:

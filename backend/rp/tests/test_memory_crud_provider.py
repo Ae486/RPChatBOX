@@ -12,7 +12,7 @@ from rp.services.memory.os_service import MemoryOsService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.writer.local_tool_provider_registry import LocalToolProviderRegistry
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.session_service import StorySessionService
 from rp.tools.memory_crud_provider import MemoryCrudToolProvider
 from services.mcp_manager import McpManager
 

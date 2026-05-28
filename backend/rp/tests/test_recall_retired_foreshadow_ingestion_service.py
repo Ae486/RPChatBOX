@@ -33,9 +33,9 @@ from rp.services.recall.retired_foreshadow_ingestion_service import (
 )
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.retrieval.document_service import RetrievalDocumentService
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
 
 
 def _utcnow() -> datetime:

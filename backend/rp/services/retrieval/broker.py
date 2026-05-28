@@ -62,8 +62,8 @@ from rp.services.runtime.read_manifest_service import (
     filter_hits_by_branch_visibility,
 )
 from rp.services.memory.rp_block_read_service import RpBlockReadService
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.memory.object_mapper import normalize_projection_summary_id
 from services.database import get_engine

@@ -7,7 +7,7 @@ from rp.models.story_runtime import LongformChapterPhase
 from rp.models.setup_workspace import StoryMode
 from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.session_service import StorySessionService
 
 
 def test_resolve_story_config_reads_setup_story_config(retrieval_session):

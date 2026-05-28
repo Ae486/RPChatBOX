@@ -18,7 +18,7 @@ from rp.services.core_state.authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,
 )
 from rp.services.core_state.authoritative_state_view_service import AuthoritativeStateViewService
-from rp.services.archival_evolution_service import ArchivalEvolutionService
+from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.writer.longform_orchestrator_service import LongformOrchestratorService
 from rp.services.writer.longform_regression_service import LongformRegressionService
 from rp.services.writer.longform_specialist_service import LongformSpecialistService
@@ -96,34 +96,34 @@ from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntim
 from rp.services.setup_agent.context_builder import SetupContextBuilder
 from rp.services.setup_agent.runtime_controller import SetupRuntimeController
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_activation_service import StoryActivationService
-from rp.services.story_block_consumer_state_service import (
+from rp.services.story.activation_service import StoryActivationService
+from rp.services.story.block_consumer_state_service import (
     StoryBlockConsumerStateService,
 )
-from rp.services.story_block_mutation_service import StoryBlockMutationService
-from rp.services.story_block_prompt_compile_service import (
+from rp.services.story.block_mutation_service import StoryBlockMutationService
+from rp.services.story.block_prompt_compile_service import (
     StoryBlockPromptCompileService,
 )
-from rp.services.story_block_prompt_context_service import (
+from rp.services.story.block_prompt_context_service import (
     StoryBlockPromptContextService,
 )
-from rp.services.story_block_prompt_render_service import (
+from rp.services.story.block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
-from rp.services.story_brainstorm_service import StoryBrainstormService
-from rp.services.story_runtime_controller import StoryRuntimeController
-from rp.services.story_runtime_debug_query_service import (
+from rp.services.story.brainstorm_service import StoryBrainstormService
+from rp.services.story.runtime_controller import StoryRuntimeController
+from rp.services.story.runtime_debug_query_service import (
     StoryRuntimeDebugQueryService,
 )
-from rp.services.story_runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story_runtime_migration_service import StoryRuntimeMigrationService
-from rp.services.story_runtime_workspace_facade import (
+from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
+from rp.services.story.runtime_migration_service import StoryRuntimeMigrationService
+from rp.services.story.runtime_workspace_facade import (
     StoryRuntimeWorkspaceFacade,
 )
-from rp.services.story_session_core_state_adapter import StorySessionCoreStateAdapter
-from rp.services.story_session_service import StorySessionService
-from rp.services.story_state_apply_service import StoryStateApplyService
-from rp.services.story_turn_domain_service import StoryTurnDomainService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
+from rp.services.story.state_apply_service import StoryStateApplyService
+from rp.services.story.turn_domain_service import StoryTurnDomainService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.writer.worker_execution_service import WorkerExecutionService

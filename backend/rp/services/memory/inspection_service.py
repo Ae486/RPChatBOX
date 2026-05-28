@@ -27,14 +27,14 @@ from rp.models.retrieval_records import SourceAsset
 from rp.models.runtime_read_contract import RuntimeBranchReadScope
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialLifecycle
 
-from ..archival_evolution_service import ArchivalEvolutionService
+from ..story.archival_evolution_service import ArchivalEvolutionService
 from .inspection_read_service import MemoryInspectionReadService
 from ..recall.lifecycle_service import RecallLifecycleService
 from ..retrieval.document_service import RetrievalDocumentService
 from .rp_block_read_service import RpBlockReadService
 from ..runtime.read_manifest_service import BranchVisibilityResolver
 from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
-from ..story_block_mutation_service import StoryBlockMutationService
+from ..story.block_mutation_service import StoryBlockMutationService
 
 
 class MemoryInspectionError(ValueError):

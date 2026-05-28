@@ -580,7 +580,7 @@ def test_eval_cli_can_enable_subjective_judges(
         lambda: nullcontext(retrieval_session),
     )
     monkeypatch.setattr(
-        "rp.services.story_llm_gateway.get_litellm_service",
+        "rp.services.story.llm_gateway.get_litellm_service",
         lambda: _FakeJudgeLLMService(
             response_payload={
                 "status": "pass",

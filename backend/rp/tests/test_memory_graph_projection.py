@@ -58,7 +58,7 @@ from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story_session_service import StorySessionService
+from rp.services.story.session_service import StorySessionService
 
 
 def _utcnow() -> datetime:
