@@ -31,6 +31,11 @@ arize-phoenix-otel
 # the `yaml` ignore_missing_imports opt-out in pyproject.toml.
 mypy==2.1.0
 
+# Lint / pre-commit (T24). ruff pin MUST equal the ruff-pre-commit `rev` in
+# .pre-commit-config.yaml (rev vX == ruff version X) — keep them in sync.
+pre-commit==4.6.0
+ruff==0.15.15
+
 # Note:
 # - MarkItDown is used for backend-side document parsing during Phase 1.5.
 # - SSE helper frameworks are intentionally excluded for now; the current

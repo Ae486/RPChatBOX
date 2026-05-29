@@ -1,0 +1,47 @@
+# .pre-commit-config.yaml  (repo root)
+# Python backend (backend/rp). Advisory mypy until CI flips it (T21).
+# Verified rev tags (2026-05-29): pre-commit-hooks v6.0.0, ruff-pre-commit v0.15.15.
+
+default_install_hook_types: [pre-commit]   # `pre-commit install` wires .git/hooks/pre-commit
+default_stages: [pre-commit]               # hooks without explicit `stages` run on commit
+minimum_pre_commit_version: "3.2.0"        # required for the new stage names (pre-commit, ...)
+
+repos:
+  # --- generic file hygiene (commit stage; trailing-ws/eof mutate files) ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  # --- ruff lint (commit stage; passes changed filenames = incremental ratchet) ---
+  # Lint-only: NO --fix, NO ruff-format (hooks stay non-mutating for code). Scoped to
+  # backend/ so ruff discovers [tool.ruff] in backend/pyproject.toml. rev == ruff pin
+  # in backend/requirements.txt (rev vX == ruff version X) — keep them in sync.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
+    hooks:
+      - id: ruff-check
+        files: ^backend/
+
+  # --- mypy (MANUAL / advisory; reuses dev venv: pure-python mypy 2.1.0 + pydantic) ---
+  # local + language: system avoids the compiled-mypyc plugin-load trap (#17726) and
+  # reproduces `cd backend && python -m mypy rp`. cwd must be backend/ so [tool.mypy] in
+  # backend/pyproject.toml is found — pre-commit has no per-hook working-directory, so we
+  # `cd backend` inside `bash -c` (pre-commit ships Git-for-Windows bash on Windows).
+  # Run on demand: `pre-commit run --hook-stage manual mypy` (NOT triggered by git commit,
+  # and NOT by a bare `pre-commit run --all-files` — pre-commit #3350).
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (advisory, rp package)
+        language: system
+        stages: [manual]          # advisory: 650-error baseline must NOT block commits
+        pass_filenames: false     # run the whole package, not per-file
+        require_serial: true
+        files: ^backend/rp/
+        entry: bash -c 'cd backend && python -m mypy rp'

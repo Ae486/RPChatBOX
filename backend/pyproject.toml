@@ -1,11 +1,11 @@
 # backend/pyproject.toml
 #
 # Config carrier only (no [build-system] / [project]) — does NOT make `backend/`
-# an installable package. Currently scoped to the mypy type-checking baseline (T20).
+# an installable package. Carries the mypy (T20) + ruff (T24) tooling baselines.
 #
-# Type-checking policy: lenient curated ruleset that ratchets UP over time.
+# Tooling policy: lenient curated rulesets that ratchet UP over time.
 # See CONTRIBUTING "Type checking" for the ruleset philosophy, opt-out rules,
-# and ratchet roadmap. Baseline is ADVISORY (non-blocking) until T21 flips CI.
+# and ratchet roadmap. Baselines are ADVISORY (non-blocking) until T21 flips CI.
 
 [tool.mypy]
 python_version = "3.12"
@@ -39,3 +39,15 @@ ignore_missing_imports = true
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
+
+# --- ruff (T24 pre-commit lint baseline; advisory until T21 CI) ---
+# Same philosophy as [tool.mypy]: lenient curated ruleset that ratchets UP.
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+# Lint settings live under [tool.ruff.lint] (NOT top-level [tool.ruff]).
+[tool.ruff.lint]
+# Start high-signal / low-noise: E9 (runtime/syntax errors) + F (Pyflakes).
+# Cosmetic E-rules (whitespace/line-length style) intentionally OFF — ratchet up later.
+select = ["E9", "F"]
