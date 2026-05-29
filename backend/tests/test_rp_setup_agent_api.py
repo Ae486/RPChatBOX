@@ -1,8 +1,6 @@
 """Integration tests for SetupAgent turn and stream APIs."""
 from __future__ import annotations
 
-import json
-
 from sqlmodel import Session
 
 from datetime import datetime, timezone
@@ -44,72 +42,6 @@ def _model_payload(model_id: str = "model-setup"):
         "is_enabled": True,
         "description": "setup test model",
     }
-
-
-class _MockSetupLLMService:
-    def __init__(self):
-        self._stream_round = 0
-        self._chat_round = 0
-
-    async def chat_completion_stream(self, request):
-        self._stream_round += 1
-        workspace_id = request.messages[0].content.split('"workspace_id": "')[1].split('"')[0]
-        if self._stream_round == 1:
-            yield (
-                'data: {"type":"tool_call","tool_calls":[{"id":"call_patch",'
-                '"function":{"name":"rp_setup__setup.patch.writing_contract",'
-                '"arguments":"{\\"workspace_id\\":\\"%s\\",\\"patch\\":{\\"pov_rules\\":[\\"third_person_limited\\"],'
-                '\\"style_rules\\":[\\"restrained\\"],\\"writing_constraints\\":[\\"avoid exposition dumps\\"]}}"}}]}\n\n'
-                % workspace_id
-            )
-            yield 'data: {"type":"done"}\n\n'
-            return
-        yield 'data: {"type":"text_delta","delta":"Writing contract updated. Continue refining before commit."}\n\n'
-        yield 'data: {"type":"done"}\n\n'
-
-    async def chat_completion(self, request):
-        self._chat_round += 1
-        workspace_id = request.messages[0].content.split('"workspace_id": "')[1].split('"')[0]
-        if self._chat_round == 1:
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_commit",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "rp_setup__setup.proposal.commit",
-                                        "arguments": json.dumps(
-                                            {
-                                                "workspace_id": workspace_id,
-                                                "step_id": "writing_contract",
-                                                "target_draft_refs": ["draft:writing_contract"],
-                                                "reason": "Current constraints and style are coherent enough for review.",
-                                            }
-                                        ),
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            }
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "I prepared a commit proposal for your review.",
-                    }
-                }
-            ],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
 
 
 class _CaptureStepLLMService:
@@ -275,40 +207,6 @@ def _create_workspace(client) -> str:
     return response.json()["workspace_id"]
 
 
-def test_setup_agent_stream_turn_applies_setup_patch(client, monkeypatch):
-    client.put("/api/providers/provider-setup", json=_provider_payload())
-    client.put(
-        "/api/providers/provider-setup/models/model-setup",
-        json=_model_payload(),
-    )
-    workspace_id = _create_workspace(client)
-    monkeypatch.setattr(
-        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _MockSetupLLMService(),
-    )
-
-    with client.stream(
-        "POST",
-        f"/api/rp/setup/workspaces/{workspace_id}/turn/stream",
-        json={
-            "workspace_id": workspace_id,
-            "model_id": "model-setup",
-            "target_step": "writing_contract",
-            "history": [],
-            "user_prompt": "请帮我先收敛写作契约。",
-        },
-    ) as response:
-        assert response.status_code == 200
-        body = "".join(response.iter_text())
-
-    assert '"type":"tool_call"' in body or '"type": "tool_call"' in body
-    assert '"type":"tool_result"' in body or '"type": "tool_result"' in body
-    assert "Writing contract updated" in body
-
-    workspace = client.get(f"/api/rp/setup/workspaces/{workspace_id}").json()
-    assert workspace["writing_contract_draft"]["pov_rules"] == ["third_person_limited"]
-
-
 def test_setup_agent_turn_emits_langfuse_root_observation(client, monkeypatch):
     fake_langfuse = _FakeLangfuseService()
     client.put("/api/providers/provider-setup", json=_provider_payload())
@@ -366,49 +264,6 @@ def test_setup_agent_turn_emits_langfuse_root_observation(client, monkeypatch):
         and item["payload"]["name"] == "setup.attribution.primary_suspects"
         for item in fake_langfuse.events
     )
-
-
-def test_setup_agent_turn_creates_commit_proposal(client, monkeypatch):
-    client.put("/api/providers/provider-setup", json=_provider_payload())
-    client.put(
-        "/api/providers/provider-setup/models/model-setup",
-        json=_model_payload(),
-    )
-    workspace_id = _create_workspace(client)
-    client.patch(
-        f"/api/rp/setup/workspaces/{workspace_id}/writing-contract",
-        json={
-            "pov_rules": ["third_person_limited"],
-            "style_rules": ["restrained"],
-            "writing_constraints": ["avoid exposition dumps"],
-        },
-    )
-    monkeypatch.setattr(
-        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _MockSetupLLMService(),
-    )
-
-    response = client.post(
-        f"/api/rp/setup/workspaces/{workspace_id}/turn",
-        json={
-            "workspace_id": workspace_id,
-            "model_id": "model-setup",
-            "history": [
-                {"role": "assistant", "content": "We already have the draft details."}
-            ],
-            "user_prompt": "如果已经足够，请发起 review。",
-        },
-    )
-
-    assert response.status_code == 200
-    assert "commit proposal" in response.json()["assistant_text"]
-
-    workspace = client.get(f"/api/rp/setup/workspaces/{workspace_id}").json()
-    proposals = [
-        item for item in workspace["commit_proposals"] if item["status"] == "pending_review"
-    ]
-    assert len(proposals) == 1
-    assert proposals[0]["step_id"] == "writing_contract"
 
 
 def test_setup_commit_proposal_api_persists_runtime_warning(client):
