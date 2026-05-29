@@ -60,6 +60,8 @@ from rp.services.projection.chapter_workspace_adapter import (
 )
 from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
@@ -104,13 +106,6 @@ from rp.services.memory.trace_read_service import MemoryTraceReadService
 class _Dumpable(dict):
     def model_dump(self, *, mode: str = "json"):
         return dict(self)
-
-
-_PRE_EXISTING_FAILURE_CLUSTER_2 = (
-    "Pre-existing failure (CoreStateAsOfResolver fixture injection missing). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 2. "
-    "Tracked by T14 in .trellis/spec/guides/project-optimization-master-guide.md."
-)
 
 
 def test_runtime_debug_packet_section_family_uses_stable_section_contract():
@@ -248,6 +243,8 @@ def _build_controller(
     retrieval_session,
     story_session_service: StorySessionService,
     repository: ProposalRepository,
+    *,
+    inject_core_state_resolver: bool = False,
 ):
     core_state_adapter = StorySessionCoreStateAdapter(story_session_service)
     core_repo = CoreStateStoreRepository(retrieval_session)
@@ -282,10 +279,22 @@ def _build_controller(
         proposal_repository=repository,
         version_history_read_service=version_history_read_service,
     )
+    core_state_as_of_resolver = (
+        CoreStateAsOfResolver(session=retrieval_session, repository=core_repo)
+        if inject_core_state_resolver
+        else None
+    )
+    core_state_dual_write_service = (
+        CoreStateDualWriteService(repository=core_repo)
+        if inject_core_state_resolver
+        else None
+    )
     proposal_apply_service = ProposalApplyService(
         story_session_service=story_session_service,
         proposal_repository=repository,
         story_state_apply_service=StoryStateApplyService(),
+        core_state_dual_write_service=core_state_dual_write_service,
+        core_state_as_of_resolver=core_state_as_of_resolver,
     )
     proposal_workflow_service = ProposalWorkflowService(
         proposal_repository=repository,
@@ -1439,14 +1448,18 @@ async def test_story_runtime_controller_reviews_and_applies_authoritative_block_
         )
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_2, strict=False)
 @pytest.mark.asyncio
 async def test_story_runtime_controller_direct_edit_routes_through_shared_kernel(
     retrieval_session,
 ):
     session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
     repository = ProposalRepository(retrieval_session)
-    controller = _build_controller(retrieval_session, story_session_service, repository)
+    controller = _build_controller(
+        retrieval_session,
+        story_session_service,
+        repository,
+        inject_core_state_resolver=True,
+    )
     runtime_identity = _build_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
@@ -1608,14 +1621,18 @@ async def test_story_runtime_controller_direct_edit_routes_through_shared_kernel
     )
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_2, strict=False)
 @pytest.mark.asyncio
 async def test_story_runtime_controller_direct_edit_rejects_stale_base_revision(
     retrieval_session,
 ):
     session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
     repository = ProposalRepository(retrieval_session)
-    controller = _build_controller(retrieval_session, story_session_service, repository)
+    controller = _build_controller(
+        retrieval_session,
+        story_session_service,
+        repository,
+        inject_core_state_resolver=True,
+    )
     runtime_identity = _build_runtime_identity(
         retrieval_session,
         session_id=session.session_id,

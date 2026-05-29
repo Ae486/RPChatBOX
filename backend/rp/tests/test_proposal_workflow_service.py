@@ -22,6 +22,7 @@ from rp.models.story_runtime import (
 from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.writer.longform_regression_service import LongformRegressionService
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
@@ -83,13 +84,13 @@ def _seed_story_runtime(retrieval_session):
 
 
 def _build_workflow(retrieval_session):
-    # T14_FIXTURE_INJECTION_MARKER_TEST
     story_session_service = StorySessionService(retrieval_session)
     repository = ProposalRepository(retrieval_session)
     apply_service = ProposalApplyService(
         story_session_service=story_session_service,
         proposal_repository=repository,
         story_state_apply_service=StoryStateApplyService(),
+        core_state_as_of_resolver=CoreStateAsOfResolver(session=retrieval_session),
     )
     workflow = ProposalWorkflowService(
         proposal_repository=repository,
@@ -97,6 +98,24 @@ def _build_workflow(retrieval_session):
         post_write_apply_handler=PostWriteApplyHandler(),
     )
     return story_session_service, repository, workflow
+
+
+def _build_runtime_identity(retrieval_session, *, session_id: str):
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session_id,
+        created_from="test.proposal_workflow.worker_core_mutation",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    return identity_service.resolve_runtime_entry_identity(
+        session_id=session_id,
+        command_kind="write_next_segment",
+        actor="worker_core_mutation_test",
+        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
 
 
 class _StaticPlanOrchestrator:
@@ -151,13 +170,6 @@ class _FailIfContinuityNoteIngestionRuns(RecallContinuityNoteIngestionService):
         summary_updates: list[str],
     ) -> list[str]:
         raise AssertionError("light regression must not materialize continuity notes")
-
-
-_PRE_EXISTING_FAILURE_CLUSTER_2 = (
-    "Pre-existing failure (CoreStateAsOfResolver fixture injection missing). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 2. "
-    "Tracked by T14 in .trellis/spec/guides/project-optimization-master-guide.md."
-)
 
 
 @pytest.mark.asyncio
@@ -594,19 +606,15 @@ async def test_proposal_workflow_persists_worker_core_mutation_metadata(
     )
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_2, strict=False)
 @pytest.mark.asyncio
 async def test_worker_core_mutation_apply_records_shared_outcomes(
     retrieval_session,
 ):
     session, chapter = _seed_story_runtime(retrieval_session)
     _, repository, workflow = _build_workflow(retrieval_session)
-    identity = MemoryRuntimeIdentity(
-        story_id=session.story_id,
+    identity = _build_runtime_identity(
+        retrieval_session,
         session_id=session.session_id,
-        branch_head_id="branch:test:worker-apply",
-        turn_id="turn:test:worker-apply",
-        runtime_profile_snapshot_id="snapshot:test:worker-apply",
     )
 
     receipt = await workflow.submit_and_route(
