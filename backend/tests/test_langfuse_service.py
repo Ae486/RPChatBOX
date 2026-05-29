@@ -6,7 +6,12 @@ import services.langfuse_service as langfuse_service_module
 from services.langfuse_service import LangfuseService
 
 
-def test_langfuse_service_is_noop_when_disabled():
+def test_langfuse_service_is_noop_when_disabled(monkeypatch):
+    monkeypatch.setattr(
+        langfuse_service_module,
+        "get_langfuse_config_service",
+        lambda: _StubConfigService(LangfuseRuntimeConfig(enabled=False)),
+    )
     service = LangfuseService(Settings())
 
     assert service.enabled is False
