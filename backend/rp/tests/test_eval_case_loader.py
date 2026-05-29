@@ -78,7 +78,10 @@ def test_eval_diagnostics_import_does_not_eagerly_load_ragas():
         cwd=backend_root,
         capture_output=True,
         text=True,
-        timeout=20,
+        # Spawns a cold interpreter (~0.4s solo). Under `pytest -n auto` the
+        # parent worker plus ~N siblings saturate every core, so allow ample
+        # headroom; the assertion below, not the timeout, is the real gate.
+        timeout=120,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
