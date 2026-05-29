@@ -26,6 +26,11 @@ opentelemetry-sdk>=1.30.0
 arize-phoenix-client
 arize-phoenix-otel
 
+# Type checking (T20 baseline; advisory until T21 CI). pydantic plugin needs
+# pydantic in the same env (already above). Ratchet: add types-PyYAML to drop
+# the `yaml` ignore_missing_imports opt-out in pyproject.toml.
+mypy==2.1.0
+
 # Note:
 # - MarkItDown is used for backend-side document parsing during Phase 1.5.
 # - SSE helper frameworks are intentionally excluded for now; the current
