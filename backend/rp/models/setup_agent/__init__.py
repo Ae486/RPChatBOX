@@ -15,10 +15,12 @@ from typing import Any
 def __getattr__(name: str) -> Any:
     # Submodule access (e.g. `from rp.models.setup_agent import stage`) resolves
     # via the import system; never warn for these.
+    submodule = f"{__name__}.{name}"
     try:
-        return importlib.import_module(f"{__name__}.{name}")
-    except ModuleNotFoundError:
-        pass
+        return importlib.import_module(submodule)
+    except ModuleNotFoundError as exc:
+        if exc.name != submodule:
+            raise  # an existing submodule's own dependency is missing — surface it, don't mask
     # Legacy symbol that used to live in the flat `rp.models.setup_agent` module.
     agent = importlib.import_module(f"{__name__}.agent")
     try:
