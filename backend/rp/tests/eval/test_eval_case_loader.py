@@ -64,7 +64,7 @@ def test_load_case_from_json(tmp_path):
 
 
 def test_eval_diagnostics_import_does_not_eagerly_load_ragas():
-    backend_root = Path(__file__).resolve().parents[2]
+    backend_root = Path(__file__).resolve().parents[3]
     script = (
         "import sys; "
         "import rp.eval.diagnostics; "

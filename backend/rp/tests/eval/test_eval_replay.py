@@ -3,7 +3,6 @@ from __future__ import annotations
 from rp.eval.models import EvalCase, EvalRun, EvalRunResult, EvalTrace
 from rp.eval.replay import (
     SampledRetrievalTrace,
-    build_sampled_retrieval_replay_payload,
     load_replay,
     load_replay_case,
     save_replay,

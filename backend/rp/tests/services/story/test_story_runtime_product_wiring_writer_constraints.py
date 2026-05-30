@@ -33,7 +33,7 @@ from rp.services.writer.writing_worker_execution_service import (
     WritingWorkerExecutionService,
 )
 from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
-from rp.tests.test_longform_chapter_runtime_service import (
+from rp.tests.services.writer.test_longform_chapter_runtime_service import (
     _accept_outline,
     _artifact_runtime_metadata,
     _build_turn_domain_service,

@@ -42,12 +42,12 @@ from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
-from rp.tests.test_archival_evolution_service import (
+from rp.tests.services.story.test_archival_evolution_service import (
     _seed_archival_asset,
     _seed_branch_identity,
     _seed_runtime_identities,
 )
-from rp.tests.test_longform_chapter_runtime_service import (
+from rp.tests.services.writer.test_longform_chapter_runtime_service import (
     _accept_outline,
     _build_context_orchestration_service,
     _identity as _longform_identity,
@@ -55,12 +55,12 @@ from rp.tests.test_longform_chapter_runtime_service import (
     _segment_plan,
     _specialist_bundle,
 )
-from rp.tests.test_mode_extension_slots import (
+from rp.tests.models.test_mode_extension_slots import (
     _context_orchestration as _mode_context_orchestration,
     _identity_for,
     _seed_story_runtime as _seed_mode_story_runtime,
 )
-from rp.tests.test_runtime_config_control_service import (
+from rp.tests.services.runtime.test_runtime_config_control_service import (
     _control_service,
     _seed_story_session,
 )

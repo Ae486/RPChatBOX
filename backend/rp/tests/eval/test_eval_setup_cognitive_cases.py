@@ -12,7 +12,7 @@ from rp.eval.replay import load_replay
 
 def _case_path(*parts: str) -> Path:
     return (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "eval"
         / "cases"
         / "setup"

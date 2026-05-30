@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1] / "services"
+SERVICE_ROOT = Path(__file__).resolve().parents[3] / "services"
 BUSINESS_SERVICE_FILES = [
     SERVICE_ROOT / "writer" / "longform_orchestrator_service.py",
     SERVICE_ROOT / "writer" / "longform_specialist_service.py",

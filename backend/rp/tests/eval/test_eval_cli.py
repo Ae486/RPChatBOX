@@ -18,7 +18,7 @@ import services.model_registry as model_registry_module
 
 def _case_path(*parts: str) -> Path:
     return (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "eval"
         / "cases"
         / Path(*parts)

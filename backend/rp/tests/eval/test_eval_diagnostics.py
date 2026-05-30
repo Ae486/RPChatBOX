@@ -21,7 +21,7 @@ from rp.eval.reporting import (
     render_text_summary,
 )
 from rp.eval.runner import EvalRunner
-from rp.tests.test_eval_setup_cognitive_cases import (
+from rp.tests.eval.test_eval_setup_cognitive_cases import (
     _ProviderFailureSetupLLMService,
     _TOOL_SURFACE_DRIFT_REASON,
     _TruthWriteAskUserLLMService,
@@ -30,7 +30,7 @@ from rp.tests.test_eval_setup_cognitive_cases import (
 
 def _case_path(*parts: str) -> Path:
     return (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "eval"
         / "cases"
         / "setup"
@@ -40,7 +40,7 @@ def _case_path(*parts: str) -> Path:
 
 def _eval_case_path(*parts: str) -> Path:
     return (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "eval"
         / "cases"
         / Path(*parts)

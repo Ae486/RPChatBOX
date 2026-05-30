@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 
 from rp.eval.suite import EvalSuiteRunner
-from rp.tests.test_eval_setup_cognitive_cases import (
+from rp.tests.eval.test_eval_setup_cognitive_cases import (
     _CharacterDesignSkillPackFacilitatorLLMService,
 )
 
 
 _PILOT_CASE_PATH = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "eval"
     / "cases"
     / "setup"

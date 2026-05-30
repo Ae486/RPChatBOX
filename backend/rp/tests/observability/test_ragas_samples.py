@@ -18,7 +18,7 @@ from rp.eval.replay import SampledRetrievalTrace, build_sampled_retrieval_replay
 
 def _case_path(*parts: str) -> Path:
     return (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "eval"
         / "cases"
         / Path(*parts)

@@ -9,7 +9,7 @@ from models.provider_registry import ProviderRegistryEntry
 from rp.eval.case_loader import load_case
 from rp.eval.replay import load_replay
 from rp.eval.runner import EvalRunner
-from rp.tests.test_eval_setup_cognitive_cases import (
+from rp.tests.eval.test_eval_setup_cognitive_cases import (
     _CharacterDesignSkillPackFacilitatorLLMService,
     _TruthWriteAskUserLLMService,
 )
@@ -21,7 +21,7 @@ import services.model_registry as model_registry_module
 
 def _case_path(*parts: str) -> Path:
     return (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "eval"
         / "cases"
         / Path(*parts)
