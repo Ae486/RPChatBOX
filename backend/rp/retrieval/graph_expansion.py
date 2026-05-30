@@ -420,8 +420,18 @@ def merge_graph_expansion_result(
     query: RetrievalQuery,
     result: RetrievalSearchResult,
     graph_result: RetrievalSearchResult,
+    result_top_k: int | None = None,
 ) -> RetrievalSearchResult:
-    """Append graph-expanded evidence hits without changing base hit ordering."""
+    """Merge graph-expanded evidence hits into the retrieval result.
+
+    Graph-evidence hits — whether freshly supplemented or already present as a
+    low-ranked base hit — are pinned to the tail of the requested ``result_top_k``
+    window so they survive the final truncation, while the remaining candidate-pool
+    hits are preserved (after the window) for downstream reranking.
+
+    ``query.top_k`` is the possibly-expanded candidate-pool size; ``result_top_k`` is
+    the user-requested top_k and defaults to ``query.top_k`` when the caller omits it.
+    """
 
     if result.trace is None:
         return result
@@ -447,25 +457,29 @@ def merge_graph_expansion_result(
             )
         base_hits.append(hit)
 
-    existing_ids = {hit.hit_id for hit in base_hits}
-    supplemental_hits = []
-    for hit in graph_result.hits:
-        if hit.hit_id in existing_ids:
-            continue
-        existing_ids.add(hit.hit_id)
-        supplemental_hits.append(
-            hit.model_copy(
-                update={
-                    "rank": len(base_hits) + len(supplemental_hits) + 1,
-                }
-            )
-        )
-    supplemental_hits = supplemental_hits[: query.top_k]
-    reserved_base_count = max(query.top_k - len(supplemental_hits), 0)
+    base_hit_ids = {hit.hit_id for hit in base_hits}
+    supplemental_hits = [
+        hit for hit in graph_result.hits if hit.hit_id not in base_hit_ids
+    ]
+
+    pool_top_k = max(int(query.top_k), 0)
+    window_top_k = pool_top_k if result_top_k is None else max(int(result_top_k), 0)
+    # Graph-expanded hits = base hits carrying graph_* metadata (deduped low-rank
+    # evidence) plus supplemental evidence chunks absent from base retrieval. Pin them
+    # to the tail of the requested window so the final top_k truncation cannot drop them.
+    graph_expanded_hits = [
+        hit for hit in base_hits if hit.hit_id in graph_hit_ids
+    ] + supplemental_hits
+    plain_hits = [hit for hit in base_hits if hit.hit_id not in graph_hit_ids]
+
+    pinned_graph_hits = graph_expanded_hits[:window_top_k]
+    front_plain_count = max(window_top_k - len(pinned_graph_hits), 0)
     merged_hits = [
-        *base_hits[:reserved_base_count],
-        *supplemental_hits,
-    ][: query.top_k]
+        *plain_hits[:front_plain_count],
+        *pinned_graph_hits,
+        *plain_hits[front_plain_count:],
+        *graph_expanded_hits[len(pinned_graph_hits):],
+    ][:pool_top_k]
     merged_hits = [
         hit.model_copy(update={"rank": index})
         for index, hit in enumerate(merged_hits, start=1)

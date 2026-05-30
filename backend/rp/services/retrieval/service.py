@@ -179,6 +179,7 @@ class RetrievalService:
                 query=retrieval_query,
                 result=fused_result,
                 graph_result=graph_result,
+                result_top_k=query.top_k,
             )
         else:
             fused_result = attach_skipped_graph_summary(
