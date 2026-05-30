@@ -56,7 +56,7 @@ def _load_local_registry_model_config(
     storage_dir = Path(
         os.environ.get(
             "CHATBOX_REAL_SETUP_EVAL_REGISTRY_DIR",
-            Path(__file__).resolve().parents[2] / "storage",
+            Path(__file__).resolve().parents[4] / "storage",
         )
     )
     models_path = storage_dir / "models.json"
