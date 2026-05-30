@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_agent.workspace import StoryMode
 
 
 class SourceAsset(BaseModel):
