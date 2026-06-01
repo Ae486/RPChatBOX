@@ -12,7 +12,7 @@ from rp.models.worker_runtime_contracts import (
     WorkerPlanSource,
     WorkerSkipItem,
 )
-from rp.services.writer.worker_registry_service import WorkerRegistryService
+from .worker_registry_service import WorkerRegistryService
 
 PRE_WRITE_CONTEXT_PHASE = "pre_write_context"
 

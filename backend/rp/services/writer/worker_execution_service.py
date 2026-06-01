@@ -23,12 +23,12 @@ from rp.models.worker_runtime_contracts import (
     WorkerResultStatus,
 )
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
-from rp.services.writer.longform_specialist_service import LongformSpecialistService
+from .longform_specialist_service import LongformSpecialistService
 from rp.services.story.runtime_adapter_service import StoryRuntimeAdapterService
 from rp.services.story.runtime_workspace_facade import (
     StoryRuntimeWorkspaceFacade,
 )
-from rp.services.writer.worker_registry_service import (
+from .worker_registry_service import (
     LONGFORM_MEMORY_WORKER_ID,
     WorkerRegistryService,
 )

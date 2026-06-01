@@ -15,7 +15,7 @@ from rp.models.story_evolution_contracts import (
     StoryEvolutionStatus,
     StoryEvolutionTargetLayer,
 )
-from rp.services.story.archival_evolution_service import ArchivalEvolutionService
+from .archival_evolution_service import ArchivalEvolutionService
 
 
 class StoryEvolutionServiceError(ValueError):

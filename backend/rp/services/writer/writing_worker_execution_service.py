@@ -14,7 +14,7 @@ from rp.models.writing_worker_contracts import (
 )
 from rp.models.writing_runtime import WritingPacket
 from ..story.llm_gateway import StoryLlmGateway
-from rp.services.writer.writing_worker_retrieval_loop_service import (
+from .writing_worker_retrieval_loop_service import (
     WritingWorkerRetrievalLoopService,
 )
 

@@ -41,8 +41,8 @@ from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
     RuntimeWorkspaceMaterialServiceError,
 )
-from rp.services.story.llm_gateway import StoryLlmGateway
-from rp.services.story.session_service import StorySessionService
+from .llm_gateway import StoryLlmGateway
+from .session_service import StorySessionService
 
 
 BRAINSTORM_MATERIAL_DOMAIN = "narrative_progress"

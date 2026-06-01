@@ -45,6 +45,14 @@ repos:
         files: ^backend/rp/services/
         entry: python backend/rp/devtools/check_service_sizes.py
 
+      - id: rp-service-import-lint
+        name: rp service import lint
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^backend/
+        entry: python backend/rp/devtools/check_service_imports.py
+
       - id: mypy
         name: mypy (advisory, rp package)
         language: system

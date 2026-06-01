@@ -28,9 +28,9 @@ from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_stage import SetupStageId
 from rp.models.setup_workspace import StoryMode
 from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
-from rp.services.retrieval.collection_service import RetrievalCollectionService
-from rp.services.retrieval.document_service import RetrievalDocumentService
-from rp.services.retrieval.ingestion_service import RetrievalIngestionService
+from .collection_service import RetrievalCollectionService
+from .document_service import RetrievalDocumentService
+from .ingestion_service import RetrievalIngestionService
 
 
 def _utcnow() -> datetime:

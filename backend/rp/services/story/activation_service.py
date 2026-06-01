@@ -7,7 +7,7 @@ from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.runtime_controller import SetupRuntimeController
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story.session_service import StorySessionService
+from .session_service import StorySessionService
 
 
 class StoryActivationService:

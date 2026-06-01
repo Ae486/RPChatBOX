@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
+from .runtime_card_service import RuntimeRetrievalCardService
 
 
 class WriterRetrievalUsageGuardServiceError(ValueError):
