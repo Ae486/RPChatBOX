@@ -37,6 +37,14 @@ repos:
   # and NOT by a bare `pre-commit run --all-files` — pre-commit #3350).
   - repo: local
     hooks:
+      - id: rp-service-size-lint
+        name: rp service size lint
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^backend/rp/services/
+        entry: python backend/rp/devtools/check_service_sizes.py
+
       - id: mypy
         name: mypy (advisory, rp package)
         language: system

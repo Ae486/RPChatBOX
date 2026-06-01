@@ -1,0 +1,580 @@
+{
+  "schema_version": 1,
+  "description": "T8 initial hard-offender baseline for backend/rp/services size lint. Entries are grandfathered at their captured line count only; new/growing/stale hard offenders fail. Soft offenders are advisory and intentionally not listed here.",
+  "thresholds": {
+    "file": {
+      "soft": 500,
+      "hard": 1000
+    },
+    "function": {
+      "soft": 50,
+      "hard": 100
+    },
+    "class": {
+      "soft": 300,
+      "hard": 600
+    }
+  },
+  "hard_allowlist": [
+    {
+      "kind": "class",
+      "path": "core_state/revision_overlay_service.py",
+      "symbol": "RevisionOverlayService",
+      "lines": 727,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "memory/graph_extraction_service.py",
+      "symbol": "MemoryGraphExtractionService",
+      "lines": 883,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "memory/graph_projection_service.py",
+      "symbol": "MemoryGraphProjectionService",
+      "lines": 893,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "memory/inspection_service.py",
+      "symbol": "MemoryInspectionService",
+      "lines": 1110,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "memory/trace_read_service.py",
+      "symbol": "MemoryTraceReadService",
+      "lines": 821,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "proposal/apply_service.py",
+      "symbol": "ProposalApplyService",
+      "lines": 761,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "retrieval/broker.py",
+      "symbol": "RetrievalBroker",
+      "lines": 999,
+      "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
+    },
+    {
+      "kind": "class",
+      "path": "retrieval/minimal_ingestion_service.py",
+      "symbol": "MinimalRetrievalIngestionService",
+      "lines": 803,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "retrieval/runtime_card_service.py",
+      "symbol": "RuntimeRetrievalCardService",
+      "lines": 806,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "runtime/context_orchestration_service.py",
+      "symbol": "ContextOrchestrationService",
+      "lines": 914,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "runtime/profile_snapshot_service.py",
+      "symbol": "RuntimeProfileSnapshotService",
+      "lines": 811,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "runtime/read_manifest_service.py",
+      "symbol": "RuntimeReadManifestService",
+      "lines": 612,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "setup_agent/agent_execution_service.py",
+      "symbol": "SetupAgentExecutionService",
+      "lines": 1002,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "setup_agent/context_builder.py",
+      "symbol": "SetupContextBuilder",
+      "lines": 704,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "setup_agent/context_compaction_service.py",
+      "symbol": "SetupContextCompactionService",
+      "lines": 654,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "setup_agent/workspace_service.py",
+      "symbol": "SetupWorkspaceService",
+      "lines": 1473,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "story/archival_evolution_service.py",
+      "symbol": "ArchivalEvolutionService",
+      "lines": 675,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "story/brainstorm_service.py",
+      "symbol": "StoryBrainstormService",
+      "lines": 699,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "story/runtime_controller.py",
+      "symbol": "StoryRuntimeController",
+      "lines": 1339,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "story/runtime_debug_query_service.py",
+      "symbol": "StoryRuntimeDebugQueryService",
+      "lines": 1237,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "story/runtime_identity_service.py",
+      "symbol": "StoryRuntimeIdentityService",
+      "lines": 1549,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "story/session_service.py",
+      "symbol": "StorySessionService",
+      "lines": 899,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "story/turn_domain_service.py",
+      "symbol": "StoryTurnDomainService",
+      "lines": 1743,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "class",
+      "path": "writer/longform_chapter_runtime_service.py",
+      "symbol": "LongformChapterRuntimeService",
+      "lines": 987,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "memory/graph_extraction_service.py",
+      "symbol": null,
+      "lines": 1107,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "memory/inspection_service.py",
+      "symbol": null,
+      "lines": 1184,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "retrieval/broker.py",
+      "symbol": null,
+      "lines": 1106,
+      "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
+    },
+    {
+      "kind": "file",
+      "path": "runtime/profile_snapshot_service.py",
+      "symbol": null,
+      "lines": 1031,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "runtime/read_manifest_service.py",
+      "symbol": null,
+      "lines": 1132,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "setup_agent/agent_execution_service.py",
+      "symbol": null,
+      "lines": 1064,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "setup_agent/workspace_service.py",
+      "symbol": null,
+      "lines": 1534,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "story/runtime_controller.py",
+      "symbol": null,
+      "lines": 1420,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "story/runtime_debug_query_service.py",
+      "symbol": null,
+      "lines": 1341,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "story/runtime_identity_service.py",
+      "symbol": null,
+      "lines": 1597,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "story/turn_domain_service.py",
+      "symbol": null,
+      "lines": 1826,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "file",
+      "path": "writer/longform_chapter_runtime_service.py",
+      "symbol": null,
+      "lines": 1229,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "core_state/backfill_service.py",
+      "symbol": "CoreStateBackfillService.backfill_authoritative_for_session",
+      "lines": 131,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "core_state/read_service.py",
+      "symbol": "CoreStateReadService.get_state",
+      "lines": 131,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "memory/graph_extraction_service.py",
+      "symbol": "MemoryGraphExtractionService._prepare_merge",
+      "lines": 115,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "memory/graph_extraction_service.py",
+      "symbol": "MemoryGraphExtractionService.process_job",
+      "lines": 109,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "memory/graph_projection_service.py",
+      "symbol": "MemoryGraphProjectionService.get_neighborhood",
+      "lines": 132,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "memory/inspection_service.py",
+      "symbol": "MemoryInspectionService.inspect_visible_memory",
+      "lines": 127,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "proposal/apply_service.py",
+      "symbol": "ProposalApplyService.apply_proposal",
+      "lines": 148,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "recall/character_long_history_ingestion_service.py",
+      "symbol": "RecallCharacterLongHistoryIngestionService.ingest_character_summaries",
+      "lines": 151,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "recall/continuity_note_ingestion_service.py",
+      "symbol": "RecallContinuityNoteIngestionService.ingest_continuity_notes",
+      "lines": 114,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "recall/detail_ingestion_service.py",
+      "symbol": "RecallDetailIngestionService.ingest_accepted_story_segments",
+      "lines": 109,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "recall/retired_foreshadow_ingestion_service.py",
+      "symbol": "RecallRetiredForeshadowIngestionService.ingest_retired_foreshadow_summaries",
+      "lines": 151,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "recall/scene_transcript_ingestion_service.py",
+      "symbol": "RecallSceneTranscriptIngestionService.ingest_scene_transcript",
+      "lines": 122,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "retrieval/broker.py",
+      "symbol": "RetrievalBroker._search",
+      "lines": 115,
+      "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
+    },
+    {
+      "kind": "function",
+      "path": "retrieval/ingestion_service.py",
+      "symbol": "RetrievalIngestionService._process_asset",
+      "lines": 102,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "retrieval/minimal_ingestion_service.py",
+      "symbol": "MinimalRetrievalIngestionService._run_single_job",
+      "lines": 118,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "retrieval/runtime_card_service.py",
+      "symbol": "RuntimeRetrievalCardService.record_writer_usage",
+      "lines": 108,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "runtime/context_orchestration_service.py",
+      "symbol": "ContextOrchestrationService._build_longform_chapter_progress_sections",
+      "lines": 127,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "runtime/context_orchestration_service.py",
+      "symbol": "ContextOrchestrationService.build_writing_packet",
+      "lines": 140,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "runtime/profile_snapshot_service.py",
+      "symbol": "RuntimeProfileSnapshotService._compile_profile",
+      "lines": 245,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "runtime/read_manifest_service.py",
+      "symbol": "RuntimeReadManifestService.build_writer_manifest",
+      "lines": 150,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "setup_agent/agent_execution_service.py",
+      "symbol": "SetupAgentExecutionService._build_runtime_v2_turn_input",
+      "lines": 140,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "setup_agent/agent_execution_service.py",
+      "symbol": "SetupAgentExecutionService._normalize_provider_usage",
+      "lines": 119,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "setup_agent/context_governor.py",
+      "symbol": "SetupContextGovernorService._govern_history_async",
+      "lines": 107,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "setup_agent/context_governor.py",
+      "symbol": "SetupContextGovernorService._govern_history_sync",
+      "lines": 105,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "setup_agent/draft_materialization_service.py",
+      "symbol": "_parse_markdown",
+      "lines": 126,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "setup_agent/runtime_controller.py",
+      "symbol": "SetupRuntimeController.run_activation_check",
+      "lines": 197,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "setup_agent/workspace_service.py",
+      "symbol": "SetupWorkspaceService._assemble_workspace",
+      "lines": 156,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/archival_evolution_service.py",
+      "symbol": "ArchivalEvolutionService.evolve_source",
+      "lines": 149,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/runtime_debug_query_service.py",
+      "symbol": "StoryRuntimeDebugQueryService._story_evolution_items",
+      "lines": 103,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/runtime_debug_query_service.py",
+      "symbol": "StoryRuntimeDebugQueryService.read_runtime_inspection",
+      "lines": 236,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/runtime_identity_service.py",
+      "symbol": "StoryRuntimeIdentityService.rollback_to_turn",
+      "lines": 127,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/turn_domain_service.py",
+      "symbol": "StoryTurnDomainService.__init__",
+      "lines": 142,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/turn_domain_service.py",
+      "symbol": "StoryTurnDomainService._persist_generated_artifact_impl",
+      "lines": 212,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/turn_domain_service.py",
+      "symbol": "StoryTurnDomainService.accept_pending_segment",
+      "lines": 132,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "story/turn_domain_service.py",
+      "symbol": "StoryTurnDomainService.trigger_post_write",
+      "lines": 150,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/longform_chapter_runtime_service.py",
+      "symbol": "LongformChapterRuntimeService._resolve_transition_state",
+      "lines": 121,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/longform_orchestrator_service.py",
+      "symbol": "LongformOrchestratorService._fallback_plan",
+      "lines": 133,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/longform_orchestrator_service.py",
+      "symbol": "LongformOrchestratorService.plan",
+      "lines": 133,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/longform_regression_service.py",
+      "symbol": "LongformRegressionService.run_heavy_regression",
+      "lines": 118,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/longform_specialist_service.py",
+      "symbol": "LongformSpecialistService._fallback_bundle",
+      "lines": 131,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/longform_specialist_service.py",
+      "symbol": "LongformSpecialistService.analyze",
+      "lines": 221,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/writing_packet_builder.py",
+      "symbol": "WritingPacketBuilder.build",
+      "lines": 140,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/writing_worker_retrieval_loop_service.py",
+      "symbol": "WritingWorkerRetrievalLoopService._tool_definitions",
+      "lines": 106,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    },
+    {
+      "kind": "function",
+      "path": "writer/writing_worker_retrieval_loop_service.py",
+      "symbol": "WritingWorkerRetrievalLoopService.run",
+      "lines": 110,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+    }
+  ]
+}
