@@ -11,7 +11,6 @@ from typing import Sequence
 from uuid import uuid4
 
 from models.model_registry import ModelRegistryEntry
-from models.provider_registry import ProviderRegistryEntry
 from rp.models.retrieval_records import EmbeddingRecord, KnowledgeChunk
 from services.litellm_service import LiteLLMService, get_litellm_service
 from services.model_registry import get_model_registry_service

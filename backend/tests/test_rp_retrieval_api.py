@@ -111,7 +111,6 @@ def test_get_collection_maintenance_returns_404_for_unknown_collection(client):
 def test_retry_failed_story_jobs_and_single_job_retry(client):
     from sqlmodel import Session
 
-    from models.rp_retrieval_store import EmbeddingRecordRecord, KnowledgeChunkRecord
     from rp.models.retrieval_records import EmbeddingRecord, KnowledgeChunk
     from rp.retrieval.embedder import Embedder
     from rp.services.retrieval.ingestion_service import RetrievalIngestionService

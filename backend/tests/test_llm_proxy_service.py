@@ -1,6 +1,6 @@
 """Tests for raw httpx proxy request building."""
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

@@ -1,7 +1,6 @@
 """Minimal FastAPI backend for PoC testing."""
 import os
 import signal
-import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

@@ -10,7 +10,6 @@ from .activation_graph_state import ActivationGraphState
 from .checkpoints import (
     build_thread_config,
     open_checkpointed_graph,
-    require_snapshot_checkpoint_id,
 )
 
 

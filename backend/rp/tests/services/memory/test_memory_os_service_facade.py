@@ -19,14 +19,10 @@ from rp.models.memory.crud import (
     RetrievalSearchResult,
     RetrievalTrace,
 )
-from rp.models.setup_drafts import StoryConfigDraft
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
 from rp.services.memory.os_service import MemoryOsService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
-from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.session_service import StorySessionService
 from rp.tests.services.retrieval.test_retrieval_broker import (

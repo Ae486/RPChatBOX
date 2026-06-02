@@ -476,7 +476,6 @@ async def test_search_archival_characterization(retrieval_session):
 @pytest.mark.asyncio
 async def test_branch_visibility_characterization(retrieval_session):
     _seed_story_runtime(retrieval_session)
-    session_service = StorySessionService(retrieval_session)
     story_session = _latest_story_session(retrieval_session)
     snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
     snapshot = snapshot_service.ensure_active_snapshot(

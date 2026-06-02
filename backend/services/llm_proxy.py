@@ -13,7 +13,6 @@ from models.chat import (
     ProviderConfig,
     Choice,
     ChatMessage,
-    Delta,
     Usage,
 )
 from services.request_normalization import get_request_normalization_service

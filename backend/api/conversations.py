@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
 from models.conversation_store import (
-    ConversationAttachmentSummary,
     ConversationAttachmentUploadRequest,
     ConversationCompactSummary,
     ConversationCompactSummaryPayload,
