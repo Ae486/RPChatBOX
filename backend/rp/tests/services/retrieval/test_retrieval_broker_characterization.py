@@ -29,6 +29,7 @@ from rp.services.story.runtime_identity_service import StoryRuntimeIdentityServi
 from rp.services.story.session_service import StorySessionService
 from rp.tests.services.retrieval.test_retrieval_broker import (
     _FakeLangfuseService,
+    _ingest_archival_seed_asset_and_return_chunk,
     _seed_story_runtime,
 )
 
@@ -107,6 +108,63 @@ def _make_trace(
         timings={},
         warnings=list(warnings or []),
         details=dict(details or {}),
+    )
+
+
+def _make_runtime_card_expand_hit(
+    *,
+    hit_id: str = "",
+    chunk_id_metadata: str | None = None,
+    knowledge_ref_chunk_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> RetrievalHit:
+    hit_metadata = dict(metadata or {})
+    if chunk_id_metadata is not None:
+        hit_metadata["chunk_id"] = chunk_id_metadata
+    return RetrievalHit(
+        hit_id=hit_id,
+        query_id="query-expand-hit",
+        layer=Layer.ARCHIVAL.value,
+        domain=Domain.WORLD_RULE,
+        domain_path="foundation.world.expand-hit",
+        knowledge_ref=(
+            ObjectRef(
+                object_id=knowledge_ref_chunk_id,
+                layer=Layer.ARCHIVAL,
+                domain=Domain.WORLD_RULE,
+                domain_path="foundation.world.expand-hit",
+                scope="story",
+                revision=1,
+            )
+            if knowledge_ref_chunk_id is not None
+            else None
+        ),
+        excerpt_text="Runtime card excerpt",
+        score=0.77,
+        rank=1,
+        metadata=hit_metadata,
+        provenance_refs=[],
+    )
+
+
+def _seed_expand_hit_chunk(
+    retrieval_session,
+    *,
+    story_id: str,
+    asset_id: str,
+    text: str,
+):
+    return _ingest_archival_seed_asset_and_return_chunk(
+        retrieval_session,
+        story_id=story_id,
+        asset_id=asset_id,
+        text=text,
+        metadata={
+            "layer": Layer.ARCHIVAL.value,
+            "source_family": "setup_source",
+            "source_type": "foundation_entry",
+            "source_origin": "setup_workspace",
+        },
     )
 
 
@@ -760,3 +818,122 @@ async def test_pinned_runtime_snapshot_beats_story_drift(retrieval_session):
     assert [hit.hit_id for hit in result.hits] == ["pinned-hit-visible"]
     assert result.trace is not None
     assert result.trace.returned_count == 1
+
+
+def test_expand_hit_resolves_chunk_id_from_runtime_card_metadata(
+    retrieval_session,
+):
+    chunk = _seed_expand_hit_chunk(
+        retrieval_session,
+        story_id="story-expand-hit-metadata",
+        asset_id="asset-expand-hit-metadata",
+        text="The harbor bell is indexed as archival foundation evidence.",
+    )
+    broker = RetrievalBroker(
+        default_story_id="story-expand-hit-metadata",
+        session=retrieval_session,
+    )
+    hit = _make_runtime_card_expand_hit(
+        chunk_id_metadata=chunk.chunk_id,
+        knowledge_ref_chunk_id="chunk-expand-hit-wrong-knowledge-ref",
+        metadata={
+            "source_ref": "metadata://ignored-when-asset-exists",
+            "asset_kind": "ignored_metadata_kind",
+        },
+    )
+
+    expanded = broker.expand_hit(hit)
+
+    assert expanded["chunk_id"] == chunk.chunk_id
+    assert expanded["text"] == chunk.text
+    assert expanded["metadata"]["section_id"] == "seed:asset-expand-hit-metadata"
+
+
+def test_expand_hit_returns_observed_dict_for_knowledge_ref_chunk(
+    retrieval_session,
+):
+    chunk = _seed_expand_hit_chunk(
+        retrieval_session,
+        story_id="story-expand-hit-found",
+        asset_id="asset-expand-hit-found",
+        text="The Order of Dawn protects Aileen under the covenant clause.",
+    )
+    broker = RetrievalBroker(
+        default_story_id="story-expand-hit-found",
+        session=retrieval_session,
+    )
+    hit = _make_runtime_card_expand_hit(
+        knowledge_ref_chunk_id=chunk.chunk_id,
+        metadata={
+            "source_ref": "metadata://ignored-when-asset-exists",
+            "asset_kind": "ignored_metadata_kind",
+        },
+    )
+
+    expanded = broker.expand_hit(hit)
+
+    assert set(expanded) == {
+        "chunk_id",
+        "asset_id",
+        "parsed_document_id",
+        "collection_id",
+        "domain",
+        "domain_path",
+        "chunk_index",
+        "title",
+        "text",
+        "token_count",
+        "layer",
+        "metadata",
+        "provenance_refs",
+        "source_ref",
+        "asset_kind",
+    }
+    assert isinstance(expanded["chunk_id"], str)
+    assert expanded == {
+        "chunk_id": chunk.chunk_id,
+        "asset_id": "asset-expand-hit-found",
+        "parsed_document_id": chunk.parsed_document_id,
+        "collection_id": chunk.collection_id,
+        "domain": Domain.WORLD_RULE.value,
+        "domain_path": "foundation.world.asset-expand-hit-found",
+        "chunk_index": 0,
+        "title": "Archival Seed asset-expand-hit-found",
+        "text": "The Order of Dawn protects Aileen under the covenant clause.",
+        "token_count": chunk.token_count,
+        "layer": Layer.ARCHIVAL.value,
+        "metadata": chunk.metadata_json,
+        "provenance_refs": list(chunk.provenance_refs_json or []),
+        "source_ref": "memory://asset-expand-hit-found",
+        "asset_kind": "foundation_entry",
+    }
+    assert isinstance(expanded["parsed_document_id"], str)
+    assert str(expanded["parsed_document_id"]).startswith("pd_asset-expand-hit-found_")
+    assert isinstance(expanded["collection_id"], str)
+    assert isinstance(expanded["metadata"], dict)
+    assert isinstance(expanded["provenance_refs"], list)
+
+
+def test_expand_hit_missing_chunk_raises_resolved_chunk_id(retrieval_session):
+    broker = RetrievalBroker(
+        default_story_id="story-expand-hit-missing",
+        session=retrieval_session,
+    )
+    hit = _make_runtime_card_expand_hit(chunk_id_metadata="chunk-expand-hit-missing")
+
+    with pytest.raises(
+        ValueError,
+        match="^retrieval_hit_chunk_not_found:chunk-expand-hit-missing$",
+    ):
+        broker.expand_hit(hit)
+
+
+def test_expand_hit_missing_resolvable_id_raises(retrieval_session):
+    broker = RetrievalBroker(
+        default_story_id="story-expand-hit-id-missing",
+        session=retrieval_session,
+    )
+    hit = _make_runtime_card_expand_hit()
+
+    with pytest.raises(ValueError, match="^retrieval_hit_chunk_id_missing$"):
+        broker.expand_hit(hit)
