@@ -42,6 +42,9 @@ from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
+from rp.tests.services._helpers.runtime_visible_segment_helpers import (
+    seed_runtime_visible_story_segment,
+)
 from rp.tests.services.story.test_archival_evolution_service import (
     _seed_archival_asset,
     _seed_branch_identity,
@@ -64,14 +67,6 @@ from rp.tests.services.runtime.test_runtime_config_control_service import (
     _control_service,
     _seed_story_session,
 )
-
-
-_PRE_EXISTING_FAILURE_CLUSTER_1 = (
-    "Pre-existing failure (writing-path business assertions). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 1. "
-    "Tracked by T18 in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
 
 def test_second_stage_runtime_config_publish_keeps_started_turn_and_pending_job_snapshots(
     retrieval_session,
@@ -263,7 +258,6 @@ async def test_second_stage_story_evolution_selected_branch_and_story_global_vis
     assert future_global.hits[0].metadata["asset_id"] == global_receipt.source_asset_id
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_1, strict=False)
 def test_second_stage_longform_chapter_bridge_packet_is_branch_and_target_scoped(
     retrieval_session,
 ):
@@ -271,16 +265,17 @@ def test_second_stage_longform_chapter_bridge_packet_is_branch_and_target_scoped
         retrieval_session
     )
     _accept_outline(story_session_service, session, chapter_one)
-    accepted_one = story_session_service.create_artifact(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter_one.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.ACCEPTED,
+    seed_runtime_visible_story_segment(
+        retrieval_session,
+        story_session_service,
+        session=session,
+        chapter=chapter_one,
+        branch_head_id="branch-main",
+        scene_ref=chapter_one.current_scene_ref,
         content_text="Accepted chapter ending for branch-target regression.",
-    )
-    chapter_one = story_session_service.update_chapter_workspace(
-        chapter_workspace_id=chapter_one.chapter_workspace_id,
-        accepted_segment_ids=[accepted_one.artifact_id],
+        status=StoryArtifactStatus.ACCEPTED,
+        created_from="second_stage.chapter_one.accepted",
+        actor="second_stage.chapter_one.accepted",
     )
     chapter_runtime_service = LongformChapterRuntimeService(
         story_session_service=story_session_service,
@@ -322,16 +317,17 @@ def test_second_stage_longform_chapter_bridge_packet_is_branch_and_target_scoped
             "current_state_digest": ["State A"],
         },
     )
-    accepted_two = story_session_service.create_artifact(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter_two.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.ACCEPTED,
+    seed_runtime_visible_story_segment(
+        retrieval_session,
+        story_session_service,
+        session=session,
+        chapter=chapter_two,
+        branch_head_id="branch-main",
+        scene_ref=chapter_two.current_scene_ref,
         content_text="Accepted chapter two handoff summary.",
-    )
-    chapter_two = story_session_service.update_chapter_workspace(
-        chapter_workspace_id=chapter_two.chapter_workspace_id,
-        accepted_segment_ids=[accepted_two.artifact_id],
+        status=StoryArtifactStatus.ACCEPTED,
+        created_from="second_stage.chapter_two.accepted",
+        actor="second_stage.chapter_two.accepted",
     )
     chapter_runtime_service.prepare_chapter_transition(
         identity=_longform_identity(

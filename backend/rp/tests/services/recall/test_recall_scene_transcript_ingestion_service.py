@@ -36,6 +36,9 @@ from rp.services.writer.longform_regression_service import LongformRegressionSer
 from rp.services.story.runtime_controller import StoryRuntimeController
 from rp.services.story.session_service import StorySessionService
 from rp.services.story.turn_domain_service import StoryTurnDomainService
+from rp.tests.services._helpers.runtime_visible_segment_helpers import (
+    seed_runtime_visible_story_segment,
+)
 from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 
 
@@ -165,14 +168,6 @@ def _build_turn_domain_service(
         ),
         recall_scene_transcript_ingestion_service=transcript_service,
     )
-
-
-_PRE_EXISTING_FAILURE_CLUSTER_1 = (
-    "Pre-existing failure (writing-path business assertions). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 1. "
-    "Tracked by T18 in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
 
 def test_ingest_scene_transcript_filters_and_persists_metadata(retrieval_session):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
@@ -629,7 +624,6 @@ async def test_complete_chapter_materializes_last_scene_transcript(retrieval_ses
     assert result.hits[0].metadata["scene_ref"] == "chapter:1:scene:2"
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_1, strict=False)
 @pytest.mark.asyncio
 async def test_accept_pending_segment_reruns_closed_scene_transcript(retrieval_session):
     story_session_service, session, chapter = _seed_story_runtime(
@@ -642,13 +636,19 @@ async def test_accept_pending_segment_reruns_closed_scene_transcript(retrieval_s
         role="user",
         content_text="Scene one should stay recoverable after later acceptance.",
     )
-    pending_segment = story_session_service.create_artifact(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.DRAFT,
+    pending_segment, _, _ = seed_runtime_visible_story_segment(
+        retrieval_session,
+        story_session_service,
+        session=session,
+        chapter=chapter,
+        branch_head_id="branch-scene-transcript-main",
+        scene_ref=chapter.current_scene_ref,
         content_text="Later-accepted prose belongs back in scene one transcript.",
+        status=StoryArtifactStatus.DRAFT,
         revision=1,
+        set_pending_on_chapter=True,
+        created_from="recall.scene_transcript.pending",
+        actor="recall.scene_transcript.pending",
     )
     story_session_service.close_current_scene(session_id=session.session_id)
     story_session_service.commit()

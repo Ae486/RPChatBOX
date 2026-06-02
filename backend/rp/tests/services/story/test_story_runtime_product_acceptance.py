@@ -61,6 +61,9 @@ from rp.services.runtime.workspace_material_service import (
 )
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
+from rp.tests.services._helpers.runtime_visible_segment_helpers import (
+    seed_runtime_visible_story_segment,
+)
 from rp.tests.services.story.test_archival_evolution_service import (
     _seed_archival_asset,
     _seed_branch_identity,
@@ -94,14 +97,6 @@ from tests.test_rp_story_api import (
     _seed_runtime_debug_read_surface,
     _seed_runtime_surface_second_stage_data,
 )
-
-
-_PRE_EXISTING_FAILURE_CLUSTER_1 = (
-    "Pre-existing failure (writing-path business assertions). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 1. "
-    "Tracked by T18 in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
 
 @pytest.fixture
 def api_client(tmp_path, monkeypatch):
@@ -286,7 +281,6 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
     assert artifact_after_rewrite.content_text == "Original draft before review."
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_1, strict=False)
 def test_q1_chapter_completion_promotes_adopted_candidate_into_branch_bridge(
     retrieval_session,
 ):
@@ -294,18 +288,23 @@ def test_q1_chapter_completion_promotes_adopted_candidate_into_branch_bridge(
         retrieval_session
     )
     _accept_outline(story_session_service, session, chapter)
-    pending = story_session_service.create_artifact(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.DRAFT,
+    pending, _, _ = seed_runtime_visible_story_segment(
+        retrieval_session,
+        story_session_service,
+        session=session,
+        chapter=chapter,
+        branch_head_id="branch-q1-main",
+        scene_ref=chapter.current_scene_ref,
         content_text="Pending draft that must wait for adoption.",
+        status=StoryArtifactStatus.DRAFT,
+        set_pending_on_chapter=True,
+        created_from="q1.chapter_transition.pending",
+        actor="q1.chapter_transition.pending",
     )
-    chapter = story_session_service.update_chapter_workspace(
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        phase=LongformChapterPhase.SEGMENT_REVIEW,
-        pending_segment_artifact_id=pending.artifact_id,
+    chapter = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
     )
+    assert chapter is not None
     review_identity = _longform_identity(
         story_id=session.story_id,
         session_id=session.session_id,
