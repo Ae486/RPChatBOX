@@ -62,7 +62,7 @@
       "kind": "class",
       "path": "retrieval/broker.py",
       "symbol": "RetrievalBroker",
-      "lines": 819,
+      "lines": 641,
       "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
     },
     {
