@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from copy import deepcopy
 from time import perf_counter
 from typing import Any
@@ -53,6 +52,7 @@ from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.projection.read_service import ProjectionReadService
+from .context import RetrievalBrokerContext
 from .observability_service import RetrievalObservabilityService
 from .runtime_config_service import RetrievalRuntimeConfigService
 from .service import RetrievalService
@@ -66,7 +66,6 @@ from rp.services.story.session_core_state_adapter import StorySessionCoreStateAd
 from rp.services.story.session_service import StorySessionService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.memory.object_mapper import normalize_projection_summary_id
-from services.database import get_engine
 from services.langfuse_service import get_langfuse_service
 
 
@@ -84,8 +83,20 @@ _RUNTIME_BRANCH_VISIBILITY_IGNORED_FILTERS_KEY = (
 )
 
 
+
 class RetrievalBroker:
     """Route memory.search_* to the retrieval-core while keeping other surfaces stable."""
+
+    # S1 intentionally keeps this facade behavior-neutral while introducing the
+    # shared context future sub-brokers will receive.
+    # The context owns only session scope, runtime identity resolution, and the
+    # default story id; factories and search/read helpers stay here for later
+    # slices.
+    # Mirror attributes remain on the facade because tests and callers have
+    # historically treated a few internals as compatibility hooks.
+    # The delegating helper methods below preserve those hooks while making the
+    # dependency direction explicit before S2+ extraction.
+    # Do not move public method bodies or search/read-service builders in S1.
 
     def __init__(
         self,
@@ -98,9 +109,14 @@ class RetrievalBroker:
         projection_read_service_factory=None,
         langfuse_service=None,
     ) -> None:
-        self._default_story_id = default_story_id
-        self._runtime_identity = self._normalize_runtime_identity(runtime_identity)
-        self._session = session
+        self._ctx = RetrievalBrokerContext(
+            default_story_id=default_story_id,
+            runtime_identity=runtime_identity,
+            session=session,
+        )
+        self._default_story_id = self._ctx.default_story_id
+        self._runtime_identity = self._ctx.runtime_identity
+        self._session = self._ctx.session
         self._custom_retrieval_service_factory = retrieval_service_factory is not None
         self._retrieval_service_factory = retrieval_service_factory or (
             lambda session: RetrievalService(session)
@@ -1025,32 +1041,16 @@ class RetrievalBroker:
     def _normalize_runtime_identity(
         runtime_identity: object | None,
     ) -> MemoryRuntimeIdentity | None:
-        if runtime_identity is None:
-            return None
-        if isinstance(runtime_identity, MemoryRuntimeIdentity):
-            return runtime_identity
-        if not isinstance(runtime_identity, dict):
-            return None
-        try:
-            return MemoryRuntimeIdentity.model_validate(runtime_identity)
-        except ValueError:
-            return None
+        return RetrievalBrokerContext.normalize_runtime_identity(runtime_identity)
 
     def _effective_runtime_identity(
         self,
         filters: dict[str, object],
     ) -> MemoryRuntimeIdentity | None:
-        if self._runtime_identity is not None:
-            return self._runtime_identity
-        return self._normalize_runtime_identity(filters.get("runtime_identity"))
+        return self._ctx.effective_runtime_identity(filters)
 
-    @contextmanager
     def _session_scope(self):
-        if self._session is not None:
-            yield self._session
-            return
-        with Session(get_engine()) as session:
-            yield session
+        return self._ctx.session_scope()
 
     @staticmethod
     def _hit_chunk_id(hit: RetrievalHit) -> str:
