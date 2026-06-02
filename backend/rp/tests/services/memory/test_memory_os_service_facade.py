@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -128,15 +129,18 @@ def _make_trace(
     returned_count: int = 1,
     warnings: list[str] | None = None,
     details: dict[str, Any] | None = None,
+    filters_applied: dict[str, Any] | None = None,
+    timings: dict[str, float] | None = None,
 ) -> RetrievalTrace:
     return RetrievalTrace(
         trace_id=trace_id,
         query_id=query.query_id,
         route=route,
         result_kind=result_kind,
+        filters_applied=dict(filters_applied or {}),
         candidate_count=candidate_count,
         returned_count=returned_count,
-        timings={},
+        timings=dict(timings or {}),
         warnings=list(warnings or []),
         details=dict(details or {}),
     )
@@ -368,3 +372,128 @@ async def test_memory_os_service_with_runtime_broker_preserves_result_and_query_
     assert result.trace is not None
     assert result.trace.returned_count == 1
     assert result.trace.route == "retrieval.stub.runtime"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "method_name",
+        "input_model",
+        "route",
+        "layer",
+        "domain",
+        "domain_path",
+    ),
+    [
+        (
+            "search_recall",
+            MemorySearchRecallInput(
+                query="facade parity recall",
+                scope="story",
+                domains=[Domain.CHAPTER],
+                top_k=3,
+                filters={
+                    "source_families": ["longform_story_runtime"],
+                    "search_policy": {"rerank": "off"},
+                },
+            ),
+            "retrieval.stub.parity.recall",
+            "recall",
+            Domain.CHAPTER,
+            "recall.parity.visible",
+        ),
+        (
+            "search_archival",
+            MemorySearchArchivalInput(
+                query="facade parity archival",
+                knowledge_collections=["setup-a"],
+                domains=[Domain.WORLD_RULE],
+                top_k=2,
+                filters={
+                    "source_types": ["foundation_entry"],
+                    "search_policy": {"rerank": "off"},
+                },
+            ),
+            "retrieval.stub.parity.archival",
+            "archival",
+            Domain.WORLD_RULE,
+            "foundation.world.parity",
+        ),
+    ],
+)
+async def test_memory_os_service_searches_match_runtime_broker_model_dump(
+    retrieval_session,
+    monkeypatch,
+    method_name,
+    input_model,
+    route,
+    layer,
+    domain,
+    domain_path,
+):
+    _seed_story_runtime(retrieval_session)
+    fixed_query_uuid = uuid.UUID("11111111-1111-4111-8111-111111111111")
+    monkeypatch.setattr(
+        "rp.services.retrieval.search.uuid.uuid4",
+        lambda: fixed_query_uuid,
+    )
+
+    captured_queries: list[RetrievalQuery] = []
+
+    def _response_factory(query: RetrievalQuery) -> RetrievalSearchResult:
+        captured_queries.append(query)
+        return RetrievalSearchResult(
+            query=query.text_query or "",
+            hits=[
+                _make_hit(
+                    query_id=query.query_id,
+                    hit_id=f"hit-{method_name}",
+                    layer=layer,
+                    domain=domain,
+                    domain_path=domain_path,
+                    excerpt_text=f"{method_name} parity hit",
+                    score=0.91,
+                    rank=1,
+                    asset_id=f"asset-{method_name}",
+                    title=f"{method_name} Parity Asset",
+                    section_id=f"section-{method_name}",
+                    section_part=0,
+                    extra_metadata={
+                        "source_family": "longform_story_runtime",
+                        "parity_marker": method_name,
+                    },
+                )
+            ],
+            trace=_make_trace(
+                query=query,
+                trace_id=f"trace-{method_name}-parity",
+                route=route,
+                candidate_count=2,
+                returned_count=1,
+                warnings=[f"{method_name}_trace_warning"],
+                details={
+                    "parity_marker": method_name,
+                    "query_kind": query.query_kind,
+                },
+                filters_applied=query.filters,
+                timings={"broker_ms": 1.0},
+            ),
+            warnings=[f"{method_name}_result_warning"],
+        )
+
+    stub_service = _StubRetrievalService(response_factory=_response_factory)
+    broker = RetrievalBroker(
+        default_story_id="story-1",
+        retrieval_service_factory=lambda _session: stub_service,
+        langfuse_service=_FakeLangfuseService(),
+    )
+    service = MemoryOsService(retrieval_broker=broker)
+
+    direct_result = await getattr(broker, method_name)(input_model)
+    facade_result = await getattr(service, method_name)(input_model)
+
+    assert direct_result.model_dump(mode="json", exclude_none=True) == (
+        facade_result.model_dump(mode="json", exclude_none=True)
+    )
+    assert captured_queries[0].filters == captured_queries[1].filters
+    assert captured_queries[0].domains == captured_queries[1].domains

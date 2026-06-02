@@ -6,6 +6,7 @@ import pytest
 
 from config import get_settings
 from rp.models.dsl import Domain, Layer
+from rp.models.memory.crud import RetrievalHit, RetrievalSearchResult, RetrievalTrace
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory.os_service import MemoryOsService
@@ -108,6 +109,72 @@ def _seed_formal_authoritative_history(
     return row.authoritative_object_id
 
 
+class _StubMemoryOsService:
+    def __init__(
+        self,
+        *,
+        recall_result: RetrievalSearchResult | None = None,
+        archival_result: RetrievalSearchResult | None = None,
+    ) -> None:
+        self._recall_result = recall_result
+        self._archival_result = archival_result
+        self.calls: list[tuple[str, object]] = []
+
+    async def search_recall(self, input_model: object) -> RetrievalSearchResult:
+        self.calls.append(("search_recall", input_model))
+        assert self._recall_result is not None
+        return self._recall_result
+
+    async def search_archival(self, input_model: object) -> RetrievalSearchResult:
+        self.calls.append(("search_archival", input_model))
+        assert self._archival_result is not None
+        return self._archival_result
+
+
+def _make_provider_search_result(*, query: str, layer: str) -> RetrievalSearchResult:
+    return RetrievalSearchResult(
+        query=query,
+        hits=[
+            RetrievalHit(
+                hit_id=f"hit-provider-{layer}",
+                query_id=f"query-provider-{layer}",
+                layer=layer,
+                domain=Domain.WORLD_RULE if layer == "archival" else Domain.CHAPTER,
+                domain_path=f"{layer}.provider",
+                excerpt_text=f"{layer} provider excerpt",
+                score=0.87,
+                rank=1,
+                metadata={
+                    "asset_id": f"asset-provider-{layer}",
+                    "section_id": f"section-provider-{layer}",
+                    "source_family": "provider_test",
+                },
+            )
+        ],
+        trace=RetrievalTrace(
+            trace_id=f"trace-provider-{layer}",
+            query_id=f"query-provider-{layer}",
+            route=f"retrieval.stub.provider.{layer}",
+            result_kind="chunk",
+            filters_applied={"layer": layer},
+            candidate_count=1,
+            returned_count=1,
+            timings={"provider_ms": 1.0},
+            warnings=[f"{layer}_trace_warning"],
+            details={"provider_stub": True},
+        ),
+        warnings=[f"{layer}_result_warning"],
+    )
+
+
+def _expected_provider_content(result: RetrievalSearchResult) -> str:
+    return json.dumps(
+        result.model_dump(mode="json", exclude_none=True),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
 @pytest.mark.asyncio
 async def test_provider_returns_canonical_json_string(retrieval_session):
     _seed_story_runtime(retrieval_session)
@@ -128,6 +195,64 @@ async def test_provider_returns_canonical_json_string(retrieval_session):
     payload = json.loads(result["content"])
     assert payload["items"][0]["object_ref"]["domain"] == "chapter"
     assert payload["items"][0]["data"]["title"] == "Chapter One"
+
+
+@pytest.mark.asyncio
+async def test_provider_search_recall_returns_stubbed_os_service_envelope():
+    recall_result = _make_provider_search_result(
+        query="provider recall",
+        layer="recall",
+    )
+    stub_service = _StubMemoryOsService(recall_result=recall_result)
+    provider = MemoryCrudToolProvider(memory_os_service=stub_service)
+
+    result = await provider.call_tool(
+        tool_name="memory.search_recall",
+        arguments={
+            "query": "provider recall",
+            "scope": "story",
+            "domains": ["chapter"],
+            "top_k": 3,
+            "filters": {"source_families": ["provider_test"]},
+        },
+    )
+
+    assert result == {
+        "success": True,
+        "content": _expected_provider_content(recall_result),
+        "error_code": None,
+    }
+    assert stub_service.calls[0][0] == "search_recall"
+    assert stub_service.calls[0][1].query == "provider recall"
+
+
+@pytest.mark.asyncio
+async def test_provider_search_archival_returns_stubbed_os_service_envelope():
+    archival_result = _make_provider_search_result(
+        query="provider archival",
+        layer="archival",
+    )
+    stub_service = _StubMemoryOsService(archival_result=archival_result)
+    provider = MemoryCrudToolProvider(memory_os_service=stub_service)
+
+    result = await provider.call_tool(
+        tool_name="memory.search_archival",
+        arguments={
+            "query": "provider archival",
+            "knowledge_collections": ["setup-a"],
+            "domains": ["world_rule"],
+            "top_k": 2,
+            "filters": {"source_types": ["foundation_entry"]},
+        },
+    )
+
+    assert result == {
+        "success": True,
+        "content": _expected_provider_content(archival_result),
+        "error_code": None,
+    }
+    assert stub_service.calls[0][0] == "search_archival"
+    assert stub_service.calls[0][1].knowledge_collections == ["setup-a"]
 
 
 @pytest.mark.asyncio
