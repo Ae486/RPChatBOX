@@ -60,13 +60,6 @@
     },
     {
       "kind": "class",
-      "path": "retrieval/broker.py",
-      "symbol": "RetrievalBroker",
-      "lines": 641,
-      "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
-    },
-    {
-      "kind": "class",
       "path": "retrieval/minimal_ingestion_service.py",
       "symbol": "MinimalRetrievalIngestionService",
       "lines": 803,
@@ -347,10 +340,10 @@
     },
     {
       "kind": "function",
-      "path": "retrieval/broker.py",
-      "symbol": "RetrievalBroker._search",
+      "path": "retrieval/search.py",
+      "symbol": "SearchBroker._search",
       "lines": 115,
-      "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
+      "reason": "T6 S5 relocation of the grandfathered RetrievalBroker._search engine into SearchBroker (behavior-preserving move); a future complexity-split task (e.g. T11) owns reducing it under the 100-line cap."
     },
     {
       "kind": "function",
