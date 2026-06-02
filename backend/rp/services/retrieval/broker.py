@@ -56,6 +56,7 @@ from .context import RetrievalBrokerContext
 from .observability_service import RetrievalObservabilityService
 from .runtime_config_service import RetrievalRuntimeConfigService
 from .service import RetrievalService
+from .versions_provenance import VersionsProvenanceBroker
 from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestServiceError,
@@ -126,6 +127,11 @@ class RetrievalBroker:
         )
         self._projection_read_service_factory = projection_read_service_factory or (
             lambda session: self._build_projection_read_service(session)
+        )
+        self._versions_provenance = VersionsProvenanceBroker(
+            context=self._ctx,
+            core_state_read_service_factory=self._core_state_read_service_factory,
+            projection_read_service_factory=self._projection_read_service_factory,
         )
         self._langfuse = langfuse_service or get_langfuse_service()
 
@@ -255,25 +261,13 @@ class RetrievalBroker:
         self,
         input_model: MemoryListVersionsInput,
     ) -> VersionListResult:
-        with self._session_scope() as session:
-            service = (
-                self._projection_read_service_factory(session)
-                if (input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION)
-                else self._core_state_read_service_factory(session)
-            )
-            return await service.list_versions(input_model)
+        return await self._versions_provenance.list_versions(input_model)
 
     async def read_provenance(
         self,
         input_model: MemoryReadProvenanceInput,
     ) -> ProvenanceResult:
-        with self._session_scope() as session:
-            service = (
-                self._projection_read_service_factory(session)
-                if (input_model.target_ref.layer == Layer.CORE_STATE_PROJECTION)
-                else self._core_state_read_service_factory(session)
-            )
-            return await service.read_provenance(input_model)
+        return await self._versions_provenance.read_provenance(input_model)
 
     def _build_query(
         self,
