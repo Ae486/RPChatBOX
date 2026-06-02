@@ -379,13 +379,6 @@ def _build_turn_domain_service(
     )
 
 
-_PRE_EXISTING_FAILURE_CLUSTER_1 = (
-    "Pre-existing failure (writing-path business assertions). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 1. "
-    "Tracked by T18 in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
-
 def test_authoritative_state_view_service_reads_session_scoped_objects(
     retrieval_session,
 ):
@@ -875,8 +868,6 @@ def test_context_orchestration_service_builds_minimal_worker_context_packet(
         "retrieval_usage_material_ids": [],
     }
 
-
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_1, strict=False)
 def test_story_turn_domain_service_build_packet_routes_through_context_orchestration_service(
     retrieval_session,
 ):
@@ -907,9 +898,11 @@ def test_story_turn_domain_service_build_packet_routes_through_context_orchestra
         },
     )
     orchestration = _RecordingContextOrchestrationService(writing_packet=packet)
+    material_service = RuntimeWorkspaceMaterialService(session=retrieval_session)
     turn_domain_service = _build_turn_domain_service(
         service,
         context_orchestration_service=orchestration,
+        runtime_workspace_material_service=material_service,
     )
     bundle = SpecialistResultBundle(writer_hints=["Hint A"])
 
@@ -923,11 +916,86 @@ def test_story_turn_domain_service_build_packet_routes_through_context_orchestra
         runtime_identity=runtime_identity,
     )
 
-    assert actual == packet
+    assert actual.packet_id == packet.packet_id
+    assert actual.identity == runtime_identity
+    assert actual.session_id == session.session_id
+    assert actual.branch_head_id == runtime_identity.branch_head_id
+    assert actual.turn_id == runtime_identity.turn_id
+    assert actual.chapter_workspace_id == chapter.chapter_workspace_id
+    assert actual.output_kind == StoryArtifactKind.STORY_SEGMENT.value
+    assert actual.phase == LongformChapterPhase.OUTLINE_DRAFTING.value
+    assert actual.operation_mode == "writing"
+    assert actual.user_instruction == "Write the next segment."
+    assert actual.writer_contract == {"style_rules": ["Lean"]}
+    assert actual.core_view_sections == packet.core_view_sections
+    assert actual.recent_raw_turn_sections == []
+    assert actual.mode_sidecar_sections == packet.mode_sidecar_sections
+    assert actual.retrieval_card_sections == []
+    assert actual.review_overlay_sections == []
+    assert actual.context_sections == packet.context_sections
+    assert actual.packet_summary_metadata == packet.packet_summary_metadata
+    assert actual.metadata["runtime_identity"] == runtime_identity.model_dump(
+        mode="json"
+    )
+    assert actual.metadata["packet_builder_boundary"] == "thin_context_packet_builder"
+    assert actual.metadata["legacy_orchestrator_plan_role"] == "adapter_input"
+    assert actual.packet_summary_metadata["flattened_section_labels"] == [
+        "foundation_digest",
+        "writer_hints",
+    ]
+    writer_input_material_id = f"writer-input-ref:{actual.packet_id}"
+    packet_material_id = f"packet-ref:{actual.packet_id}"
+    assert actual.metadata["runtime_workspace_writer_input_material_id"] == (
+        writer_input_material_id
+    )
+    assert actual.metadata["runtime_workspace_packet_material_id"] == (
+        packet_material_id
+    )
+    writer_inputs = material_service.list_materials(
+        identity=runtime_identity,
+        material_kind=RuntimeWorkspaceMaterialKind.WRITER_INPUT_REF,
+    )
+    packet_refs = material_service.list_materials(
+        identity=runtime_identity,
+        material_kind=RuntimeWorkspaceMaterialKind.PACKET_REF,
+    )
+    assert len(writer_inputs) == 1
+    assert writer_inputs[0].material_id == writer_input_material_id
+    assert writer_inputs[0].payload == {
+        "packet_id": actual.packet_id,
+        "output_kind": StoryArtifactKind.STORY_SEGMENT.value,
+        "phase": LongformChapterPhase.OUTLINE_DRAFTING.value,
+        "recent_turn_ref_ids": [],
+        "retrieval_ref_ids": [],
+        "user_instruction_preview": "Write the next segment.",
+        "writer_contract_keys": ["style_rules"],
+    }
+    assert len(packet_refs) == 1
+    assert packet_refs[0].material_id == packet_material_id
+    assert packet_refs[0].payload["packet_id"] == actual.packet_id
+    assert packet_refs[0].payload["output_kind"] == StoryArtifactKind.STORY_SEGMENT.value
+    assert packet_refs[0].payload["phase"] == LongformChapterPhase.OUTLINE_DRAFTING.value
+    assert packet_refs[0].payload["context_section_labels"] == [
+        "foundation_digest",
+        "writer_hints",
+    ]
+    assert packet_refs[0].payload["section_counts"] == {
+        "core_view": 1,
+        "recent_raw_turn": 0,
+        "mode_sidecar": 1,
+        "retrieval_card": 0,
+        "review_overlay": 0,
+    }
+    assert packet_refs[0].payload["packet_summary_metadata"] == (
+        actual.packet_summary_metadata
+    )
+    assert packet_refs[0].source_refs[0].entry_id == writer_input_material_id
     assert len(orchestration.writer_calls) == 1
     writer_call = cast(dict[str, Any], orchestration.writer_calls[0])
     assert writer_call["session"].session_id == session.session_id
     assert writer_call["chapter"].chapter_workspace_id == (chapter.chapter_workspace_id)
+    assert writer_call["operation_mode"] == "writing"
+    assert writer_call["plan"].output_kind == StoryArtifactKind.STORY_SEGMENT
     assert writer_call["specialist_bundle"] == bundle
     assert writer_call["runtime_identity"] == runtime_identity
 
@@ -2207,8 +2275,6 @@ def test_story_segment_structured_metadata_schema_stays_typed_and_degrades_bad_i
         ]
     }
 
-
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_1, strict=False)
 def test_story_turn_accept_outline_updates_projection_via_boundary_service(
     retrieval_session,
 ):
@@ -2233,8 +2299,44 @@ def test_story_turn_accept_outline_updates_projection_via_boundary_service(
     updated_chapter = service.get_current_chapter(session.session_id)
 
     assert updated_chapter is not None
+    normalized_outline_text = (
+        "Chapter goal: Advance the chapter.\n\n"
+        "1. Accepted Outline Text\n"
+        "   Goal: Accepted Outline Text"
+    )
     assert updated_chapter.builder_snapshot_json["current_outline_digest"] == [
-        "Accepted Outline Text"
+        normalized_outline_text
+    ]
+    assert updated_chapter.accepted_outline_json["content_text"] == (
+        normalized_outline_text
+    )
+    assert updated_chapter.accepted_outline_json["structured_outline"] == {
+        "schema_version": "longform_outline_v1",
+        "chapter_index": 1,
+        "chapter_title": None,
+        "chapter_goal": "Advance the chapter.",
+        "beats": [
+            {
+                "beat_id": "beat_001",
+                "order": 1,
+                "title": "Accepted Outline Text",
+                "goal": "Accepted Outline Text",
+                "must_include": [],
+                "avoid": [],
+                "continuity_notes": [],
+                "metadata_json": {},
+            }
+        ],
+        "constraints": {},
+    }
+    outline_metadata = updated_chapter.accepted_outline_json["metadata"]
+    assert outline_metadata["outline_schema_version"] == "longform_outline_v1"
+    assert (
+        outline_metadata["outline_normalization_source"]
+        == "deterministic_line_normalizer"
+    )
+    assert outline_metadata["outline_normalization_warnings"] == [
+        "outline_normalized_from_non_json_output"
     ]
     assert response.current_phase == LongformChapterPhase.SEGMENT_DRAFTING
 
