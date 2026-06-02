@@ -15,7 +15,7 @@ from models.rp_retrieval_store import KnowledgeChunkRecord, SourceAssetRecord
 from models.rp_story_store import RuntimeProfileSnapshotRecord
 from rp.models.block_view import RpBlockView
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.dsl import Domain
 from rp.models.memory_crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
@@ -29,7 +29,6 @@ from rp.models.memory_crud import (
     RetrievalSearchResult,
     RetrievalTrace,
     StateReadResult,
-    StateReadResultItem,
     SummaryEntry,
     SummaryReadResult,
     VersionListResult,
@@ -37,9 +36,6 @@ from rp.models.memory_crud import (
 from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
 from rp.models.runtime_identity import RuntimeProfileSnapshotCompiledProfile
 from rp.observability.langfuse_scores import emit_retrieval_trace_scores
-from rp.services.projection.builder_context_service import (
-    BuilderProjectionContextService,
-)
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
@@ -47,8 +43,6 @@ from rp.services.core_state.backfill_service import CoreStateBackfillService
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.read_service import CoreStateReadService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
-from rp.services.memory.inspection_read_service import MemoryInspectionReadService
-from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.projection.read_service import ProjectionReadService
@@ -56,6 +50,8 @@ from .context import RetrievalBrokerContext
 from .observability_service import RetrievalObservabilityService
 from .runtime_config_service import RetrievalRuntimeConfigService
 from .service import RetrievalService
+from .state import StateBroker
+from .state_summary_base import StateSummaryReadBase
 from .versions_provenance import VersionsProvenanceBroker
 from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
@@ -128,6 +124,11 @@ class RetrievalBroker:
         self._projection_read_service_factory = projection_read_service_factory or (
             lambda session: self._build_projection_read_service(session)
         )
+        self._state_summary_read_base = StateSummaryReadBase(context=self._ctx)
+        self._state = StateBroker(
+            context=self._ctx,
+            core_state_read_service_factory=self._core_state_read_service_factory,
+        )
         self._versions_provenance = VersionsProvenanceBroker(
             context=self._ctx,
             core_state_read_service_factory=self._core_state_read_service_factory,
@@ -136,44 +137,7 @@ class RetrievalBroker:
         self._langfuse = langfuse_service or get_langfuse_service()
 
     async def get_state(self, input_model: MemoryGetStateInput) -> StateReadResult:
-        try:
-            with self._session_scope() as session:
-                service = self._core_state_read_service_factory(session)
-                result = await service.get_state(input_model)
-                return self._merge_state_result_from_blocks(
-                    session=session,
-                    input_model=input_model,
-                    result=result,
-                )
-        except SQLAlchemyError as exc:
-            items: list[StateReadResultItem] = []
-            refs = list(input_model.refs)
-            if not refs:
-                domain = input_model.domain
-                if domain is None:
-                    raise ValueError(
-                        "MemoryGetStateInput must include refs or domain"
-                    ) from exc
-                refs = [
-                    ObjectRef(
-                        object_id=f"{domain.value}.current",
-                        layer=Layer.CORE_STATE_AUTHORITATIVE,
-                        domain=domain,
-                        domain_path=f"{domain.value}.current",
-                        scope=input_model.scope,
-                        revision=1,
-                    )
-                ]
-            for ref in refs:
-                items.append(StateReadResultItem(object_ref=ref, data={}, warnings=[]))
-            return StateReadResult(
-                items=items,
-                version_refs=[
-                    f"{item.object_ref.object_id}@{item.object_ref.revision or 1}"
-                    for item in items
-                ],
-                warnings=[f"story_store_unavailable:{type(exc).__name__}"],
-            )
+        return await self._state.get_state(input_model)
 
     async def get_summary(
         self, input_model: MemoryGetSummaryInput
@@ -480,97 +444,9 @@ class RetrievalBroker:
             runtime_identity=self._runtime_identity,
         )
 
+    # Transitional S3 shims; removed in S4 when SummaryBroker owns summary merge.
     def _build_rp_block_read_service(self, session: Session) -> RpBlockReadService:
-        story_session_service = StorySessionService(session)
-        proposal_repository = ProposalRepository(session)
-        core_state_store_repository = CoreStateStoreRepository(session)
-        store_read_enabled = bool(
-            get_settings().rp_memory_core_state_store_read_enabled
-        )
-        projection_state_service = ProjectionStateService(
-            story_session_service=story_session_service,
-            adapter=ChapterWorkspaceProjectionAdapter(
-                story_session_service,
-                default_story_id=self._default_story_id,
-            ),
-            core_state_store_repository=core_state_store_repository,
-            store_read_enabled=store_read_enabled,
-        )
-        builder_projection_context_service = BuilderProjectionContextService(
-            projection_state_service
-        )
-        core_state_adapter = StorySessionCoreStateAdapter(
-            story_session_service,
-            default_story_id=self._default_story_id,
-        )
-        version_history_read_service = VersionHistoryReadService(
-            adapter=core_state_adapter,
-            proposal_repository=proposal_repository,
-            core_state_store_repository=core_state_store_repository,
-            store_read_enabled=store_read_enabled,
-        )
-        memory_inspection_read_service = MemoryInspectionReadService(
-            story_session_service=story_session_service,
-            builder_projection_context_service=builder_projection_context_service,
-            proposal_repository=proposal_repository,
-            version_history_read_service=version_history_read_service,
-            core_state_store_repository=core_state_store_repository,
-            store_read_enabled=store_read_enabled,
-        )
-        return RpBlockReadService(
-            story_session_service=story_session_service,
-            builder_projection_context_service=builder_projection_context_service,
-            core_state_store_repository=core_state_store_repository,
-            memory_inspection_read_service=memory_inspection_read_service,
-            store_read_enabled=store_read_enabled,
-        )
-
-    def _merge_state_result_from_blocks(
-        self,
-        *,
-        session: Session,
-        input_model: MemoryGetStateInput,
-        result: StateReadResult,
-    ) -> StateReadResult:
-        # Only explicit refs can safely resolve unmapped authoritative identities.
-        if not input_model.refs:
-            return result
-        unresolved_indexes = [
-            index
-            for index, item in enumerate(result.items)
-            if self._state_item_needs_block_resolution(item)
-        ]
-        if not unresolved_indexes:
-            return result
-        session_id = self._current_session_id(session)
-        if session_id is None:
-            return result
-
-        block_service = self._build_rp_block_read_service(session)
-        blocks = block_service.list_authoritative_blocks(session_id=session_id)
-        blocks_by_identity = {
-            self._authoritative_identity_from_block(block): block for block in blocks
-        }
-        items = list(result.items)
-        version_refs = list(result.version_refs)
-
-        for index in unresolved_indexes:
-            current_item = items[index]
-            block = blocks_by_identity.get(
-                self._authoritative_identity_from_ref(current_item.object_ref)
-            )
-            if block is None:
-                continue
-            items[index] = self._state_item_from_block(
-                block=block,
-                warnings=current_item.warnings,
-            )
-            version_refs[index] = (
-                f"{items[index].object_ref.object_id}@"
-                f"{items[index].object_ref.revision or 1}"
-            )
-
-        return result.model_copy(update={"items": items, "version_refs": version_refs})
+        return self._state_summary_read_base._build_rp_block_read_service(session)
 
     def _merge_summary_result_from_blocks(
         self,
@@ -635,60 +511,7 @@ class RetrievalBroker:
         return result.model_copy(update={"items": ordered_items})
 
     def _current_session_id(self, session: Session) -> str | None:
-        if self._runtime_identity is not None:
-            return self._runtime_identity.session_id
-        if not self._default_story_id:
-            return None
-        current_session = StorySessionService(session).get_latest_session_for_story(
-            self._default_story_id
-        )
-        if current_session is None:
-            return None
-        return current_session.session_id
-
-    @staticmethod
-    def _state_item_needs_block_resolution(item: StateReadResultItem) -> bool:
-        return any(
-            warning.startswith("phase_e_authoritative_ref_not_materialized:")
-            for warning in item.warnings
-        )
-
-    @staticmethod
-    def _authoritative_identity_from_ref(ref: ObjectRef) -> tuple[str, str, str]:
-        return (
-            ref.object_id,
-            ref.domain_path or ref.object_id,
-            ref.scope or "story",
-        )
-
-    @staticmethod
-    def _authoritative_identity_from_block(block: RpBlockView) -> tuple[str, str, str]:
-        return (block.label, block.domain_path, block.scope or "story")
-
-    @classmethod
-    def _state_item_from_block(
-        cls,
-        *,
-        block: RpBlockView,
-        warnings: list[str],
-    ) -> StateReadResultItem:
-        payload = block.data_json if isinstance(block.data_json, dict) else {}
-        return StateReadResultItem(
-            object_ref=ObjectRef(
-                object_id=block.label,
-                layer=block.layer,
-                domain=block.domain,
-                domain_path=block.domain_path,
-                scope=block.scope,
-                revision=int(block.revision),
-            ),
-            data=deepcopy(payload),
-            warnings=[
-                warning
-                for warning in warnings
-                if not warning.startswith("phase_e_authoritative_ref_not_materialized:")
-            ],
-        )
+        return self._state_summary_read_base._current_session_id(session)
 
     @classmethod
     def _summary_entry_with_block_metadata(

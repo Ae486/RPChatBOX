@@ -62,7 +62,7 @@
       "kind": "class",
       "path": "retrieval/broker.py",
       "symbol": "RetrievalBroker",
-      "lines": 992,
+      "lines": 819,
       "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
     },
     {
@@ -197,13 +197,6 @@
       "symbol": null,
       "lines": 1184,
       "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
-    },
-    {
-      "kind": "file",
-      "path": "retrieval/broker.py",
-      "symbol": null,
-      "lines": 1100,
-      "reason": "T6 / Task B grandfather: RetrievalBroker decomposition owns splitting this service; T8 must freeze only."
     },
     {
       "kind": "file",
