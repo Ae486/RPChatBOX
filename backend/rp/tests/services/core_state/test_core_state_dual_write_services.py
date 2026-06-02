@@ -142,14 +142,16 @@ def _seed_story_runtime(retrieval_session):
     return refreshed_session, refreshed_chapter, service
 
 
-_PRE_EXISTING_FAILURE_CLUSTER_3 = (
-    "Pre-existing failure (SQLite database is locked under dual-write concurrency). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 3. "
-    "Tracked by T17 in .trellis/spec/guides/project-optimization-master-guide.md."
+_PROPOSAL_APPLY_REVISION_MISMATCH = (
+    "Pre-existing failure: proposal_apply does not produce authoritative revision 2 "
+    "(expected revisions [1=repair, 2=proposal_apply]; current_revision stays 1 under "
+    "submit_source='test'). Distinct root cause from the projection event-write cluster; "
+    "triage stale test expectation vs dual-write product bug. "
+    "Tracked by .trellis/tasks/06-02-proposal-apply-revision-mismatch/."
 )
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_3, strict=False)
+@pytest.mark.xfail(reason=_PROPOSAL_APPLY_REVISION_MISMATCH, strict=False)
 @pytest.mark.asyncio
 async def test_proposal_apply_service_dual_writes_authoritative_store(
     retrieval_session,
@@ -588,12 +590,11 @@ def test_projection_refresh_service_rejects_stale_source_revision_before_write(
     assert exc.value.code == "projection_refresh_source_revision_conflict"
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_3, strict=False)
 def test_projection_refresh_service_emits_shared_event_when_identity_is_supplied(
     retrieval_session,
 ):
     _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
-    event_service = MemoryChangeEventService()
+    event_service = MemoryChangeEventService(session=retrieval_session)
     refresh_service = ProjectionRefreshService(
         story_session_service,
         memory_change_event_service=event_service,
@@ -628,12 +629,11 @@ def test_projection_refresh_service_emits_shared_event_when_identity_is_supplied
     assert events[0].dirty_targets[0].target_kind == "packet_window"
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_3, strict=False)
 def test_projection_refresh_service_allows_repeated_shared_events_for_same_identity(
     retrieval_session,
 ):
     _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
-    event_service = MemoryChangeEventService()
+    event_service = MemoryChangeEventService(session=retrieval_session)
     refresh_service = ProjectionRefreshService(
         story_session_service,
         memory_change_event_service=event_service,

@@ -18,6 +18,9 @@ def get_engine():
     engine_kwargs: dict[str, object] = {"pool_pre_ping": True}
     if settings.resolved_database_url.startswith("sqlite:///"):
         connect_args["check_same_thread"] = False
+        # sqlite3 maps this DBAPI timeout to per-connection busy waiting. It is
+        # defensive hardening for short-lived NullPool connections, not WAL.
+        connect_args["timeout"] = 30.0
         # Desktop/backend local SQLite sees bursty parallel reads plus long-lived
         # streaming sessions. QueuePool easily saturates in that shape, so use
         # one-shot connections instead of a tiny bounded pool.
