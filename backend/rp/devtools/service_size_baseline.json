@@ -524,8 +524,8 @@
       "kind": "function",
       "path": "writer/longform_regression_service.py",
       "symbol": "LongformRegressionService.run_heavy_regression",
-      "lines": 118,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 114,
+      "reason": "Grandfathered by T8; shrank 118->114 in T16 S5 (recall digests routed via the mirror seam removed 2 inline guards). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "function",

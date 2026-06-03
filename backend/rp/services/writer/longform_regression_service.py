@@ -15,6 +15,9 @@ from rp.models.story_runtime import (
     StorySession,
 )
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from ..core_state.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
 from ..core_state.legacy_state_patch_proposal_builder import LegacyStatePatchProposalBuilder
 from .longform_orchestrator_service import LongformOrchestratorService
 from .longform_specialist_service import LongformSpecialistService
@@ -55,6 +58,7 @@ class LongformRegressionService:
         | None = None,
         recall_retired_foreshadow_ingestion_service: RecallRetiredForeshadowIngestionService
         | None = None,
+        mirror_service: AuthoritativeCompatibilityMirrorService | None = None,
         regression_policy: PostWriteMaintenancePolicy | None = None,
     ) -> None:
         self._story_session_service = story_session_service
@@ -79,6 +83,7 @@ class LongformRegressionService:
         self._recall_retired_foreshadow_ingestion_service = (
             recall_retired_foreshadow_ingestion_service
         )
+        self._mirror_service = mirror_service
         self._regression_policy = regression_policy or PostWriteMaintenancePolicy(
             preset_id="phase_e_internal_regression",
             fallback_decision=PolicyDecision.NOTIFY_APPLY,
@@ -197,13 +202,13 @@ class LongformRegressionService:
                 runtime_identity=runtime_identity,
                 source_refs=recall_source_refs,
             )
-        if (
-            self._recall_character_long_history_ingestion_service is not None
-            and isinstance(updated_session.current_state_json, dict)
-        ):
-            character_state_digest = updated_session.current_state_json.get(
-                "character_state_digest"
-            )
+        mirror_service = self._mirror_service or AuthoritativeCompatibilityMirrorService(
+            story_session_service=self._story_session_service
+        )
+        mirror = mirror_service.read_mirror_state_with_presence(session=updated_session)
+        state = mirror.state if mirror.present and isinstance(mirror.state, dict) else {}
+        if self._recall_character_long_history_ingestion_service is not None:
+            character_state_digest = state.get("character_state_digest")
             if isinstance(character_state_digest, dict):
                 self._recall_character_long_history_ingestion_service.ingest_character_summaries(
                     session_id=updated_session.session_id,
@@ -217,12 +222,8 @@ class LongformRegressionService:
                     runtime_identity=runtime_identity,
                     source_refs=recall_source_refs,
                 )
-        if self._recall_retired_foreshadow_ingestion_service is not None and isinstance(
-            updated_session.current_state_json, dict
-        ):
-            foreshadow_registry = updated_session.current_state_json.get(
-                "foreshadow_registry"
-            )
+        if self._recall_retired_foreshadow_ingestion_service is not None:
+            foreshadow_registry = state.get("foreshadow_registry")
             if isinstance(foreshadow_registry, list):
                 self._recall_retired_foreshadow_ingestion_service.ingest_retired_foreshadow_summaries(
                     session_id=updated_session.session_id,

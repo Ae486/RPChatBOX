@@ -489,6 +489,7 @@ class RpRuntimeFactory:
             recall_retired_foreshadow_ingestion_service=(
                 RecallRetiredForeshadowIngestionService(self._session)
             ),
+            mirror_service=authoritative_mirror_service,
         )
         writing_packet_builder = WritingPacketBuilder()
         writing_worker_execution_service = WritingWorkerExecutionService(
