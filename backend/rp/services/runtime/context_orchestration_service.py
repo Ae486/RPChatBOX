@@ -872,30 +872,6 @@ class ContextOrchestrationService:
         return None
 
     @staticmethod
-    def _accepted_outline_digest(chapter: ChapterWorkspace) -> str | None:
-        accepted_outline = chapter.accepted_outline_json or {}
-        structured_outline = ContextOrchestrationService._accepted_structured_outline(
-            chapter=chapter
-        )
-        if structured_outline is not None:
-            beat_summaries = [
-                f"{beat.order}. {beat.title}: {beat.goal}"
-                for beat in structured_outline.beats[:4]
-            ]
-            if beat_summaries:
-                return " | ".join(beat_summaries)
-        outline_text = str(accepted_outline.get("content_text") or "").strip()
-        if outline_text:
-            return ContextOrchestrationService._excerpt(outline_text)
-        snapshot = chapter.builder_snapshot_json or {}
-        outline_digest = snapshot.get("current_outline_digest")
-        if isinstance(outline_digest, list):
-            items = [str(item).strip() for item in outline_digest if str(item).strip()]
-            if items:
-                return " | ".join(items)
-        return None
-
-    @staticmethod
     def _chapter_goal_text(*, chapter: ChapterWorkspace) -> str:
         goal = str(chapter.chapter_goal or "").strip()
         return goal or "(not set)"
