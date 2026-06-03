@@ -31,6 +31,8 @@ LEGACY_MEMORY_BACKEND_ALLOWLIST = {
     "dual_write_service.py",
     "inspection_read_service.py",
     "compatibility_mirror_service.py",
+    # read-only Block compatibility presenter (surfaces legacy mirror as inspect/block envelopes; T16 Q5)
+    "rp_block_read_service.py",
     "read_service.py",
     "provenance_read_service.py",
     "activation_service.py",
