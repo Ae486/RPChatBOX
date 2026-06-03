@@ -142,16 +142,6 @@ def _seed_story_runtime(retrieval_session):
     return refreshed_session, refreshed_chapter, service
 
 
-_PROPOSAL_APPLY_REVISION_MISMATCH = (
-    "Pre-existing failure: proposal_apply does not produce authoritative revision 2 "
-    "(expected revisions [1=repair, 2=proposal_apply]; current_revision stays 1 under "
-    "submit_source='test'). Distinct root cause from the projection event-write cluster; "
-    "triage stale test expectation vs dual-write product bug. "
-    "Tracked by .trellis/tasks/06-02-proposal-apply-revision-mismatch/."
-)
-
-
-@pytest.mark.xfail(reason=_PROPOSAL_APPLY_REVISION_MISMATCH, strict=False)
 @pytest.mark.asyncio
 async def test_proposal_apply_service_dual_writes_authoritative_store(
     retrieval_session,
@@ -159,6 +149,7 @@ async def test_proposal_apply_service_dual_writes_authoritative_store(
     session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
     repository = ProposalRepository(retrieval_session)
     dual_write_service = _build_dual_write_service(retrieval_session)
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
     workflow = ProposalWorkflowService(
         proposal_repository=repository,
         proposal_apply_service=ProposalApplyService(
@@ -221,7 +212,7 @@ async def test_proposal_apply_service_dual_writes_authoritative_store(
     assert current_row.data_json["title"] == "Chapter Two"
     assert current_row.latest_apply_id == apply_receipt.apply_id
     assert [item.revision for item in revisions] == [1, 2]
-    assert revisions[0].revision_source_kind == "repair"
+    assert revisions[0].revision_source_kind == "activation_seed"
     assert revisions[1].revision_source_kind == "proposal_apply"
     assert links and links[0].revision == 2
 
