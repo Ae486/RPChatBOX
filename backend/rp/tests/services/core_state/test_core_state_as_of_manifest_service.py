@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from models.rp_story_store import StoryTurnRecord
 from rp.models.dsl import Domain, Layer, ObjectRef
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.memory_crud import MemoryGetStateInput
 from rp.models.runtime_identity import StoryTurnStatus
 from rp.models.story_runtime import LongformChapterPhase
+from rp.services.core_state.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.read_service import CoreStateReadService
@@ -141,6 +145,101 @@ def _character_ref() -> ObjectRef:
         domain_path="character.state_digest",
         scope="story",
     )
+
+
+def test_compatibility_seed_reports_missing_session_from_mirror_presence(
+    retrieval_session,
+):
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    resolver = CoreStateAsOfResolver(
+        session=retrieval_session,
+        repository=core_repo,
+        mirror_service=AuthoritativeCompatibilityMirrorService(
+            story_session_service=StorySessionService(retrieval_session)
+        ),
+    )
+    turn = StoryTurnRecord(
+        turn_id="turn-missing-session",
+        story_id="story-missing-session",
+        session_id="missing-session",
+        branch_head_id="branch-missing-session",
+        runtime_profile_snapshot_id="snapshot-missing-session",
+        turn_kind="generation",
+        command_kind="compatibility-seed",
+        actor="test.core_asof",
+        status=StoryTurnStatus.STARTED.value,
+    )
+
+    assert resolver._seed_compatibility_rows_from_session_mirror(turn=turn) == [
+        "compatibility_seed_session_missing"
+    ]
+    assert core_repo.list_authoritative_objects_for_session(
+        session_id=turn.session_id
+    ) == []
+
+
+def test_compatibility_seed_reads_present_session_via_mirror_service(
+    retrieval_session,
+):
+    story_service = StorySessionService(retrieval_session)
+    session = story_service.create_session(
+        story_id="story-core-asof-mirror",
+        source_workspace_id="workspace-core-asof-mirror",
+        mode="longform",
+        runtime_story_config={},
+        writer_contract={},
+        current_state_json={
+            "chapter_digest": {"current_chapter": 1, "title": "Mirror Chapter"},
+        },
+        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
+    )
+    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
+    snapshot = snapshot_service.ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from="test.core_asof.mirror",
+    )
+    identity_service = StoryRuntimeIdentityService(
+        retrieval_session,
+        runtime_profile_snapshot_service=snapshot_service,
+    )
+    branch = identity_service.ensure_default_branch(
+        session_id=session.session_id,
+        story_id=session.story_id,
+    )
+    identity = _create_identity(
+        identity_service,
+        session_id=session.session_id,
+        story_id=session.story_id,
+        branch_head_id=branch.branch_head_id,
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+        command_kind="compatibility-seed",
+    )
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    resolver = CoreStateAsOfResolver(
+        session=retrieval_session,
+        repository=core_repo,
+        mirror_service=AuthoritativeCompatibilityMirrorService(
+            story_session_service=story_service
+        ),
+    )
+
+    manifest = resolver.ensure_manifest_for_identity(identity=identity)
+
+    chapter_payload = _read_payload(resolver, identity=identity, ref=_chapter_ref())
+    chapter_row = core_repo.get_authoritative_object(
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        scope="story",
+        object_id="chapter.current",
+    )
+    assert chapter_payload["title"] == "Mirror Chapter"
+    assert chapter_row is not None
+    assert chapter_row.metadata_json["backfilled_from"] == (
+        "authoritative_compatibility_mirror"
+    )
+    assert manifest.metadata["warnings"] == [
+        "historical_core_state_as_of_unavailable_before_this_snapshot"
+    ]
 
 
 def _mutate_chapter_title(

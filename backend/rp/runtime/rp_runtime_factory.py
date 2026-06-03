@@ -356,6 +356,7 @@ class RpRuntimeFactory:
         core_state_as_of_resolver = CoreStateAsOfResolver(
             session=self._session,
             repository=core_state_store_repository,
+            mirror_service=authoritative_mirror_service,
         )
         store_read_enabled = self._use_core_state_store_read()
         store_write_switch_enabled = self._use_core_state_store_write_switch()
@@ -606,6 +607,7 @@ class RpRuntimeFactory:
         core_state_as_of_resolver = CoreStateAsOfResolver(
             session=self._session,
             repository=core_state_store_repository,
+            mirror_service=authoritative_mirror_service,
         )
         core_state_dual_write_service = self._build_core_state_dual_write_service()
         store_read_enabled = self._use_core_state_store_read()

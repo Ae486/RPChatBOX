@@ -12,7 +12,7 @@ from models.rp_core_state_store import (
     CoreStateAuthoritativeRevisionRecord,
     CoreStateSnapshotManifestRecord,
 )
-from models.rp_story_store import BranchHeadRecord, StorySessionRecord, StoryTurnRecord
+from models.rp_story_store import BranchHeadRecord, StoryTurnRecord
 from rp.models.dsl import Layer, ObjectRef
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_read_contract import (
@@ -20,9 +20,13 @@ from rp.models.runtime_read_contract import (
     RuntimeBranchReadScope,
 )
 
+from .authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
 from .store_repository import CoreStateStoreRepository
 from ..memory.object_mapper import authoritative_bindings, normalize_authoritative_ref
 from ..runtime.read_manifest_service import BranchVisibilityResolver
+from ..story.session_service import StorySessionService
 
 
 class CoreStateAsOfResolverError(ValueError):
@@ -42,12 +46,14 @@ class CoreStateAsOfResolver:
         session: Session,
         repository: CoreStateStoreRepository | None = None,
         branch_visibility_resolver: BranchVisibilityResolver | None = None,
+        mirror_service: AuthoritativeCompatibilityMirrorService | None = None,
     ) -> None:
         self._session = session
         self._repository = repository or CoreStateStoreRepository(session)
         self._branch_visibility_resolver = (
             branch_visibility_resolver or BranchVisibilityResolver(session)
         )
+        self._mirror_service = mirror_service
 
     def build_scope(
         self,
@@ -359,10 +365,13 @@ class CoreStateAsOfResolver:
         *,
         turn: StoryTurnRecord,
     ) -> list[str]:
-        session_record = self._session.get(StorySessionRecord, turn.session_id)
-        if session_record is None:
+        mirror_service = self._mirror_service or AuthoritativeCompatibilityMirrorService(
+            story_session_service=StorySessionService(self._session)
+        )
+        mirror = mirror_service.read_mirror_state_with_presence(session_id=turn.session_id)
+        if not mirror.present:
             return ["compatibility_seed_session_missing"]
-        snapshot = dict(session_record.current_state_json or {})
+        snapshot = mirror.state
         for binding in authoritative_bindings():
             value = self._normalize_json_payload(snapshot.get(binding.backend_field))
             current_record = self._repository.upsert_authoritative_object(
@@ -379,7 +388,7 @@ class CoreStateAsOfResolver:
                     "compatibility_warning": (
                         "historical_core_state_as_of_unavailable_before_this_snapshot"
                     ),
-                    "backfilled_from": "story_session.current_state_json",
+                    "backfilled_from": "authoritative_compatibility_mirror",
                     "source_route": "core_state_current_rows_compatibility_seed",
                 },
                 latest_apply_id=None,
@@ -400,7 +409,7 @@ class CoreStateAsOfResolver:
                     "compatibility_warning": (
                         "historical_core_state_as_of_unavailable_before_this_snapshot"
                     ),
-                    "backfilled_from": "story_session.current_state_json",
+                    "backfilled_from": "authoritative_compatibility_mirror",
                     "runtime_writer_context_must_not_use_latest_current_row": True,
                 },
             )
