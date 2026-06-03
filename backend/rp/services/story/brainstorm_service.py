@@ -602,11 +602,7 @@ class StoryBrainstormService:
             and artifact.status.value == "accepted"
             and str(artifact.content_text or "").strip()
         ]
-        current_title = str(
-            dict(story_session.current_state_json or {}).get("chapter_digest", {}).get(
-                "title", ""
-            )
-        ).strip()
+        current_title = self._read_current_chapter_title(story_session.session_id)
         phase = getattr(snapshot.chapter.phase, "value", snapshot.chapter.phase)
         return _ChapterBrainstormContext(
             phase=str(phase or "").strip(),
@@ -614,6 +610,20 @@ class StoryBrainstormService:
             accepted_segments=accepted_segments[-2:],
             current_title=current_title,
         )
+
+    def _read_current_chapter_title(self, session_id: str) -> str:
+        """Read the chapter title via the authoritative Block read seam.
+
+        Avoids direct access to the legacy session mirror state field.
+        Fail-soft to "" when the seam is absent or the block/title is missing.
+        """
+        block_read = self._rp_block_read_service
+        if block_read is None:
+            return ""
+        for block in block_read.list_authoritative_blocks(session_id=session_id):
+            if block.label == "chapter.current" and isinstance(block.data_json, dict):
+                return str(block.data_json.get("title", "") or "").strip()
+        return ""
 
     def _chapter_context_prompt(self, context: _ChapterBrainstormContext) -> str:
         lines = ["Current branch-visible story context:"]

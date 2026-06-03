@@ -132,8 +132,8 @@
       "kind": "class",
       "path": "story/brainstorm_service.py",
       "symbol": "StoryBrainstormService",
-      "lines": 699,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 709,
+      "reason": "Grandfathered by T8; +10 lines in T16 S3 for the None-safe Block-read title seam helper that replaces direct current_state_json access. Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "class",

@@ -6,6 +6,7 @@ import pytest
 from sqlmodel import select
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
+from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.story_brainstorm import (
     BrainstormBatchSubmitRequest,
     BrainstormContinueWritingRequest,
@@ -18,15 +19,27 @@ from rp.models.story_brainstorm import (
 )
 from rp.models.story_runtime import LongformChapterPhase
 from rp.models.story_runtime import StoryArtifactKind, StoryArtifactStatus
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
+from rp.services.core_state.store_repository import CoreStateStoreRepository
+from rp.services.memory.inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.rp_block_read_service import RpBlockReadService
+from rp.services.memory.version_history_read_service import VersionHistoryReadService
+from rp.services.projection.builder_context_service import (
+    BuilderProjectionContextService,
+)
+from rp.services.projection.chapter_workspace_adapter import (
+    ChapterWorkspaceProjectionAdapter,
+)
+from rp.services.projection.state_service import ProjectionStateService
+from rp.services.proposal.repository import ProposalRepository
+from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from rp.services.story.brainstorm_service import (
     StoryBrainstormService,
     StoryBrainstormServiceError,
 )
-from rp.services.story.session_service import StorySessionService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
+from rp.services.story.session_service import StorySessionService
 
 
 class _StubStoryLlmGateway:
@@ -53,6 +66,69 @@ class _StubStoryLlmGateway:
         import ast
 
         return ast.literal_eval(text)
+
+
+def test_chapter_context_reads_current_title_from_block_seam(retrieval_session):
+    story_session, _chapter, story_service = _seed_story_runtime(
+        retrieval_session,
+        story_id="brainstorm-title-block-seam",
+    )
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    projection_state_service = ProjectionStateService(
+        story_session_service=story_service,
+        adapter=ChapterWorkspaceProjectionAdapter(story_service),
+        core_state_store_repository=core_repo,
+        store_read_enabled=False,
+    )
+    builder_projection_context_service = BuilderProjectionContextService(
+        projection_state_service
+    )
+    proposal_repository = ProposalRepository(retrieval_session)
+    version_history_read_service = VersionHistoryReadService(
+        adapter=StorySessionCoreStateAdapter(story_service),
+        proposal_repository=proposal_repository,
+        core_state_store_repository=core_repo,
+        store_read_enabled=False,
+    )
+    memory_inspection_read_service = MemoryInspectionReadService(
+        story_session_service=story_service,
+        builder_projection_context_service=builder_projection_context_service,
+        proposal_repository=proposal_repository,
+        version_history_read_service=version_history_read_service,
+        core_state_store_repository=core_repo,
+        store_read_enabled=False,
+    )
+    block_read_service = RpBlockReadService(
+        story_session_service=story_service,
+        builder_projection_context_service=builder_projection_context_service,
+        core_state_store_repository=core_repo,
+        memory_inspection_read_service=memory_inspection_read_service,
+        store_read_enabled=False,
+    )
+    service = StoryBrainstormService(
+        story_session_service=story_service,
+        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+            session=retrieval_session
+        ),
+        rp_block_read_service=block_read_service,
+        llm_gateway=_StubStoryLlmGateway(),
+    )
+
+    context = service._chapter_context(story_session.session_id)
+
+    assert context.current_title == "Chapter One"
+
+
+def test_chapter_context_returns_empty_title_without_block_seam(retrieval_session):
+    story_session, _chapter, story_service = _seed_story_runtime(
+        retrieval_session,
+        story_id="brainstorm-title-no-block-seam",
+    )
+    service = _build_service(retrieval_session, story_service=story_service)
+
+    context = service._chapter_context(story_session.session_id)
+
+    assert context.current_title == ""
 
 
 @pytest.mark.asyncio
