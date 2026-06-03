@@ -51,3 +51,18 @@ line-length = 100
 # Start high-signal / low-noise: E9 (runtime/syntax errors) + F (Pyflakes).
 # Cosmetic E-rules (whitespace/line-length style) intentionally OFF — ratchet up later.
 select = ["E9", "F"]
+
+# --- coverage (T23 advisory baseline 2026-06-03 = 91%; CI floor 90, ratchets UP only) ---
+[tool.coverage.run]
+source = ["rp"]
+relative_files = true
+omit = [
+  "rp/tests/*",
+  "rp/devtools/*",
+  "rp/eval/cli.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+precision = 1
