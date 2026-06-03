@@ -76,7 +76,7 @@
       "kind": "class",
       "path": "runtime/context_orchestration_service.py",
       "symbol": "ContextOrchestrationService",
-      "lines": 914,
+      "lines": 890,
       "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
     },
     {
