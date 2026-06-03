@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-
 SERVICE_ROOT = Path(__file__).resolve().parents[3] / "services"
 BUSINESS_SERVICE_FILES = [
     SERVICE_ROOT / "writer" / "longform_orchestrator_service.py",
@@ -41,13 +38,6 @@ LEGACY_MEMORY_BACKEND_ALLOWLIST = {
 }
 
 
-_PRE_EXISTING_FAILURE_CLUSTER_6 = (
-    "Pre-existing failure (legacy memory backend keys outside allowlist). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 6. "
-    "Tracked by T16 in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
-
 def test_business_services_do_not_touch_legacy_memory_backend_keys_directly():
     for file_path in BUSINESS_SERVICE_FILES:
         content = file_path.read_text(encoding="utf-8")
@@ -64,7 +54,6 @@ def test_primary_memory_write_services_use_mirror_boundaries():
             )
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_6, strict=False)
 def test_legacy_memory_backend_key_usage_stays_inside_allowlist():
     offenders: set[str] = set()
     for file_path in SERVICE_ROOT.rglob("*.py"):
