@@ -286,7 +286,7 @@ assets/backend/app.zip
 # ==========================================
 # 本地脚手架 / 测试产物 / 归档输出 (T5 hygiene)
 # 均为未跟踪的机器生成噪声；忽略以保持 git status 干净，磁盘内容不受影响。
-# 用户资产目录 pet/ 与 downloaded_files/ 故意不在此忽略（其归属留待 T5(b) 用户裁决）。
+# pet/ 已按 T5(b) 删除（静态、不再生，不在此忽略以免误掩未来同名资产）。
 # ==========================================
 .tmp/
 _tmp/
@@ -297,3 +297,11 @@ sqlite-probe-*/
 test-storage/
 test-storage-sqlite/
 *.db-journal
+
+# ==========================================
+# T5(b) 收尾决议 (user-ratified 2026-06-05)
+# ==========================================
+# downloaded_files/ 为应用下载输出目录，会再生 (dashboard.lock)；删除当前内容后忽略以防复发。
+downloaded_files/
+# 发布 APK 为可重建构建产物，不应入库（已 git rm --cached，磁盘保留）。
+/chatboxapp-release.apk
