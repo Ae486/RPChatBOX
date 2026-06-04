@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from rp.agent_runtime.contracts import SetupDraftRefReadInput, SetupDraftRefReadResult
 from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 
 from .contracts import (
@@ -116,15 +115,3 @@ class SetupSessionMemoryService:
             ref=ref,
             max_chars=max_chars,
         )
-
-
-def empty_draft_ref_reader(
-    input_model: SetupDraftRefReadInput,
-) -> SetupDraftRefReadResult:
-    """Test/helper reader for service instances that only exercise manifest/search."""
-
-    return SetupDraftRefReadResult(
-        success=False,
-        items=[],
-        missing_refs=list(input_model.refs),
-    )

@@ -178,13 +178,3 @@ def get_mode_stage_plan(mode: str) -> SetupModeStagePlan:
     if stage_ids is None:
         raise ValueError(f"Unsupported setup mode for stage plan: {mode}")
     return SetupModeStagePlan(mode=str(mode), stage_ids=list(stage_ids))
-
-
-def is_setup_stage_id(value: str) -> bool:
-    """Return whether a stored lifecycle id is a canonical setup stage id."""
-
-    try:
-        SetupStageId(value)
-    except ValueError:
-        return False
-    return True

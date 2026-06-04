@@ -50,12 +50,6 @@ def build_manifest_item(
     )
 
 
-def empty_read_manifest() -> ContextReadManifest:
-    """Return an empty read manifest."""
-
-    return ContextReadManifest()
-
-
 def build_trace(
     *,
     operation_id: str,
@@ -95,14 +89,3 @@ def build_trace(
         provider_usage=dict(provider_usage or {}),
         metadata=dict(metadata or {}),
     )
-
-
-def merge_trace_metadata(
-    trace: ContextTrace,
-    metadata: Mapping[str, Any],
-) -> ContextTrace:
-    """Return a copy of trace with merged metadata."""
-
-    merged = dict(trace.metadata)
-    merged.update(metadata)
-    return trace.model_copy(update={"metadata": merged})

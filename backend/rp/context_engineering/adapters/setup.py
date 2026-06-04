@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 
 from rp.agent_runtime.contracts import (
-    SetupCompactRecoveryHint,
     SetupContextCompactSummary,
     SetupContextGovernanceReport,
     SetupToolOutcome,
@@ -436,15 +435,3 @@ class SetupContextEngineeringAdapter:
                 if isinstance(item, Mapping) and item.get("ref") is not None:
                     refs.append(str(item.get("ref")))
         return refs
-
-
-def setup_recovery_hint(
-    ref: str, reason: str, detail: str | None = None
-) -> dict[str, Any]:
-    """Small test/helper adapter shape for setup recovery hints."""
-
-    return SetupCompactRecoveryHint(
-        ref=ref,
-        reason=reason,
-        detail=detail,
-    ).model_dump(mode="json", exclude_none=True)

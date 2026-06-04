@@ -86,10 +86,6 @@ class ServiceReference:
     domain: str | None
     module: str | None
 
-    @property
-    def dotted(self) -> str:
-        return ".".join(self.parts)
-
 
 @dataclass(frozen=True)
 class ImportRecord:

@@ -45,32 +45,6 @@ class _JudgeResponse(BaseModel):
     issues: list[str] = Field(default_factory=list)
 
 
-def materialize_subjective_hook_scores(
-    *,
-    case: EvalCase,
-    run_id: str,
-    root_span_id: str | None,
-    runtime_result: dict[str, Any],
-    workspace_before: dict[str, Any] | None,
-    workspace_after: dict[str, Any] | None,
-    graph_debug: dict[str, Any] | None,
-    runtime_events: list[dict[str, Any]],
-) -> list[EvalScore]:
-    return [
-        _materialize_hook_score(
-            hook=hook,
-            run_id=run_id,
-            span_id=root_span_id,
-            runtime_result=runtime_result,
-            workspace_before=workspace_before,
-            workspace_after=workspace_after,
-            graph_debug=graph_debug,
-            runtime_events=runtime_events,
-        )
-        for hook in case.expected.subjective_hooks
-    ]
-
-
 async def evaluate_subjective_hook_scores(
     *,
     case: EvalCase,
