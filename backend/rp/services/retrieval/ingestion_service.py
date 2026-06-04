@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from sqlmodel import select
 
 from models.rp_retrieval_store import EmbeddingRecordRecord, IndexJobRecord, KnowledgeChunkRecord
+from rp.errors import RPError
 from rp.models.retrieval_records import IndexJob
 from rp.retrieval.chunker import Chunker
 from rp.retrieval.embedder import Embedder
@@ -34,7 +35,7 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return ordered
 
 
-class _AssetProcessingError(Exception):
+class _AssetProcessingError(RPError):
     def __init__(
         self,
         message: str,

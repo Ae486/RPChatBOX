@@ -44,12 +44,13 @@ from .policies import (
 from .prompts.setup_agent import runtime_overlay_instruction
 from .state import RpAgentRunState
 from .tools import RuntimeToolExecutor
+from rp.errors import RPError
 from rp.services.setup_agent.context_governor import SetupContextGovernorService
 
 _SENTINEL = object()
 
 
-class _ProviderStreamPayloadError(ValueError):
+class _ProviderStreamPayloadError(RPError, ValueError):
     """Provider stream emitted a malformed typed-SSE payload."""
 
 

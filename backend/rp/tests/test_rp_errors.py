@@ -9,6 +9,10 @@ from rp.errors import (
     RPUpstreamError,
     RPValidationError,
 )
+from rp.agent_runtime.executor import _ProviderStreamPayloadError
+from rp.context_engineering.compaction import ContextCompactPromptFailure
+from rp.services.memory.graph_extraction_service import _StructuredOutputInvalid
+from rp.services.retrieval.ingestion_service import _AssetProcessingError
 from rp.services.story.block_mutation_service import (
     MemoryBlockMutationUnsupportedError,
     MemoryBlockProposalNotFoundError,
@@ -144,3 +148,33 @@ def test_reparented_runtime_error_block_errors_keep_legacy_behavior() -> None:
 
     assert isinstance(runtime_error, MemoryBlockProposalNotFoundError)
     assert isinstance(rp_error, MemoryBlockProposalNotFoundError)
+
+
+def test_reparented_internal_wrapper_errors_keep_legacy_behavior() -> None:
+    stream_error = _ProviderStreamPayloadError("bad json")
+    structured_error = _StructuredOutputInvalid("bad output")
+    asset_error = _AssetProcessingError(
+        "bad asset",
+        warnings=["w1"],
+        parse_status="failed",
+    )
+    compaction_error = ContextCompactPromptFailure("model_output_not_json")
+
+    assert isinstance(stream_error, ValueError)
+    assert isinstance(stream_error, RPError)
+    assert str(stream_error) == "bad json"
+
+    assert isinstance(structured_error, ValueError)
+    assert isinstance(structured_error, RPError)
+    assert str(structured_error) == "bad output"
+
+    assert isinstance(asset_error, Exception)
+    assert isinstance(asset_error, RPError)
+    assert str(asset_error) == "bad asset"
+    assert asset_error.warnings == ["w1"]
+    assert asset_error.parse_status == "failed"
+
+    assert isinstance(compaction_error, Exception)
+    assert isinstance(compaction_error, RPError)
+    assert str(compaction_error) == "model_output_not_json"
+    assert compaction_error.reason == "model_output_not_json"

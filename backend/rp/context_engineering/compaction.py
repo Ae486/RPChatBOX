@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Literal, Protocol
 
+from rp.errors import RPError
 from rp.context_engineering.contracts import (
     ContextArtifact,
     ContextCompactPromptRequest,
@@ -25,7 +26,7 @@ from rp.context_engineering.validation import validate_payload_against_policy
 CompactionAction = Literal["not_needed", "reused", "updated", "rebuilt"]
 
 
-class ContextCompactPromptFailure(Exception):
+class ContextCompactPromptFailure(RPError):
     """Known model/provider compact failure that may use adapter fallback."""
 
     def __init__(self, reason: str) -> None:

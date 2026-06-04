@@ -26,6 +26,7 @@ from models.rp_retrieval_store import (
     MemoryGraphExtractionJobRecord,
     SourceAssetRecord,
 )
+from rp.errors import RPError
 from rp.models.memory_graph_projection import (
     GRAPH_CANON_STATUS_SOURCE_REFERENCE,
     GRAPH_EDGE_DIRECTION_DIRECTED,
@@ -85,7 +86,7 @@ def _slug(value: str) -> str:
     return normalized or "unknown"
 
 
-class _StructuredOutputInvalid(ValueError):
+class _StructuredOutputInvalid(RPError, ValueError):
     pass
 
 
