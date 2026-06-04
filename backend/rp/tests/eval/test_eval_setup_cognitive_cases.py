@@ -113,13 +113,6 @@ def _text_response(text: str):
     }
 
 
-_PRE_EXISTING_FAILURE_CLUSTER_4 = (
-    "Pre-existing failure (eval runner business assertions: 'failed' vs 'completed'). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 4. "
-    "Tracked by T19 (coupled with `05-11-runtime-classifier-drift`) in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("case_file", "llm_factory", "expected_report"),
@@ -134,17 +127,16 @@ _PRE_EXISTING_FAILURE_CLUSTER_4 = (
             _ProposalRejectedInvalidationLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
         ),
-        pytest.param(
+        (
             _case_path("infra", "provider_request_failed_during_turn.v1.json"),
             _ProviderFailureSetupLLMService,
             {
-                "finish_reason": None,
+                "finish_reason": "upstream_error",
                 "repair_route": None,
                 "commit_blocked": False,
                 "run_status": "failed",
                 "failure_layer": "infra",
             },
-            marks=pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_4, strict=False),
         ),
         (
             _case_path(
