@@ -111,6 +111,14 @@ class Settings(BaseSettings):
             "LANGFUSE_DEBUG",
         ),
     )
+    metrics_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "CHATBOX_BACKEND_METRICS_ENABLED",
+            "METRICS_ENABLED",
+            "metrics_enabled",
+        ),
+    )
 
     # Version
     version: str = "0.1.0"
