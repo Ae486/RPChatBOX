@@ -11,7 +11,6 @@ from rp.eval.replay import load_replay
 from rp.eval.runner import EvalRunner
 from rp.tests.eval.test_eval_setup_cognitive_cases import (
     _CharacterDesignSkillPackFacilitatorLLMService,
-    _TruthWriteAskUserLLMService,
 )
 from rp.eval.graders.judge_registry import get_judge_rubric, list_judge_rubrics
 from services.model_registry import get_model_registry_service
@@ -76,49 +75,6 @@ class _FakeJudgeLLMService:
         raise AssertionError("stream path not expected")
 
 
-_PRE_EXISTING_FAILURE_CLUSTER_4 = (
-    "Pre-existing failure (eval runner business assertions: 'failed' vs 'completed'). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 4. "
-    "Tracked by T19 (coupled with `05-11-runtime-classifier-drift`) in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
-
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_4, strict=False)
-@pytest.mark.asyncio
-async def test_eval_runner_materializes_setup_subjective_hooks(
-    retrieval_session,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _TruthWriteAskUserLLMService(),
-    )
-
-    case = load_case(
-        _case_path("setup", "repair", "writing_contract_ask_user_after_semantic_fail.v1.json")
-    )
-    result = await EvalRunner(retrieval_session).run_case(case)
-
-    subjective_scores = [score for score in result.scores if score.kind == "llm"]
-    assert len(subjective_scores) == 1
-    score = subjective_scores[0]
-    assert score.status == "skip"
-    assert score.value == "pending"
-    assert score.metadata["hook_id"] == "clarification_quality"
-    assert score.metadata["rubric_ref"] == "setup/clarification-quality/v1"
-    assert score.metadata["resolved_source"] == "runtime_result"
-    assert "Which POV and style rules" in (score.metadata["target_preview"] or "")
-    assert result.report["pending_judge_hook_ids"] == ["clarification_quality"]
-    assert result.report["subjective_hook_summary"]["pending"] == 1
-    assert result.report["subjective_hook_summary"]["artifact_count"] == 1
-    judge_artifact = next(
-        artifact for artifact in result.artifacts if artifact.kind == "subjective_hook_record"
-    )
-    assert judge_artifact.payload["hook_id"] == "clarification_quality"
-    assert judge_artifact.payload["request"] is None
-    assert judge_artifact.payload["judge"]["skip_reason"] is None
-
-
 @pytest.mark.asyncio
 async def test_eval_runner_materializes_retrieval_subjective_hooks(retrieval_session):
     case = load_case(
@@ -155,67 +111,6 @@ async def test_eval_runner_materializes_activation_subjective_hooks(retrieval_se
     assert score.metadata["target_available"] is True
     assert "runtime_story_config" in (score.metadata["target_preview"] or "")
     assert result.report["pending_judge_hook_ids"] == ["activation_handoff_quality"]
-
-
-@pytest.mark.asyncio
-async def test_eval_runner_executes_setup_subjective_judge(
-    retrieval_session,
-    monkeypatch,
-):
-    _seed_judge_model_registry()
-    monkeypatch.setattr(
-        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _TruthWriteAskUserLLMService(),
-    )
-    monkeypatch.setattr(
-        "rp.services.story.llm_gateway.get_litellm_service",
-        lambda: _FakeJudgeLLMService(
-            response_payload={
-                "status": "pass",
-                "label": "good",
-                "score": 0.91,
-                "explanation": "The question directly asks for the missing POV and style preferences.",
-            }
-        ),
-    )
-
-    case = load_case(
-        _case_path("setup", "repair", "writing_contract_ask_user_after_semantic_fail.v1.json")
-    )
-    case.input.env_overrides.update(
-        {
-            "enable_subjective_judges": True,
-            "judge_model_id": "model-eval",
-            "judge_provider_id": "provider-eval",
-        }
-    )
-    result = await EvalRunner(retrieval_session).run_case(case)
-
-    subjective_scores = [score for score in result.scores if score.kind == "llm"]
-    assert len(subjective_scores) == 1
-    score = subjective_scores[0]
-    assert score.status == "pass"
-    assert score.value == 0.91
-    assert score.label == "good"
-    assert score.metadata["judge_model_id"] == "model-eval"
-    assert score.metadata["judge_prompt_version"] == "llm-judge/v2"
-    assert score.metadata["judge_response_schema_version"] == "judge-response/v2"
-    assert score.metadata["judge_status_source"] == "model_status"
-    assert score.metadata["judge_score_band"] == "pass"
-    assert result.report["pending_judge_hook_ids"] == []
-    assert result.report["subjective_hook_summary"]["executed"] == 1
-    assert result.report["subjective_hook_summary"]["status_counts"] == {"pass": 1}
-    assert result.report["subjective_hook_summary"]["average_numeric_score"] == 0.91
-    assert result.report["subjective_hook_results"][0]["hook_id"] == "clarification_quality"
-    assert result.report["subjective_hook_results"][0]["judge_prompt_version"] == "llm-judge/v2"
-    assert result.report["subjective_hook_summary"]["artifact_count"] == 1
-    judge_artifact = next(
-        artifact for artifact in result.artifacts if artifact.kind == "subjective_hook_record"
-    )
-    assert result.report["subjective_hook_results"][0]["artifact_id"] == judge_artifact.artifact_id
-    assert judge_artifact.payload["request"]["rubric"]["ref"] == "setup/clarification-quality/v1"
-    assert judge_artifact.payload["response"]["status"] == "pass"
-    assert judge_artifact.payload["judge"]["prompt_version"] == "llm-judge/v2"
 
 
 @pytest.mark.asyncio

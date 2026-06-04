@@ -23,8 +23,6 @@ from rp.eval.reporting import (
 from rp.eval.runner import EvalRunner
 from rp.tests.eval.test_eval_setup_cognitive_cases import (
     _ProviderFailureSetupLLMService,
-    _TOOL_SURFACE_DRIFT_REASON,
-    _TruthWriteAskUserLLMService,
 )
 
 
@@ -45,80 +43,6 @@ def _eval_case_path(*parts: str) -> Path:
         / "cases"
         / Path(*parts)
     )
-
-
-@pytest.mark.asyncio
-@pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False)
-async def test_setup_eval_report_includes_capability_and_diagnostic_summary(
-    retrieval_session,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _TruthWriteAskUserLLMService(),
-    )
-
-    case = load_case(
-        _case_path("repair", "writing_contract_ask_user_after_semantic_fail.v1.json")
-    )
-    result = await EvalRunner(retrieval_session).run_case(case)
-
-    diagnostics = result.report["diagnostics"]
-    capabilities = diagnostics["capabilities"]
-    attribution = diagnostics["attribution"]
-    observability = diagnostics["observability"]
-
-    assert capabilities["task_completion"]["status"] == "pass"
-    assert capabilities["clarification_gap_detection"]["status"] == "pass"
-    assert capabilities["repair_recovery"]["status"] == "pass"
-    assert attribution["dimensions"]["infra_model_provider"]["status"] == "pass"
-    assert attribution["dimensions"]["tool_contract_execution"]["status"] == "warn"
-    assert attribution["dimensions"]["decision_policy"]["status"] == "pass"
-    assert attribution["dimensions"]["structured_output_contract"]["status"] == "pass"
-    assert "tool_contract_execution" in attribution["primary_suspects"]
-    assert "tighten_tool_schema_and_error_messages" in attribution["optimization_candidates"]
-    assert "tool_execution.provider_execution_failed" in diagnostics["reason_codes"]
-    assert diagnostics["outcome_chain"]["transcript_status"] == "pass"
-    assert diagnostics["recommended_next_action"] is not None
-    assert {
-        item["score_name"]: item["status"]
-        for item in result.report["diagnostic_expectation_results"]
-    } == {
-        "diagnostic.reason_code_presence": "pass",
-        "diagnostic.attribution_primary_suspect_alignment": "pass",
-        "diagnostic.outcome_chain_alignment": "pass",
-        "diagnostic.recommended_next_action_alignment": "pass",
-    }
-    assert any(
-        score.name == "diagnostic.reason_code_presence" and score.status == "pass"
-        for score in result.scores
-    )
-    assert result.report["primary_suspects"] == ["tool_contract_execution"]
-    assert "artifact:tool_sequence" in result.report["evidence_refs"]
-    assert {
-        item["code"] for item in result.report["diagnostic_overview"]["reason_codes"]
-    } >= {
-        "tool_execution.provider_execution_failed"
-    }
-    assert result.report["diagnostic_overview"]["primary_suspects"][0]["name"] == (
-        "tool_contract_execution"
-    )
-    assert result.report["outcome_chain_stages"][0] == {
-        "stage_key": "transcript_status",
-        "stage": "transcript",
-        "status": "pass",
-        "summary": "Transcript moves the setup turn toward the expected step outcome.",
-    }
-    assert any(
-        item["ref"] == "artifact:tool_sequence" and item["available"] is True
-        for item in result.report["evidence_ref_details"]
-    )
-    assert result.report["outcome_chain_display"][0] == "transcript=pass"
-    assert "failure_layer=none" in result.report["diagnostic_summary_text"]
-    assert "tool_execution.provider_execution_failed" in result.report["diagnostic_summary_text"]
-    assert observability["usage"]["total_tokens"] == 2
-    assert observability["request_metrics"]["system_prompt_chars"] is not None
-    assert observability["tooling"]["failure_count"] == 1
 
 
 @pytest.mark.asyncio

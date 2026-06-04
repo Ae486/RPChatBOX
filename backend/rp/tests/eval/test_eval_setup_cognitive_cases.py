@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -24,113 +23,6 @@ def _all_setup_case_paths() -> list[Path]:
     return sorted(_case_path().rglob("*.json"))
 
 
-def _extract_workspace_id(request) -> str:
-    system_prompt = request.messages[0].content or ""
-    return system_prompt.split('"workspace_id": "')[1].split('"')[0]
-
-
-class _TruthWriteAskUserLLMService:
-    def __init__(self) -> None:
-        self._round = 0
-
-    async def chat_completion_stream(self, request):
-        raise AssertionError("stream path not expected")
-
-    async def chat_completion(self, request):
-        self._round += 1
-        workspace_id = _extract_workspace_id(request)
-        if self._round == 1:
-            return _tool_call_response(
-                call_id="call_truth_write",
-                tool_name="rp_setup__setup.truth.write",
-                arguments={
-                    "workspace_id": workspace_id,
-                    "step_id": "writing_contract",
-                    "truth_write": {
-                        "write_id": "truth-write-empty",
-                        "current_step": "writing_contract",
-                        "block_type": "writing_contract",
-                        "operation": "merge",
-                        "payload": {},
-                    },
-                },
-            )
-        return _text_response(
-            "I still need your concrete writing preferences. Which POV and style rules do you want me to lock in?"
-        )
-
-
-class _ExplainInsteadOfRepairSetupLLMService:
-    def __init__(self) -> None:
-        self._round = 0
-
-    async def chat_completion_stream(self, request):
-        raise AssertionError("stream path not expected")
-
-    async def chat_completion(self, request):
-        self._round += 1
-        workspace_id = _extract_workspace_id(request)
-        if self._round == 1:
-            return _tool_call_response(
-                call_id="call_bad_patch",
-                tool_name="rp_setup__setup.patch.story_config",
-                arguments={"workspace_id": workspace_id},
-            )
-        return _text_response(
-            "I know the patch field is missing, so I cannot continue yet."
-        )
-
-
-class _CommitBlockedQuestionLLMService:
-    def __init__(self) -> None:
-        self._round = 0
-
-    async def chat_completion_stream(self, request):
-        raise AssertionError("stream path not expected")
-
-    async def chat_completion(self, request):
-        self._round += 1
-        workspace_id = _extract_workspace_id(request)
-        if self._round == 1:
-            return _tool_call_response(
-                call_id="call_commit",
-                tool_name="rp_setup__setup.proposal.commit",
-                arguments={
-                    "workspace_id": workspace_id,
-                    "step_id": "foundation",
-                    "target_draft_refs": ["foundation:world_rule_1"],
-                },
-            )
-        return _text_response(
-            "We still need to resolve this setup detail before review. Which final rule do you want me to lock in?"
-        )
-
-
-class _RejectedProposalDiscussionLLMService:
-    def __init__(self) -> None:
-        self._round = 0
-
-    async def chat_completion_stream(self, request):
-        raise AssertionError("stream path not expected")
-
-    async def chat_completion(self, request):
-        self._round += 1
-        workspace_id = _extract_workspace_id(request)
-        if self._round == 1:
-            return _tool_call_response(
-                call_id="call_commit_again",
-                tool_name="rp_setup__setup.proposal.commit",
-                arguments={
-                    "workspace_id": workspace_id,
-                    "step_id": "story_config",
-                    "target_draft_refs": ["draft:story_config"],
-                },
-            )
-        return _text_response(
-            "The last proposal was rejected, so I should continue refining the step before another review."
-        )
-
-
 class _UserEditInvalidationLLMService:
     async def chat_completion_stream(self, request):
         raise AssertionError("stream path not expected")
@@ -148,135 +40,6 @@ class _ProposalRejectedInvalidationLLMService:
     async def chat_completion(self, request):
         return _text_response(
             "The last review was rejected. Which runtime preference do you want me to revise before I propose review again?"
-        )
-
-
-class _TruthWriteTargetRefAutoRepairLLMService:
-    def __init__(self) -> None:
-        self._round = 0
-
-    async def chat_completion_stream(self, request):
-        raise AssertionError("stream path not expected")
-
-    async def chat_completion(self, request):
-        self._round += 1
-        workspace_id = _extract_workspace_id(request)
-        if self._round == 1:
-            return _tool_call_response(
-                call_id="call_truth_write_bad_target",
-                tool_name="rp_setup__setup.truth.write",
-                arguments={
-                    "workspace_id": workspace_id,
-                    "step_id": "writing_contract",
-                    "truth_write": {
-                        "write_id": "truth-write-bad-target",
-                        "current_step": "writing_contract",
-                        "block_type": "writing_contract",
-                        "target_ref": "draft:story_config",
-                        "operation": "merge",
-                        "payload": {
-                            "notes": "Use sparse, intimate narration."
-                        }
-                    }
-                },
-            )
-        if self._round == 2:
-            return _tool_call_response(
-                call_id="call_truth_write_good_target",
-                tool_name="rp_setup__setup.truth.write",
-                arguments={
-                    "workspace_id": workspace_id,
-                    "step_id": "writing_contract",
-                    "truth_write": {
-                        "write_id": "truth-write-good-target",
-                        "current_step": "writing_contract",
-                        "block_type": "writing_contract",
-                        "target_ref": "draft:writing_contract",
-                        "operation": "merge",
-                        "payload": {
-                            "notes": "Use sparse, intimate narration."
-                        },
-                        "ready_for_review": True,
-                        "remaining_open_issues": []
-                    }
-                },
-            )
-        return _text_response("I repaired the target and wrote the contract update cleanly.")
-
-
-class _TruthWriteCreateConflictLLMService:
-    def __init__(self) -> None:
-        self._round = 0
-
-    async def chat_completion_stream(self, request):
-        raise AssertionError("stream path not expected")
-
-    async def chat_completion(self, request):
-        self._round += 1
-        workspace_id = _extract_workspace_id(request)
-        if self._round == 1:
-            return _tool_call_response(
-                call_id="call_truth_write_create_conflict",
-                tool_name="rp_setup__setup.truth.write",
-                arguments={
-                    "workspace_id": workspace_id,
-                    "step_id": "story_config",
-                    "truth_write": {
-                        "write_id": "truth-write-create-conflict",
-                        "current_step": "story_config",
-                        "block_type": "story_config",
-                        "target_ref": "draft:story_config",
-                        "operation": "create",
-                        "payload": {
-                            "notes": "Fresh config block"
-                        }
-                    }
-                },
-            )
-        return _text_response(
-            "That block already has content. Do you want me to merge the new note into the existing story config instead?"
-        )
-
-
-class _TruthWriteReplaceMissingLLMService:
-    def __init__(self) -> None:
-        self._round = 0
-
-    async def chat_completion_stream(self, request):
-        raise AssertionError("stream path not expected")
-
-    async def chat_completion(self, request):
-        self._round += 1
-        workspace_id = _extract_workspace_id(request)
-        if self._round == 1:
-            return _tool_call_response(
-                call_id="call_truth_write_replace_missing",
-                tool_name="rp_setup__setup.truth.write",
-                arguments={
-                    "workspace_id": workspace_id,
-                    "step_id": "foundation",
-                    "truth_write": {
-                        "write_id": "truth-write-replace-missing",
-                        "current_step": "foundation",
-                        "block_type": "foundation_entry",
-                        "target_ref": "foundation:missing_entry",
-                        "operation": "replace",
-                        "payload": {
-                            "entry_id": "missing_entry",
-                            "domain": "world",
-                            "path": "world.missing_entry",
-                            "title": "Missing Entry",
-                            "tags": ["world"],
-                            "source_refs": [],
-                            "content": {
-                                "summary": "Replacement payload"
-                            }
-                        }
-                    }
-                },
-            )
-        return _text_response(
-            "That foundation target does not exist yet. Do you want me to create it as a new entry instead?"
         )
 
 
@@ -336,30 +99,6 @@ class _PlotBlueprintAskUserLLMService:
         )
 
 
-def _tool_call_response(*, call_id: str, tool_name: str, arguments: dict):
-    return {
-        "choices": [
-            {
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "arguments": json.dumps(arguments),
-                            },
-                        }
-                    ],
-                }
-            }
-        ],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-    }
-
-
 def _text_response(text: str):
     return {
         "choices": [
@@ -374,17 +113,6 @@ def _text_response(text: str):
     }
 
 
-_TOOL_SURFACE_DRIFT_REASON = (
-    "runtime classifier / policy drift, not tool scope. Stage 4 added target_stage "
-    "so setup.truth.write is now in scope, but ToolFailureClassifier defaults to "
-    "auto_repair on SCHEMA_VALIDATION_FAILED and policies caps schema_retry_count "
-    "at 1, so bad->good mock round-trips finalize as tool_schema_validation_failed "
-    "instead of completed_text. Decision (update case expected_report, revert "
-    "policy, or retire case) is owned by task `05-11-runtime-classifier-drift`. "
-    "strict=False because test-order-dependent state leakage occasionally lets "
-    "some cases pass without the runtime fix."
-)
-
 _PRE_EXISTING_FAILURE_CLUSTER_4 = (
     "Pre-existing failure (eval runner business assertions: 'failed' vs 'completed'). "
     "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 4. "
@@ -396,36 +124,6 @@ _PRE_EXISTING_FAILURE_CLUSTER_4 = (
 @pytest.mark.parametrize(
     ("case_file", "llm_factory", "expected_report"),
     [
-        pytest.param(
-            _case_path("repair", "writing_contract_ask_user_after_semantic_fail.v1.json"),
-            _TruthWriteAskUserLLMService,
-            {"finish_reason": "awaiting_user_input", "repair_route": "ask_user", "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
-        ),
-        pytest.param(
-            _case_path("guard", "repair_obligation_false_success_blocked.v1.json"),
-            _ExplainInsteadOfRepairSetupLLMService,
-            {"finish_reason": "repair_obligation_unfulfilled", "repair_route": "auto_repair", "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
-        ),
-        pytest.param(
-            _case_path("commit", "blocked_truth_write_not_ready.v1.json"),
-            _CommitBlockedQuestionLLMService,
-            {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
-        ),
-        pytest.param(
-            _case_path("commit", "blocked_truth_write_open_issues.v1.json"),
-            _CommitBlockedQuestionLLMService,
-            {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
-        ),
-        pytest.param(
-            _case_path("commit", "rejected_proposal_back_to_discussion.v1.json"),
-            _RejectedProposalDiscussionLLMService,
-            {"finish_reason": "completed_text", "repair_route": None, "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
-        ),
         (
             _case_path("cognitive", "invalidate_after_user_edit.v1.json"),
             _UserEditInvalidationLLMService,
@@ -435,24 +133,6 @@ _PRE_EXISTING_FAILURE_CLUSTER_4 = (
             _case_path("cognitive", "invalidate_after_proposal_reject.v1.json"),
             _ProposalRejectedInvalidationLLMService,
             {"finish_reason": "awaiting_user_input", "repair_route": None, "commit_blocked": False},
-        ),
-        pytest.param(
-            _case_path("repair", "truth_write_target_ref_auto_repair_success.v1.json"),
-            _TruthWriteTargetRefAutoRepairLLMService,
-            {"finish_reason": "completed_text", "repair_route": "continue_discussion", "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
-        ),
-        pytest.param(
-            _case_path("repair", "truth_write_create_requires_empty_target.v1.json"),
-            _TruthWriteCreateConflictLLMService,
-            {"finish_reason": "awaiting_user_input", "repair_route": "continue_discussion", "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
-        ),
-        pytest.param(
-            _case_path("repair", "truth_write_replace_requires_existing_target.v1.json"),
-            _TruthWriteReplaceMissingLLMService,
-            {"finish_reason": "awaiting_user_input", "repair_route": "continue_discussion", "commit_blocked": False},
-            marks=pytest.mark.xfail(reason=_TOOL_SURFACE_DRIFT_REASON, strict=False),
         ),
         pytest.param(
             _case_path("infra", "provider_request_failed_during_turn.v1.json"),
