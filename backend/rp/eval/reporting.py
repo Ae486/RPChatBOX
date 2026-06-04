@@ -11,6 +11,71 @@ from .trace_capture import normalize_tool_name
 
 
 def build_report(result: EvalRunResult) -> dict:
+    score_summary = _collect_report_score_summary(result)
+    payload_sections = _extract_structured_payload_sections(result.runtime_result)
+
+    counts = score_summary["counts"]
+    hard_failures = score_summary["hard_failures"]
+    subjective_hook_results = score_summary["subjective_hook_results"]
+    completion_guard = payload_sections["completion_guard"]
+    last_failure = payload_sections["last_failure"]
+    cognitive_state_summary = payload_sections["cognitive_state_summary"]
+    repair_route = payload_sections["repair_route"]
+
+    report = _build_initial_report(
+        result=result,
+        score_summary=score_summary,
+        payload_sections=payload_sections,
+    )
+    report["diagnostics"] = build_diagnostics(
+        result=result,
+        assertion_summary=counts,
+        hard_failures=hard_failures,
+        repair_route=repair_route,
+        completion_guard_reason=completion_guard.get("reason"),
+        last_failure_category=last_failure.get("failure_category"),
+        cognitive_state_invalidated=cognitive_state_summary.get("invalidated"),
+        remaining_open_issues=cognitive_state_summary.get("remaining_open_issues") or [],
+        subjective_hook_results=subjective_hook_results,
+    )
+    diagnostics = report["diagnostics"] if isinstance(report.get("diagnostics"), dict) else {}
+    attribution = diagnostics.get("attribution")
+    if not isinstance(attribution, dict):
+        attribution = {}
+    activation_check = result.runtime_result.get("activation_check")
+    if not isinstance(activation_check, dict):
+        activation_check = {}
+    report["reason_codes"] = list(diagnostics.get("reason_codes") or [])
+    report["outcome_chain"] = dict(diagnostics.get("outcome_chain") or {})
+    report["outcome_chain_display"] = _render_outcome_chain_display(report["outcome_chain"])
+    report["outcome_chain_stages"] = _render_outcome_chain_stages(report["outcome_chain"])
+    report["primary_suspects"] = list(attribution.get("primary_suspects") or [])
+    report["secondary_suspects"] = list(attribution.get("secondary_suspects") or [])
+    report["evidence_refs"] = list(attribution.get("evidence_refs") or [])
+    report["evidence_ref_details"] = _render_evidence_ref_details(
+        report["evidence_refs"],
+        result=result,
+    )
+    report["recommended_next_action"] = (
+        diagnostics.get("recommended_next_action")
+        or attribution.get("recommended_next_action")
+    )
+    report["activation_check"] = activation_check
+    report["activation_handoff_snapshot"] = (
+        dict(activation_check.get("handoff") or {})
+        if isinstance(activation_check.get("handoff"), dict)
+        else None
+    )
+    report["diagnostic_overview"] = _build_diagnostic_overview(
+        report=report,
+        diagnostics=diagnostics,
+        attribution=attribution,
+    )
+    report["diagnostic_summary_text"] = _render_diagnostic_summary_text(report)
+    return report
+
+
+def _collect_report_score_summary(result: EvalRunResult) -> dict[str, Any]:
     counts = {
         "pass": 0,
         "fail": 0,
@@ -23,18 +88,12 @@ def build_report(result: EvalRunResult) -> dict:
     rubric_refs: list[str] = []
     subjective_status_counts: dict[str, int] = {}
     subjective_hook_results: list[dict[str, Any]] = []
-    subjective_hook_artifact_ids: list[str] = []
-    subjective_artifact_id_by_hook: dict[str, str] = {}
     rubric_summaries: dict[str, dict[str, Any]] = {}
     subjective_numeric_scores: list[float] = []
-    for artifact in result.artifacts:
-        if artifact.kind != "subjective_hook_record":
-            continue
-        hook_id = str(artifact.payload.get("hook_id") or "").strip()
-        if not hook_id:
-            continue
-        subjective_hook_artifact_ids.append(artifact.artifact_id)
-        subjective_artifact_id_by_hook[hook_id] = artifact.artifact_id
+    (
+        subjective_hook_artifact_ids,
+        subjective_artifact_id_by_hook,
+    ) = _collect_subjective_hook_artifacts(result)
     for score in result.scores:
         counts[score.status] = counts.get(score.status, 0) + 1
         if score.status == "fail" and score.severity == "error":
@@ -91,8 +150,40 @@ def build_report(result: EvalRunResult) -> dict:
         rubric_ref: _finalize_rubric_summary(summary)
         for rubric_ref, summary in sorted(rubric_summaries.items())
     }
+    return {
+        "counts": counts,
+        "hard_failures": hard_failures,
+        "subjective_hook_ids": subjective_hook_ids,
+        "judge_family_counts": judge_family_counts,
+        "rubric_refs": rubric_refs,
+        "subjective_status_counts": subjective_status_counts,
+        "subjective_hook_results": subjective_hook_results,
+        "subjective_hook_artifact_ids": subjective_hook_artifact_ids,
+        "subjective_numeric_scores": subjective_numeric_scores,
+        "finalized_rubric_summaries": finalized_rubric_summaries,
+    }
 
-    structured_payload = result.runtime_result.get("structured_payload", {})
+
+def _collect_subjective_hook_artifacts(
+    result: EvalRunResult,
+) -> tuple[list[str], dict[str, str]]:
+    subjective_hook_artifact_ids: list[str] = []
+    subjective_artifact_id_by_hook: dict[str, str] = {}
+    for artifact in result.artifacts:
+        if artifact.kind != "subjective_hook_record":
+            continue
+        hook_id = str(artifact.payload.get("hook_id") or "").strip()
+        if not hook_id:
+            continue
+        subjective_hook_artifact_ids.append(artifact.artifact_id)
+        subjective_artifact_id_by_hook[hook_id] = artifact.artifact_id
+    return subjective_hook_artifact_ids, subjective_artifact_id_by_hook
+
+
+def _extract_structured_payload_sections(
+    runtime_result: dict[str, Any],
+) -> dict[str, Any]:
+    structured_payload = runtime_result.get("structured_payload", {})
     if not isinstance(structured_payload, dict):
         structured_payload = {}
     cognitive_state_summary = structured_payload.get("cognitive_state_summary")
@@ -107,7 +198,7 @@ def build_report(result: EvalRunResult) -> dict:
     pending_obligation = structured_payload.get("pending_obligation")
     if not isinstance(pending_obligation, dict):
         pending_obligation = {}
-    warnings = result.runtime_result.get("warnings") or []
+    warnings = runtime_result.get("warnings") or []
     if not isinstance(warnings, list):
         warnings = []
     repair_route = structured_payload.get("repair_route")
@@ -116,7 +207,38 @@ def build_report(result: EvalRunResult) -> dict:
         or pending_obligation.get("obligation_type") == "reassess_commit_readiness"
     ):
         repair_route = "block_commit"
+    return {
+        "structured_payload": structured_payload,
+        "cognitive_state_summary": cognitive_state_summary,
+        "last_failure": last_failure,
+        "completion_guard": completion_guard,
+        "pending_obligation": pending_obligation,
+        "warnings": warnings,
+        "repair_route": repair_route,
+    }
 
+
+def _build_initial_report(
+    *,
+    result: EvalRunResult,
+    score_summary: dict[str, Any],
+    payload_sections: dict[str, Any],
+) -> dict[str, Any]:
+    counts = score_summary["counts"]
+    hard_failures = score_summary["hard_failures"]
+    subjective_hook_ids = score_summary["subjective_hook_ids"]
+    judge_family_counts = score_summary["judge_family_counts"]
+    rubric_refs = score_summary["rubric_refs"]
+    subjective_status_counts = score_summary["subjective_status_counts"]
+    subjective_hook_results = score_summary["subjective_hook_results"]
+    subjective_hook_artifact_ids = score_summary["subjective_hook_artifact_ids"]
+    subjective_numeric_scores = score_summary["subjective_numeric_scores"]
+    finalized_rubric_summaries = score_summary["finalized_rubric_summaries"]
+    cognitive_state_summary = payload_sections["cognitive_state_summary"]
+    last_failure = payload_sections["last_failure"]
+    completion_guard = payload_sections["completion_guard"]
+    warnings = payload_sections["warnings"]
+    repair_route = payload_sections["repair_route"]
     report = {
         "run_id": result.run.run_id,
         "case_id": result.case.case_id,
@@ -167,51 +289,6 @@ def build_report(result: EvalRunResult) -> dict:
         ),
         "ragas": extract_ragas_report(result.artifacts),
     }
-    report["diagnostics"] = build_diagnostics(
-        result=result,
-        assertion_summary=counts,
-        hard_failures=hard_failures,
-        repair_route=repair_route,
-        completion_guard_reason=completion_guard.get("reason"),
-        last_failure_category=last_failure.get("failure_category"),
-        cognitive_state_invalidated=cognitive_state_summary.get("invalidated"),
-        remaining_open_issues=cognitive_state_summary.get("remaining_open_issues") or [],
-        subjective_hook_results=subjective_hook_results,
-    )
-    diagnostics = report["diagnostics"] if isinstance(report.get("diagnostics"), dict) else {}
-    attribution = diagnostics.get("attribution")
-    if not isinstance(attribution, dict):
-        attribution = {}
-    activation_check = result.runtime_result.get("activation_check")
-    if not isinstance(activation_check, dict):
-        activation_check = {}
-    report["reason_codes"] = list(diagnostics.get("reason_codes") or [])
-    report["outcome_chain"] = dict(diagnostics.get("outcome_chain") or {})
-    report["outcome_chain_display"] = _render_outcome_chain_display(report["outcome_chain"])
-    report["outcome_chain_stages"] = _render_outcome_chain_stages(report["outcome_chain"])
-    report["primary_suspects"] = list(attribution.get("primary_suspects") or [])
-    report["secondary_suspects"] = list(attribution.get("secondary_suspects") or [])
-    report["evidence_refs"] = list(attribution.get("evidence_refs") or [])
-    report["evidence_ref_details"] = _render_evidence_ref_details(
-        report["evidence_refs"],
-        result=result,
-    )
-    report["recommended_next_action"] = (
-        diagnostics.get("recommended_next_action")
-        or attribution.get("recommended_next_action")
-    )
-    report["activation_check"] = activation_check
-    report["activation_handoff_snapshot"] = (
-        dict(activation_check.get("handoff") or {})
-        if isinstance(activation_check.get("handoff"), dict)
-        else None
-    )
-    report["diagnostic_overview"] = _build_diagnostic_overview(
-        report=report,
-        diagnostics=diagnostics,
-        attribution=attribution,
-    )
-    report["diagnostic_summary_text"] = _render_diagnostic_summary_text(report)
     return report
 
 
@@ -302,7 +379,26 @@ def render_suite_markdown(
     summary: dict[str, Any],
     thresholds: dict[str, Any],
 ) -> str:
-    lines = [
+    lines = _render_suite_overview(summary=summary, thresholds=thresholds)
+    lines.extend(_render_finish_reasons(summary))
+    lines.extend(_render_failure_layers(summary))
+    lines.extend(_render_judge_hooks(summary))
+    lines.extend(_render_judge_status(summary))
+    lines.extend(_render_judge_rubrics(summary))
+    lines.extend(_render_diagnostics_section(summary))
+    lines.extend(_render_ragas_section(summary))
+    lines.extend(_render_repeat_cases(summary))
+    lines.extend(_render_thresholds_section(thresholds))
+    lines.extend(_render_top_cases(summary))
+    return "\n".join(lines) + "\n"
+
+
+def _render_suite_overview(
+    *,
+    summary: dict[str, Any],
+    thresholds: dict[str, Any],
+) -> list[str]:
+    return [
         "# RP Eval Suite Summary",
         "",
         f"- run_count: {summary.get('run_count', 0)}",
@@ -320,38 +416,53 @@ def render_suite_markdown(
         "",
     ]
 
+
+def _render_finish_reasons(summary: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
     finish_reason_counts = dict(summary.get("finish_reason_counts") or {})
     if finish_reason_counts:
         for finish_reason, count in finish_reason_counts.items():
             lines.append(f"- {finish_reason}: {count}")
     else:
         lines.append("- none")
+    return lines
 
-    lines.extend(["", "## Failure Layers", ""])
+
+def _render_failure_layers(summary: dict[str, Any]) -> list[str]:
+    lines = ["", "## Failure Layers", ""]
     failure_layer_counts = dict(summary.get("failure_layer_counts") or {})
     if failure_layer_counts:
         for layer, count in failure_layer_counts.items():
             lines.append(f"- {layer}: {count}")
     else:
         lines.append("- none")
+    return lines
 
-    lines.extend(["", "## Judge Hooks", ""])
+
+def _render_judge_hooks(summary: dict[str, Any]) -> list[str]:
+    lines = ["", "## Judge Hooks", ""]
     judge_family_counts = dict(summary.get("judge_family_counts") or {})
     if judge_family_counts:
         for judge_family, count in judge_family_counts.items():
             lines.append(f"- {judge_family}: {count}")
     else:
         lines.append("- none")
+    return lines
 
-    lines.extend(["", "## Judge Status", ""])
+
+def _render_judge_status(summary: dict[str, Any]) -> list[str]:
+    lines = ["", "## Judge Status", ""]
     subjective_status_counts = dict(summary.get("subjective_status_counts") or {})
     if subjective_status_counts:
         for status, count in subjective_status_counts.items():
             lines.append(f"- {status}: {count}")
     else:
         lines.append("- none")
+    return lines
 
-    lines.extend(["", "## Judge Rubrics", ""])
+
+def _render_judge_rubrics(summary: dict[str, Any]) -> list[str]:
+    lines = ["", "## Judge Rubrics", ""]
     rubric_summaries = dict(summary.get("rubric_summaries") or {})
     if rubric_summaries:
         for rubric_ref, item in rubric_summaries.items():
@@ -365,9 +476,12 @@ def render_suite_markdown(
             )
     else:
         lines.append("- none")
+    return lines
 
+
+def _render_diagnostics_section(summary: dict[str, Any]) -> list[str]:
     diagnostics = dict(summary.get("diagnostic_summary") or {})
-    lines.extend(["", "## Diagnostics", ""])
+    lines = ["", "## Diagnostics", ""]
     primary_suspects = list(diagnostics.get("primary_suspects") or [])
     if primary_suspects:
         lines.append(f"- primary_suspects: {', '.join(primary_suspects)}")
@@ -409,9 +523,12 @@ def render_suite_markdown(
         )
     else:
         lines.append("- recommended_next_actions: none")
+    return lines
 
+
+def _render_ragas_section(summary: dict[str, Any]) -> list[str]:
     ragas_status_counts = dict(summary.get("ragas_status_counts") or {})
-    lines.extend(["", "## RAGAS", ""])
+    lines = ["", "## RAGAS", ""]
     if ragas_status_counts:
         for status, count in ragas_status_counts.items():
             lines.append(f"- status {status}: {count}")
@@ -423,24 +540,33 @@ def render_suite_markdown(
             lines.append(f"- metric {metric_name}: {value}")
     else:
         lines.append("- metric: none")
+    return lines
 
+
+def _render_repeat_cases(summary: dict[str, Any]) -> list[str]:
     repeat_case_ids = list(summary.get("repeat_case_ids") or [])
-    lines.extend(["", "## Repeat Cases", ""])
+    lines = ["", "## Repeat Cases", ""]
     if repeat_case_ids:
         for case_id in repeat_case_ids:
             lines.append(f"- {case_id}")
     else:
         lines.append("- none")
+    return lines
 
+
+def _render_thresholds_section(thresholds: dict[str, Any]) -> list[str]:
     breaches = list(thresholds.get("breaches") or [])
-    lines.extend(["", "## Thresholds", ""])
+    lines = ["", "## Thresholds", ""]
     if breaches:
         for breach in breaches:
             lines.append(f"- breach: {breach}")
     else:
         lines.append("- no threshold breaches")
+    return lines
 
-    lines.extend(["", "## Top Cases", ""])
+
+def _render_top_cases(summary: dict[str, Any]) -> list[str]:
+    lines = ["", "## Top Cases", ""]
     case_summaries = dict(summary.get("case_summaries") or {})
     sorted_cases = sorted(
         case_summaries.items(),
@@ -462,8 +588,7 @@ def render_suite_markdown(
             )
     else:
         lines.append("- none")
-
-    return "\n".join(lines) + "\n"
+    return lines
 
 
 def render_comparison_markdown(*, comparison: dict[str, Any]) -> str:
