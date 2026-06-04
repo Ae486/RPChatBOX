@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rp.errors import RPError
 from rp.models.archival_evolution import (
     ArchivalEvolutionReceipt,
     ArchivalEvolutionRequest,
@@ -18,7 +19,7 @@ from rp.models.story_evolution_contracts import (
 from .archival_evolution_service import ArchivalEvolutionService
 
 
-class StoryEvolutionServiceError(ValueError):
+class StoryEvolutionServiceError(RPError, ValueError):
     """Stable Story Evolution error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str) -> None:

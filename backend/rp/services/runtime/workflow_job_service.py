@@ -10,6 +10,7 @@ from uuid import uuid4
 from sqlmodel import Session, select
 
 from models.rp_story_store import RuntimeWorkflowJobRecord, StoryTurnRecord
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_workflow_job import (
     RuntimeWorkflowJobCategory,
@@ -29,7 +30,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class RuntimeWorkflowJobServiceError(ValueError):
+class RuntimeWorkflowJobServiceError(RPError, ValueError):
     """Stable runtime workflow job error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

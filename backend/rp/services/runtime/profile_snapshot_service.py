@@ -12,6 +12,7 @@ from sqlalchemy import desc
 from sqlmodel import Session, select
 
 from models.rp_story_store import RuntimeProfileSnapshotRecord, StorySessionRecord
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryLifecycleState
 from rp.models.mode_extension_contracts import (
     build_mode_extension_profile,
@@ -44,7 +45,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class RuntimeProfileSnapshotServiceError(ValueError):
+class RuntimeProfileSnapshotServiceError(RPError, ValueError):
     """Stable runtime-profile error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlmodel import Session
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.revision_overlay_contracts import (
     DraftDocumentRecord,
@@ -32,7 +33,7 @@ REVISION_OVERLAY_PAYLOAD_VERSION = "revision-overlay.v1"
 _REVIEW_OVERLAY_DOMAIN = "chapter"
 
 
-class RevisionOverlayServiceError(ValueError):
+class RevisionOverlayServiceError(RPError, ValueError):
     """Stable revision overlay service error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

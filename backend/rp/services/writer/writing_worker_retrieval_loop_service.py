@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from models.chat import ChatMessage
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.retrieval_runtime_contracts import (
     WriterRetrievalExpandToolInput,
@@ -31,7 +32,7 @@ WRITER_RETRIEVAL_EXPAND_TOOL = "retrieval.expand"
 WRITER_RETRIEVAL_USAGE_TOOL = "retrieval.usage"
 
 
-class WritingWorkerRetrievalLoopServiceError(ValueError):
+class WritingWorkerRetrievalLoopServiceError(RPError, ValueError):
     """Stable writer-retrieval loop error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from models.rp_memory_store import MemoryChangeEventRecord
+from rp.errors import RPError
 from rp.models.memory_contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
@@ -37,7 +38,7 @@ class MemoryChangeEventStore:
     event_ids: set[str] = field(default_factory=set)
 
 
-class MemoryChangeEventServiceError(ValueError):
+class MemoryChangeEventServiceError(RPError, ValueError):
     """Stable memory event spine error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlmodel import Session
 
+from rp.errors import RPError
 from rp.models.dsl import Domain, ObjectRef
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_crud import (
@@ -31,7 +32,7 @@ from .broker import RetrievalBroker
 from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
-class RuntimeRetrievalCardServiceError(ValueError):
+class RuntimeRetrievalCardServiceError(RPError, ValueError):
     """Stable retrieval-card error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

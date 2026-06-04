@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
 from .runtime_card_service import RuntimeRetrievalCardService
 
 
-class WriterRetrievalUsageGuardServiceError(ValueError):
+class WriterRetrievalUsageGuardServiceError(RPError, ValueError):
     """Stable writer-retrieval usage guard error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

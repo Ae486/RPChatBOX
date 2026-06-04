@@ -15,6 +15,7 @@ from models.rp_story_store import (
     RuntimeProfileSnapshotRecord,
     StorySessionRecord,
 )
+from rp.errors import RPError
 from rp.models.runtime_config_contracts import (
     RuntimeConfigControlReceipt,
     RuntimeConfigPatchRequest,
@@ -62,7 +63,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class RuntimeConfigControlServiceError(ValueError):
+class RuntimeConfigControlServiceError(RPError, ValueError):
     """Stable runtime-config error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

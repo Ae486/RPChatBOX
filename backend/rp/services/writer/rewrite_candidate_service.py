@@ -10,6 +10,7 @@ from sqlmodel import select
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.revision_overlay_contracts import (
     DraftDocumentRecord,
@@ -33,7 +34,7 @@ REWRITE_CANDIDATE_PAYLOAD_VERSION = "rewrite-candidate.v1"
 _REWRITE_CANDIDATE_DOMAIN = "chapter"
 
 
-class RewriteCandidateServiceError(ValueError):
+class RewriteCandidateServiceError(RPError, ValueError):
     """Stable rewrite candidate service error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

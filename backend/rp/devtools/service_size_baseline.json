@@ -188,22 +188,22 @@
       "kind": "file",
       "path": "memory/inspection_service.py",
       "symbol": null,
-      "lines": 1184,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1185,
+      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import for additive error-hierarchy reparent, behavior-preserving). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "file",
       "path": "runtime/profile_snapshot_service.py",
       "symbol": null,
-      "lines": 1031,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1032,
+      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import for additive error-hierarchy reparent, behavior-preserving). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "file",
       "path": "runtime/read_manifest_service.py",
       "symbol": null,
-      "lines": 1132,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1133,
+      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import for additive error-hierarchy reparent, behavior-preserving). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "file",
@@ -230,15 +230,15 @@
       "kind": "file",
       "path": "story/runtime_debug_query_service.py",
       "symbol": null,
-      "lines": 1341,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1342,
+      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import for additive error-hierarchy reparent, behavior-preserving). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "file",
       "path": "story/runtime_identity_service.py",
       "symbol": null,
-      "lines": 1597,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1598,
+      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import for additive error-hierarchy reparent, behavior-preserving). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "file",
@@ -251,8 +251,8 @@
       "kind": "file",
       "path": "writer/longform_chapter_runtime_service.py",
       "symbol": null,
-      "lines": 1229,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1230,
+      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import for additive error-hierarchy reparent, behavior-preserving). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "function",

@@ -10,6 +10,7 @@ from sqlmodel import select
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.revision_overlay_contracts import (
     LongformDraftAdoptionReceipt,
@@ -31,7 +32,7 @@ DRAFT_ADOPTION_PAYLOAD_VERSION = "draft-adoption.v1"
 _DRAFT_SELECTION_DOMAIN = "chapter"
 
 
-class DraftSelectionServiceError(ValueError):
+class DraftSelectionServiceError(RPError, ValueError):
     """Stable draft selection/adoption error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

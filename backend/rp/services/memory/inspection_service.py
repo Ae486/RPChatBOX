@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any, Iterable, Sequence
 from uuid import uuid4
 
+from rp.errors import RPError
 from rp.models.archival_evolution import (
     ArchivalEvolutionReceipt,
     ArchivalEvolutionRequest,
@@ -37,7 +38,7 @@ from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from ..story.block_mutation_service import StoryBlockMutationService
 
 
-class MemoryInspectionError(ValueError):
+class MemoryInspectionError(RPError, ValueError):
     """Stable inspection/edit error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str) -> None:

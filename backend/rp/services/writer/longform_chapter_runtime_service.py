@@ -14,6 +14,7 @@ from sqlalchemy import asc
 from sqlmodel import Session, select
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
+from rp.errors import RPError
 from rp.models.longform_chapter_contracts import (
     ChapterBridgeMaterial,
     LONGFORM_OUTLINE_SCHEMA_VERSION,
@@ -53,7 +54,7 @@ OUTLINE_PROGRESS_PAYLOAD_VERSION = "longform-outline-progress.v1"
 _CHAPTER_DOMAIN = "chapter"
 
 
-class LongformChapterRuntimeServiceError(ValueError):
+class LongformChapterRuntimeServiceError(RPError, ValueError):
     """Stable longform chapter runtime error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

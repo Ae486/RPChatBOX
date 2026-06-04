@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid4
 
+from rp.errors import RPError
 from rp.models.story_runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
@@ -49,7 +50,7 @@ class _WorkerAdapterOutcome:
     specialist_bundle: SpecialistResultBundle | None = None
 
 
-class WorkerExecutionServiceError(ValueError):
+class WorkerExecutionServiceError(RPError, ValueError):
     """Stable worker execution error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

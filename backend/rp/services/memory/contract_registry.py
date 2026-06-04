@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import (
     MemoryBlockTemplate,
     MemoryContractRegistry,
@@ -181,7 +182,7 @@ _WORKER_MODE_ROLES: dict[str, dict[str, str]] = {
 }
 
 
-class MemoryContractRegistryError(ValueError):
+class MemoryContractRegistryError(RPError, ValueError):
     """Stable registry error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

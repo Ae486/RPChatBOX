@@ -16,6 +16,7 @@ from models.rp_story_store import (
     RuntimeProfileSnapshotRecord,
     StoryTurnRecord,
 )
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterialKind,
@@ -47,7 +48,7 @@ _RUNTIME_INSPECT_BOUNDARIES = [
 ]
 
 
-class StoryRuntimeDebugQueryServiceError(ValueError):
+class StoryRuntimeDebugQueryServiceError(RPError, ValueError):
     """Stable runtime debug/inspect read error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

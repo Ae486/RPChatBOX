@@ -48,6 +48,7 @@ from models.rp_story_store import (
     StorySessionRecord,
     StoryTurnRecord,
 )
+from rp.errors import RPError
 from rp.models.dsl import Domain
 from rp.models.longform_chapter_contracts import LongformStructuredOutline
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
@@ -192,7 +193,7 @@ def _artifact_runtime_metadata(*, identity: MemoryRuntimeIdentity) -> dict[str, 
     }
 
 
-class LegalLongformSessionSeedError(ValueError):
+class LegalLongformSessionSeedError(RPError, ValueError):
     """Stable dev-seed error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

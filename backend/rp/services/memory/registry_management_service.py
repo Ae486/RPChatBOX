@@ -13,6 +13,7 @@ from models.rp_registry_store import (
     MemoryModeProfileRecord,
     MemoryWorkerDescriptorRecord,
 )
+from rp.errors import RPError
 from rp.models.memory_contract_registry import (
     MemoryBlockTemplate,
     MemoryContractRegistry,
@@ -38,7 +39,7 @@ _RecordT = TypeVar(
 )
 
 
-class MemoryRegistryManagementServiceError(ValueError):
+class MemoryRegistryManagementServiceError(RPError, ValueError):
     """Stable registry-management error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

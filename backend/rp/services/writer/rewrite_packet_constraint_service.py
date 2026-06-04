@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.story_runtime import (
     ChapterWorkspace,
@@ -20,7 +21,7 @@ from .rewrite_request_builder_service import RewriteRequestBuilderService
 from ..story.session_service import StorySessionService
 
 
-class RewritePacketConstraintServiceError(ValueError):
+class RewritePacketConstraintServiceError(RPError, ValueError):
     """Stable rewrite constraint error for real rewrite packet assembly."""
 
     def __init__(self, code: str, detail: str):

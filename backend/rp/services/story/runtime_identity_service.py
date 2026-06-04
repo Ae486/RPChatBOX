@@ -17,6 +17,7 @@ from models.rp_story_store import (
     StorySessionRecord,
     StoryTurnRecord,
 )
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_identity import (
     BranchControlKind,
@@ -38,7 +39,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class StoryRuntimeIdentityServiceError(ValueError):
+class StoryRuntimeIdentityServiceError(RPError, ValueError):
     """Stable runtime-identity error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

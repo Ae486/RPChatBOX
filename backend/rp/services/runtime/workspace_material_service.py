@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
+from rp.errors import RPError
 from rp.models.memory_contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
@@ -55,7 +56,7 @@ class RuntimeWorkspaceMaterialStore:
     events: list[MemoryChangeEvent] = field(default_factory=list)
 
 
-class RuntimeWorkspaceMaterialServiceError(ValueError):
+class RuntimeWorkspaceMaterialServiceError(RPError, ValueError):
     """Stable Runtime Workspace material error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

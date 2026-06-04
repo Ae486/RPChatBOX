@@ -13,6 +13,7 @@ from models.rp_core_state_store import (
     CoreStateSnapshotManifestRecord,
 )
 from models.rp_story_store import BranchHeadRecord, StoryTurnRecord
+from rp.errors import RPError
 from rp.models.dsl import Layer, ObjectRef
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_read_contract import (
@@ -29,7 +30,7 @@ from ..runtime.read_manifest_service import BranchVisibilityResolver
 from ..story.session_service import StorySessionService
 
 
-class CoreStateAsOfResolverError(ValueError):
+class CoreStateAsOfResolverError(RPError, ValueError):
     """Stable Core State as-of resolver error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

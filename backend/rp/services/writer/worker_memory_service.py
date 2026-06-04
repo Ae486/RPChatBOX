@@ -8,6 +8,7 @@ from typing import Any, Iterator
 from sqlmodel import Session
 
 from models.rp_story_store import RuntimeProfileSnapshotRecord
+from rp.errors import RPError
 from rp.models.dsl import Layer
 from rp.models.memory_contract_registry import MemorySourceRef
 from rp.models.memory_crud import (
@@ -40,7 +41,7 @@ from ..story.session_service import StorySessionService
 from ..story.state_apply_service import StoryStateApplyService
 
 
-class WorkerMemoryPermissionError(ValueError):
+class WorkerMemoryPermissionError(RPError, ValueError):
     """Stable worker permission error with machine-readable reason codes."""
 
     def __init__(self, code: str, detail: str, *, reason_codes: list[str]) -> None:

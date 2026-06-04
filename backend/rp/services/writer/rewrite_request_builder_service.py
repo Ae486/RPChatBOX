@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from sqlmodel import Session
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.revision_overlay_contracts import (
     DraftDocumentBlock,
@@ -19,7 +20,7 @@ from rp.services.core_state.revision_overlay_service import (
 )
 
 
-class RewriteRequestBuilderServiceError(ValueError):
+class RewriteRequestBuilderServiceError(RPError, ValueError):
     """Stable rewrite request builder error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

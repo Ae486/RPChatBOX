@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlmodel import Session
 
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryDomainContract
 from rp.models.runtime_identity import (
     RuntimeProfileSnapshotCompiledProfile,
@@ -52,7 +53,7 @@ class _BootstrapRuntimeWorkerSpec:
     use_source_activation_fallback: bool = True
 
 
-class WorkerRegistryServiceError(ValueError):
+class WorkerRegistryServiceError(RPError, ValueError):
     """Stable runtime worker-registry error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

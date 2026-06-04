@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.projection_refresh import ProjectionRefreshRequest
 from rp.models.dsl import ObjectRef
@@ -32,7 +33,7 @@ from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from .workflow_service import ProposalWorkflowService
 
 
-class PostWriteGovernanceServiceError(ValueError):
+class PostWriteGovernanceServiceError(RPError, ValueError):
     """Stable post-write governance error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

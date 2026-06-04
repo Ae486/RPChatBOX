@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from models.chat import ChatMessage
+from rp.errors import RPError
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime_workspace_material import (
     RuntimeWorkspaceMaterial,
@@ -61,7 +62,7 @@ class _ChapterBrainstormContext:
     current_title: str
 
 
-class StoryBrainstormServiceError(ValueError):
+class StoryBrainstormServiceError(RPError, ValueError):
     """Stable brainstorm service error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):

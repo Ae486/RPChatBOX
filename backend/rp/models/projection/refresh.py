@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from rp.errors import RPError
 from rp.models.shared.dsl import ObjectRef
 from rp.models.memory.contract_registry import (
     MemoryDirtyTarget,
@@ -12,7 +13,7 @@ from rp.models.memory.contract_registry import (
 )
 
 
-class ProjectionRefreshServiceError(ValueError):
+class ProjectionRefreshServiceError(RPError, ValueError):
     """Stable projection refresh error with a machine-readable code."""
 
     def __init__(self, code: str, detail: str):
