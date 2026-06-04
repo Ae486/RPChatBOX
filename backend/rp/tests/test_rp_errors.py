@@ -11,6 +11,7 @@ from rp.errors import (
 )
 from rp.services.memory.contract_registry import MemoryContractRegistryError
 from rp.services.writer.worker_memory_service import WorkerMemoryPermissionError
+from rp.tools.setup_tool_contracts import SetupToolContractError
 
 
 def test_semantic_error_classes_preserve_legacy_builtin_bases() -> None:
@@ -66,3 +67,46 @@ def test_reparented_variant_signature_preserves_no_clobber_contract() -> None:
     assert exc.code == "denied"
     assert exc.reason_codes == ["scope"]
     assert str(exc) == "denied:x"
+
+
+def test_reparented_setup_tool_contract_error_keeps_tool_boundary_contract() -> None:
+    exc = SetupToolContractError(
+        code="invalid_input",
+        message="bad arg",
+        error_code="SETUP_TOOL_FAILED",
+        retryable=True,
+        details={"field": "x"},
+    )
+
+    assert isinstance(exc, ValueError)
+    assert isinstance(exc, RPError)
+    assert exc.code == "invalid_input"
+    assert exc.error_code == "SETUP_TOOL_FAILED"
+    assert exc.retryable is True
+    assert exc.details == {"field": "x"}
+    assert str(exc) == "bad arg"
+
+    try:
+        raise SetupToolContractError(
+            code="invalid_input",
+            message="bad arg",
+            error_code="SETUP_TOOL_FAILED",
+            retryable=True,
+            details={"field": "x"},
+        )
+    except ValueError as caught_value_error:
+        value_error = caught_value_error
+
+    try:
+        raise SetupToolContractError(
+            code="invalid_input",
+            message="bad arg",
+            error_code="SETUP_TOOL_FAILED",
+            retryable=True,
+            details={"field": "x"},
+        )
+    except RPError as caught_rp_error:
+        rp_error = caught_rp_error
+
+    assert isinstance(value_error, SetupToolContractError)
+    assert isinstance(rp_error, SetupToolContractError)
