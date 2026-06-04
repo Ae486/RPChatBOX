@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import math
+import time
+import uuid
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
+
+from sqlmodel import select
 
 from models.rp_retrieval_store import (
     KnowledgeChunkRecord,
@@ -12,7 +16,12 @@ from models.rp_retrieval_store import (
     SourceAssetRecord,
 )
 from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery
+from rp.models.memory_crud import (
+    RetrievalHit,
+    RetrievalQuery,
+    RetrievalSearchResult,
+    RetrievalTrace,
+)
 
 _ASSET_METADATA_FALLBACK_FIELDS = (
     "layer",
@@ -63,6 +72,13 @@ _ASSET_METADATA_FALLBACK_FIELDS = (
     "artifact_id",
     "artifact_revision",
 )
+
+ScoredChunkRow = tuple[
+    KnowledgeChunkRecord,
+    SourceAssetRecord,
+    KnowledgeCollectionRecord | None,
+    float,
+]
 
 
 def coerce_domain(value: str | None) -> Domain:
@@ -172,6 +188,126 @@ def chunk_view_priority(metadata: dict[str, Any] | None) -> int:
         return int(metadata.get("chunk_view_priority") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def load_scored_chunk_rows(
+    *,
+    session: Any,
+    query: RetrievalQuery,
+    score_map: dict[str, float],
+) -> list[ScoredChunkRow]:
+    if not score_map:
+        return []
+
+    chunk_asset_id = cast(Any, KnowledgeChunkRecord.asset_id)
+    chunk_collection_id = cast(Any, KnowledgeChunkRecord.collection_id)
+    source_asset_id = cast(Any, SourceAssetRecord.asset_id)
+    collection_id = cast(Any, KnowledgeCollectionRecord.collection_id)
+    chunk_id = cast(Any, KnowledgeChunkRecord.chunk_id)
+    stmt = (
+        select(KnowledgeChunkRecord, SourceAssetRecord, KnowledgeCollectionRecord)
+        .join(SourceAssetRecord, source_asset_id == chunk_asset_id)
+        .join(
+            KnowledgeCollectionRecord,
+            collection_id == chunk_collection_id,
+            isouter=True,
+        )
+        .where(chunk_id.in_(list(score_map.keys())))
+    )
+    rows: list[ScoredChunkRow] = []
+    for chunk, asset, collection in session.exec(stmt).all():
+        if not row_matches_common_filters(
+            chunk=chunk,
+            asset=asset,
+            collection=collection,
+            query=query,
+        ):
+            continue
+        score = float(score_map.get(chunk.chunk_id) or 0.0)
+        if score <= 0.0:
+            continue
+        rows.append((chunk, asset, collection, score))
+    rows.sort(
+        key=lambda item: (
+            -item[3],
+            chunk_view_priority(item[0].metadata_json or {}),
+            item[0].chunk_index,
+        )
+    )
+    return rows
+
+
+def build_empty_chunk_search_result(
+    *,
+    query: RetrievalQuery,
+    started: float,
+    route: str,
+    warning: str,
+    timing_key: str,
+) -> RetrievalSearchResult:
+    return RetrievalSearchResult(
+        query="",
+        hits=[],
+        trace=RetrievalTrace(
+            trace_id=f"trace_{uuid.uuid4().hex[:10]}",
+            query_id=query.query_id,
+            route=route,
+            result_kind="chunk",
+            filters_applied=build_filters_applied(query),
+            retriever_routes=[route],
+            pipeline_stages=["retrieve"],
+            candidate_count=0,
+            returned_count=0,
+            timings={timing_key: round((time.perf_counter() - started) * 1000, 3)},
+            warnings=[warning],
+        ),
+        warnings=[warning],
+    )
+
+
+def build_chunk_search_result(
+    *,
+    query: RetrievalQuery,
+    rows: list[ScoredChunkRow],
+    started: float,
+    route: str,
+    warnings: list[str],
+    timing_key: str,
+    hit_metadata_prefix: dict[str, Any] | None = None,
+) -> RetrievalSearchResult:
+    hits = []
+    for index, (chunk, asset, collection, score) in enumerate(rows[: query.top_k], start=1):
+        hit = build_chunk_hit(
+            query=query,
+            chunk=chunk,
+            asset=asset,
+            collection=collection,
+            score=score,
+            rank=index,
+        )
+        if hit_metadata_prefix is not None:
+            hit = hit.model_copy(
+                update={"metadata": {**hit_metadata_prefix, **dict(hit.metadata)}}
+            )
+        hits.append(hit)
+    return RetrievalSearchResult(
+        query=query.text_query or "",
+        hits=hits,
+        trace=RetrievalTrace(
+            trace_id=f"trace_{uuid.uuid4().hex[:10]}",
+            query_id=query.query_id,
+            route=route,
+            result_kind="chunk",
+            filters_applied=build_filters_applied(query),
+            retriever_routes=[route],
+            pipeline_stages=["retrieve"],
+            candidate_count=len(rows),
+            returned_count=len(hits),
+            timings={timing_key: round((time.perf_counter() - started) * 1000, 3)},
+            warnings=warnings,
+        ),
+        warnings=warnings,
+    )
 
 
 def _merge_asset_metadata_fallbacks(

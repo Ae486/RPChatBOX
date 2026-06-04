@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import uuid
 
 from sqlalchemy import text
 from sqlmodel import select
@@ -14,13 +13,13 @@ from models.rp_retrieval_store import (
     KnowledgeCollectionRecord,
     SourceAssetRecord,
 )
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
 from .embedder import Embedder
 from .search_utils import (
-    build_chunk_hit,
-    build_filters_applied,
-    chunk_view_priority,
+    build_chunk_search_result,
+    build_empty_chunk_search_result,
     cosine_similarity,
+    load_scored_chunk_rows,
     query_vector_literal,
     row_matches_common_filters,
 )
@@ -37,59 +36,24 @@ class SemanticRetriever:
         started = time.perf_counter()
         if not (query.text_query or "").strip():
             warning = "dense_unavailable:empty_query"
-            return RetrievalSearchResult(
-                query="",
-                hits=[],
-                trace=RetrievalTrace(
-                    trace_id=f"trace_{uuid.uuid4().hex[:10]}",
-                    query_id=query.query_id,
-                    route="retrieval.semantic.empty",
-                    result_kind="chunk",
-                    filters_applied=build_filters_applied(query),
-                    retriever_routes=["retrieval.semantic.empty"],
-                    pipeline_stages=["retrieve"],
-                    candidate_count=0,
-                    returned_count=0,
-                    timings={"semantic_ms": round((time.perf_counter() - started) * 1000, 3)},
-                    warnings=[warning],
-                ),
-                warnings=[warning],
+            return build_empty_chunk_search_result(
+                query=query,
+                started=started,
+                route="retrieval.semantic.empty",
+                warning=warning,
+                timing_key="semantic_ms",
             )
         vector, warnings, embedding_model = self._embedder.embed_query(query.text_query or "")
         rows, extra_warnings, route = self._load_ranked_rows(query, vector=vector)
         warnings = [*warnings, *extra_warnings]
-        hits = []
-        for index, (chunk, asset, collection, score) in enumerate(rows[: query.top_k], start=1):
-            hit = build_chunk_hit(
-                query=query,
-                chunk=chunk,
-                asset=asset,
-                collection=collection,
-                score=score,
-                rank=index,
-            )
-            hits.append(
-                hit.model_copy(
-                    update={"metadata": {"embedding_model": embedding_model, **dict(hit.metadata)}}
-                )
-            )
-        return RetrievalSearchResult(
-            query=query.text_query or "",
-            hits=hits,
-            trace=RetrievalTrace(
-                trace_id=f"trace_{uuid.uuid4().hex[:10]}",
-                query_id=query.query_id,
-                route=route,
-                result_kind="chunk",
-                filters_applied=build_filters_applied(query),
-                retriever_routes=[route],
-                pipeline_stages=["retrieve"],
-                candidate_count=len(rows),
-                returned_count=len(hits),
-                timings={"semantic_ms": round((time.perf_counter() - started) * 1000, 3)},
-                warnings=warnings,
-            ),
+        return build_chunk_search_result(
+            query=query,
+            rows=rows,
+            started=started,
+            route=route,
             warnings=warnings,
+            timing_key="semantic_ms",
+            hit_metadata_prefix={"embedding_model": embedding_model},
         )
 
     def _load_ranked_rows(
@@ -160,7 +124,11 @@ class SemanticRetriever:
         )
         ranked_ids = list(self._session.exec(sql, params).all())
         score_map = {row[0]: float(row[1]) for row in ranked_ids if float(row[1]) > 0.0}
-        return self._load_joined_rows(query, score_map)
+        return load_scored_chunk_rows(
+            session=self._session,
+            query=query,
+            score_map=score_map,
+        )
 
     def _load_with_python_scoring(
         self,
@@ -192,38 +160,8 @@ class SemanticRetriever:
             score = cosine_similarity(vector, embedding.embedding_vector or [])
             if score > 0.0:
                 score_map[chunk.chunk_id] = score
-        return self._load_joined_rows(query, score_map)
-
-    def _load_joined_rows(
-        self,
-        query: RetrievalQuery,
-        score_map: dict[str, float],
-    ) -> list[tuple[KnowledgeChunkRecord, SourceAssetRecord, KnowledgeCollectionRecord | None, float]]:
-        if not score_map:
-            return []
-        stmt = (
-            select(KnowledgeChunkRecord, SourceAssetRecord, KnowledgeCollectionRecord)
-            .join(SourceAssetRecord, SourceAssetRecord.asset_id == KnowledgeChunkRecord.asset_id)
-            .join(
-                KnowledgeCollectionRecord,
-                KnowledgeCollectionRecord.collection_id == KnowledgeChunkRecord.collection_id,
-                isouter=True,
-            )
-            .where(KnowledgeChunkRecord.chunk_id.in_(list(score_map.keys())))
+        return load_scored_chunk_rows(
+            session=self._session,
+            query=query,
+            score_map=score_map,
         )
-        rows = []
-        for chunk, asset, collection in self._session.exec(stmt).all():
-            if not row_matches_common_filters(chunk=chunk, asset=asset, collection=collection, query=query):
-                continue
-            score = float(score_map.get(chunk.chunk_id) or 0.0)
-            if score <= 0.0:
-                continue
-            rows.append((chunk, asset, collection, score))
-        rows.sort(
-            key=lambda item: (
-                -item[3],
-                chunk_view_priority(item[0].metadata_json or {}),
-                item[0].chunk_index,
-            )
-        )
-        return rows

@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 import re
 import time
-import uuid
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any, cast
@@ -14,8 +13,13 @@ from sqlalchemy import text
 from sqlmodel import select
 
 from models.rp_retrieval_store import KnowledgeChunkRecord, KnowledgeCollectionRecord, SourceAssetRecord
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult, RetrievalTrace
-from .search_utils import build_chunk_hit, build_filters_applied, chunk_view_priority, row_matches_common_filters
+from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
+from .search_utils import (
+    build_chunk_search_result,
+    build_empty_chunk_search_result,
+    load_scored_chunk_rows,
+    row_matches_common_filters,
+)
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+", re.UNICODE)
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -165,53 +169,21 @@ class KeywordRetriever:
         started = time.perf_counter()
         if not (query.text_query or "").strip():
             warning = "keyword_unavailable:empty_query"
-            return RetrievalSearchResult(
-                query="",
-                hits=[],
-                trace=RetrievalTrace(
-                    trace_id=f"trace_{uuid.uuid4().hex[:10]}",
-                    query_id=query.query_id,
-                    route="retrieval.keyword.empty",
-                    result_kind="chunk",
-                    filters_applied=build_filters_applied(query),
-                    retriever_routes=["retrieval.keyword.empty"],
-                    pipeline_stages=["retrieve"],
-                    candidate_count=0,
-                    returned_count=0,
-                    timings={"keyword_ms": round((time.perf_counter() - started) * 1000, 3)},
-                    warnings=[warning],
-                ),
-                warnings=[warning],
+            return build_empty_chunk_search_result(
+                query=query,
+                started=started,
+                route="retrieval.keyword.empty",
+                warning=warning,
+                timing_key="keyword_ms",
             )
         rows, warnings, route = self._load_ranked_rows(query)
-        hits = [
-            build_chunk_hit(
-                query=query,
-                chunk=chunk,
-                asset=asset,
-                collection=collection,
-                score=score,
-                rank=index,
-            )
-            for index, (chunk, asset, collection, score) in enumerate(rows[: query.top_k], start=1)
-        ]
-        return RetrievalSearchResult(
-            query=query.text_query or "",
-            hits=hits,
-            trace=RetrievalTrace(
-                trace_id=f"trace_{uuid.uuid4().hex[:10]}",
-                query_id=query.query_id,
-                route=route,
-                result_kind="chunk",
-                filters_applied=build_filters_applied(query),
-                retriever_routes=[route],
-                pipeline_stages=["retrieve"],
-                candidate_count=len(rows),
-                returned_count=len(hits),
-                timings={"keyword_ms": round((time.perf_counter() - started) * 1000, 3)},
-                warnings=warnings,
-            ),
+        return build_chunk_search_result(
+            query=query,
+            rows=rows,
+            started=started,
+            route=route,
             warnings=warnings,
+            timing_key="keyword_ms",
         )
 
     def _load_ranked_rows(
@@ -282,7 +254,11 @@ class KeywordRetriever:
         score_map = {row[0]: float(row[1]) for row in ranked_ids}
         if not score_map:
             return []
-        return self._load_joined_rows(query, score_map)
+        return load_scored_chunk_rows(
+            session=self._session,
+            query=query,
+            score_map=score_map,
+        )
 
     def _load_with_python_scoring(
         self,
@@ -307,7 +283,11 @@ class KeywordRetriever:
             for chunk, asset, _ in rows
             if (score := score_map.get(chunk.chunk_id, 0.0)) > 0.0
         }
-        return self._load_joined_rows(query, score_map)
+        return load_scored_chunk_rows(
+            session=self._session,
+            query=query,
+            score_map=score_map,
+        )
 
     def _tokens_for_chunk(
         self,
@@ -474,46 +454,6 @@ class KeywordRetriever:
         ):
             multiplier *= 0.9
         return multiplier
-
-    def _load_joined_rows(
-        self,
-        query: RetrievalQuery,
-        score_map: dict[str, float],
-    ) -> list[tuple[KnowledgeChunkRecord, SourceAssetRecord, KnowledgeCollectionRecord | None, float]]:
-        if not score_map:
-            return []
-
-        chunk_asset_id = cast(Any, KnowledgeChunkRecord.asset_id)
-        chunk_collection_id = cast(Any, KnowledgeChunkRecord.collection_id)
-        source_asset_id = cast(Any, SourceAssetRecord.asset_id)
-        collection_id = cast(Any, KnowledgeCollectionRecord.collection_id)
-        chunk_id = cast(Any, KnowledgeChunkRecord.chunk_id)
-        stmt = (
-            select(KnowledgeChunkRecord, SourceAssetRecord, KnowledgeCollectionRecord)
-            .join(SourceAssetRecord, source_asset_id == chunk_asset_id)
-            .join(
-                KnowledgeCollectionRecord,
-                collection_id == chunk_collection_id,
-                isouter=True,
-            )
-            .where(chunk_id.in_(list(score_map.keys())))
-        )
-        rows = []
-        for chunk, asset, collection in self._session.exec(stmt).all():
-            if not row_matches_common_filters(chunk=chunk, asset=asset, collection=collection, query=query):
-                continue
-            score = float(score_map.get(chunk.chunk_id) or 0.0)
-            if score <= 0.0:
-                continue
-            rows.append((chunk, asset, collection, score))
-        rows.sort(
-            key=lambda item: (
-                -item[3],
-                chunk_view_priority(item[0].metadata_json or {}),
-                item[0].chunk_index,
-            )
-        )
-        return rows
 
     def _iter_joined_rows(
         self,
