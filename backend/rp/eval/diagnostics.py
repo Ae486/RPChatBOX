@@ -68,79 +68,32 @@ def build_setup_diagnostic_projection(
 ) -> dict[str, Any]:
     hard_failures = list(hard_failures or [])
     subjective_hook_results = list(subjective_hook_results or [])
-    structured_payload = runtime_result.get("structured_payload")
-    if not isinstance(structured_payload, dict):
-        structured_payload = {}
-    warnings = runtime_result.get("warnings")
-    if not isinstance(warnings, list):
-        warnings = []
-    tool_invocations = runtime_result.get("tool_invocations")
-    if not isinstance(tool_invocations, list):
-        tool_invocations = []
-    tool_results = runtime_result.get("tool_results")
-    if not isinstance(tool_results, list):
-        tool_results = []
-    assistant_text = str(runtime_result.get("assistant_text") or "")
-    finish_reason = runtime_result.get("finish_reason")
-    request_metrics = structured_payload.get("request_metrics")
-    if not isinstance(request_metrics, dict):
-        request_metrics = {}
-    request_context = structured_payload.get("request_context")
-    if not isinstance(request_context, dict):
-        request_context = {}
-    usage = _extract_usage(structured_payload.get("latest_response"))
-    completion_guard = structured_payload.get("completion_guard")
-    if not isinstance(completion_guard, dict):
-        completion_guard = {}
-    last_failure = structured_payload.get("last_failure")
-    if not isinstance(last_failure, dict):
-        last_failure = {}
-    cognitive_summary = structured_payload.get("cognitive_state_summary")
-    if not isinstance(cognitive_summary, dict):
-        cognitive_summary = {}
-    activation_check = runtime_result.get("activation_check")
-    if not isinstance(activation_check, dict):
-        activation_check = {}
-
-    repair_route = structured_payload.get("repair_route")
-    if repair_route is None and (
-        "commit_proposal_blocked" in warnings
-        or (structured_payload.get("pending_obligation") or {}).get("obligation_type")
-        == "reassess_commit_readiness"
-    ):
-        repair_route = "block_commit"
-    completion_guard_reason = str(completion_guard.get("reason") or "") or None
-    last_failure_category = str(last_failure.get("failure_category") or "") or None
-    cognitive_state_invalidated = (
-        bool(cognitive_summary.get("invalidated"))
-        if cognitive_summary.get("invalidated") is not None
-        else None
+    projection_inputs = _derive_setup_diagnostic_projection_inputs(
+        runtime_result=runtime_result,
+        subjective_hook_results=subjective_hook_results,
     )
-    remaining_open_issues = list(cognitive_summary.get("remaining_open_issues") or [])
-
-    tool_failure_results = [
-        item for item in tool_results if isinstance(item, dict) and not bool(item.get("success"))
-    ]
-    tool_success_results = [
-        item for item in tool_results if isinstance(item, dict) and bool(item.get("success"))
-    ]
-    tool_failure_codes = [
-        str(item.get("error_code") or "")
-        for item in tool_failure_results
-        if isinstance(item, dict)
-    ]
-    tool_names = [
-        str(item.get("tool_name") or "")
-        for item in tool_invocations
-        if isinstance(item, dict) and item.get("tool_name")
-    ]
-    schema_retry_count = sum(
-        1 for item in warnings if isinstance(item, str) and "tool_schema_validation" in item
-    )
-    clarification_hook = _find_subjective_hook(
-        subjective_hook_results,
-        rubric_ref="setup/clarification-quality/v1",
-    )
+    structured_payload = projection_inputs["structured_payload"]
+    warnings = projection_inputs["warnings"]
+    tool_invocations = projection_inputs["tool_invocations"]
+    tool_results = projection_inputs["tool_results"]
+    assistant_text = projection_inputs["assistant_text"]
+    finish_reason = projection_inputs["finish_reason"]
+    request_metrics = projection_inputs["request_metrics"]
+    request_context = projection_inputs["request_context"]
+    usage = projection_inputs["usage"]
+    cognitive_summary = projection_inputs["cognitive_summary"]
+    activation_check = projection_inputs["activation_check"]
+    repair_route = projection_inputs["repair_route"]
+    completion_guard_reason = projection_inputs["completion_guard_reason"]
+    last_failure_category = projection_inputs["last_failure_category"]
+    cognitive_state_invalidated = projection_inputs["cognitive_state_invalidated"]
+    remaining_open_issues = projection_inputs["remaining_open_issues"]
+    tool_failure_results = projection_inputs["tool_failure_results"]
+    tool_success_results = projection_inputs["tool_success_results"]
+    tool_failure_codes = projection_inputs["tool_failure_codes"]
+    tool_names = projection_inputs["tool_names"]
+    schema_retry_count = projection_inputs["schema_retry_count"]
+    clarification_hook = projection_inputs["clarification_hook"]
 
     capabilities = {
         "task_completion": _capability_entry(
@@ -502,6 +455,156 @@ def build_setup_diagnostic_projection(
                 "invoked_tool_names": tool_names,
             },
         },
+    }
+
+
+def _derive_setup_diagnostic_projection_inputs(
+    *,
+    runtime_result: dict[str, Any],
+    subjective_hook_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    payload_sections = _setup_projection_payload_sections(runtime_result)
+    structured_payload = payload_sections["structured_payload"]
+    warnings = payload_sections["warnings"]
+    tool_invocations = payload_sections["tool_invocations"]
+    tool_results = payload_sections["tool_results"]
+    request_metrics = payload_sections["request_metrics"]
+    request_context = payload_sections["request_context"]
+    usage = payload_sections["usage"]
+    completion_guard = payload_sections["completion_guard"]
+    last_failure = payload_sections["last_failure"]
+    cognitive_summary = payload_sections["cognitive_summary"]
+    activation_check = payload_sections["activation_check"]
+    failure_scalars = _setup_projection_failure_scalars(
+        structured_payload=structured_payload,
+        warnings=warnings,
+        completion_guard=completion_guard,
+        last_failure=last_failure,
+        cognitive_summary=cognitive_summary,
+    )
+    tool_signals = _setup_projection_tool_signals(
+        tool_invocations=tool_invocations,
+        tool_results=tool_results,
+        warnings=warnings,
+        subjective_hook_results=subjective_hook_results,
+    )
+
+    return {
+        "structured_payload": structured_payload,
+        "warnings": warnings,
+        "tool_invocations": tool_invocations,
+        "tool_results": tool_results,
+        "assistant_text": str(runtime_result.get("assistant_text") or ""),
+        "finish_reason": runtime_result.get("finish_reason"),
+        "request_metrics": request_metrics,
+        "request_context": request_context,
+        "usage": usage,
+        "cognitive_summary": cognitive_summary,
+        "activation_check": activation_check,
+        **failure_scalars,
+        **tool_signals,
+    }
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _setup_projection_payload_sections(
+    runtime_result: dict[str, Any],
+) -> dict[str, Any]:
+    structured_payload = _as_dict(runtime_result.get("structured_payload"))
+    return {
+        "structured_payload": structured_payload,
+        "warnings": _as_list(runtime_result.get("warnings")),
+        "tool_invocations": _as_list(runtime_result.get("tool_invocations")),
+        "tool_results": _as_list(runtime_result.get("tool_results")),
+        "request_metrics": _as_dict(structured_payload.get("request_metrics")),
+        "request_context": _as_dict(structured_payload.get("request_context")),
+        "usage": _extract_usage(structured_payload.get("latest_response")),
+        "completion_guard": _as_dict(structured_payload.get("completion_guard")),
+        "last_failure": _as_dict(structured_payload.get("last_failure")),
+        "cognitive_summary": _as_dict(
+            structured_payload.get("cognitive_state_summary")
+        ),
+        "activation_check": _as_dict(runtime_result.get("activation_check")),
+    }
+
+
+def _setup_projection_failure_scalars(
+    *,
+    structured_payload: dict[str, Any],
+    warnings: list[Any],
+    completion_guard: dict[str, Any],
+    last_failure: dict[str, Any],
+    cognitive_summary: dict[str, Any],
+) -> dict[str, Any]:
+    repair_route = structured_payload.get("repair_route")
+    if repair_route is None and (
+        "commit_proposal_blocked" in warnings
+        or (structured_payload.get("pending_obligation") or {}).get("obligation_type")
+        == "reassess_commit_readiness"
+    ):
+        repair_route = "block_commit"
+    completion_guard_reason = str(completion_guard.get("reason") or "") or None
+    last_failure_category = str(last_failure.get("failure_category") or "") or None
+    cognitive_state_invalidated = (
+        bool(cognitive_summary.get("invalidated"))
+        if cognitive_summary.get("invalidated") is not None
+        else None
+    )
+    remaining_open_issues = list(cognitive_summary.get("remaining_open_issues") or [])
+    return {
+        "repair_route": repair_route,
+        "completion_guard_reason": completion_guard_reason,
+        "last_failure_category": last_failure_category,
+        "cognitive_state_invalidated": cognitive_state_invalidated,
+        "remaining_open_issues": remaining_open_issues,
+    }
+
+
+def _setup_projection_tool_signals(
+    *,
+    tool_invocations: list[Any],
+    tool_results: list[Any],
+    warnings: list[Any],
+    subjective_hook_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    tool_failure_results = [
+        item for item in tool_results if isinstance(item, dict) and not bool(item.get("success"))
+    ]
+    tool_success_results = [
+        item for item in tool_results if isinstance(item, dict) and bool(item.get("success"))
+    ]
+    tool_failure_codes = [
+        str(item.get("error_code") or "")
+        for item in tool_failure_results
+        if isinstance(item, dict)
+    ]
+    tool_names = [
+        str(item.get("tool_name") or "")
+        for item in tool_invocations
+        if isinstance(item, dict) and item.get("tool_name")
+    ]
+    schema_retry_count = sum(
+        1 for item in warnings if isinstance(item, str) and "tool_schema_validation" in item
+    )
+    clarification_hook = _find_subjective_hook(
+        subjective_hook_results,
+        rubric_ref="setup/clarification-quality/v1",
+    )
+
+    return {
+        "tool_failure_results": tool_failure_results,
+        "tool_success_results": tool_success_results,
+        "tool_failure_codes": tool_failure_codes,
+        "tool_names": tool_names,
+        "schema_retry_count": schema_retry_count,
+        "clarification_hook": clarification_hook,
     }
 
 
