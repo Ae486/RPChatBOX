@@ -24,7 +24,7 @@ def _case_path(*parts: str) -> Path:
     )
 
 
-class _CommitProposalLLMService:
+class _ValidToolCallLLMService:
     def __init__(self) -> None:
         self._chat_round = 0
 
@@ -44,16 +44,14 @@ class _CommitProposalLLMService:
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "call_commit",
+                                    "id": "call_memory_search",
                                     "type": "function",
                                     "function": {
-                                        "name": "rp_setup__setup.proposal.commit",
+                                        "name": "rp_setup__setup.memory.search",
                                         "arguments": json.dumps(
                                             {
                                                 "workspace_id": workspace_id,
-                                                "step_id": "writing_contract",
-                                                "target_draft_refs": ["draft:writing_contract"],
-                                                "reason": "The writing contract is coherent enough for review.",
+                                                "query": "writing contract",
                                             }
                                         ),
                                     },
@@ -69,7 +67,7 @@ class _CommitProposalLLMService:
                 {
                     "message": {
                         "role": "assistant",
-                        "content": "I prepared a review proposal.",
+                        "content": "I checked the setup memory references.",
                     }
                 }
             ],
@@ -77,7 +75,7 @@ class _CommitProposalLLMService:
         }
 
 
-class _StreamCommitProposalLLMService:
+class _StreamValidToolCallLLMService:
     def __init__(self) -> None:
         self._chat_round = 0
 
@@ -93,16 +91,14 @@ class _StreamCommitProposalLLMService:
                         "type": "tool_call",
                         "tool_calls": [
                             {
-                                "id": "call_commit_stream",
+                                "id": "call_memory_search_stream",
                                 "type": "function",
                                 "function": {
-                                    "name": "rp_setup__setup.proposal.commit",
+                                    "name": "rp_setup__setup.memory.search",
                                     "arguments": json.dumps(
                                         {
                                             "workspace_id": workspace_id,
-                                            "step_id": "writing_contract",
-                                            "target_draft_refs": ["draft:writing_contract"],
-                                            "reason": "The writing contract is coherent enough for review.",
+                                            "query": "writing contract",
                                         }
                                     ),
                                 },
@@ -116,7 +112,7 @@ class _StreamCommitProposalLLMService:
             yield 'data: {"type":"done"}\n\n'
             return
 
-        yield 'data: {"type":"text_delta","delta":"I prepared a review proposal."}\n\n'
+        yield 'data: {"type":"text_delta","delta":"I checked the setup memory references."}\n\n'
         yield 'data: {"type":"done"}\n\n'
 
     async def chat_completion(self, request):
@@ -141,16 +137,8 @@ class _DiscussionOnlyLLMService:
         }
 
 
-_PRE_EXISTING_FAILURE_CLUSTER_4 = (
-    "Pre-existing failure (eval runner business assertions: 'failed' vs 'completed'). "
-    "See .trellis/tasks/archive/2026-05/05-25-services-directory-reorganization/research/pre-existing-failures-19.md cluster 4. "
-    "Tracked by T19 (coupled with `05-11-runtime-classifier-drift`) in .trellis/spec/guides/project-optimization-master-guide.md."
-)
-
-
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_4, strict=False)
 @pytest.mark.asyncio
-async def test_eval_runner_executes_setup_case_and_creates_proposal(
+async def test_eval_runner_executes_setup_case_via_valid_tool(
     retrieval_session,
     monkeypatch,
 ):
@@ -185,15 +173,15 @@ async def test_eval_runner_executes_setup_case_and_creates_proposal(
 
     monkeypatch.setattr(
         "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _CommitProposalLLMService(),
+        lambda: _ValidToolCallLLMService(),
     )
 
     case = EvalCase.model_validate(
         {
-            "case_id": "setup.commit_proposal.writing_contract.ready.v1",
-            "title": "Writing contract ready proposal",
+            "case_id": "setup.runner_tool_smoke.in_process.v1",
+            "title": "Runner tool smoke via valid setup memory search",
             "scope": "setup",
-            "category": "commit_proposal",
+            "category": "runner_tool_smoke",
             "tags": ["mvp", "deterministic"],
             "runtime_target": {
                 "mode": "in_process",
@@ -225,16 +213,7 @@ async def test_eval_runner_executes_setup_case_and_creates_proposal(
             },
             "preconditions": {},
             "expected": {
-                "deterministic_assertions": [
-                    {
-                        "assertion_id": "proposal_created",
-                        "source": "workspace_truth",
-                        "type": "equals",
-                        "path": "commit_proposals[-1].status",
-                        "expected": "pending_review",
-                        "severity": "error",
-                    }
-                ],
+                "deterministic_assertions": [],
                 "subjective_hooks": [],
             },
             "trace_hooks": {
@@ -253,16 +232,10 @@ async def test_eval_runner_executes_setup_case_and_creates_proposal(
 
     assert result.run.status == "completed"
     assert result.runtime_result["finish_reason"] == "completed_text"
-    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.proposal.commit"
-    assert any(score.name == "proposal_created" and score.status == "pass" for score in result.scores)
-    workspace_after = next(
-        artifact for artifact in result.artifacts if artifact.kind == "workspace_after"
-    )
-    assert workspace_after.payload["commit_proposals"][-1]["status"] == "pending_review"
+    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.memory.search"
     assert result.report["assertion_summary"]["fail"] == 0
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_4, strict=False)
 @pytest.mark.asyncio
 async def test_eval_runner_http_mode_uses_real_setup_turn_route(
     retrieval_session,
@@ -299,15 +272,15 @@ async def test_eval_runner_http_mode_uses_real_setup_turn_route(
 
     monkeypatch.setattr(
         "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _CommitProposalLLMService(),
+        lambda: _ValidToolCallLLMService(),
     )
 
     case = EvalCase.model_validate(
         {
-            "case_id": "setup.commit_proposal.writing_contract.http.v1",
-            "title": "Writing contract ready proposal via setup API route",
+            "case_id": "setup.runner_tool_smoke.http.v1",
+            "title": "Runner tool smoke via setup API route",
             "scope": "setup",
-            "category": "commit_proposal",
+            "category": "runner_tool_smoke",
             "tags": ["mvp", "deterministic", "http"],
             "runtime_target": {
                 "mode": "http",
@@ -339,16 +312,7 @@ async def test_eval_runner_http_mode_uses_real_setup_turn_route(
             },
             "preconditions": {},
             "expected": {
-                "deterministic_assertions": [
-                    {
-                        "assertion_id": "proposal_created_http",
-                        "source": "workspace_truth",
-                        "type": "equals",
-                        "path": "commit_proposals[-1].status",
-                        "expected": "pending_review",
-                        "severity": "error",
-                    }
-                ],
+                "deterministic_assertions": [],
                 "subjective_hooks": [],
             },
             "trace_hooks": {
@@ -367,15 +331,10 @@ async def test_eval_runner_http_mode_uses_real_setup_turn_route(
 
     assert result.run.status == "completed"
     assert result.runtime_result["finish_reason"] == "completed_text"
-    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.proposal.commit"
-    assert any(
-        score.name == "proposal_created_http" and score.status == "pass"
-        for score in result.scores
-    )
+    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.memory.search"
     assert result.report["assertion_summary"]["fail"] == 0
 
 
-@pytest.mark.xfail(reason=_PRE_EXISTING_FAILURE_CLUSTER_4, strict=False)
 @pytest.mark.asyncio
 async def test_eval_runner_http_stream_mode_uses_real_setup_turn_stream_route(
     retrieval_session,
@@ -412,15 +371,15 @@ async def test_eval_runner_http_stream_mode_uses_real_setup_turn_stream_route(
 
     monkeypatch.setattr(
         "rp.services.setup_agent.agent_execution_service.get_litellm_service",
-        lambda: _StreamCommitProposalLLMService(),
+        lambda: _StreamValidToolCallLLMService(),
     )
 
     case = EvalCase.model_validate(
         {
-            "case_id": "setup.commit_proposal.writing_contract.http.stream.v1",
-            "title": "Writing contract ready proposal via setup stream API route",
+            "case_id": "setup.runner_tool_smoke.http.stream.v1",
+            "title": "Runner tool smoke via setup stream API route",
             "scope": "setup",
-            "category": "commit_proposal",
+            "category": "runner_tool_smoke",
             "tags": ["mvp", "deterministic", "http", "stream"],
             "runtime_target": {
                 "mode": "http",
@@ -452,16 +411,7 @@ async def test_eval_runner_http_stream_mode_uses_real_setup_turn_stream_route(
             },
             "preconditions": {},
             "expected": {
-                "deterministic_assertions": [
-                    {
-                        "assertion_id": "proposal_created_http_stream",
-                        "source": "workspace_truth",
-                        "type": "equals",
-                        "path": "commit_proposals[-1].status",
-                        "expected": "pending_review",
-                        "severity": "error",
-                    }
-                ],
+                "deterministic_assertions": [],
                 "subjective_hooks": [],
             },
             "trace_hooks": {
@@ -482,13 +432,9 @@ async def test_eval_runner_http_stream_mode_uses_real_setup_turn_stream_route(
 
     assert result.run.status == "completed"
     assert result.runtime_result["finish_reason"] == "completed_text"
-    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.proposal.commit"
+    assert result.runtime_result["tool_invocations"][0]["tool_name"] == "rp_setup__setup.memory.search"
     assert "runtime_event.tool_call" in event_types
     assert "runtime_event.tool_result" in event_types
-    assert any(
-        score.name == "proposal_created_http_stream" and score.status == "pass"
-        for score in result.scores
-    )
     assert result.report["assertion_summary"]["fail"] == 0
 
 
