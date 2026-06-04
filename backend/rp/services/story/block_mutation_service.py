@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rp.errors import RPError
 from rp.models.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
     CoreMutationEnvelope,
@@ -24,15 +25,15 @@ from ..memory.rp_block_read_service import RpBlockReadService
 from .session_service import StorySessionService
 
 
-class MemoryBlockMutationUnsupportedError(RuntimeError):
+class MemoryBlockMutationUnsupportedError(RPError, RuntimeError):
     """Raised when a resolved Block does not support governed mutation."""
 
 
-class MemoryBlockTargetMismatchError(RuntimeError):
+class MemoryBlockTargetMismatchError(RPError, RuntimeError):
     """Raised when a submitted operation targets the wrong Block identity."""
 
 
-class MemoryBlockProposalNotFoundError(RuntimeError):
+class MemoryBlockProposalNotFoundError(RPError, RuntimeError):
     """Raised when a proposal is not visible from the addressed session/block path."""
 
 

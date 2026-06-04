@@ -9,6 +9,12 @@ from rp.errors import (
     RPUpstreamError,
     RPValidationError,
 )
+from rp.services.story.block_mutation_service import (
+    MemoryBlockMutationUnsupportedError,
+    MemoryBlockProposalNotFoundError,
+    MemoryBlockTargetMismatchError,
+)
+from rp.services.story.runtime_controller import MemoryBlockHistoryUnsupportedError
 from rp.services.memory.contract_registry import MemoryContractRegistryError
 from rp.services.writer.worker_memory_service import WorkerMemoryPermissionError
 from rp.tools.setup_tool_contracts import SetupToolContractError
@@ -110,3 +116,31 @@ def test_reparented_setup_tool_contract_error_keeps_tool_boundary_contract() -> 
 
     assert isinstance(value_error, SetupToolContractError)
     assert isinstance(rp_error, SetupToolContractError)
+
+
+def test_reparented_runtime_error_block_errors_keep_legacy_behavior() -> None:
+    exc = MemoryBlockProposalNotFoundError("x")
+
+    assert isinstance(exc, RuntimeError)
+    assert isinstance(exc, RPError)
+    assert str(MemoryBlockProposalNotFoundError("not found: p1")) == "not found: p1"
+
+    assert isinstance(MemoryBlockMutationUnsupportedError("x"), RuntimeError)
+    assert isinstance(MemoryBlockMutationUnsupportedError("x"), RPError)
+    assert isinstance(MemoryBlockTargetMismatchError("x"), RuntimeError)
+    assert isinstance(MemoryBlockTargetMismatchError("x"), RPError)
+    assert isinstance(MemoryBlockHistoryUnsupportedError("x"), RuntimeError)
+    assert isinstance(MemoryBlockHistoryUnsupportedError("x"), RPError)
+
+    try:
+        raise MemoryBlockProposalNotFoundError("not found: p1")
+    except RuntimeError as caught_runtime_error:
+        runtime_error = caught_runtime_error
+
+    try:
+        raise MemoryBlockProposalNotFoundError("not found: p1")
+    except RPError as caught_rp_error:
+        rp_error = caught_rp_error
+
+    assert isinstance(runtime_error, MemoryBlockProposalNotFoundError)
+    assert isinstance(rp_error, MemoryBlockProposalNotFoundError)

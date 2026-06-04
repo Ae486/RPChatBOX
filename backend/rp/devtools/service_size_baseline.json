@@ -223,8 +223,8 @@
       "kind": "file",
       "path": "story/runtime_controller.py",
       "symbol": null,
-      "lines": 1420,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1421,
+      "reason": "Grandfathered by T8 initial baseline at 1420; +1 line for T12 batch-3 RPError import (error-hierarchy migration per ADR-0012); future domain-specific refactor owns decomposition."
     },
     {
       "kind": "file",

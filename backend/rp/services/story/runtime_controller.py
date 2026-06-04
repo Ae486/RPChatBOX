@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from rp.errors import RPError
 from rp.models.block_view import BlockSource, RpBlockView
 from rp.models.core_mutation import DirectCoreEditRequest
 from rp.models.archival_evolution import ArchivalEvolutionRequest
@@ -75,7 +76,7 @@ from .session_service import StorySessionService
 from ..memory.version_history_read_service import VersionHistoryReadService
 
 
-class MemoryBlockHistoryUnsupportedError(RuntimeError):
+class MemoryBlockHistoryUnsupportedError(RPError, RuntimeError):
     """Raised when a Block envelope has no read-only history/provenance backend."""
 
 
