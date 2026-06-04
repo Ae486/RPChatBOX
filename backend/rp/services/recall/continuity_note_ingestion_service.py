@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from hashlib import sha256
 
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
@@ -10,18 +9,17 @@ from rp.models.memory_materialization import (
     CONTINUITY_NOTE_KIND,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
     build_recall_materialization_metadata,
-    build_recall_seed_section,
 )
-from rp.models.retrieval_records import IndexJob, SourceAsset
-from rp.models.setup_workspace import StoryMode
+from ._ingestion_pipeline import (
+    RecallSeedAssetSpec,
+    branch_head_id,
+    ensure_recall_collection,
+    persist_recall_seed_asset,
+)
 from .lifecycle_service import RecallLifecycleService
 from ..retrieval.collection_service import RetrievalCollectionService
 from ..retrieval.document_service import RetrievalDocumentService
 from ..retrieval.ingestion_service import RetrievalIngestionService
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class RecallContinuityNoteIngestionService:
@@ -48,26 +46,20 @@ class RecallContinuityNoteIngestionService:
         if not notes:
             return []
 
-        collection = self._collection_service.ensure_story_collection(
+        collection = ensure_recall_collection(
+            self._collection_service,
             story_id=story_id,
-            scope="story",
-            collection_kind="recall",
         )
         persisted_asset_ids: list[str] = []
+        branch_id = branch_head_id(runtime_identity)
 
         for note_index, note_text in notes:
             asset_id = self._build_asset_id(
                 session_id=session_id,
                 chapter_index=chapter_index,
                 note_text=note_text,
-                branch_head_id=(
-                    runtime_identity.branch_head_id
-                    if runtime_identity is not None
-                    else None
-                ),
+                branch_head_id=branch_id,
             )
-            now = _utcnow()
-            existing_asset = self._document_service.get_source_asset(asset_id)
             note_digest = self._note_digest(
                 session_id=session_id,
                 chapter_index=chapter_index,
@@ -90,60 +82,29 @@ class RecallContinuityNoteIngestionService:
                 source_refs=source_refs,
                 extra={"note_index": note_index},
             )
-            if existing_asset is not None:
-                metadata = self._lifecycle_service.build_recomputed_metadata(
-                    existing_metadata=existing_asset.metadata,
-                    replacement_metadata=metadata,
-                )
-            asset = SourceAsset(
-                asset_id=asset_id,
-                story_id=story_id,
-                mode=StoryMode.LONGFORM,
-                collection_id=collection.collection_id,
-                workspace_id=source_workspace_id,
-                step_id="active_story",
-                commit_id=None,
-                asset_kind="continuity_note",
-                source_ref=source_ref,
-                title=f"Chapter {chapter_index} Continuity Note {note_index + 1}",
-                raw_excerpt=note_text[:280],
-                parse_status="queued",
-                ingestion_status="queued",
-                mapped_targets=["recall"],
-                metadata={
-                    **metadata,
-                    "seed_sections": [
-                        build_recall_seed_section(
-                            section_id=f"continuity_note:{note_digest}",
-                            title=(
-                                f"Chapter {chapter_index} Continuity Note "
-                                f"{note_index + 1}"
-                            ),
-                            path=section_path,
-                            text=note_text,
-                            metadata=metadata,
-                            tags=[CONTINUITY_NOTE_KIND, "recall"],
-                        )
-                    ],
-                },
-                created_at=existing_asset.created_at
-                if existing_asset is not None
-                else now,
-                updated_at=now,
-            )
-            self._document_service.upsert_source_asset(asset)
-            if existing_asset is None:
-                job = self._ingestion_service.ingest_asset(
-                    story_id=story_id,
+            title = f"Chapter {chapter_index} Continuity Note {note_index + 1}"
+            persist_recall_seed_asset(
+                document_service=self._document_service,
+                ingestion_service=self._ingestion_service,
+                lifecycle_service=self._lifecycle_service,
+                spec=RecallSeedAssetSpec(
                     asset_id=asset_id,
+                    story_id=story_id,
                     collection_id=collection.collection_id,
-                )
-            else:
-                job = self._ingestion_service.reindex_asset(
-                    story_id=story_id,
-                    asset_id=asset_id,
-                )
-            self._raise_if_job_failed(job=job, asset_id=asset_id)
+                    source_workspace_id=source_workspace_id,
+                    asset_kind="continuity_note",
+                    source_ref=source_ref,
+                    title=title,
+                    raw_text=note_text,
+                    metadata=metadata,
+                    section_id=f"continuity_note:{note_digest}",
+                    section_title=title,
+                    section_path=section_path,
+                    section_text=note_text,
+                    section_tags=[CONTINUITY_NOTE_KIND, "recall"],
+                    error_prefix="recall_continuity_note_ingestion_failed",
+                ),
+            )
             persisted_asset_ids.append(asset_id)
 
         return persisted_asset_ids
@@ -197,11 +158,3 @@ class RecallContinuityNoteIngestionService:
         )
         return sha256(identity.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def _raise_if_job_failed(*, job: IndexJob, asset_id: str) -> None:
-        if job.job_state == "completed":
-            return
-        error_detail = job.error_message or job.job_state
-        raise RuntimeError(
-            f"recall_continuity_note_ingestion_failed:{asset_id}:{error_detail}"
-        )

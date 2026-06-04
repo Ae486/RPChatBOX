@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 
@@ -12,23 +11,23 @@ from rp.models.memory_materialization import (
     CHARACTER_LONG_HISTORY_SUMMARY_KIND,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
     build_recall_materialization_metadata,
-    build_recall_seed_section,
 )
-from rp.models.retrieval_records import IndexJob, SourceAsset
-from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import (
     StoryArtifact,
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from ._ingestion_pipeline import (
+    RecallSeedAssetSpec,
+    branch_head_id,
+    dedupe_memory_source_refs,
+    ensure_recall_collection,
+    persist_recall_seed_asset,
+)
 from .lifecycle_service import RecallLifecycleService
 from ..retrieval.collection_service import RetrievalCollectionService
 from ..retrieval.document_service import RetrievalDocumentService
 from ..retrieval.ingestion_service import RetrievalIngestionService
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class RecallCharacterLongHistoryIngestionService:
@@ -57,15 +56,15 @@ class RecallCharacterLongHistoryIngestionService:
         if not character_state_digest:
             return []
 
-        collection = self._collection_service.ensure_story_collection(
+        collection = ensure_recall_collection(
+            self._collection_service,
             story_id=story_id,
-            scope="story",
-            collection_kind="recall",
         )
         normalized_summary = self._normalize_optional_text(chapter_summary_text)
         normalized_notes = self._normalize_continuity_notes(continuity_notes)
         eligible_segments = self._list_eligible_segments(accepted_segments)
         persisted_asset_ids: list[str] = []
+        branch_id = branch_head_id(runtime_identity)
 
         for character_key, character_snapshot in self._iter_character_snapshots(
             character_state_digest
@@ -83,14 +82,8 @@ class RecallCharacterLongHistoryIngestionService:
                 session_id=session_id,
                 chapter_index=chapter_index,
                 character_key=character_key,
-                branch_head_id=(
-                    runtime_identity.branch_head_id
-                    if runtime_identity is not None
-                    else None
-                ),
+                branch_head_id=branch_id,
             )
-            now = _utcnow()
-            existing_asset = self._document_service.get_source_asset(asset_id)
             key_digest = self._identity_digest(
                 session_id=session_id,
                 chapter_index=chapter_index,
@@ -124,70 +117,39 @@ class RecallCharacterLongHistoryIngestionService:
                     "accepted_segment_evidence_count": len(matched_segments),
                 },
             )
-            if existing_asset is not None:
-                metadata = self._lifecycle_service.build_recomputed_metadata(
-                    existing_metadata=existing_asset.metadata,
-                    replacement_metadata=metadata,
-                )
-            asset = SourceAsset(
-                asset_id=asset_id,
-                story_id=story_id,
-                mode=StoryMode.LONGFORM,
-                collection_id=collection.collection_id,
-                workspace_id=source_workspace_id,
-                step_id="active_story",
-                commit_id=None,
-                asset_kind="character_long_history_summary",
-                source_ref=(
-                    f"story_session:{session_id}:chapter:{chapter_index}:"
-                    f"character:{key_digest}"
-                ),
-                title=(
-                    f"Chapter {chapter_index} Character History Summary: "
-                    f"{character_key}"
-                ),
-                raw_excerpt=rendered_text[:280],
-                parse_status="queued",
-                ingestion_status="queued",
-                mapped_targets=["recall"],
-                metadata={
-                    **metadata,
-                    "seed_sections": [
-                        build_recall_seed_section(
-                            section_id=f"character_long_history_summary:{key_digest}",
-                            title=(
-                                f"Chapter {chapter_index} Character History Summary: "
-                                f"{character_key}"
-                            ),
-                            path=section_path,
-                            text=rendered_text,
-                            metadata=metadata,
-                            tags=[
-                                CHARACTER_LONG_HISTORY_SUMMARY_KIND,
-                                "recall",
-                                character_key,
-                            ],
-                        )
-                    ],
-                },
-                created_at=existing_asset.created_at
-                if existing_asset is not None
-                else now,
-                updated_at=now,
+            title = (
+                f"Chapter {chapter_index} Character History Summary: "
+                f"{character_key}"
             )
-            self._document_service.upsert_source_asset(asset)
-            if existing_asset is None:
-                job = self._ingestion_service.ingest_asset(
-                    story_id=story_id,
+            persist_recall_seed_asset(
+                document_service=self._document_service,
+                ingestion_service=self._ingestion_service,
+                lifecycle_service=self._lifecycle_service,
+                spec=RecallSeedAssetSpec(
                     asset_id=asset_id,
+                    story_id=story_id,
                     collection_id=collection.collection_id,
-                )
-            else:
-                job = self._ingestion_service.reindex_asset(
-                    story_id=story_id,
-                    asset_id=asset_id,
-                )
-            self._raise_if_job_failed(job=job, asset_id=asset_id)
+                    source_workspace_id=source_workspace_id,
+                    asset_kind="character_long_history_summary",
+                    source_ref=(
+                        f"story_session:{session_id}:chapter:{chapter_index}:"
+                        f"character:{key_digest}"
+                    ),
+                    title=title,
+                    raw_text=rendered_text,
+                    metadata=metadata,
+                    section_id=f"character_long_history_summary:{key_digest}",
+                    section_title=title,
+                    section_path=section_path,
+                    section_text=rendered_text,
+                    section_tags=[
+                        CHARACTER_LONG_HISTORY_SUMMARY_KIND,
+                        "recall",
+                        character_key,
+                    ],
+                    error_prefix="recall_character_long_history_ingestion_failed",
+                ),
+            )
             persisted_asset_ids.append(asset_id)
 
         return persisted_asset_ids
@@ -358,15 +320,6 @@ class RecallCharacterLongHistoryIngestionService:
         return sha256(identity.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _raise_if_job_failed(*, job: IndexJob, asset_id: str) -> None:
-        if job.job_state == "completed":
-            return
-        error_detail = job.error_message or job.job_state
-        raise RuntimeError(
-            f"recall_character_long_history_ingestion_failed:{asset_id}:{error_detail}"
-        )
-
-    @staticmethod
     def _build_source_refs(
         *,
         character_key: str,
@@ -382,15 +335,7 @@ class RecallCharacterLongHistoryIngestionService:
                 metadata={"character_key": character_key},
             )
         )
-        deduped: list[MemorySourceRef] = []
-        seen: set[tuple[str, str]] = set()
-        for ref in refs:
-            key = (ref.source_type.casefold(), ref.source_id.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(ref)
-        return deduped
+        return dedupe_memory_source_refs(refs)
 
     @staticmethod
     def _is_eligible_story_segment(artifact: StoryArtifact) -> bool:

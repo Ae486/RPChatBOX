@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from hashlib import sha256
 from typing import Literal
 
@@ -13,24 +13,24 @@ from rp.models.memory_materialization import (
     SCENE_CLOSE_EVENT,
     SCENE_TRANSCRIPT_KIND,
     build_recall_materialization_metadata,
-    build_recall_seed_section,
 )
-from rp.models.retrieval_records import IndexJob, SourceAsset
-from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import (
     StoryArtifact,
     StoryArtifactKind,
     StoryArtifactStatus,
     StoryDiscussionEntry,
 )
+from ._ingestion_pipeline import (
+    RecallSeedAssetSpec,
+    branch_head_id,
+    dedupe_memory_source_refs,
+    ensure_recall_collection,
+    persist_recall_seed_asset,
+)
 from .lifecycle_service import RecallLifecycleService
 from ..retrieval.collection_service import RetrievalCollectionService
 from ..retrieval.document_service import RetrievalDocumentService
 from ..retrieval.ingestion_service import RetrievalIngestionService
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class SceneTranscriptPromotionInput(BaseModel):
@@ -129,23 +129,17 @@ class RecallSceneTranscriptIngestionService:
         if not transcript_text:
             return None
 
-        collection = self._collection_service.ensure_story_collection(
+        collection = ensure_recall_collection(
+            self._collection_service,
             story_id=input_model.story_id,
-            scope="story",
-            collection_kind="recall",
         )
+        branch_id = branch_head_id(input_model.runtime_identity)
         asset_id = self._build_asset_id(
             session_id=input_model.session_id,
             chapter_index=input_model.chapter_index,
             scene_ref=input_model.scene_ref,
-            branch_head_id=(
-                input_model.runtime_identity.branch_head_id
-                if input_model.runtime_identity is not None
-                else None
-            ),
+            branch_head_id=branch_id,
         )
-        now = _utcnow()
-        existing_asset = self._document_service.get_source_asset(asset_id)
         scene_digest = self._scene_digest(
             session_id=input_model.session_id,
             chapter_index=input_model.chapter_index,
@@ -171,65 +165,36 @@ class RecallSceneTranscriptIngestionService:
                 ),
             },
         )
-        if existing_asset is not None:
-            metadata = self._lifecycle_service.build_recomputed_metadata(
-                existing_metadata=existing_asset.metadata,
-                replacement_metadata=metadata,
-            )
-        asset = SourceAsset(
-            asset_id=asset_id,
-            story_id=input_model.story_id,
-            mode=StoryMode.LONGFORM,
-            collection_id=collection.collection_id,
-            workspace_id=input_model.source_workspace_id,
-            step_id="active_story",
-            commit_id=None,
-            asset_kind="scene_transcript",
-            source_ref=(
-                f"story_session:{input_model.session_id}:chapter:{input_model.chapter_index}:"
-                f"scene_ref:{input_model.scene_ref}"
-            ),
-            title=(
-                f"Chapter {input_model.chapter_index} Scene Transcript "
-                f"{input_model.scene_ref}"
-            ),
-            raw_excerpt=transcript_text[:280],
-            parse_status="queued",
-            ingestion_status="queued",
-            mapped_targets=["recall"],
-            metadata={
-                **metadata,
-                "seed_sections": [
-                    build_recall_seed_section(
-                        section_id=f"scene_transcript:{scene_digest}",
-                        title=(
-                            f"Chapter {input_model.chapter_index} Scene Transcript "
-                            f"{input_model.scene_ref}"
-                        ),
-                        path=section_path,
-                        text=transcript_text,
-                        metadata=metadata,
-                        tags=[SCENE_TRANSCRIPT_KIND, "recall"],
-                    )
-                ],
-            },
-            created_at=existing_asset.created_at if existing_asset is not None else now,
-            updated_at=now,
+        title = (
+            f"Chapter {input_model.chapter_index} Scene Transcript "
+            f"{input_model.scene_ref}"
         )
-        self._document_service.upsert_source_asset(asset)
-        if existing_asset is None:
-            job = self._ingestion_service.ingest_asset(
-                story_id=input_model.story_id,
+        return persist_recall_seed_asset(
+            document_service=self._document_service,
+            ingestion_service=self._ingestion_service,
+            lifecycle_service=self._lifecycle_service,
+            spec=RecallSeedAssetSpec(
                 asset_id=asset_id,
+                story_id=input_model.story_id,
                 collection_id=collection.collection_id,
-            )
-        else:
-            job = self._ingestion_service.reindex_asset(
-                story_id=input_model.story_id,
-                asset_id=asset_id,
-            )
-        self._raise_if_job_failed(job=job, asset_id=asset_id)
-        return asset_id
+                source_workspace_id=input_model.source_workspace_id,
+                asset_kind="scene_transcript",
+                source_ref=(
+                    f"story_session:{input_model.session_id}:"
+                    f"chapter:{input_model.chapter_index}:"
+                    f"scene_ref:{input_model.scene_ref}"
+                ),
+                title=title,
+                raw_text=transcript_text,
+                metadata=metadata,
+                section_id=f"scene_transcript:{scene_digest}",
+                section_title=title,
+                section_path=section_path,
+                section_text=transcript_text,
+                section_tags=[SCENE_TRANSCRIPT_KIND, "recall"],
+                error_prefix="recall_scene_transcript_ingestion_failed",
+            ),
+        )
 
     @classmethod
     def _collect_source_items(
@@ -379,15 +344,6 @@ class RecallSceneTranscriptIngestionService:
         )
 
     @staticmethod
-    def _raise_if_job_failed(*, job: IndexJob, asset_id: str) -> None:
-        if job.job_state == "completed":
-            return
-        error_detail = job.error_message or job.job_state
-        raise RuntimeError(
-            f"recall_scene_transcript_ingestion_failed:{asset_id}:{error_detail}"
-        )
-
-    @staticmethod
     def _build_source_refs(
         *,
         input_model: SceneTranscriptPromotionInput,
@@ -425,12 +381,4 @@ class RecallSceneTranscriptIngestionService:
                     metadata={"scene_ref": artifact.scene_ref},
                 )
             )
-        deduped: list[MemorySourceRef] = []
-        seen: set[tuple[str, str]] = set()
-        for ref in refs:
-            key = (ref.source_type.casefold(), ref.source_id.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(ref)
-        return deduped
+        return dedupe_memory_source_refs(refs)

@@ -307,36 +307,15 @@
       "kind": "function",
       "path": "recall/character_long_history_ingestion_service.py",
       "symbol": "RecallCharacterLongHistoryIngestionService.ingest_character_summaries",
-      "lines": 151,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
-    },
-    {
-      "kind": "function",
-      "path": "recall/continuity_note_ingestion_service.py",
-      "symbol": "RecallContinuityNoteIngestionService.ingest_continuity_notes",
       "lines": 114,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
-    },
-    {
-      "kind": "function",
-      "path": "recall/detail_ingestion_service.py",
-      "symbol": "RecallDetailIngestionService.ingest_accepted_story_segments",
-      "lines": 109,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "reason": "Shrunk 151->114 by T9 S1 recall persist-block extraction into _ingestion_pipeline.py; residual candidate-iteration/render logic still >100 hard cap, future complexity split (T11) owns further reduction."
     },
     {
       "kind": "function",
       "path": "recall/retired_foreshadow_ingestion_service.py",
       "symbol": "RecallRetiredForeshadowIngestionService.ingest_retired_foreshadow_summaries",
-      "lines": 151,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
-    },
-    {
-      "kind": "function",
-      "path": "recall/scene_transcript_ingestion_service.py",
-      "symbol": "RecallSceneTranscriptIngestionService.ingest_scene_transcript",
-      "lines": 122,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 114,
+      "reason": "Shrunk 151->114 by T9 S1 recall persist-block extraction into _ingestion_pipeline.py; residual candidate-iteration/render logic still >100 hard cap, future complexity split (T11) owns further reduction."
     },
     {
       "kind": "function",

@@ -2,30 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.memory_materialization import (
     ACCEPTED_STORY_SEGMENT_KIND,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
     build_recall_materialization_metadata,
-    build_recall_seed_section,
 )
-from rp.models.retrieval_records import IndexJob, SourceAsset
-from rp.models.setup_workspace import StoryMode
 from rp.models.story_runtime import (
     StoryArtifact,
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from ._ingestion_pipeline import (
+    RecallSeedAssetSpec,
+    dedupe_memory_source_refs,
+    ensure_recall_collection,
+    persist_recall_seed_asset,
+)
 from .lifecycle_service import RecallLifecycleService
 from ..retrieval.collection_service import RetrievalCollectionService
 from ..retrieval.document_service import RetrievalDocumentService
 from ..retrieval.ingestion_service import RetrievalIngestionService
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class RecallDetailIngestionService:
@@ -48,10 +45,9 @@ class RecallDetailIngestionService:
         runtime_identity: MemoryRuntimeIdentity | None = None,
         source_refs: list[MemorySourceRef] | None = None,
     ) -> list[str]:
-        collection = self._collection_service.ensure_story_collection(
+        collection = ensure_recall_collection(
+            self._collection_service,
             story_id=story_id,
-            scope="story",
-            collection_kind="recall",
         )
         persisted_asset_ids: list[str] = []
         seen_asset_ids: set[str] = set()
@@ -65,8 +61,6 @@ class RecallDetailIngestionService:
                 continue
             seen_asset_ids.add(asset_id)
 
-            now = _utcnow()
-            existing_asset = self._document_service.get_source_asset(asset_id)
             section_path = f"recall.chapter.{chapter_index}.accepted_segment.{artifact.artifact_id}"
             section_title = f"Accepted Story Segment r{artifact.revision}"
             metadata = build_recall_materialization_metadata(
@@ -87,62 +81,33 @@ class RecallDetailIngestionService:
                     "artifact_kind": artifact.artifact_kind.value,
                 },
             )
-            if existing_asset is not None:
-                metadata = self._lifecycle_service.build_recomputed_metadata(
-                    existing_metadata=existing_asset.metadata,
-                    replacement_metadata=metadata,
-                )
-            source_asset = SourceAsset(
-                asset_id=asset_id,
-                story_id=story_id,
-                mode=StoryMode.LONGFORM,
-                collection_id=collection.collection_id,
-                workspace_id=source_workspace_id,
-                step_id="active_story",
-                commit_id=None,
-                asset_kind="accepted_story_segment",
-                source_ref=(
-                    f"story_session:{session_id}:chapter:{chapter_index}:"
-                    f"artifact:{artifact.artifact_id}"
-                ),
-                title=(
-                    f"Chapter {chapter_index} Accepted Segment r{artifact.revision}"
-                ),
-                raw_excerpt=content_text[:280],
-                parse_status="queued",
-                ingestion_status="queued",
-                mapped_targets=["recall"],
-                metadata={
-                    **metadata,
-                    "seed_sections": [
-                        build_recall_seed_section(
-                            section_id=f"accepted_story_segment:{artifact.artifact_id}",
-                            title=section_title,
-                            path=section_path,
-                            text=content_text,
-                            metadata=metadata,
-                            tags=[ACCEPTED_STORY_SEGMENT_KIND, "recall"],
-                        )
-                    ],
-                },
-                created_at=existing_asset.created_at
-                if existing_asset is not None
-                else now,
-                updated_at=now,
-            )
-            self._document_service.upsert_source_asset(source_asset)
-            if existing_asset is None:
-                job = self._ingestion_service.ingest_asset(
-                    story_id=story_id,
+            persist_recall_seed_asset(
+                document_service=self._document_service,
+                ingestion_service=self._ingestion_service,
+                lifecycle_service=self._lifecycle_service,
+                spec=RecallSeedAssetSpec(
                     asset_id=asset_id,
+                    story_id=story_id,
                     collection_id=collection.collection_id,
-                )
-            else:
-                job = self._ingestion_service.reindex_asset(
-                    story_id=story_id,
-                    asset_id=asset_id,
-                )
-            self._raise_if_job_failed(job=job, asset_id=asset_id)
+                    source_workspace_id=source_workspace_id,
+                    asset_kind="accepted_story_segment",
+                    source_ref=(
+                        f"story_session:{session_id}:chapter:{chapter_index}:"
+                        f"artifact:{artifact.artifact_id}"
+                    ),
+                    title=(
+                        f"Chapter {chapter_index} Accepted Segment r{artifact.revision}"
+                    ),
+                    raw_text=content_text,
+                    metadata=metadata,
+                    section_id=f"accepted_story_segment:{artifact.artifact_id}",
+                    section_title=section_title,
+                    section_path=section_path,
+                    section_text=content_text,
+                    section_tags=[ACCEPTED_STORY_SEGMENT_KIND, "recall"],
+                    error_prefix="recall_detail_ingestion_failed",
+                ),
+            )
             persisted_asset_ids.append(asset_id)
 
         return persisted_asset_ids
@@ -150,13 +115,6 @@ class RecallDetailIngestionService:
     @staticmethod
     def _build_asset_id(*, artifact_id: str) -> str:
         return f"recall_detail_{artifact_id}"
-
-    @staticmethod
-    def _raise_if_job_failed(*, job: IndexJob, asset_id: str) -> None:
-        if job.job_state == "completed":
-            return
-        error_detail = job.error_message or job.job_state
-        raise RuntimeError(f"recall_detail_ingestion_failed:{asset_id}:{error_detail}")
 
     @staticmethod
     def _build_source_refs(
@@ -179,15 +137,7 @@ class RecallDetailIngestionService:
                 },
             )
         )
-        deduped: list[MemorySourceRef] = []
-        seen: set[tuple[str, str]] = set()
-        for ref in refs:
-            key = (ref.source_type.casefold(), ref.source_id.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(ref)
-        return deduped
+        return dedupe_memory_source_refs(refs)
 
     @staticmethod
     def _is_eligible_story_segment(artifact: StoryArtifact) -> bool:
