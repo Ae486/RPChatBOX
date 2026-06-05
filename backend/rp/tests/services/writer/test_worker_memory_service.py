@@ -37,12 +37,8 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _enable_core_shadow_write(monkeypatch) -> None:
+def _enable_core_write(monkeypatch) -> None:
     monkeypatch.setenv("CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_ENABLED", "true")
-    monkeypatch.setenv(
-        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_SWITCH_ENABLED",
-        "false",
-    )
     get_settings.cache_clear()
 
 
@@ -321,7 +317,7 @@ async def test_worker_memory_service_auto_apply_dual_writes_core_and_mirror(
     retrieval_session,
     monkeypatch,
 ):
-    _enable_core_shadow_write(monkeypatch)
+    _enable_core_write(monkeypatch)
     ctx, story_session_service = _build_ctx(retrieval_session)
     service = WorkerMemoryService(session=retrieval_session)
 
@@ -351,7 +347,7 @@ async def test_worker_memory_service_auto_apply_dual_writes_core_and_mirror(
     repository = ProposalRepository(retrieval_session)
     apply_receipts = repository.list_apply_receipts_for_proposal(receipt.proposal_id)
     assert len(apply_receipts) == 1
-    assert apply_receipts[0].apply_backend == "dual_write"
+    assert apply_receipts[0].apply_backend == "core_state_store"
     target_links = repository.list_apply_target_links_for_apply(apply_receipts[0].apply_id)
     assert len(target_links) == 1
     assert target_links[0].object_id == "timeline.event_spine"
@@ -367,8 +363,7 @@ async def test_worker_memory_service_auto_apply_dual_writes_core_and_mirror(
     # Worker proposals carry governance metadata (a core mutation envelope), so the
     # apply follows the governed base-seed-then-applied revision pattern: rev1 =
     # activation_seed (pre-apply base), rev2 = proposal_apply (the appended event).
-    # (Ungoverned tool proposals produce a single revision; cf.
-    # test_core_state_dual_write_services.py:210-217 for the same dual_write pattern.)
+    # (Ungoverned tool proposals produce a single revision.)
     assert current_row.current_revision == 2
     assert current_row.data_json == [{"event": "worker-auto-applied"}]
     revisions = core_repo.list_authoritative_revisions(

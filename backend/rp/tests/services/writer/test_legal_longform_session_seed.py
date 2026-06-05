@@ -581,7 +581,6 @@ async def test_legal_longform_session_seed_materializes_branchable_runtime(
         proposal_repository=proposal_repository,
         story_state_apply_service=StoryStateApplyService(),
         core_state_dual_write_service=CoreStateDualWriteService(repository=core_repo),
-        core_state_store_write_switch_enabled=True,
         memory_change_event_service=MemoryChangeEventService(session=retrieval_session),
         runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
             session=retrieval_session

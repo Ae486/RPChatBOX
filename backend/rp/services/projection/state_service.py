@@ -21,7 +21,6 @@ class ProjectionStateService:
         core_state_dual_write_service: CoreStateDualWriteService | None = None,
         core_state_store_repository: CoreStateStoreRepository | None = None,
         store_read_enabled: bool = False,
-        core_state_store_write_switch_enabled: bool = False,
         projection_compatibility_mirror_service: ProjectionCompatibilityMirrorService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
@@ -29,7 +28,6 @@ class ProjectionStateService:
         self._core_state_dual_write_service = core_state_dual_write_service
         self._core_state_store_repository = core_state_store_repository
         self._store_read_enabled = store_read_enabled
-        self._core_state_store_write_switch_enabled = core_state_store_write_switch_enabled
         self._projection_compatibility_mirror_service = (
             projection_compatibility_mirror_service
             or ProjectionCompatibilityMirrorService(
@@ -146,44 +144,23 @@ class ProjectionStateService:
         snapshot: dict,
         refresh_source_kind: str,
     ) -> None:
-        store_primary = (
-            self._core_state_store_write_switch_enabled
-            and self._core_state_dual_write_service is not None
+        chapter = self._require_chapter(chapter_workspace_id)
+        session = self._story_session_service.get_session(chapter.session_id)
+        if session is None:
+            raise ValueError("phase_g_projection_state_session_missing")
+        self._require_core_state_dual_write_service().sync_projection_snapshot(
+            session=session,
+            chapter=chapter,
+            snapshot=dict(snapshot),
+            refresh_source_kind=refresh_source_kind,
         )
-        if store_primary:
-            chapter = self._require_chapter(chapter_workspace_id)
-            session = self._story_session_service.get_session(chapter.session_id)
-            if session is not None:
-                self._core_state_dual_write_service.sync_projection_snapshot(
-                    session=session,
-                    chapter=chapter,
-                    snapshot=dict(snapshot),
-                    refresh_source_kind=refresh_source_kind,
-                )
-            self._projection_compatibility_mirror_service.sync_mirror_snapshot(
-                chapter_workspace_id=chapter_workspace_id,
-                snapshot=snapshot,
-            )
-            return
-        updated_chapter = self._projection_compatibility_mirror_service.sync_mirror_snapshot(
+        self._projection_compatibility_mirror_service.sync_mirror_snapshot(
             chapter_workspace_id=chapter_workspace_id,
             snapshot=snapshot,
         )
-        if self._core_state_dual_write_service is not None:
-            session = self._story_session_service.get_session(updated_chapter.session_id)
-            if session is not None:
-                self._core_state_dual_write_service.sync_projection_snapshot(
-                    session=session,
-                    chapter=updated_chapter,
-                    snapshot=dict(snapshot),
-                    refresh_source_kind=refresh_source_kind,
-                )
 
     def _materialize_snapshot(self, *, chapter) -> dict:
-        if (
-            self._core_state_store_write_switch_enabled
-            and self._core_state_dual_write_service is not None
-        ):
+        if self._core_state_dual_write_service is not None:
             session = self._story_session_service.get_session(chapter.session_id)
             if session is not None:
                 return self._core_state_dual_write_service.materialize_projection_snapshot(
@@ -198,6 +175,11 @@ class ProjectionStateService:
         )
         snapshot.pop("writer_hints", None)
         return snapshot
+
+    def _require_core_state_dual_write_service(self) -> CoreStateDualWriteService:
+        if self._core_state_dual_write_service is None:
+            raise ValueError("phase_g_projection_state_dual_write_service_missing")
+        return self._core_state_dual_write_service
 
     def _require_chapter(self, chapter_workspace_id: str):
         chapter = self._story_session_service.get_chapter_workspace(chapter_workspace_id)

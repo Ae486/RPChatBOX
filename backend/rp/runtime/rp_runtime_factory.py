@@ -248,14 +248,6 @@ class RpRuntimeFactory:
     def _use_core_state_store_read() -> bool:
         return bool(get_settings().rp_memory_core_state_store_read_enabled)
 
-    @classmethod
-    def _use_core_state_store_write_switch(cls) -> bool:
-        settings = get_settings()
-        return bool(
-            settings.rp_memory_core_state_store_write_enabled
-            and settings.rp_memory_core_state_store_write_switch_enabled
-        )
-
     def _build_core_state_dual_write_service(self) -> CoreStateDualWriteService | None:
         if not self._use_core_state_store_write():
             return None
@@ -359,7 +351,6 @@ class RpRuntimeFactory:
             mirror_service=authoritative_mirror_service,
         )
         store_read_enabled = self._use_core_state_store_read()
-        store_write_switch_enabled = self._use_core_state_store_write_switch()
         core_state_adapter = StorySessionCoreStateAdapter(story_session_service)
         authoritative_state_view_service = AuthoritativeStateViewService(
             adapter=core_state_adapter,
@@ -372,7 +363,6 @@ class RpRuntimeFactory:
             core_state_dual_write_service=core_state_dual_write_service,
             core_state_store_repository=core_state_store_repository,
             store_read_enabled=store_read_enabled,
-            core_state_store_write_switch_enabled=store_write_switch_enabled,
             projection_compatibility_mirror_service=projection_mirror_service,
         )
         proposal_repository = ProposalRepository(self._session)
@@ -387,7 +377,6 @@ class RpRuntimeFactory:
             proposal_repository=proposal_repository,
             story_state_apply_service=StoryStateApplyService(),
             core_state_dual_write_service=core_state_dual_write_service,
-            core_state_store_write_switch_enabled=store_write_switch_enabled,
             authoritative_compatibility_mirror_service=authoritative_mirror_service,
             core_state_as_of_resolver=core_state_as_of_resolver,
         )
@@ -466,7 +455,6 @@ class RpRuntimeFactory:
         projection_refresh_service = ProjectionRefreshService(
             story_session_service,
             core_state_dual_write_service=core_state_dual_write_service,
-            core_state_store_write_switch_enabled=store_write_switch_enabled,
             projection_compatibility_mirror_service=projection_mirror_service,
         )
         regression_service = LongformRegressionService(
@@ -612,7 +600,6 @@ class RpRuntimeFactory:
         )
         core_state_dual_write_service = self._build_core_state_dual_write_service()
         store_read_enabled = self._use_core_state_store_read()
-        store_write_switch_enabled = self._use_core_state_store_write_switch()
         projection_adapter = ChapterWorkspaceProjectionAdapter(story_session_service)
         projection_state_service = ProjectionStateService(
             story_session_service=story_session_service,
@@ -620,7 +607,6 @@ class RpRuntimeFactory:
             core_state_dual_write_service=core_state_dual_write_service,
             core_state_store_repository=core_state_store_repository,
             store_read_enabled=store_read_enabled,
-            core_state_store_write_switch_enabled=store_write_switch_enabled,
             projection_compatibility_mirror_service=projection_mirror_service,
         )
         builder_projection_context_service = BuilderProjectionContextService(
@@ -656,7 +642,6 @@ class RpRuntimeFactory:
             proposal_repository=proposal_repository,
             story_state_apply_service=StoryStateApplyService(),
             core_state_dual_write_service=core_state_dual_write_service,
-            core_state_store_write_switch_enabled=store_write_switch_enabled,
             authoritative_compatibility_mirror_service=authoritative_mirror_service,
             core_state_as_of_resolver=core_state_as_of_resolver,
         )

@@ -16,6 +16,7 @@ from rp.models.memory_crud import ProposalSubmitInput
 from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from rp.models.story_runtime import LongformChapterPhase
 from rp.services.core_state.backfill_service import CoreStateBackfillService
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
@@ -59,12 +60,16 @@ async def _seed_session_with_apply(retrieval_session):
         },
     )
     repository = ProposalRepository(retrieval_session)
+    core_repo = CoreStateStoreRepository(retrieval_session)
     workflow = ProposalWorkflowService(
         proposal_repository=repository,
         proposal_apply_service=ProposalApplyService(
             story_session_service=story_session_service,
             proposal_repository=repository,
             story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=CoreStateDualWriteService(
+                repository=core_repo
+            ),
         ),
         post_write_apply_handler=PostWriteApplyHandler(),
     )

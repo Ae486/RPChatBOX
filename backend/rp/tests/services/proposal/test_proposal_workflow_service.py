@@ -23,12 +23,17 @@ from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.writer.longform_regression_service import LongformRegressionService
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
+from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )
@@ -40,6 +45,9 @@ from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.story.session_service import StorySessionService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.state_apply_service import StoryStateApplyService
+from rp.tests.services._helpers.core_state_dual_write_helpers import (
+    build_seeded_core_state_dual_write_service_from_story_service,
+)
 from rp.models.worker_memory import WorkerProposalGovernanceMetadata
 
 
@@ -86,11 +94,25 @@ def _seed_story_runtime(retrieval_session):
 def _build_workflow(retrieval_session):
     story_session_service = StorySessionService(retrieval_session)
     repository = ProposalRepository(retrieval_session)
+    core_state_store_repository = CoreStateStoreRepository(retrieval_session)
+    dual_write_service = build_seeded_core_state_dual_write_service_from_story_service(
+        story_session_service,
+        story_id="story-1",
+    )
+    authoritative_mirror_service = AuthoritativeCompatibilityMirrorService(
+        story_session_service=story_session_service
+    )
     apply_service = ProposalApplyService(
         story_session_service=story_session_service,
         proposal_repository=repository,
         story_state_apply_service=StoryStateApplyService(),
-        core_state_as_of_resolver=CoreStateAsOfResolver(session=retrieval_session),
+        core_state_dual_write_service=dual_write_service,
+        authoritative_compatibility_mirror_service=authoritative_mirror_service,
+        core_state_as_of_resolver=CoreStateAsOfResolver(
+            session=retrieval_session,
+            repository=core_state_store_repository,
+            mirror_service=authoritative_mirror_service,
+        ),
     )
     workflow = ProposalWorkflowService(
         proposal_repository=repository,
@@ -98,6 +120,21 @@ def _build_workflow(retrieval_session):
         post_write_apply_handler=PostWriteApplyHandler(),
     )
     return story_session_service, repository, workflow
+
+
+def _build_projection_refresh_service(
+    retrieval_session,
+    story_session_service: StorySessionService,
+) -> ProjectionRefreshService:
+    return ProjectionRefreshService(
+        story_session_service,
+        core_state_dual_write_service=(
+            build_seeded_core_state_dual_write_service_from_story_service(
+                story_session_service,
+                story_id="story-1",
+            )
+        ),
+    )
 
 
 def _build_runtime_identity(retrieval_session, *, session_id: str):
@@ -173,6 +210,12 @@ class _FailIfContinuityNoteIngestionRuns(RecallContinuityNoteIngestionService):
 
 
 class _FailingCoreStateDualWriteService:
+    def ensure_authoritative_targets_seed(self, **kwargs):
+        return None
+
+    def materialize_authoritative_snapshot(self, **kwargs):
+        return dict(kwargs.get("fallback_snapshot") or {})
+
     def current_authoritative_revision(self, **kwargs):
         return 0
 
@@ -482,6 +525,12 @@ async def test_apply_service_does_not_reapply_applied_proposal(retrieval_session
         story_session_service=story_session_service,
         proposal_repository=repository,
         story_state_apply_service=StoryStateApplyService(),
+        core_state_dual_write_service=(
+            build_seeded_core_state_dual_write_service_from_story_service(
+                story_session_service,
+                story_id="story-1",
+            )
+        ),
     ).apply_proposal(receipt.proposal_id)
 
     updated_session = story_session_service.get_session(session.session_id)
@@ -932,6 +981,10 @@ async def test_longform_regression_routes_authoritative_patch_through_workflow(
         specialist_service=object(),
         proposal_workflow_service=workflow,
         legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
+        projection_refresh_service=_build_projection_refresh_service(
+            retrieval_session,
+            story_session_service,
+        ),
     )
 
     updated_session, updated_chapter = await regression_service._apply_bundle(
@@ -998,6 +1051,10 @@ async def test_longform_regression_light_path_deduplicates_newly_accepted_segmen
         specialist_service=specialist_service,
         proposal_workflow_service=workflow,
         legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
+        projection_refresh_service=_build_projection_refresh_service(
+            retrieval_session,
+            story_session_service,
+        ),
         recall_continuity_note_ingestion_service=(_FailIfContinuityNoteIngestionRuns()),
     )
 
@@ -1080,6 +1137,10 @@ async def test_longform_regression_heavy_path_ingests_recall_summary_and_detail(
         specialist_service=specialist_service,
         proposal_workflow_service=workflow,
         legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
+        projection_refresh_service=_build_projection_refresh_service(
+            retrieval_session,
+            story_session_service,
+        ),
         recall_summary_ingestion_service=RecallSummaryIngestionService(
             retrieval_session
         ),

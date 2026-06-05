@@ -98,14 +98,9 @@ def _memory_backend_metadata() -> dict[str, object]:
     settings = get_settings()
     store_write_enabled = bool(settings.rp_memory_core_state_store_write_enabled)
     store_read_enabled = bool(settings.rp_memory_core_state_store_read_enabled)
-    write_switch_enabled = bool(
-        store_write_enabled and settings.rp_memory_core_state_store_write_switch_enabled
-    )
-    truth_source = (
-        "core_state_store" if write_switch_enabled else "compatibility_mirror"
-    )
+    truth_source = "core_state_store"
     return {
-        "phase": "phase_g4c_cleanup_prep",
+        "phase": "phase_g5_write_switch_retired",
         "authoritative_truth_source": truth_source,
         "projection_truth_source": truth_source,
         "read_surface": "core_state_store"
@@ -120,7 +115,7 @@ def _memory_backend_metadata() -> dict[str, object]:
         "flags": {
             "core_state_store_write_enabled": store_write_enabled,
             "core_state_store_read_enabled": store_read_enabled,
-            "core_state_store_write_switch_enabled": write_switch_enabled,
+            "core_state_store_write_switch_enabled": True,
         },
     }
 

@@ -56,6 +56,8 @@ from rp.models.writing_runtime import WritingPacket
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.graphs.story_graph_runner import StoryGraphRunner
 from rp.services.core_state.authoritative_state_view_service import AuthoritativeStateViewService
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
@@ -103,6 +105,9 @@ from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
 from rp.services.writer.worker_scheduler_service import PRE_WRITE_CONTEXT_PHASE
 from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
 from rp.services.writer.writing_packet_builder import WritingPacketBuilder
+from rp.tests.services._helpers.core_state_dual_write_helpers import (
+    build_seeded_core_state_dual_write_service_from_story_service,
+)
 from rp.models.worker_runtime_contracts import (
     WorkerExecutionItem,
     WorkerExecutionPlan,
@@ -181,6 +186,8 @@ def _seed_story_runtime(retrieval_session):
 
 def _build_boundary_services(
     service: StorySessionService,
+    *,
+    core_state_dual_write_service: CoreStateDualWriteService | None = None,
 ) -> tuple[
     AuthoritativeStateViewService,
     ProjectionStateService,
@@ -191,6 +198,7 @@ def _build_boundary_services(
     projection_state_service = ProjectionStateService(
         story_session_service=service,
         adapter=ChapterWorkspaceProjectionAdapter(service),
+        core_state_dual_write_service=core_state_dual_write_service,
     )
     return authoritative_state_view_service, projection_state_service
 
@@ -334,6 +342,7 @@ class _FailingMemoryOsService:
 def _build_turn_domain_service(
     service: StorySessionService,
     *,
+    core_state_dual_write_service: CoreStateDualWriteService | None = None,
     orchestrator_service=None,
     specialist_service=None,
     writing_worker_execution_service=None,
@@ -347,8 +356,15 @@ def _build_turn_domain_service(
     post_write_scheduler_service=None,
     post_write_governance_service=None,
 ) -> StoryTurnDomainService:
+    core_state_dual_write_service = (
+        core_state_dual_write_service
+        or build_seeded_core_state_dual_write_service_from_story_service(service)
+    )
     authoritative_state_view_service, projection_state_service = (
-        _build_boundary_services(service)
+        _build_boundary_services(
+            service,
+            core_state_dual_write_service=core_state_dual_write_service,
+        )
     )
     return StoryTurnDomainService(
         story_session_service=service,
@@ -401,7 +417,14 @@ def test_authoritative_state_view_service_reads_session_scoped_objects(
 
 def test_projection_state_service_updates_slots_and_rollover(retrieval_session):
     session, chapter, service = _seed_story_runtime(retrieval_session)
-    _, projection_state_service = _build_boundary_services(service)
+    dual_write_service = CoreStateDualWriteService(
+        repository=CoreStateStoreRepository(retrieval_session)
+    )
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
+    _, projection_state_service = _build_boundary_services(
+        service,
+        core_state_dual_write_service=dual_write_service,
+    )
 
     projection_state_service.set_current_outline(
         chapter_workspace_id=chapter.chapter_workspace_id,
@@ -617,8 +640,15 @@ async def test_writing_worker_execution_service_returns_structured_result_and_us
 
 
 def test_projection_refresh_service_updates_settled_slots_only(retrieval_session):
-    _, chapter, service = _seed_story_runtime(retrieval_session)
-    refresh_service = ProjectionRefreshService(service)
+    session, chapter, service = _seed_story_runtime(retrieval_session)
+    dual_write_service = CoreStateDualWriteService(
+        repository=CoreStateStoreRepository(retrieval_session)
+    )
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
+    refresh_service = ProjectionRefreshService(
+        service,
+        core_state_dual_write_service=dual_write_service,
+    )
 
     updated_chapter = refresh_service.refresh_from_bundle(
         chapter=chapter,
@@ -1789,7 +1819,7 @@ def test_runtime_workflow_settlement_blocks_cancelled_required_job(
 async def test_story_turn_domain_service_full_post_write_governs_worker_results(
     retrieval_session,
 ):
-    session, _, service = _seed_story_runtime(retrieval_session)
+    session, chapter, service = _seed_story_runtime(retrieval_session)
     snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
     snapshot = snapshot_service.ensure_active_snapshot(
         session_id=session.session_id,
@@ -1862,13 +1892,20 @@ async def test_story_turn_domain_service_full_post_write_governs_worker_results(
     )
     worker_scheduler_service = _RecordingWorkerSchedulerService(worker_plan)
     proposal_workflow_service = _RecordingProposalWorkflowService()
+    dual_write_service = CoreStateDualWriteService(
+        repository=CoreStateStoreRepository(retrieval_session)
+    )
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
     post_write_scheduler_service = PostWriteSchedulerService(
         worker_scheduler_service=worker_scheduler_service,
         runtime_workspace_material_service=material_service,
     )
     post_write_governance_service = PostWriteGovernanceService(
         runtime_workflow_job_service=workflow_job_service,
-        projection_refresh_service=ProjectionRefreshService(service),
+        projection_refresh_service=ProjectionRefreshService(
+            service,
+            core_state_dual_write_service=dual_write_service,
+        ),
         proposal_workflow_service=proposal_workflow_service,
     )
     turn_domain_service = _build_turn_domain_service(

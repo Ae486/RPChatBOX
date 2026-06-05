@@ -58,6 +58,10 @@ from rp.models.story_runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from rp.services.core_state.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.models.setup_workspace import StoryMode
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
@@ -153,6 +157,7 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             },
         )
         core_repo = CoreStateStoreRepository(db_session)
+        core_state_dual_write_service = CoreStateDualWriteService(repository=core_repo)
         authoritative_row = core_repo.upsert_authoritative_object(
             story_id=story_session.story_id,
             session_id=story_session.session_id,
@@ -253,7 +258,7 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
                         "domain": Domain.CHAPTER,
                         "domain_path": "chapter.current",
                         "scope": "story",
-                        "revision": 1,
+                        "revision": 5,
                     }
                 ],
                 reason="api applied detail",
@@ -269,6 +274,12 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             story_session_service=story_session_service,
             proposal_repository=proposal_repo,
             story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=core_state_dual_write_service,
+            authoritative_compatibility_mirror_service=(
+                AuthoritativeCompatibilityMirrorService(
+                    story_session_service=story_session_service
+                )
+            ),
         )
         proposal_apply_service.apply_proposal(matching_applied.proposal_id)
         matching_review_required = proposal_repo.create_proposal(
@@ -296,7 +307,7 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
                         "domain": Domain.CHAPTER,
                         "domain_path": "chapter.current",
                         "scope": "story",
-                        "revision": 2,
+                        "revision": 6,
                     }
                 ],
                 reason="api review required detail",
@@ -1774,21 +1785,21 @@ def test_story_activation_bootstraps_session(client, monkeypatch):
     )
     assert snapshot["chapter"]["chapter_index"] == 1
     assert snapshot["chapter"]["phase"] == "outline_drafting"
-    assert snapshot["memory_backend"]["phase"] == "phase_g4c_cleanup_prep"
+    assert snapshot["memory_backend"]["phase"] == "phase_g5_write_switch_retired"
     assert snapshot["memory_backend"]["legacy_fields"] == {
         "session.current_state_json": "compatibility_mirror",
         "chapter.builder_snapshot_json": "compatibility_mirror",
     }
     assert snapshot["memory_backend"]["mirror_sync_enabled"] is True
     assert snapshot["memory_backend"]["hard_cleanup_enabled"] is False
-    if snapshot["memory_backend"]["flags"]["core_state_store_write_switch_enabled"]:
-        assert (
-            snapshot["memory_backend"]["authoritative_truth_source"]
-            == "core_state_store"
-        )
-        assert (
-            snapshot["memory_backend"]["projection_truth_source"] == "core_state_store"
-        )
+    assert (
+        snapshot["memory_backend"]["authoritative_truth_source"] == "core_state_store"
+    )
+    assert snapshot["memory_backend"]["projection_truth_source"] == "core_state_store"
+    assert (
+        snapshot["memory_backend"]["flags"]["core_state_store_write_switch_enabled"]
+        is True
+    )
 
 
 def test_activation_check_emits_langfuse_scores(client, monkeypatch):
@@ -3635,7 +3646,7 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert authoritative_item["source"] == "core_state_store"
     assert authoritative_item["data_json"] == {
         "current_chapter": 1,
-        "title": "Formal API Chapter",
+        "title": "Applied API Chapter",
     }
     assert authoritative_item["metadata"]["source_table"] == (
         "rp_core_state_authoritative_objects"
@@ -3698,8 +3709,8 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert authoritative_versions.json() == {
         "session_id": session_id,
         "block_id": seeded["authoritative_block_id"],
-        "versions": ["chapter.current@5"],
-        "current_ref": "chapter.current@5",
+        "versions": ["chapter.current@5", "chapter.current@6"],
+        "current_ref": "chapter.current@6",
     }
     assert authoritative_provenance.json()["session_id"] == session_id
     assert (
@@ -3712,7 +3723,7 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
         "domain": Domain.CHAPTER.value,
         "domain_path": "chapter.current",
         "scope": "story",
-        "revision": 5,
+        "revision": 6,
     }
     assert authoritative_provenance.json()["source_refs"] == [
         "core_state_store:authoritative_revision"
@@ -3880,7 +3891,7 @@ def test_story_memory_inspection_route_uses_memory_family_and_identity_scope(
     assert core_block["entrypoints"]["direct_core_edit"]["governed_by"] == (
         "StoryBlockMutationService.direct_edit_block"
     )
-    assert core_block["entries"][0]["base_revision"] == 5
+    assert core_block["entries"][0]["base_revision"] == 6
     workspace_block = next(
         block
         for block in payload["blocks"]
@@ -3962,7 +3973,7 @@ def test_story_memory_action_routes_return_refreshable_receipts(client):
             "domain": Domain.CHAPTER.value,
             "domain_path": "chapter.current",
             "scope": "story",
-            "revision": 5,
+            "revision": 6,
         }
         direct_response = client.post(
             (
@@ -4596,14 +4607,14 @@ def test_story_memory_block_proposal_detail_and_apply_routes(client, monkeypatch
     assert detail_item["operations"][0]["field_patch"] == {
         "title": "Pending API Chapter"
     }
-    assert detail_item["base_refs"][0]["revision"] == 2
+    assert detail_item["base_refs"][0]["revision"] == 6
     assert detail_item["apply_receipts"] == []
 
     assert applied_detail.status_code == 200
     applied_detail_item = applied_detail.json()["item"]
     assert applied_detail_item["status"] == "applied"
     assert len(applied_detail_item["apply_receipts"]) == 1
-    assert applied_detail_item["apply_receipts"][0]["apply_backend"] == "adapter_backed"
+    assert applied_detail_item["apply_receipts"][0]["apply_backend"] == "core_state_store"
 
     assert apply.status_code == 200
     applied_item = apply.json()["item"]

@@ -25,6 +25,9 @@ from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
 from rp.services.projection.state_service import ProjectionStateService
+from rp.tests.services._helpers.core_state_dual_write_helpers import (
+    build_seeded_core_state_dual_write_service_from_story_service,
+)
 from rp.services.recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
     SceneTranscriptPromotionInput,
@@ -151,6 +154,9 @@ def _build_turn_domain_service(
     projection_state_service = ProjectionStateService(
         story_session_service=service,
         adapter=ChapterWorkspaceProjectionAdapter(service),
+        core_state_dual_write_service=(
+            build_seeded_core_state_dual_write_service_from_story_service(service)
+        ),
     )
     return StoryTurnDomainService(
         story_session_service=service,

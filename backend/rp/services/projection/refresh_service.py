@@ -27,16 +27,12 @@ class ProjectionRefreshService:
         self,
         story_session_service: StorySessionService,
         core_state_dual_write_service: CoreStateDualWriteService | None = None,
-        core_state_store_write_switch_enabled: bool = False,
         projection_compatibility_mirror_service: ProjectionCompatibilityMirrorService
         | None = None,
         memory_change_event_service: MemoryChangeEventService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._core_state_dual_write_service = core_state_dual_write_service
-        self._core_state_store_write_switch_enabled = (
-            core_state_store_write_switch_enabled
-        )
         self._memory_change_event_service = memory_change_event_service
         self._projection_compatibility_mirror_service = (
             projection_compatibility_mirror_service
@@ -73,43 +69,27 @@ class ProjectionRefreshService:
                 "current_state_digest": list(bundle.current_state_digest),
             }
         )
-        store_primary = (
-            self._core_state_store_write_switch_enabled
-            and self._core_state_dual_write_service is not None
-        )
         self._validate_refresh_before_writing(chapter=chapter, refresh_request=request)
-        if store_primary:
-            session = self._story_session_service.get_session(chapter.session_id)
-            if session is not None:
-                core_state_dual_write_service = self._core_state_dual_write_service
-                assert core_state_dual_write_service is not None
-                core_state_dual_write_service.sync_projection_snapshot(
-                    session=session,
-                    chapter=chapter,
-                    snapshot=dict(snapshot),
-                    refresh_source_kind=request.refresh_source_kind,
-                    refresh_source_ref=request.refresh_source_ref,
-                    refresh_request=request,
-                )
+        session = self._story_session_service.get_session(chapter.session_id)
+        if session is None:
+            raise ProjectionRefreshServiceError(
+                "projection_refresh_session_missing",
+                chapter.session_id,
+            )
+        self._require_core_state_dual_write_service().sync_projection_snapshot(
+            session=session,
+            chapter=chapter,
+            snapshot=dict(snapshot),
+            refresh_source_kind=request.refresh_source_kind,
+            refresh_source_ref=request.refresh_source_ref,
+            refresh_request=request,
+        )
         updated_chapter = (
             self._projection_compatibility_mirror_service.sync_mirror_snapshot(
                 chapter_workspace_id=chapter.chapter_workspace_id,
                 snapshot=snapshot,
             )
         )
-        if self._core_state_dual_write_service is not None and not store_primary:
-            session = self._story_session_service.get_session(
-                updated_chapter.session_id
-            )
-            if session is not None:
-                self._core_state_dual_write_service.sync_projection_snapshot(
-                    session=session,
-                    chapter=updated_chapter,
-                    snapshot=dict(snapshot),
-                    refresh_source_kind=request.refresh_source_kind,
-                    refresh_source_ref=request.refresh_source_ref,
-                    refresh_request=request,
-                )
         self._publish_refresh_event(chapter=updated_chapter, refresh_request=request)
         return updated_chapter
 
@@ -129,6 +109,14 @@ class ProjectionRefreshService:
             chapter=chapter,
             refresh_request=refresh_request,
         )
+
+    def _require_core_state_dual_write_service(self) -> CoreStateDualWriteService:
+        if self._core_state_dual_write_service is None:
+            raise ProjectionRefreshServiceError(
+                "projection_refresh_dual_write_service_missing",
+                "core_state_dual_write_service",
+            )
+        return self._core_state_dual_write_service
 
     def _publish_refresh_event(
         self,

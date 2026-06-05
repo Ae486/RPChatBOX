@@ -55,7 +55,7 @@
       "kind": "class",
       "path": "proposal/apply_service.py",
       "symbol": "ProposalApplyService",
-      "lines": 761,
+      "lines": 731,
       "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
     },
     {
@@ -300,7 +300,7 @@
       "kind": "function",
       "path": "proposal/apply_service.py",
       "symbol": "ProposalApplyService.apply_proposal",
-      "lines": 148,
+      "lines": 136,
       "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
     },
     {

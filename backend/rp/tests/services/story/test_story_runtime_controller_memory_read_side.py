@@ -61,7 +61,6 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
-from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
@@ -101,6 +100,10 @@ from rp.services.story.session_service import StorySessionService
 from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
 from rp.services.memory.trace_read_service import MemoryTraceReadService
+from rp.tests.services._helpers.core_state_dual_write_helpers import (
+    build_seeded_core_state_dual_write_service,
+    build_seeded_core_state_dual_write_service_from_story_service,
+)
 
 
 class _Dumpable(dict):
@@ -199,12 +202,23 @@ def _seed_story_runtime(retrieval_session):
 async def _apply_authoritative_patch(retrieval_session):
     session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
     repository = ProposalRepository(retrieval_session)
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    core_state_dual_write_service = build_seeded_core_state_dual_write_service(
+        retrieval_session,
+        session=session,
+        chapter=chapter,
+    )
     workflow = ProposalWorkflowService(
         proposal_repository=repository,
         proposal_apply_service=ProposalApplyService(
             story_session_service=story_session_service,
             proposal_repository=repository,
             story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=core_state_dual_write_service,
+            core_state_as_of_resolver=CoreStateAsOfResolver(
+                session=retrieval_session,
+                repository=core_repo,
+            ),
         ),
         post_write_apply_handler=PostWriteApplyHandler(),
     )
@@ -248,10 +262,17 @@ def _build_controller(
 ):
     core_state_adapter = StorySessionCoreStateAdapter(story_session_service)
     core_repo = CoreStateStoreRepository(retrieval_session)
+    core_state_dual_write_service = (
+        build_seeded_core_state_dual_write_service_from_story_service(
+            story_session_service,
+            story_id="story-1",
+        )
+    )
     projection_adapter = ChapterWorkspaceProjectionAdapter(story_session_service)
     projection_state_service = ProjectionStateService(
         story_session_service=story_session_service,
         adapter=projection_adapter,
+        core_state_dual_write_service=core_state_dual_write_service,
     )
     builder_projection_context_service = BuilderProjectionContextService(
         projection_state_service
@@ -281,11 +302,6 @@ def _build_controller(
     )
     core_state_as_of_resolver = (
         CoreStateAsOfResolver(session=retrieval_session, repository=core_repo)
-        if inject_core_state_resolver
-        else None
-    )
-    core_state_dual_write_service = (
-        CoreStateDualWriteService(repository=core_repo)
         if inject_core_state_resolver
         else None
     )
@@ -1320,7 +1336,7 @@ async def test_story_runtime_controller_reviews_and_applies_authoritative_block_
                     "domain": Domain.CHAPTER,
                     "domain_path": "chapter.current",
                     "scope": "story",
-                    "revision": 1,
+                    "revision": 3,
                 }
             ],
             reason="controller review detail",
@@ -1422,7 +1438,7 @@ async def test_story_runtime_controller_reviews_and_applies_authoritative_block_
     assert applied_detail["apply_receipts"][0]["target_refs"][0]["object_id"] == (
         "chapter.current"
     )
-    assert applied_detail["apply_receipts"][0]["revision_after"]["chapter.current"] == 2
+    assert applied_detail["apply_receipts"][0]["revision_after"]["chapter.current"] == 4
     assert any(
         item["proposal_id"] == review_required.proposal_id
         and item["status"] == "applied"

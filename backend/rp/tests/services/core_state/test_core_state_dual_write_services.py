@@ -207,7 +207,7 @@ async def test_proposal_apply_service_dual_writes_authoritative_store(
     ).all()
     links = repository.list_apply_target_links_for_apply(apply_receipt.apply_id)
 
-    assert apply_receipt.apply_backend == "dual_write"
+    assert apply_receipt.apply_backend == "core_state_store"
     assert current_row.current_revision == 2
     assert current_row.data_json["title"] == "Chapter Two"
     assert current_row.latest_apply_id == apply_receipt.apply_id
@@ -243,7 +243,6 @@ async def test_proposal_apply_service_write_switch_uses_formal_store_as_source(
             proposal_repository=repository,
             story_state_apply_service=StoryStateApplyService(),
             core_state_dual_write_service=dual_write_service,
-            core_state_store_write_switch_enabled=True,
         ),
         post_write_apply_handler=PostWriteApplyHandler(),
     )
@@ -309,7 +308,6 @@ async def test_proposal_apply_service_write_switch_seeds_before_base_revision_ch
             proposal_repository=repository,
             story_state_apply_service=StoryStateApplyService(),
             core_state_dual_write_service=dual_write_service,
-            core_state_store_write_switch_enabled=True,
         ),
         post_write_apply_handler=PostWriteApplyHandler(),
     )
@@ -584,10 +582,13 @@ def test_projection_refresh_service_rejects_stale_source_revision_before_write(
 def test_projection_refresh_service_emits_shared_event_when_identity_is_supplied(
     retrieval_session,
 ):
-    _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    dual_write_service = _build_dual_write_service(retrieval_session)
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
     event_service = MemoryChangeEventService(session=retrieval_session)
     refresh_service = ProjectionRefreshService(
         story_session_service,
+        core_state_dual_write_service=dual_write_service,
         memory_change_event_service=event_service,
     )
     request = _projection_refresh_request(
@@ -623,10 +624,13 @@ def test_projection_refresh_service_emits_shared_event_when_identity_is_supplied
 def test_projection_refresh_service_allows_repeated_shared_events_for_same_identity(
     retrieval_session,
 ):
-    _, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    dual_write_service = _build_dual_write_service(retrieval_session)
+    dual_write_service.seed_activation_state(session=session, chapter=chapter)
     event_service = MemoryChangeEventService(session=retrieval_session)
     refresh_service = ProjectionRefreshService(
         story_session_service,
+        core_state_dual_write_service=dual_write_service,
         memory_change_event_service=event_service,
     )
     request = _projection_refresh_request()
@@ -725,7 +729,6 @@ def test_projection_state_service_write_switch_uses_formal_store_as_source(
         story_session_service=story_session_service,
         adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
         core_state_dual_write_service=dual_write_service,
-        core_state_store_write_switch_enabled=True,
     )
 
     projection_state_service.append_recent_segment(

@@ -63,7 +63,6 @@ class ProposalApplyService:
         proposal_repository: ProposalRepository,
         story_state_apply_service: StoryStateApplyService | None = None,
         core_state_dual_write_service: CoreStateDualWriteService | None = None,
-        core_state_store_write_switch_enabled: bool = False,
         authoritative_compatibility_mirror_service: AuthoritativeCompatibilityMirrorService
         | None = None,
         memory_change_event_service: MemoryChangeEventService | None = None,
@@ -77,9 +76,6 @@ class ProposalApplyService:
             story_state_apply_service or StoryStateApplyService()
         )
         self._core_state_dual_write_service = core_state_dual_write_service
-        self._core_state_store_write_switch_enabled = (
-            core_state_store_write_switch_enabled
-        )
         self._authoritative_compatibility_mirror_service = (
             authoritative_compatibility_mirror_service
             or AuthoritativeCompatibilityMirrorService(
@@ -137,12 +133,9 @@ class ProposalApplyService:
                     state_map=before_snapshot,
                     patch=patch,
                 )
-                store_primary = self._use_store_primary_write()
-                if not store_primary:
-                    self._authoritative_compatibility_mirror_service.sync_mirror_state(
-                        session_id=session.session_id,
-                        state_map=after_snapshot,
-                    )
+                core_state_dual_write_service = (
+                    self._require_core_state_dual_write_service()
+                )
 
                 revision_after = {
                     target_ref.object_id: (
@@ -166,60 +159,51 @@ class ProposalApplyService:
                     before_snapshot=before_snapshot,
                     after_snapshot=after_snapshot,
                     warnings=[],
-                    apply_backend=(
-                        "core_state_store"
-                        if store_primary
-                        else "dual_write"
-                        if self._core_state_dual_write_service is not None
-                        else "adapter_backed"
+                    apply_backend="core_state_store",
+                )
+                store_writes = core_state_dual_write_service.apply_authoritative_mutation(
+                    session=session,
+                    before_snapshot=before_snapshot,
+                    after_snapshot=after_snapshot,
+                    target_refs=target_refs,
+                    revision_after=revision_after,
+                    apply_id=apply_receipt.apply_id,
+                    proposal_id=proposal_id,
+                    runtime_identity=(
+                        None if core_mutation is None else core_mutation.identity
                     ),
                 )
-                if self._core_state_dual_write_service is not None:
-                    store_writes = self._core_state_dual_write_service.apply_authoritative_mutation(
-                        session=session,
-                        before_snapshot=before_snapshot,
-                        after_snapshot=after_snapshot,
-                        target_refs=target_refs,
-                        revision_after=revision_after,
+                self._record_core_state_snapshot_manifest(
+                    core_mutation=core_mutation,
+                    changed_revision_records=[
+                        revision_record for _, revision_record in store_writes.values()
+                    ],
+                    source_event_ids=[apply_receipt.apply_id],
+                )
+                for object_id, (
+                    current_record,
+                    revision_record,
+                ) in store_writes.items():
+                    target_ref = next(
+                        ref for ref in target_refs if ref.object_id == object_id
+                    )
+                    self._proposal_repository.create_apply_target_link(
                         apply_id=apply_receipt.apply_id,
                         proposal_id=proposal_id,
-                        runtime_identity=(
-                            None if core_mutation is None else core_mutation.identity
-                        ),
-                    )
-                    self._record_core_state_snapshot_manifest(
-                        core_mutation=core_mutation,
-                        changed_revision_records=[
-                            revision_record
-                            for _, revision_record in store_writes.values()
-                        ],
-                        source_event_ids=[apply_receipt.apply_id],
-                    )
-                    for object_id, (
-                        current_record,
-                        revision_record,
-                    ) in store_writes.items():
-                        target_ref = next(
-                            ref for ref in target_refs if ref.object_id == object_id
-                        )
-                        self._proposal_repository.create_apply_target_link(
-                            apply_id=apply_receipt.apply_id,
-                            proposal_id=proposal_id,
-                            story_id=proposal_record.story_id,
-                            session_id=session.session_id,
-                            object_id=object_id,
-                            domain=target_ref.domain.value,
-                            domain_path=target_ref.domain_path or object_id,
-                            scope=target_ref.scope or "story",
-                            revision=revision_after[object_id],
-                            authoritative_object_id=current_record.authoritative_object_id,
-                            authoritative_revision_id=revision_record.authoritative_revision_id,
-                        )
-                if store_primary:
-                    self._authoritative_compatibility_mirror_service.sync_mirror_state(
+                        story_id=proposal_record.story_id,
                         session_id=session.session_id,
-                        state_map=after_snapshot,
+                        object_id=object_id,
+                        domain=target_ref.domain.value,
+                        domain_path=target_ref.domain_path or object_id,
+                        scope=target_ref.scope or "story",
+                        revision=revision_after[object_id],
+                        authoritative_object_id=current_record.authoritative_object_id,
+                        authoritative_revision_id=revision_record.authoritative_revision_id,
                     )
+                self._authoritative_compatibility_mirror_service.sync_mirror_state(
+                    session_id=session.session_id,
+                    state_map=after_snapshot,
+                )
                 self._record_apply_outcomes(
                     proposal_record=proposal_record,
                     input_model=input_model,
@@ -343,12 +327,6 @@ class ProposalApplyService:
             return self._story_session_service.get_session(session_id)
         return self._story_session_service.get_latest_session_for_story(story_id)
 
-    def _use_store_primary_write(self) -> bool:
-        return (
-            self._core_state_store_write_switch_enabled
-            and self._core_state_dual_write_service is not None
-        )
-
     def _require_core_state_dual_write_service(self) -> CoreStateDualWriteService:
         if self._core_state_dual_write_service is None:
             raise ValueError("phase_e_core_state_dual_write_service_missing")
@@ -370,14 +348,6 @@ class ProposalApplyService:
             core_mutation=core_mutation,
             target_refs=target_refs,
         )
-        if not self._use_store_primary_write():
-            if as_of_revisions:
-                return self._overlay_as_of_revisions(
-                    snapshot=mirror_snapshot,
-                    target_refs=target_refs,
-                    revisions_by_object_id=as_of_revisions,
-                )
-            return mirror_snapshot
         dual_write_service = self._require_core_state_dual_write_service()
         dual_write_service.ensure_authoritative_targets_seed(
             session=session,

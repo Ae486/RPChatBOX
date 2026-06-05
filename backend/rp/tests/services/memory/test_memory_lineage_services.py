@@ -27,6 +27,11 @@ from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
@@ -52,6 +57,10 @@ from rp.models.runtime_workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,
+)
+from rp.tests.services._helpers.core_state_dual_write_helpers import (
+    build_seeded_core_state_dual_write_service,
+    build_seeded_core_state_dual_write_service_from_story_service,
 )
 
 
@@ -103,12 +112,28 @@ def _seed_story_runtime(retrieval_session):
 async def _apply_chapter_patch(retrieval_session):
     session, chapter, story_session_service = _seed_story_runtime(retrieval_session)
     repository = ProposalRepository(retrieval_session)
+    core_state_store_repository = CoreStateStoreRepository(retrieval_session)
+    authoritative_mirror_service = AuthoritativeCompatibilityMirrorService(
+        story_session_service=story_session_service
+    )
+    dual_write_service = build_seeded_core_state_dual_write_service(
+        retrieval_session,
+        session=session,
+        chapter=chapter,
+    )
     workflow = ProposalWorkflowService(
         proposal_repository=repository,
         proposal_apply_service=ProposalApplyService(
             story_session_service=story_session_service,
             proposal_repository=repository,
             story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=dual_write_service,
+            authoritative_compatibility_mirror_service=authoritative_mirror_service,
+            core_state_as_of_resolver=CoreStateAsOfResolver(
+                session=retrieval_session,
+                repository=core_state_store_repository,
+                mirror_service=authoritative_mirror_service,
+            ),
         ),
         post_write_apply_handler=PostWriteApplyHandler(),
     )
@@ -221,6 +246,12 @@ async def test_memory_inspection_read_service_lists_objects_slots_and_proposals(
     projection_state_service = ProjectionStateService(
         story_session_service=story_session_service,
         adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
+        core_state_dual_write_service=(
+            build_seeded_core_state_dual_write_service_from_story_service(
+                story_session_service,
+                story_id="story-1",
+            )
+        ),
     )
     inspection_service = MemoryInspectionReadService(
         story_session_service=story_session_service,
@@ -309,6 +340,12 @@ async def test_session_scoped_lineage_and_inspection_do_not_fall_back_to_story_l
     projection_state_service = ProjectionStateService(
         story_session_service=story_session_service,
         adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
+        core_state_dual_write_service=(
+            build_seeded_core_state_dual_write_service_from_story_service(
+                story_session_service,
+                story_id="story-1",
+            )
+        ),
     )
     inspection_service = MemoryInspectionReadService(
         story_session_service=story_session_service,
