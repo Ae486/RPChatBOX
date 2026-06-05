@@ -172,6 +172,14 @@ class _FailIfContinuityNoteIngestionRuns(RecallContinuityNoteIngestionService):
         raise AssertionError("light regression must not materialize continuity notes")
 
 
+class _FailingCoreStateDualWriteService:
+    def current_authoritative_revision(self, **kwargs):
+        return 0
+
+    def apply_authoritative_mutation(self, **kwargs):
+        raise RuntimeError("phase_e_core_shadow_write_failed")
+
+
 @pytest.mark.asyncio
 async def test_proposal_workflow_applies_and_persists_receipt(retrieval_session):
     session, chapter = _seed_story_runtime(retrieval_session)
@@ -844,6 +852,65 @@ async def test_proposal_workflow_rolls_back_state_when_receipt_write_fails(
     assert (
         updated_session.current_state_json["chapter_digest"]["title"] == "Chapter One"
     )
+    proposal_records = repository.list_proposals_for_story("story-1")
+    assert len(proposal_records) == 1
+    assert proposal_records[0].status == "failed"
+    assert (
+        repository.list_apply_receipts_for_proposal(proposal_records[0].proposal_id)
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_proposal_workflow_rolls_back_mirror_when_core_shadow_write_fails(
+    retrieval_session,
+):
+    session, chapter = _seed_story_runtime(retrieval_session)
+    story_session_service = StorySessionService(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    workflow = ProposalWorkflowService(
+        proposal_repository=repository,
+        proposal_apply_service=ProposalApplyService(
+            story_session_service=story_session_service,
+            proposal_repository=repository,
+            story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=_FailingCoreStateDualWriteService(),
+        ),
+        post_write_apply_handler=PostWriteApplyHandler(),
+    )
+
+    with pytest.raises(RuntimeError, match="phase_e_core_shadow_write_failed"):
+        await workflow.submit_and_route(
+            ProposalSubmitInput(
+                story_id="story-1",
+                mode="longform",
+                domain=Domain.TIMELINE,
+                domain_path="timeline.event_spine",
+                operations=[
+                    {
+                        "kind": "append_event",
+                        "target_ref": {
+                            "object_id": "timeline.event_spine",
+                            "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                            "domain": Domain.TIMELINE,
+                            "domain_path": "timeline.event_spine",
+                        },
+                        "event_data": {"event": "should-roll-back"},
+                    }
+                ],
+            ),
+            session_id=session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            submit_source="tool",
+            policy=PostWriteMaintenancePolicy(
+                preset_id="test",
+                fallback_decision=PolicyDecision.NOTIFY_APPLY,
+            ),
+        )
+
+    updated_session = story_session_service.get_session(session.session_id)
+    assert updated_session is not None
+    assert updated_session.current_state_json["timeline_spine"] == []
     proposal_records = repository.list_proposals_for_story("story-1")
     assert len(proposal_records) == 1
     assert proposal_records[0].status == "failed"

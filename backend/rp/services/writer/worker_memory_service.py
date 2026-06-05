@@ -7,6 +7,7 @@ from typing import Any, Iterator
 
 from sqlmodel import Session
 
+from config import get_settings
 from models.rp_story_store import RuntimeProfileSnapshotRecord
 from rp.errors import RPError
 from rp.models.dsl import Layer
@@ -31,8 +32,14 @@ from rp.models.worker_memory import (
 )
 from services.database import get_engine
 
-from ..proposal.post_write_apply_handler import PostWriteApplyHandler
+from ..core_state.as_of_resolver import CoreStateAsOfResolver
+from ..core_state.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
+from ..core_state.dual_write_service import CoreStateDualWriteService
+from ..core_state.store_repository import CoreStateStoreRepository
 from ..proposal.apply_service import ProposalApplyService
+from ..proposal.post_write_apply_handler import PostWriteApplyHandler
 from ..proposal.repository import ProposalRepository
 from ..proposal.workflow_service import ProposalWorkflowService
 from ..retrieval.broker import RetrievalBroker
@@ -175,12 +182,31 @@ class WorkerMemoryService:
         with self._session_scope() as (session, managed):
             story_session_service = StorySessionService(session)
             repository = ProposalRepository(session)
+            core_state_store_repository = CoreStateStoreRepository(session)
+            authoritative_mirror_service = AuthoritativeCompatibilityMirrorService(
+                story_session_service=story_session_service
+            )
+            core_state_dual_write_service = (
+                CoreStateDualWriteService(repository=core_state_store_repository)
+                if get_settings().rp_memory_core_state_store_write_enabled
+                else None
+            )
+            core_state_as_of_resolver = CoreStateAsOfResolver(
+                session=session,
+                repository=core_state_store_repository,
+                mirror_service=authoritative_mirror_service,
+            )
             workflow = ProposalWorkflowService(
                 proposal_repository=repository,
                 proposal_apply_service=ProposalApplyService(
                     story_session_service=story_session_service,
                     proposal_repository=repository,
                     story_state_apply_service=StoryStateApplyService(),
+                    core_state_dual_write_service=core_state_dual_write_service,
+                    authoritative_compatibility_mirror_service=(
+                        authoritative_mirror_service
+                    ),
+                    core_state_as_of_resolver=core_state_as_of_resolver,
                 ),
                 post_write_apply_handler=PostWriteApplyHandler(),
             )

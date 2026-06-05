@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from sqlmodel import Session
 
+from config import get_settings
 from rp.models.memory_crud import ProposalReceipt, ProposalSubmitInput
+from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
+from rp.services.core_state.authoritative_compatibility_mirror_service import (
+    AuthoritativeCompatibilityMirrorService,
+)
+from rp.services.core_state.dual_write_service import CoreStateDualWriteService
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory.crud_validation_service import MemoryCrudValidationService
 from rp.services.story.session_service import StorySessionService
 from rp.services.story.state_apply_service import StoryStateApplyService
@@ -45,10 +52,29 @@ class ProposalService:
     def _build_default_workflow(self, session: Session) -> ProposalWorkflowService:
         repository = ProposalRepository(session)
         story_session_service = StorySessionService(session)
+        core_state_store_repository = CoreStateStoreRepository(session)
+        authoritative_mirror_service = AuthoritativeCompatibilityMirrorService(
+            story_session_service=story_session_service
+        )
+        core_state_dual_write_service = (
+            CoreStateDualWriteService(repository=core_state_store_repository)
+            if get_settings().rp_memory_core_state_store_write_enabled
+            else None
+        )
+        core_state_as_of_resolver = CoreStateAsOfResolver(
+            session=session,
+            repository=core_state_store_repository,
+            mirror_service=authoritative_mirror_service,
+        )
         apply_service = ProposalApplyService(
             story_session_service=story_session_service,
             proposal_repository=repository,
             story_state_apply_service=StoryStateApplyService(),
+            core_state_dual_write_service=core_state_dual_write_service,
+            authoritative_compatibility_mirror_service=(
+                authoritative_mirror_service
+            ),
+            core_state_as_of_resolver=core_state_as_of_resolver,
         )
         return ProposalWorkflowService(
             proposal_repository=repository,

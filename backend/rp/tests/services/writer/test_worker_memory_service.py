@@ -7,15 +7,23 @@ from copy import deepcopy
 
 import pytest
 
+from config import get_settings
 from rp.models.dsl import Domain, Layer
 from rp.models.memory_crud import (
     MemoryGetSummaryInput,
     MemorySearchRecallInput,
     ProposalSubmitInput,
 )
+from rp.models.retrieval_records import SourceAsset
+from rp.models.setup_workspace import StoryMode
+from rp.models.story_runtime import LongformChapterPhase
 from rp.models.projection_refresh import ProjectionRefreshRequest
 from rp.models.worker_memory import WorkerMemoryContext
+from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.proposal.repository import ProposalRepository
+from rp.services.retrieval.collection_service import RetrievalCollectionService
+from rp.services.retrieval.document_service import RetrievalDocumentService
+from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.session_service import StorySessionService
@@ -23,16 +31,19 @@ from rp.services.writer.worker_memory_service import (
     WorkerMemoryPermissionError,
     WorkerMemoryService,
 )
-from rp.services.retrieval.collection_service import RetrievalCollectionService
-from rp.services.retrieval.document_service import RetrievalDocumentService
-from rp.services.retrieval.ingestion_service import RetrievalIngestionService
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _enable_core_shadow_write(monkeypatch) -> None:
+    monkeypatch.setenv("CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_ENABLED", "true")
+    monkeypatch.setenv(
+        "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_SWITCH_ENABLED",
+        "false",
+    )
+    get_settings.cache_clear()
 
 
 def _seed_story_runtime(retrieval_session):
@@ -303,6 +314,75 @@ async def test_worker_memory_service_persists_governance_metadata_on_proposal(
     assert (
         updated_session.current_state_json["chapter_digest"]["title"] == "Chapter One"
     )
+
+
+@pytest.mark.asyncio
+async def test_worker_memory_service_auto_apply_dual_writes_core_and_mirror(
+    retrieval_session,
+    monkeypatch,
+):
+    _enable_core_shadow_write(monkeypatch)
+    ctx, story_session_service = _build_ctx(retrieval_session)
+    service = WorkerMemoryService(session=retrieval_session)
+
+    receipt = await service.submit_proposal(
+        ctx=ctx,
+        input_model=ProposalSubmitInput(
+            story_id=ctx.identity.story_id,
+            mode="longform",
+            domain=Domain.TIMELINE,
+            domain_path="timeline.event_spine",
+            operations=[
+                {
+                    "kind": "append_event",
+                    "target_ref": {
+                        "object_id": "timeline.event_spine",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.TIMELINE,
+                        "domain_path": "timeline.event_spine",
+                    },
+                    "event_data": {"event": "worker-auto-applied"},
+                }
+            ],
+        ),
+    )
+
+    assert receipt.status == "applied"
+    repository = ProposalRepository(retrieval_session)
+    apply_receipts = repository.list_apply_receipts_for_proposal(receipt.proposal_id)
+    assert len(apply_receipts) == 1
+    assert apply_receipts[0].apply_backend == "dual_write"
+    target_links = repository.list_apply_target_links_for_apply(apply_receipts[0].apply_id)
+    assert len(target_links) == 1
+    assert target_links[0].object_id == "timeline.event_spine"
+
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    current_row = core_repo.get_authoritative_object(
+        session_id=ctx.identity.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        scope="story",
+        object_id="timeline.event_spine",
+    )
+    assert current_row is not None
+    # Worker proposals carry governance metadata (a core mutation envelope), so the
+    # apply follows the governed base-seed-then-applied revision pattern: rev1 =
+    # activation_seed (pre-apply base), rev2 = proposal_apply (the appended event).
+    # (Ungoverned tool proposals produce a single revision; cf.
+    # test_core_state_dual_write_services.py:210-217 for the same dual_write pattern.)
+    assert current_row.current_revision == 2
+    assert current_row.data_json == [{"event": "worker-auto-applied"}]
+    revisions = core_repo.list_authoritative_revisions(
+        session_id=ctx.identity.session_id,
+        object_id="timeline.event_spine",
+    )
+    assert [revision.revision for revision in revisions] == [1, 2]
+    assert revisions[1].source_apply_id == apply_receipts[0].apply_id
+
+    updated_session = story_session_service.get_session(ctx.identity.session_id)
+    assert updated_session is not None
+    assert updated_session.current_state_json["timeline_spine"] == [
+        {"event": "worker-auto-applied"}
+    ]
 
 
 def test_worker_memory_service_refresh_projection_injects_identity_and_actor(
