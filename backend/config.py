@@ -33,14 +33,14 @@ class Settings(BaseSettings):
     use_litellm: bool = True
     use_litellm_router: bool = True
     rp_memory_core_state_store_write_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices(
             "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_ENABLED",
             "RP_MEMORY_CORE_STATE_STORE_WRITE_ENABLED",
         ),
     )
     rp_memory_core_state_store_read_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices(
             "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
             "RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",

@@ -564,8 +564,14 @@ async def test_get_state_reads_explicit_unmapped_authoritative_ref_from_block_st
 
 
 @pytest.mark.asyncio
-async def test_get_summary_reads_projection_slots_and_aliases(retrieval_session):
+async def test_get_summary_reads_projection_slots_and_aliases(
+    retrieval_session, monkeypatch
+):
     _seed_story_runtime(retrieval_session)
+    # Pin legacy mirror read surface explicitly (S2b flipped the default to core_state); this test characterizes the mirror route.
+    monkeypatch.setenv("CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_READ_ENABLED", "0")
+    monkeypatch.setenv("CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_ENABLED", "0")
+    get_settings.cache_clear()
     broker = RetrievalBroker(default_story_id="story-1")
 
     result = await broker.get_summary(
