@@ -333,3 +333,108 @@ async def test_inspection_projection_includes_mirror_only_slots_during_partial_s
     assert outline_item["slot_name"] == "current_outline_digest"
     assert outline_item["items"] == ["Outline A"]
     assert outline_item["backend"] == "compatibility_mirror"
+
+
+@pytest.mark.asyncio
+async def test_current_data_read_parity_mirror_vs_core_state(retrieval_session):
+    """S2a parity characterization (ADR-0014): pins that CURRENT dual-written
+    data reads equivalently via the legacy mirror (read_enabled=False) and the
+    core_state formal store (read_enabled=True). Provenance labels + historical
+    as-of are intentionally out of scope (historical = warn-closed,
+    user-ratified 2026-06-05).
+    """
+
+    session, _, story_session_service, repository = await _seed_dual_written_runtime(
+        retrieval_session
+    )
+
+    mirror_repo = CoreStateStoreRepository(retrieval_session)
+    mirror_core_adapter = StorySessionCoreStateAdapter(
+        story_session_service,
+        default_story_id=session.story_id,
+    )
+    mirror_projection_adapter = ChapterWorkspaceProjectionAdapter(
+        story_session_service,
+        default_story_id=session.story_id,
+    )
+    mirror_version_service = VersionHistoryReadService(
+        adapter=mirror_core_adapter,
+        proposal_repository=repository,
+        core_state_store_repository=mirror_repo,
+        store_read_enabled=False,
+    )
+    mirror_provenance_service = ProvenanceReadService(
+        adapter=mirror_core_adapter,
+        proposal_repository=repository,
+        core_state_store_repository=mirror_repo,
+        store_read_enabled=False,
+    )
+    mirror_core_read_service = CoreStateReadService(
+        adapter=mirror_core_adapter,
+        version_history_read_service=mirror_version_service,
+        provenance_read_service=mirror_provenance_service,
+        core_state_store_repository=mirror_repo,
+        store_read_enabled=False,
+    )
+    mirror_projection_read_service = ProjectionReadService(
+        adapter=mirror_projection_adapter,
+        core_state_store_repository=mirror_repo,
+        store_read_enabled=False,
+    )
+
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    core_adapter = StorySessionCoreStateAdapter(
+        story_session_service,
+        default_story_id=session.story_id,
+    )
+    projection_adapter = ChapterWorkspaceProjectionAdapter(
+        story_session_service,
+        default_story_id=session.story_id,
+    )
+    version_service = VersionHistoryReadService(
+        adapter=core_adapter,
+        proposal_repository=repository,
+        core_state_store_repository=core_repo,
+        store_read_enabled=True,
+    )
+    provenance_service = ProvenanceReadService(
+        adapter=core_adapter,
+        proposal_repository=repository,
+        core_state_store_repository=core_repo,
+        store_read_enabled=True,
+    )
+    core_read_service = CoreStateReadService(
+        adapter=core_adapter,
+        version_history_read_service=version_service,
+        provenance_read_service=provenance_service,
+        core_state_store_repository=core_repo,
+        store_read_enabled=True,
+    )
+    projection_read_service = ProjectionReadService(
+        adapter=projection_adapter,
+        core_state_store_repository=core_repo,
+        store_read_enabled=True,
+    )
+
+    mirror_state = await mirror_core_read_service.get_state(
+        MemoryGetStateInput(domain=Domain.CHAPTER)
+    )
+    core_state = await core_read_service.get_state(
+        MemoryGetStateInput(domain=Domain.CHAPTER)
+    )
+    mirror_summary = await mirror_projection_read_service.get_summary(
+        MemoryGetSummaryInput(summary_ids=["projection.current_outline_digest"])
+    )
+    core_summary = await projection_read_service.get_summary(
+        MemoryGetSummaryInput(summary_ids=["projection.current_outline_digest"])
+    )
+
+    # Parity is scoped to current user-visible data only. Route/source labels
+    # differ by design, and historical as-of behavior is warn-closed.
+    assert mirror_state.items[0].data["title"] == core_state.items[0].data["title"]
+    assert core_state.items[0].data["title"] == "Chapter Two"
+    assert (
+        mirror_summary.items[0].summary_text
+        == core_summary.items[0].summary_text
+        == "Outline A"
+    )
