@@ -46,13 +46,6 @@ class Settings(BaseSettings):
             "RP_MEMORY_CORE_STATE_STORE_READ_ENABLED",
         ),
     )
-    rp_memory_core_state_store_write_switch_enabled: bool = Field(
-        default=False,
-        validation_alias=AliasChoices(
-            "CHATBOX_BACKEND_RP_MEMORY_CORE_STATE_STORE_WRITE_SWITCH_ENABLED",
-            "RP_MEMORY_CORE_STATE_STORE_WRITE_SWITCH_ENABLED",
-        ),
-    )
 
     # Langfuse observability
     langfuse_enabled: bool = Field(

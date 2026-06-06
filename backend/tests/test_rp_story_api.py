@@ -1797,8 +1797,8 @@ def test_story_activation_bootstraps_session(client, monkeypatch):
     )
     assert snapshot["memory_backend"]["projection_truth_source"] == "core_state_store"
     assert (
-        snapshot["memory_backend"]["flags"]["core_state_store_write_switch_enabled"]
-        is True
+        "core_state_store_write_switch_enabled"
+        not in snapshot["memory_backend"]["flags"]
     )
 
 
@@ -3709,7 +3709,11 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
     assert authoritative_versions.json() == {
         "session_id": session_id,
         "block_id": seeded["authoritative_block_id"],
-        "versions": ["chapter.current@5", "chapter.current@6"],
+        "versions": [
+            "chapter.current@6",
+            "chapter.current@5",
+            "chapter.current@1",
+        ],
         "current_ref": "chapter.current@6",
     }
     assert authoritative_provenance.json()["session_id"] == session_id
@@ -3726,7 +3730,8 @@ def test_story_memory_block_routes_read_formal_blocks_and_filter_list(
         "revision": 6,
     }
     assert authoritative_provenance.json()["source_refs"] == [
-        "core_state_store:authoritative_revision"
+        "core_state_store:authoritative_revision",
+        "base_ref:chapter.current",
     ]
     authoritative_proposal_payload = authoritative_proposals.json()
     authoritative_proposal_ids = {

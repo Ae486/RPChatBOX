@@ -115,7 +115,6 @@ def _memory_backend_metadata() -> dict[str, object]:
         "flags": {
             "core_state_store_write_enabled": store_write_enabled,
             "core_state_store_read_enabled": store_read_enabled,
-            "core_state_store_write_switch_enabled": True,
         },
     }
 
