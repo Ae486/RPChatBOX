@@ -594,6 +594,61 @@ class SetupWorkspaceService:
         self._session.commit()
         return self._require_workspace(workspace_id)
 
+    def stage_pending_user_edit_delta(
+        self,
+        *,
+        workspace_id: str,
+        delta_id: str,
+        step_id: str,
+        target_block: str,
+        target_ref: str,
+        changes: list[dict],
+    ) -> SetupPendingUserEditDeltaRecord:
+        record = SetupPendingUserEditDeltaRecord(
+            delta_id=delta_id,
+            workspace_id=workspace_id,
+            step_id=step_id,
+            target_block=target_block,
+            target_ref=target_ref,
+            changes_json=list(changes),
+            created_at=_utcnow(),
+            consumed_at=None,
+        )
+        self._session.add(record)
+        return record
+
+    def clear_activated_story_session(
+        self,
+        *,
+        workspace_id: str,
+    ) -> SetupWorkspaceRecord:
+        record = self._require_workspace_record(workspace_id)
+        record.activated_story_session_id = None
+        record.updated_at = _utcnow()
+        self._session.add(record)
+        return record
+
+    def seed_current_step(
+        self,
+        *,
+        workspace_id: str,
+        current_step: str,
+    ) -> None:
+        """Seed/dev-only current_step override.
+
+        This deliberately bypasses normal _advance_current_step lifecycle
+        semantics. It is not a normal business state transition and is not part
+        of the aggregate command protocol; by design it may preserve an existing
+        seed-time current_step/current_stage inconsistency surface.
+        """
+
+        record = self._session.get(SetupWorkspaceRecord, workspace_id)
+        if record is None:
+            raise ValueError(f"Workspace missing while seeding current_step: {workspace_id}")
+        record.current_step = str(current_step)
+        self._session.add(record)
+        self._session.commit()
+
     def get_pending_ingestion_jobs(
         self,
         *,

@@ -20,8 +20,9 @@ class SetupWorkspaceAggregate(Protocol):
     3. commit proposal and accepted commit ledger (`commit_proposal` /
        `accepted_commit` surface, represented here by `accept_commit`)
     4. retrieval ingestion job update (`update_ingestion_job`)
-    5. pending user edit delta writes (S2b gap; not declared yet)
-    6. activation session link (`mark_activated_story_session`)
+    5. pending user edit delta writes (`stage_pending_user_edit_delta`)
+    6. activation session link and clear (`mark_activated_story_session` /
+       `clear_activated_story_session`)
     """
 
     def create_workspace(self, *args: object, **kwargs: object) -> object: ...
@@ -32,6 +33,14 @@ class SetupWorkspaceAggregate(Protocol):
 
     def update_ingestion_job(self, *args: object, **kwargs: object) -> object: ...
 
+    def stage_pending_user_edit_delta(
+        self, *args: object, **kwargs: object
+    ) -> object: ...
+
     def mark_activated_story_session(
+        self, *args: object, **kwargs: object
+    ) -> object: ...
+
+    def clear_activated_story_session(
         self, *args: object, **kwargs: object
     ) -> object: ...

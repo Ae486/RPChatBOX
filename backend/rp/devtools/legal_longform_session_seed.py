@@ -1156,9 +1156,9 @@ class LegalLongformSessionSeeder:
             workspace is not None
             and _optional_text(workspace.activated_story_session_id) in session_id_set
         ):
-            workspace.activated_story_session_id = None
-            workspace.updated_at = _utcnow()
-            self._session.add(workspace)
+            SetupWorkspaceService(self._session).clear_activated_story_session(
+                workspace_id=workspace.workspace_id
+            )
 
         chapter_ids = [
             chapter_workspace_id

@@ -17,8 +17,6 @@ from models.rp_retrieval_store import (
     SourceAssetRecord,
 )
 from models.rp_story_store import ChapterWorkspaceRecord, StorySessionRecord
-from models.rp_setup_store import SetupPendingUserEditDeltaRecord
-from models.rp_setup_store import SetupWorkspaceRecord
 from rp.agent_runtime.contracts import SetupCognitiveStateSnapshot
 from rp.models.memory_crud import RetrievalQuery
 from rp.models.retrieval_records import SourceAsset
@@ -966,12 +964,10 @@ class EvalRunner:
 
         current_step = seed.get("current_step")
         if current_step:
-            record = self._session.get(SetupWorkspaceRecord, workspace_id)
-            if record is None:
-                raise ValueError(f"Workspace missing while seeding current_step: {workspace_id}")
-            record.current_step = str(current_step)
-            self._session.add(record)
-            self._session.commit()
+            self._workspace_service.seed_current_step(
+                workspace_id=workspace_id,
+                current_step=current_step,
+            )
 
         rejected_proposals = seed.get("rejected_proposals") or []
         for item in rejected_proposals:
@@ -1001,17 +997,13 @@ class EvalRunner:
 
         pending_user_edit_deltas = seed.get("pending_user_edit_deltas") or []
         for item in pending_user_edit_deltas:
-            self._session.add(
-                SetupPendingUserEditDeltaRecord(
-                    delta_id=str(item.get("delta_id") or uuid4().hex),
-                    workspace_id=workspace_id,
-                    step_id=str(item["step_id"]),
-                    target_block=str(item["target_block"]),
-                    target_ref=str(item["target_ref"]),
-                    changes_json=list(item.get("changes") or []),
-                    created_at=utcnow(),
-                    consumed_at=None,
-                )
+            self._workspace_service.stage_pending_user_edit_delta(
+                workspace_id=workspace_id,
+                delta_id=str(item.get("delta_id") or uuid4().hex),
+                step_id=str(item["step_id"]),
+                target_block=str(item["target_block"]),
+                target_ref=str(item["target_ref"]),
+                changes=list(item.get("changes") or []),
             )
         if pending_user_edit_deltas:
             self._session.commit()

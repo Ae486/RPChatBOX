@@ -118,8 +118,8 @@
       "kind": "class",
       "path": "setup_agent/workspace_service.py",
       "symbol": "SetupWorkspaceService",
-      "lines": 1473,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1528,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition. T27 S2b-1 (+55) added 3 authorized aggregate command methods (stage_pending_user_edit_delta, clear_activated_story_session, seed_current_step) consolidating previously-bypassed SetupWorkspace writes into the aggregate root."
     },
     {
       "kind": "class",
@@ -216,8 +216,8 @@
       "kind": "file",
       "path": "setup_agent/workspace_service.py",
       "symbol": null,
-      "lines": 1534,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 1589,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition. T27 S2b-1 (+55) added 3 authorized aggregate command methods (stage_pending_user_edit_delta, clear_activated_story_session, seed_current_step) consolidating previously-bypassed SetupWorkspace writes into the aggregate root."
     },
     {
       "kind": "file",
