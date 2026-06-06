@@ -160,7 +160,7 @@ def test_real_tree_has_no_hard_write_boundary_failures() -> None:
     assert result.mutation_bypasses == []
 
 
-def test_real_tree_classification_matches_locked_s2b1_expectations() -> None:
+def test_real_tree_classification_matches_locked_s2b2_expectations() -> None:
     result = scan_setup_workspace_write_boundary(DEFAULT_BACKEND_ROOT)
 
     assert {finding.path for finding in result.allowed_authorized} == set(AUTHORIZED)
@@ -168,13 +168,10 @@ def test_real_tree_classification_matches_locked_s2b1_expectations() -> None:
     assert {finding.path for finding in result.known_bypass_debt} == set(
         KNOWN_BYPASS_DEBT
     )
-    assert {finding.path for finding in result.known_bypass_debt} == {
-        "rp/services/retrieval/minimal_ingestion_service.py"
+    assert {finding.path for finding in result.known_bypass_debt} == set()
+    assert "rp/services/retrieval/minimal_ingestion_service.py" in {
+        finding.path for finding in result.allowed_read
     }
-    assert any(
-        finding.bypass_type == "mutation" and finding.record == "SetupRetrievalIngestionJobRecord"
-        for finding in result.known_bypass_debt
-    )
 
 
 def test_setup_workspace_service_structurally_satisfies_aggregate() -> None:

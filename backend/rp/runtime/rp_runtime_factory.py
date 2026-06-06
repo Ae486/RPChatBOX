@@ -166,7 +166,10 @@ class RpRuntimeFactory:
         return SetupRuntimeController(
             workspace_service=workspace_service,
             context_builder=context_builder,
-            retrieval_ingestion_service=MinimalRetrievalIngestionService(self._session),
+            retrieval_ingestion_service=MinimalRetrievalIngestionService(
+                self._session,
+                ingestion_job_port=workspace_service,
+            ),
             runtime_state_service=(
                 runtime_state_service or self._build_setup_runtime_state_service()
             ),

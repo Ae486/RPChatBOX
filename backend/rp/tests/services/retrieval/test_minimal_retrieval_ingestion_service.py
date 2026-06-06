@@ -25,10 +25,12 @@ from rp.models.memory_graph_projection import (
     GRAPH_JOB_STATUS_QUEUED,
 )
 from rp.models.memory_crud import MemorySearchArchivalInput
+from rp.models.setup_workspace import RetrievalIngestionState
 from rp.services.retrieval.minimal_ingestion_service import (
     MinimalRetrievalIngestionService,
 )
 from rp.services.retrieval.broker import RetrievalBroker
+from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 
 
 def _utcnow() -> datetime:
@@ -38,6 +40,34 @@ def _utcnow() -> datetime:
 class _FailingGraphProjectionService:
     def queue_archival_extraction_jobs(self, **_):
         raise RuntimeError("graph queue unavailable")
+
+
+class _RaiseOnSecondStagePort:
+    def __init__(self, delegate: SetupWorkspaceService) -> None:
+        self._delegate = delegate
+        self._calls = 0
+
+    def stage_ingestion_job_update(
+        self,
+        *,
+        job_id: str,
+        state: RetrievalIngestionState,
+        index_job_id: str | None = None,
+        warnings: list[str] | None = None,
+        error_message: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> SetupRetrievalIngestionJobRecord:
+        self._calls += 1
+        if self._calls == 2:
+            raise RuntimeError("port exploded on second update")
+        return self._delegate.stage_ingestion_job_update(
+            job_id=job_id,
+            state=state,
+            index_job_id=index_job_id,
+            warnings=warnings,
+            error_message=error_message,
+            completed_at=completed_at,
+        )
 
 
 def _seed_workspace(retrieval_session) -> None:
@@ -114,10 +144,10 @@ async def test_setup_foundation_ingestion_generates_archival_metadata(
     )
     retrieval_session.commit()
 
-    completed = MinimalRetrievalIngestionService(retrieval_session).ingest_commit(
-        workspace_id="workspace-archival",
-        commit_id="commit-foundation",
-    )
+    completed = MinimalRetrievalIngestionService(
+        retrieval_session,
+        ingestion_job_port=SetupWorkspaceService(retrieval_session),
+    ).ingest_commit(workspace_id="workspace-archival", commit_id="commit-foundation")
 
     asset = retrieval_session.get(
         SourceAssetRecord,
@@ -243,10 +273,10 @@ def test_setup_asset_ingestion_overrides_conflicting_archival_metadata(
     )
     retrieval_session.commit()
 
-    MinimalRetrievalIngestionService(retrieval_session).ingest_commit(
-        workspace_id="workspace-archival",
-        commit_id="commit-asset",
-    )
+    MinimalRetrievalIngestionService(
+        retrieval_session,
+        ingestion_job_port=SetupWorkspaceService(retrieval_session),
+    ).ingest_commit(workspace_id="workspace-archival", commit_id="commit-asset")
 
     asset = retrieval_session.get(SourceAssetRecord, "asset-hero")
     chunks = retrieval_session.exec(
@@ -318,6 +348,7 @@ def test_graph_queue_failure_does_not_fail_setup_archival_ingestion(
 
     completed = MinimalRetrievalIngestionService(
         retrieval_session,
+        ingestion_job_port=SetupWorkspaceService(retrieval_session),
         graph_projection_service=_FailingGraphProjectionService(),
     ).ingest_commit(
         workspace_id="workspace-archival",
@@ -405,7 +436,10 @@ def test_setup_stage_payload_ingestion_reads_canonical_stage_snapshot(
     )
     retrieval_session.commit()
 
-    completed = MinimalRetrievalIngestionService(retrieval_session).ingest_commit(
+    completed = MinimalRetrievalIngestionService(
+        retrieval_session,
+        ingestion_job_port=SetupWorkspaceService(retrieval_session),
+    ).ingest_commit(
         workspace_id="workspace-archival",
         commit_id="commit-stage-world-background",
     )
@@ -519,7 +553,10 @@ def test_setup_stage_section_ingestion_mechanically_splits_oversized_text(
     )
     retrieval_session.commit()
 
-    MinimalRetrievalIngestionService(retrieval_session).ingest_commit(
+    MinimalRetrievalIngestionService(
+        retrieval_session,
+        ingestion_job_port=SetupWorkspaceService(retrieval_session),
+    ).ingest_commit(
         workspace_id="workspace-archival",
         commit_id="commit-stage-world-background-long",
     )
@@ -589,10 +626,10 @@ def test_setup_blueprint_ingestion_generates_archival_metadata(retrieval_session
     )
     retrieval_session.commit()
 
-    completed = MinimalRetrievalIngestionService(retrieval_session).ingest_commit(
-        workspace_id="workspace-archival",
-        commit_id="commit-blueprint",
-    )
+    completed = MinimalRetrievalIngestionService(
+        retrieval_session,
+        ingestion_job_port=SetupWorkspaceService(retrieval_session),
+    ).ingest_commit(workspace_id="workspace-archival", commit_id="commit-blueprint")
 
     asset = retrieval_session.get(
         SourceAssetRecord,
@@ -625,4 +662,182 @@ def test_setup_blueprint_ingestion_generates_archival_metadata(retrieval_session
     assert chunks
     assert {chunk.metadata_json["source_type"] for chunk in chunks} == {
         "longform_blueprint"
+    }
+
+
+def test_ingest_commit_commits_exactly_once_for_multiple_jobs(
+    retrieval_session,
+    monkeypatch,
+) -> None:
+    _seed_workspace(retrieval_session)
+    retrieval_session.add(
+        SetupAcceptedCommitRecord(
+            commit_id="commit-multi-job-success",
+            workspace_id="workspace-archival",
+            proposal_id="proposal-multi-job-success",
+            step_id="foundation",
+            committed_refs_json=["foundation:law-one", "foundation:law-two"],
+            snapshot_payload_json={
+                "foundation": {
+                    "entries": [
+                        {
+                            "entry_id": "law-one",
+                            "domain": "world",
+                            "path": "law-one",
+                            "title": "Law One",
+                            "content": {"rule": "First law of the dusk gate."},
+                        },
+                        {
+                            "entry_id": "law-two",
+                            "domain": "world",
+                            "path": "law-two",
+                            "title": "Law Two",
+                            "content": {"rule": "Second law of the dusk gate."},
+                        },
+                    ]
+                }
+            },
+        )
+    )
+    retrieval_session.add(
+        SetupRetrievalIngestionJobRecord(
+            job_id="setup-job-multi-one",
+            workspace_id="workspace-archival",
+            commit_id="commit-multi-job-success",
+            step_id="foundation",
+            target_type="foundation_entry",
+            target_ref="law-one",
+            state="queued",
+        )
+    )
+    retrieval_session.add(
+        SetupRetrievalIngestionJobRecord(
+            job_id="setup-job-multi-two",
+            workspace_id="workspace-archival",
+            commit_id="commit-multi-job-success",
+            step_id="foundation",
+            target_type="foundation_entry",
+            target_ref="law-two",
+            state="queued",
+        )
+    )
+    retrieval_session.commit()
+
+    commit_count = 0
+    original_commit = retrieval_session.commit
+
+    def counting_commit() -> None:
+        nonlocal commit_count
+        commit_count += 1
+        original_commit()
+
+    monkeypatch.setattr(retrieval_session, "commit", counting_commit)
+
+    completed = MinimalRetrievalIngestionService(
+        retrieval_session,
+        ingestion_job_port=SetupWorkspaceService(retrieval_session),
+    ).ingest_commit(
+        workspace_id="workspace-archival",
+        commit_id="commit-multi-job-success",
+    )
+
+    assert completed == ["setup-job-multi-one", "setup-job-multi-two"]
+    assert commit_count == 1
+
+    # Couple the enum characterization to the real process_job output: every state
+    # that flowed through the port conversion must be a valid RetrievalIngestionState
+    # (an out-of-enum state would have already raised at RetrievalIngestionState(...)).
+    valid_states = {member.value for member in RetrievalIngestionState}
+    for job_id in completed:
+        persisted = retrieval_session.get(SetupRetrievalIngestionJobRecord, job_id)
+        assert persisted.state in valid_states
+
+
+def test_ingest_commit_does_not_commit_when_a_later_job_raises(
+    retrieval_session,
+    monkeypatch,
+) -> None:
+    _seed_workspace(retrieval_session)
+    retrieval_session.add(
+        SetupAcceptedCommitRecord(
+            commit_id="commit-multi-job-failure",
+            workspace_id="workspace-archival",
+            proposal_id="proposal-multi-job-failure",
+            step_id="foundation",
+            committed_refs_json=["foundation:law-alpha", "foundation:law-beta"],
+            snapshot_payload_json={
+                "foundation": {
+                    "entries": [
+                        {
+                            "entry_id": "law-alpha",
+                            "domain": "world",
+                            "path": "law-alpha",
+                            "title": "Law Alpha",
+                            "content": {"rule": "Alpha law of the dusk gate."},
+                        },
+                        {
+                            "entry_id": "law-beta",
+                            "domain": "world",
+                            "path": "law-beta",
+                            "title": "Law Beta",
+                            "content": {"rule": "Beta law of the dusk gate."},
+                        },
+                    ]
+                }
+            },
+        )
+    )
+    retrieval_session.add(
+        SetupRetrievalIngestionJobRecord(
+            job_id="setup-job-failure-one",
+            workspace_id="workspace-archival",
+            commit_id="commit-multi-job-failure",
+            step_id="foundation",
+            target_type="foundation_entry",
+            target_ref="law-alpha",
+            state="queued",
+        )
+    )
+    retrieval_session.add(
+        SetupRetrievalIngestionJobRecord(
+            job_id="setup-job-failure-two",
+            workspace_id="workspace-archival",
+            commit_id="commit-multi-job-failure",
+            step_id="foundation",
+            target_type="foundation_entry",
+            target_ref="law-beta",
+            state="queued",
+        )
+    )
+    retrieval_session.commit()
+
+    commit_count = 0
+    original_commit = retrieval_session.commit
+
+    def counting_commit() -> None:
+        nonlocal commit_count
+        commit_count += 1
+        original_commit()
+
+    monkeypatch.setattr(retrieval_session, "commit", counting_commit)
+    exploding_port = _RaiseOnSecondStagePort(SetupWorkspaceService(retrieval_session))
+
+    with pytest.raises(RuntimeError, match="^port exploded on second update$"):
+        MinimalRetrievalIngestionService(
+            retrieval_session,
+            ingestion_job_port=exploding_port,
+        ).ingest_commit(
+            workspace_id="workspace-archival",
+            commit_id="commit-multi-job-failure",
+        )
+
+    assert commit_count == 0
+
+
+def test_process_job_terminal_states_are_valid_ingestion_states() -> None:
+    terminal_states = {"completed", "failed"}
+
+    assert {RetrievalIngestionState(value) for value in terminal_states} == {
+        RetrievalIngestionState.COMPLETED,
+        RetrievalIngestionState.FAILED,
     }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
 from sqlmodel import select
@@ -26,7 +26,7 @@ from rp.models.memory_materialization import (
 from rp.models.memory_graph_projection import GRAPH_JOB_REASON_ARCHIVAL_INGESTED
 from rp.models.retrieval_records import SourceAsset
 from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_workspace import RetrievalIngestionState, StoryMode
 from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
 from .collection_service import RetrievalCollectionService
 from .document_service import RetrievalDocumentService
@@ -37,6 +37,28 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+@runtime_checkable
+class IngestionJobUpdatePort(Protocol):
+    """Aggregate command surface for staging an ingestion-job status update.
+
+    Defined in retrieval so the setup-facing facade can write the SetupWorkspace
+    aggregate WITHOUT importing setup_agent services (which would create a
+    setup_agent <-> retrieval import cycle). SetupWorkspaceService satisfies it
+    structurally. The implementation MUST NOT commit (the batch owner commits).
+    """
+
+    def stage_ingestion_job_update(
+        self,
+        *,
+        job_id: str,
+        state: RetrievalIngestionState,
+        index_job_id: str | None = None,
+        warnings: list[str] | None = None,
+        error_message: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> SetupRetrievalIngestionJobRecord: ...
+
+
 class MinimalRetrievalIngestionService:
     """Keep the setup commit contract stable while delegating to retrieval-core."""
 
@@ -44,9 +66,11 @@ class MinimalRetrievalIngestionService:
         self,
         session,
         *,
+        ingestion_job_port: IngestionJobUpdatePort,
         graph_projection_service: MemoryGraphProjectionService | None = None,
     ):
         self._session = session
+        self._ingestion_job_port = ingestion_job_port
         self._collection_service = RetrievalCollectionService(session)
         self._document_service = RetrievalDocumentService(session)
         self._ingestion_service = RetrievalIngestionService(session)
@@ -205,13 +229,14 @@ class MinimalRetrievalIngestionService:
             collection_id=collection_id,
         )
 
-        job.index_job_id = index_job.job_id
-        job.state = index_job.job_state
-        job.warnings_json = list(index_job.warnings)
-        job.error_message = index_job.error_message
-        job.updated_at = _utcnow()
-        job.completed_at = index_job.completed_at
-        self._session.add(job)
+        self._ingestion_job_port.stage_ingestion_job_update(
+            job_id=job.job_id,
+            state=RetrievalIngestionState(index_job.job_state),
+            index_job_id=index_job.job_id,
+            warnings=list(index_job.warnings),
+            error_message=index_job.error_message,
+            completed_at=index_job.completed_at,
+        )
         return asset_id if index_job.job_state == "completed" else None
 
     def _queue_graph_extraction_after_archival_ingestion(

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
-from models.rp_setup_store import SetupPendingUserEditDeltaRecord, SetupWorkspaceRecord
+from models.rp_setup_store import (
+    SetupPendingUserEditDeltaRecord,
+    SetupRetrievalIngestionJobRecord,
+    SetupWorkspaceRecord,
+)
 from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId, StoryMode
+from rp.models.setup_workspace import RetrievalIngestionState, SetupStepId, StoryMode
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 
 
@@ -108,3 +114,110 @@ def test_clear_activated_story_session_clears_pointer_and_preserves_state_fields
     assert record_after.workspace_state == workspace_state_before
     assert record_after.activated_at == activated_at_before
     assert record_after.updated_at > updated_at_before
+
+
+def test_stage_ingestion_job_update_stages_without_commit(
+    retrieval_session,
+    monkeypatch,
+) -> None:
+    service = SetupWorkspaceService(retrieval_session)
+    workspace = service.create_workspace(
+        story_id="story-stage-ingestion-job",
+        mode=StoryMode.LONGFORM,
+    )
+    retrieval_session.add(
+        SetupRetrievalIngestionJobRecord(
+            job_id="job-stage-only",
+            workspace_id=workspace.workspace_id,
+            commit_id="commit-stage-only",
+            step_id=SetupStepId.FOUNDATION.value,
+            target_type="foundation_entry",
+            target_ref="entry-stage-only",
+            state=RetrievalIngestionState.QUEUED.value,
+        )
+    )
+    retrieval_session.commit()
+
+    commit_count = 0
+    original_commit = retrieval_session.commit
+
+    def counting_commit() -> None:
+        nonlocal commit_count
+        commit_count += 1
+        original_commit()
+
+    monkeypatch.setattr(retrieval_session, "commit", counting_commit)
+    completed_at = datetime(2026, 6, 7, tzinfo=timezone.utc)
+
+    service.stage_ingestion_job_update(
+        job_id="job-stage-only",
+        state=RetrievalIngestionState.COMPLETED,
+        index_job_id="index-stage-only",
+        warnings=["warn-stage-only"],
+        error_message="stage-only-error",
+        completed_at=completed_at,
+    )
+
+    record = retrieval_session.get(SetupRetrievalIngestionJobRecord, "job-stage-only")
+    assert record is not None
+    assert record.state == RetrievalIngestionState.COMPLETED.value
+    assert record.index_job_id == "index-stage-only"
+    assert record.warnings_json == ["warn-stage-only"]
+    assert record.error_message == "stage-only-error"
+    assert record.completed_at == completed_at
+    assert commit_count == 0
+
+
+def test_update_ingestion_job_commits_and_refreshes(
+    retrieval_session,
+    monkeypatch,
+) -> None:
+    service = SetupWorkspaceService(retrieval_session)
+    workspace = service.create_workspace(
+        story_id="story-update-ingestion-job",
+        mode=StoryMode.LONGFORM,
+    )
+    retrieval_session.add(
+        SetupRetrievalIngestionJobRecord(
+            job_id="job-update-commit",
+            workspace_id=workspace.workspace_id,
+            commit_id="commit-update-commit",
+            step_id=SetupStepId.FOUNDATION.value,
+            target_type="foundation_entry",
+            target_ref="entry-update-commit",
+            state=RetrievalIngestionState.QUEUED.value,
+        )
+    )
+    retrieval_session.commit()
+
+    commit_count = 0
+    original_commit = retrieval_session.commit
+
+    def counting_commit() -> None:
+        nonlocal commit_count
+        commit_count += 1
+        original_commit()
+
+    monkeypatch.setattr(retrieval_session, "commit", counting_commit)
+    completed_at = datetime(2026, 6, 7, 1, tzinfo=timezone.utc)
+
+    service.update_ingestion_job(
+        job_id="job-update-commit",
+        state=RetrievalIngestionState.FAILED,
+        index_job_id="index-update-commit",
+        warnings=["warn-update-commit"],
+        error_message="update-commit-error",
+        completed_at=completed_at,
+    )
+
+    assert commit_count == 1
+    retrieval_session.expire_all()
+    record = retrieval_session.get(SetupRetrievalIngestionJobRecord, "job-update-commit")
+    assert record is not None
+    assert record.state == RetrievalIngestionState.FAILED.value
+    assert record.index_job_id == "index-update-commit"
+    assert record.warnings_json == ["warn-update-commit"]
+    assert record.error_message == "update-commit-error"
+    # SQLite stores DATETIME tz-naive, so the tz-aware input reloads tz-naive after
+    # commit+expire; compare the same instant with tz stripped (production stores as-is).
+    assert record.completed_at == completed_at.replace(tzinfo=None)

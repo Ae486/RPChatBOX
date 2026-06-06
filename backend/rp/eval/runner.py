@@ -487,7 +487,10 @@ class EvalRunner:
                 f"Retrieval eval requires a commit_id or accepted commit seed: {case.case_id}"
             )
 
-        ingestion_service = MinimalRetrievalIngestionService(self._session)
+        ingestion_service = MinimalRetrievalIngestionService(
+            self._session,
+            ingestion_job_port=self._workspace_service,
+        )
         completed_job_ids = ingestion_service.ingest_commit(
             workspace_id=workspace.workspace_id,
             commit_id=commit_id,
@@ -756,7 +759,10 @@ class EvalRunner:
         run_status = "completed"
 
         if bool(case.input.env_overrides.get("run_pending_retrieval_ingestion_for_all_commits")):
-            ingestion_service = MinimalRetrievalIngestionService(self._session)
+            ingestion_service = MinimalRetrievalIngestionService(
+                self._session,
+                ingestion_job_port=self._workspace_service,
+            )
             for commit_id in self._list_commit_ids(workspace_before):
                 ingestion_service.ingest_commit(
                     workspace_id=workspace.workspace_id,

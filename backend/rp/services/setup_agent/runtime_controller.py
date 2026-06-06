@@ -50,8 +50,11 @@ def _run_retrieval_ingestion_in_background(
 ) -> None:
     """Ingestion + readiness refresh on a fresh DB session (request-scoped session is already closed)."""
     with Session(get_engine()) as session:
-        ingestion_service = MinimalRetrievalIngestionService(session)
         workspace_service = SetupWorkspaceService(session)
+        ingestion_service = MinimalRetrievalIngestionService(
+            session,
+            ingestion_job_port=workspace_service,
+        )
         try:
             ingestion_service.ingest_commit(
                 workspace_id=workspace_id,

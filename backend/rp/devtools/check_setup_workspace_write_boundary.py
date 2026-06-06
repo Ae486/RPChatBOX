@@ -23,15 +23,12 @@ AUTHORIZED = frozenset({"rp/services/setup_agent/workspace_service.py"})
 ALLOWED_READ = frozenset(
     {
         "rp/devtools/legal_longform_session_seed.py",
+        "rp/services/retrieval/minimal_ingestion_service.py",
         "rp/services/retrieval/runtime_config_service.py",
     }
 )
 ALLOWED_SCHEMA = frozenset({"services/database.py"})
-KNOWN_BYPASS_DEBT = frozenset(
-    {
-        "rp/services/retrieval/minimal_ingestion_service.py",
-    }
-)
+KNOWN_BYPASS_DEBT = frozenset()
 S2_RECORD_NAMES = frozenset(
     {
         "SetupWorkspaceRecord",

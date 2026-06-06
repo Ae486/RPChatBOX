@@ -676,6 +676,28 @@ class SetupWorkspaceService:
         error_message: str | None = None,
         completed_at: datetime | None = None,
     ) -> SetupRetrievalIngestionJobRecord:
+        record = self.stage_ingestion_job_update(
+            job_id=job_id,
+            state=state,
+            index_job_id=index_job_id,
+            warnings=warnings,
+            error_message=error_message,
+            completed_at=completed_at,
+        )
+        self._session.commit()
+        self._session.refresh(record)
+        return record
+
+    def stage_ingestion_job_update(
+        self,
+        *,
+        job_id: str,
+        state: RetrievalIngestionState,
+        index_job_id: str | None = None,
+        warnings: list[str] | None = None,
+        error_message: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> SetupRetrievalIngestionJobRecord:
         record = self._session.get(SetupRetrievalIngestionJobRecord, job_id)
         if record is None:
             raise ValueError(f"RetrievalIngestionJob not found: {job_id}")
@@ -688,8 +710,6 @@ class SetupWorkspaceService:
         record.updated_at = _utcnow()
         record.completed_at = completed_at
         self._session.add(record)
-        self._session.commit()
-        self._session.refresh(record)
         return record
 
     def _assemble_workspace(
