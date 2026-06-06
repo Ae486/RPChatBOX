@@ -92,12 +92,12 @@ def test_read_allowlisted_file_may_import_but_not_construct(tmp_path: Path) -> N
     assert len(result.construction_bypasses) >= 1
 
 
-def test_production_and_nonprod_debt_are_separate_buckets(tmp_path: Path) -> None:
+def test_archival_reads_and_nonprod_debt_stays_separate(tmp_path: Path) -> None:
     backend_root = tmp_path / "backend"
     _write_python(
         backend_root / "rp" / "services" / "story" / "archival_evolution_service.py",
-        "from models.rp_retrieval_store import KnowledgeChunkRecord\n"
-        "VALUE = KnowledgeChunkRecord\n",
+        "from models.rp_retrieval_store import KnowledgeCollectionRecord\n"
+        "VALUE = KnowledgeCollectionRecord\n",
     )
     _write_python(
         backend_root / "rp" / "eval" / "runner.py",
@@ -107,10 +107,11 @@ def test_production_and_nonprod_debt_are_separate_buckets(tmp_path: Path) -> Non
 
     result = _scan(backend_root)
 
-    assert {f.path for f in result.production_bypass_debt} == {
+    assert {f.path for f in result.allowed_read} == {
         "rp/services/story/archival_evolution_service.py"
     }
     assert {f.path for f in result.nonprod_bypass_debt} == {"rp/eval/runner.py"}
+    assert result.production_bypass_debt == []
     assert result.errors == []
 
 
@@ -148,14 +149,25 @@ def test_real_tree_allowlists_are_exactly_classified() -> None:
     assert {f.path for f in result.nonprod_bypass_debt} == set(NONPROD_BYPASS_DEBT)
 
 
-def test_real_tree_production_debt_is_exactly_story_archival() -> None:
-    # The single production write-authority penetration must not be diluted by the
-    # non-production seed/eval debt; it is asserted on its own.
+def test_real_tree_production_bypass_debt_is_resolved_empty() -> None:
+    # T27 S4b: archival no longer penetrates the corpus write authority; it
+    # delegates chunk/embedding lifecycle writes to the Indexer sink. The single
+    # production write-authority penetration is resolved -> zero production debt.
+    #
+    # The production_bypass_debt bucket alone is a constant (the frozenset is now
+    # empty), so it documents the DoD but cannot catch a regression on its own.
+    # The teeth live in the archival classification below: archival is a pure
+    # READER (allowed_read), and any re-introduced corpus-record construction
+    # there would surface in construction_bypasses / unexpected_importers and trip
+    # this test -- which is exactly the reclaimed boundary S4b must keep closed.
     result = scan_retrieval_corpus_write_boundary(DEFAULT_BACKEND_ROOT)
+    archival = "rp/services/story/archival_evolution_service.py"
 
-    assert {f.path for f in result.production_bypass_debt} == {
-        "rp/services/story/archival_evolution_service.py"
-    }
+    assert result.production_bypass_debt == []
+    assert set(PRODUCTION_BYPASS_DEBT) == set()
+    assert archival in {finding.path for finding in result.allowed_read}
+    assert archival not in {finding.path for finding in result.construction_bypasses}
+    assert archival not in {finding.path for finding in result.unexpected_importers}
 
 
 def test_graph_records_are_out_of_corpus_scope() -> None:

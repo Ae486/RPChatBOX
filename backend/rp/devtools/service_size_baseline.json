@@ -125,8 +125,8 @@
       "kind": "class",
       "path": "story/archival_evolution_service.py",
       "symbol": "ArchivalEvolutionService",
-      "lines": 675,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
+      "lines": 640,
+      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition. T27 S4b ratchet-down (675->640): chunk/embedding lifecycle writes moved out to the Indexer corpus sink (annotate_active_chunks + supersede_asset_chunks), shrinking the class."
     },
     {
       "kind": "class",

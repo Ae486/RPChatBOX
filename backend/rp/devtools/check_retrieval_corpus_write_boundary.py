@@ -1,21 +1,22 @@
-"""Enforce the RetrievalCorpus authoritative write boundary (T27 S4a, ADR-0015).
+"""Enforce the RetrievalCorpus authoritative write boundary (T27 S4a/S4b, ADR-0015).
 
 The six retrieval-corpus records -- KnowledgeCollectionRecord, SourceAssetRecord,
 ParsedDocumentRecord, KnowledgeChunkRecord, EmbeddingRecordRecord, IndexJobRecord
 -- are constructed only by four retrieval-domain sinks (collection_service,
 document_service, index_job_service, indexer). This lint keeps every direct
-import and construction site visible so a future gated S4b slice can resolve the
-remaining write-authority bypasses without changing runtime behavior here.
+import and construction site visible so future write-authority debt stays
+explicit without changing runtime behavior here.
 
 Scope notes (reconciled by two independent write-surface investigations + leader
-code verification, 2026-06-06):
+code verification, updated after T27 S4b resolution):
 - recall is NOT a direct co-writer: it never imports models.rp_retrieval_store and
   reaches the corpus only through injected retrieval services (co-drive, not
   co-write). Hence no recall file appears in any allowlist below.
-- the genuine direct second-domain writer is story/archival_evolution_service.py,
-  which reaches PAST the Indexer API to mutate chunk/embedding lifecycle rows. It
-  is therefore PRODUCTION bypass debt, kept distinct from non-production seed/eval
-  debt so its severity is never diluted.
+- story/archival_evolution_service.py no longer mutates chunk/embedding lifecycle
+  rows directly. It now assembles archival lifecycle semantics and delegates the
+  record writes to the Indexer sink, so the S4b production write-authority
+  penetration is RESOLVED. It remains an allowed READER because it still reads
+  KnowledgeCollectionRecord while validating archival source assets.
 - the four MemoryGraph* projection records (also defined in rp_retrieval_store.py)
   are a SEPARATE memory-owned aggregate written via MemoryGraphProjectionRepository.
   They are intentionally OUT of this lint's record set; their write boundary is a
@@ -63,6 +64,7 @@ ALLOWED_READ = frozenset(
         "rp/services/retrieval/search.py",
         "rp/services/retrieval/maintenance_service.py",
         "rp/services/retrieval/ingestion_service.py",
+        "rp/services/story/archival_evolution_service.py",
         "rp/services/story/runtime_debug_query_service.py",
         "rp/services/memory/graph_extraction_service.py",
         "rp/services/memory/graph_projection_service.py",
@@ -72,11 +74,9 @@ ALLOWED_READ = frozenset(
 # DDL / metadata schema registration only; no row data writes.
 ALLOWED_SCHEMA = frozenset({"services/database.py"})
 
-# PRODUCTION write-authority penetration. The future S4b slice MUST resolve this
-# (collect into a corpus command, or define a sanctioned archival-lifecycle seam).
-PRODUCTION_BYPASS_DEBT = frozenset(
-    {"rp/services/story/archival_evolution_service.py"}
-)
+# PRODUCTION write-authority penetration. Empty at T27 S4b after archival
+# lifecycle writes moved behind the Indexer sink.
+PRODUCTION_BYPASS_DEBT = frozenset()
 
 # Non-production seed/eval helpers that write corpus rows directly. Lower priority
 # than production debt; surfaced separately so it never dilutes the line above.
@@ -433,7 +433,7 @@ def format_report(result: ScanResult) -> str:
     )
     lines.extend(
         _format_file_category(
-            "PRODUCTION-BYPASS-DEBT (S4b MUST RESOLVE: write-authority penetration)",
+            "production-bypass-debt (future direct production write penetrations)",
             result.production_bypass_debt,
         )
     )

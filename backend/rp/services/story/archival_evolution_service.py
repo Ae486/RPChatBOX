@@ -9,11 +9,7 @@ from uuid import uuid4
 
 from sqlmodel import select
 
-from models.rp_retrieval_store import (
-    EmbeddingRecordRecord,
-    KnowledgeCollectionRecord,
-    KnowledgeChunkRecord,
-)
+from models.rp_retrieval_store import KnowledgeCollectionRecord
 from models.rp_story_store import BranchHeadRecord
 from rp.models.archival_evolution import (
     ARCHIVAL_EVOLUTION_EVENT,
@@ -33,6 +29,7 @@ from rp.models.memory_contract_registry import (
 )
 from rp.models.memory_materialization import ARCHIVAL_LAYER
 from rp.models.retrieval_records import SourceAsset
+from rp.retrieval.indexer import Indexer
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
@@ -51,6 +48,7 @@ class ArchivalEvolutionService:
         *,
         document_service: RetrievalDocumentService | None = None,
         ingestion_service: RetrievalIngestionService | None = None,
+        indexer: Indexer | None = None,
         memory_change_event_service: MemoryChangeEventService | None = None,
     ) -> None:
         self._session = session
@@ -58,6 +56,7 @@ class ArchivalEvolutionService:
         self._ingestion_service = ingestion_service or RetrievalIngestionService(
             session
         )
+        self._indexer = indexer or Indexer(session)
         self._memory_change_event_service = (
             memory_change_event_service or MemoryChangeEventService(session=session)
         )
@@ -438,43 +437,31 @@ class ArchivalEvolutionService:
         reindex_job_id: str,
         source_refs: Sequence[MemorySourceRef],
     ) -> list[str]:
-        stmt = (
-            select(KnowledgeChunkRecord)
-            .where(KnowledgeChunkRecord.asset_id == new_asset_id)
-            .where(KnowledgeChunkRecord.is_active == True)  # noqa: E712
-            .order_by(KnowledgeChunkRecord.chunk_index.asc())
-        )
-        chunks = list(self._session.exec(stmt).all())
         source_ref_payloads = [item.model_dump(mode="json") for item in source_refs]
-        for chunk in chunks:
-            metadata = dict(chunk.metadata_json or {})
-            metadata.update(
-                {
-                    "archival_evolution_id": evolution_id,
-                    "source_version": new_source_version,
-                    "source_asset_version": new_source_version,
-                    "chunk_version": new_source_version,
-                    "supersedes_source_asset_id": superseded_source_asset_id,
-                    "supersedes_source_version": superseded_source_version,
-                    "reindex_job_id": reindex_job_id,
-                    "source_refs": source_ref_payloads,
-                }
-            )
-            chunk.metadata_json = metadata
-            chunk.provenance_refs_json = _dedupe_text_values(
-                [
-                    *list(chunk.provenance_refs_json or []),
-                    f"archival_evolution:{evolution_id}",
-                    f"source_asset:{new_asset_id}@v{new_source_version}",
-                    (
-                        f"supersedes_source_asset:{superseded_source_asset_id}"
-                        f"@v{superseded_source_version}"
-                    ),
-                    f"index_job:{reindex_job_id}",
-                ]
-            )
-            self._session.add(chunk)
-        return [chunk.chunk_id for chunk in chunks]
+        metadata_merge = {
+            "archival_evolution_id": evolution_id,
+            "source_version": new_source_version,
+            "source_asset_version": new_source_version,
+            "chunk_version": new_source_version,
+            "supersedes_source_asset_id": superseded_source_asset_id,
+            "supersedes_source_version": superseded_source_version,
+            "reindex_job_id": reindex_job_id,
+            "source_refs": source_ref_payloads,
+        }
+        provenance_appends = [
+            f"archival_evolution:{evolution_id}",
+            f"source_asset:{new_asset_id}@v{new_source_version}",
+            (
+                f"supersedes_source_asset:{superseded_source_asset_id}"
+                f"@v{superseded_source_version}"
+            ),
+            f"index_job:{reindex_job_id}",
+        ]
+        return self._indexer.annotate_active_chunks(
+            asset_id=new_asset_id,
+            metadata_merge=metadata_merge,
+            provenance_appends=provenance_appends,
+        )
 
     def _supersede_source_asset(
         self,
@@ -549,42 +536,17 @@ class ArchivalEvolutionService:
         replacement_asset_id: str,
         replacement_source_version: int,
     ) -> None:
-        chunks = list(
-            self._session.exec(
-                select(KnowledgeChunkRecord).where(
-                    KnowledgeChunkRecord.asset_id == source_asset_id
-                )
-            ).all()
+        metadata_merge = {
+            "lifecycle_state": ARCHIVAL_LIFECYCLE_SUPERSEDED,
+            "visibility_state": ARCHIVAL_LIFECYCLE_SUPERSEDED,
+            "superseded_by_source_asset_id": replacement_asset_id,
+            "superseded_by_evolution_id": evolution_id,
+            "superseded_by_source_version": replacement_source_version,
+        }
+        self._indexer.supersede_asset_chunks(
+            asset_id=source_asset_id,
+            metadata_merge=metadata_merge,
         )
-        chunk_ids: list[str] = []
-        for chunk in chunks:
-            chunk_ids.append(chunk.chunk_id)
-            metadata = dict(chunk.metadata_json or {})
-            metadata.update(
-                {
-                    "lifecycle_state": ARCHIVAL_LIFECYCLE_SUPERSEDED,
-                    "visibility_state": ARCHIVAL_LIFECYCLE_SUPERSEDED,
-                    "superseded_by_source_asset_id": replacement_asset_id,
-                    "superseded_by_evolution_id": evolution_id,
-                    "superseded_by_source_version": replacement_source_version,
-                }
-            )
-            chunk.metadata_json = metadata
-            chunk.is_active = False
-            self._session.add(chunk)
-        if not chunk_ids:
-            return
-        embeddings = list(
-            self._session.exec(
-                select(EmbeddingRecordRecord).where(
-                    EmbeddingRecordRecord.chunk_id.in_(chunk_ids)
-                )
-            ).all()
-        )
-        for embedding in embeddings:
-            embedding.is_active = False
-            embedding.updated_at = _utcnow()
-            self._session.add(embedding)
 
     def _record_evolution_event(
         self,

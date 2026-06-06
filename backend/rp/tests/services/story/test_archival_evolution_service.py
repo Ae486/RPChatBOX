@@ -6,6 +6,7 @@ import pytest
 from sqlmodel import select
 
 from models.rp_retrieval_store import (
+    EmbeddingRecordRecord,
     IndexJobRecord,
     KnowledgeChunkRecord,
     SourceAssetRecord,
@@ -747,6 +748,137 @@ async def test_archival_evolution_records_version_reindex_event_and_excludes_old
     assert new_search.hits[0].metadata["source_version"] == 2
     assert new_search.hits[0].metadata["archival_evolution_id"] == (
         receipt.evolution_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_archival_evolution_supersedes_old_chunks_and_embeddings(
+    retrieval_session,
+):
+    main_identity, _ = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-old-chunk-supersede",
+        text="oldchunkanchor original law should be superseded.",
+    )
+
+    receipt = ArchivalEvolutionService(retrieval_session).evolve_source(
+        ArchivalEvolutionRequest(
+            identity=main_identity,
+            actor="writer",
+            source_asset_id="asset-old-chunk-supersede",
+            expected_source_version=1,
+            replacement_sections=[
+                {
+                    "text": "newchunkanchor replacement law after supersede.",
+                    "metadata": {
+                        "domain": Domain.WORLD_RULE.value,
+                        "domain_path": "foundation.world.asset-old-chunk-supersede",
+                    },
+                }
+            ],
+            reason="supersede old chunk records",
+        )
+    )
+    retrieval_session.flush()
+
+    old_chunks = list(
+        retrieval_session.exec(
+            select(KnowledgeChunkRecord).where(
+                KnowledgeChunkRecord.asset_id == "asset-old-chunk-supersede"
+            )
+        ).all()
+    )
+    old_chunk_ids = [chunk.chunk_id for chunk in old_chunks]
+    old_embeddings = list(
+        retrieval_session.exec(
+            select(EmbeddingRecordRecord).where(
+                EmbeddingRecordRecord.chunk_id.in_(old_chunk_ids)
+            )
+        ).all()
+    )
+
+    assert receipt.new_source_version == 2
+    assert old_chunks
+    for chunk in old_chunks:
+        assert chunk.is_active is False
+        assert chunk.metadata_json["lifecycle_state"] == "superseded"
+        assert chunk.metadata_json["visibility_state"] == "superseded"
+        assert chunk.metadata_json["superseded_by_source_asset_id"] == (
+            receipt.source_asset_id
+        )
+        assert chunk.metadata_json["superseded_by_evolution_id"] == (
+            receipt.evolution_id
+        )
+        assert chunk.metadata_json["superseded_by_source_version"] == (
+            receipt.new_source_version
+        )
+    assert old_embeddings
+    for embedding in old_embeddings:
+        assert embedding.is_active is False
+        assert embedding.updated_at is not None
+
+
+@pytest.mark.asyncio
+async def test_archival_evolution_new_chunks_keep_full_metadata_and_deduped_provenance(
+    retrieval_session,
+):
+    main_identity, _ = _seed_runtime_identities(retrieval_session)
+    _seed_archival_asset(
+        retrieval_session,
+        identity=main_identity,
+        asset_id="asset-new-chunk-metadata",
+        text="oldmetadataanchor original law should be replaced.",
+    )
+
+    receipt = ArchivalEvolutionService(retrieval_session).evolve_source(
+        ArchivalEvolutionRequest(
+            identity=main_identity,
+            actor="writer",
+            source_asset_id="asset-new-chunk-metadata",
+            expected_source_version=1,
+            replacement_sections=[
+                {
+                    "text": "newmetadataanchor replacement law cites exact versions.",
+                    "metadata": {
+                        "domain": Domain.WORLD_RULE.value,
+                        "domain_path": "foundation.world.asset-new-chunk-metadata",
+                    },
+                }
+            ],
+            reason="pin full chunk metadata and provenance",
+        )
+    )
+    retrieval_session.flush()
+
+    new_chunk = retrieval_session.get(
+        KnowledgeChunkRecord, receipt.replacement_chunk_ids[0]
+    )
+
+    assert new_chunk is not None
+    assert new_chunk.metadata_json["archival_evolution_id"] == receipt.evolution_id
+    assert new_chunk.metadata_json["source_version"] == 2
+    assert new_chunk.metadata_json["source_asset_version"] == 2
+    assert new_chunk.metadata_json["chunk_version"] == 2
+    assert new_chunk.metadata_json["supersedes_source_asset_id"] == (
+        "asset-new-chunk-metadata"
+    )
+    assert new_chunk.metadata_json["supersedes_source_version"] == 1
+    assert new_chunk.metadata_json["reindex_job_id"] == receipt.reindex_job_ids[0]
+    assert isinstance(new_chunk.metadata_json["source_refs"], list)
+    assert f"archival_evolution:{receipt.evolution_id}" in (
+        new_chunk.provenance_refs_json
+    )
+    assert f"source_asset:{receipt.source_asset_id}@v2" in (
+        new_chunk.provenance_refs_json
+    )
+    assert "supersedes_source_asset:asset-new-chunk-metadata@v1" in (
+        new_chunk.provenance_refs_json
+    )
+    assert f"index_job:{receipt.reindex_job_ids[0]}" in new_chunk.provenance_refs_json
+    assert len(new_chunk.provenance_refs_json) == len(
+        {item.casefold() for item in new_chunk.provenance_refs_json}
     )
 
 

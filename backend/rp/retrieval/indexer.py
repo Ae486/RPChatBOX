@@ -18,6 +18,21 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _dedupe_text_values(values: list[str]) -> list[str]:
+    normalized_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_values.append(normalized)
+    return normalized_values
+
+
 class Indexer:
     """Persist active retrieval chunks and embeddings."""
 
@@ -48,6 +63,80 @@ class Indexer:
             embedding.is_active = False
             embedding.updated_at = now
             self._session.add(embedding)
+
+    def annotate_active_chunks(
+        self,
+        *,
+        asset_id: str,
+        metadata_merge: dict,
+        provenance_appends: list[str],
+    ) -> list[str]:
+        """Merge metadata and append provenance on an asset's ACTIVE chunks.
+
+        Generic corpus-lifecycle write: the caller assembles the domain semantics
+        (merge dict + provenance strings); the indexer owns the record write. The
+        outer transaction owner commits; this never commits.
+        """
+        stmt = (
+            select(KnowledgeChunkRecord)
+            .where(KnowledgeChunkRecord.asset_id == asset_id)
+            .where(KnowledgeChunkRecord.is_active == True)  # noqa: E712
+            .order_by(KnowledgeChunkRecord.chunk_index.asc())
+        )
+        chunks = list(self._session.exec(stmt).all())
+        for chunk in chunks:
+            metadata = dict(chunk.metadata_json or {})
+            metadata.update(metadata_merge)
+            chunk.metadata_json = metadata
+            chunk.provenance_refs_json = _dedupe_text_values(
+                [*list(chunk.provenance_refs_json or []), *provenance_appends]
+            )
+            self._session.add(chunk)
+        return [chunk.chunk_id for chunk in chunks]
+
+    def supersede_asset_chunks(
+        self,
+        *,
+        asset_id: str,
+        metadata_merge: dict,
+    ) -> list[str]:
+        """Supersede ALL of an asset's chunks (+ cascade their embeddings).
+
+        Operates on every chunk of the asset (NOT only active ones) and every
+        embedding of those chunks, matching the archival supersession contract.
+        Merges the caller-provided lifecycle metadata and deactivates. Generic
+        corpus-lifecycle write; never commits.
+        """
+        chunks = list(
+            self._session.exec(
+                select(KnowledgeChunkRecord).where(
+                    KnowledgeChunkRecord.asset_id == asset_id
+                )
+            ).all()
+        )
+        chunk_ids: list[str] = []
+        for chunk in chunks:
+            chunk_ids.append(chunk.chunk_id)
+            metadata = dict(chunk.metadata_json or {})
+            metadata.update(metadata_merge)
+            chunk.metadata_json = metadata
+            chunk.is_active = False
+            self._session.add(chunk)
+        if not chunk_ids:
+            return chunk_ids
+        now = _utcnow()
+        embeddings = list(
+            self._session.exec(
+                select(EmbeddingRecordRecord).where(
+                    EmbeddingRecordRecord.chunk_id.in_(chunk_ids)
+                )
+            ).all()
+        )
+        for embedding in embeddings:
+            embedding.is_active = False
+            embedding.updated_at = now
+            self._session.add(embedding)
+        return chunk_ids
 
     def upsert_chunks(self, chunks: list[KnowledgeChunk]) -> None:
         for chunk in chunks:
