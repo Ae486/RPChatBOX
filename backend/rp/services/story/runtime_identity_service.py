@@ -33,6 +33,7 @@ from rp.services.runtime.profile_snapshot_service import (
     RuntimeProfileSnapshotServiceError,
 )
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
+from .session_service import StorySessionService
 
 
 def _utcnow() -> datetime:
@@ -74,10 +75,14 @@ class StoryRuntimeIdentityService:
         session,
         *,
         runtime_profile_snapshot_service: RuntimeProfileSnapshotService | None = None,
+        story_session_service: StorySessionService | None = None,
     ) -> None:
         self._session = session
         self._runtime_profile_snapshot_service = (
             runtime_profile_snapshot_service or RuntimeProfileSnapshotService(session)
+        )
+        self._story_session_service = (
+            story_session_service or StorySessionService(session)
         )
 
     def ensure_default_branch(
@@ -227,7 +232,10 @@ class StoryRuntimeIdentityService:
         )
         branch.created_by_control_receipt_id = receipt.receipt_id
         branch.updated_at = now
-        session_record.active_branch_head_id = branch.branch_head_id
+        self._story_session_service.set_active_branch_head(
+            session_record,
+            branch.branch_head_id,
+        )
         session_record.updated_at = now
         self._session.add(branch)
         self._session.add(session_record)
@@ -253,7 +261,10 @@ class StoryRuntimeIdentityService:
         self._require_branch_switchable(target_branch)
         now = _utcnow()
         from_branch_head_id = str(session_record.active_branch_head_id or "").strip()
-        session_record.active_branch_head_id = target_branch.branch_head_id
+        self._story_session_service.set_active_branch_head(
+            session_record,
+            target_branch.branch_head_id,
+        )
         session_record.updated_at = now
         self._session.add(session_record)
         receipt = self._write_branch_control_receipt(
@@ -1592,7 +1603,10 @@ class StoryRuntimeIdentityService:
         current_branch_id = str(session_record.active_branch_head_id or "").strip()
         if current_branch_id:
             return
-        session_record.active_branch_head_id = branch_head_id
+        self._story_session_service.set_active_branch_head(
+            session_record,
+            branch_head_id,
+        )
         session_record.updated_at = updated_at or _utcnow()
         self._session.add(session_record)
         self._session.flush()

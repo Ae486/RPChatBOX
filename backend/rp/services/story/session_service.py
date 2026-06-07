@@ -133,6 +133,30 @@ class StorySessionService:
         """
         session_record.active_runtime_profile_snapshot_id = snapshot_id
 
+    def set_runtime_story_config(
+        self,
+        session_record: StorySessionRecord,
+        runtime_story_config: dict,
+    ) -> None:
+        """Owner-authority full replace of runtime story config on a caller-held row.
+
+        The caller already performed any deep merge and still owns updated_at,
+        flush, and transaction boundaries around this field replacement.
+        """
+        session_record.runtime_story_config_json = dict(runtime_story_config)
+
+    def set_active_branch_head(
+        self,
+        session_record: StorySessionRecord,
+        branch_head_id: str | None,
+    ) -> None:
+        """Owner-authority assignment of the active branch-head pointer.
+
+        Field-specific seam: assigns only this pointer on a caller-held record,
+        without flush or updated_at bump (the caller owns its transaction).
+        """
+        session_record.active_branch_head_id = branch_head_id
+
     def update_session(
         self,
         *,

@@ -25,6 +25,7 @@ from rp.services.memory.contract_registry import MemoryContractRegistryError
 from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
+from ..story.session_service import StorySessionService
 from .profile_snapshot_service import (
     RuntimeProfileSnapshotService,
     RuntimeProfileSnapshotServiceError,
@@ -79,6 +80,7 @@ class RuntimeConfigControlService:
         session: Session,
         *,
         runtime_profile_snapshot_service: RuntimeProfileSnapshotService | None = None,
+        story_session_service: StorySessionService | None = None,
         registry_management_service: MemoryRegistryManagementService | None = None,
         model_registry_service: Any | None = None,
         provider_registry_service: Any | None = None,
@@ -88,6 +90,11 @@ class RuntimeConfigControlService:
             runtime_profile_snapshot_service
             if runtime_profile_snapshot_service is not None
             else RuntimeProfileSnapshotService(session)
+        )
+        self._story_session_service = (
+            story_session_service
+            if story_session_service is not None
+            else StorySessionService(session)
         )
         self._registry_management_service = (
             registry_management_service
@@ -150,7 +157,10 @@ class RuntimeConfigControlService:
         previous_config = dict(session_record.runtime_story_config_json or {})
         try:
             now = _utcnow()
-            session_record.runtime_story_config_json = next_config
+            self._story_session_service.set_runtime_story_config(
+                session_record,
+                next_config,
+            )
             session_record.updated_at = now
             self._session.add(session_record)
             self._session.flush()

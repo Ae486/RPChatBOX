@@ -14,14 +14,10 @@ runtime behavior here.
 Scope limits (anti-fitting / honest disclosure):
 - This lint detects IMPORT + CONSTRUCTION in AST. It does NOT detect field
   mutation (x.field = ...).
-- Three known StorySessionRecord active-pointer field penetrations are invisible
-  to this lint because the offending services are AUTHORIZED constructors of
-  their own records:
-  - active_branch_head_id <- runtime_identity_service (:230/:256/:1595)
-  - active_runtime_profile_snapshot_id <- profile_snapshot_service (:648)
-  - runtime_story_config_json <- config_control_service (:153)
-- Those active-pointer penetrations are covered by characterization tests and
-  deferred to S5d owner-reroute migration.
+- StorySession owner-pointer field authority is enforced separately by
+  characterization tests (`test_session_pointer_write_authority.py`) because a
+  future foreign `x.field = ...` write would still be invisible to this lint if
+  it happened inside an otherwise AUTHORIZED constructor service.
 - rp/services/core_state/as_of_resolver.py is in PRODUCTION_BYPASS_DEBT
   precisely because it writes StoryTurnRecord.core_state_snapshot_id (:516),
   the one penetration this lint can keep visible only through its import
