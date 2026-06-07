@@ -153,8 +153,8 @@
       "kind": "class",
       "path": "story/runtime_identity_service.py",
       "symbol": "StoryRuntimeIdentityService",
-      "lines": 1562,
-      "reason": "Grandfathered by T8; +13 for T27 S5d-3 (StorySessionService DI + 3 active_branch_head_id writes rerouted to owner seam, behavior-preserving). Future domain-specific refactor owns decomposition."
+      "lines": 1578,
+      "reason": "Grandfathered by T8; +13 for T27 S5d-3 (StorySessionService DI + 3 active_branch_head_id writes rerouted to owner seam, behavior-preserving); +16 for T27 S5e (stage_turn_core_state_binding owner seam hosting the inverted as_of_resolver core_state_snapshot_id write). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "class",
@@ -237,8 +237,8 @@
       "kind": "file",
       "path": "story/runtime_identity_service.py",
       "symbol": null,
-      "lines": 1612,
-      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import); +14 for T27 S5d-3 (owner-seam DI + 3 branch-head reroutes). Future domain-specific refactor owns decomposition."
+      "lines": 1628,
+      "reason": "Grandfathered by T8; +1 line in T12 batch-1 (RPError import); +14 for T27 S5d-3 (owner-seam DI + 3 branch-head reroutes); +16 for T27 S5e (stage_turn_core_state_binding owner seam for the inverted core_state_snapshot_id write). Future domain-specific refactor owns decomposition."
     },
     {
       "kind": "file",

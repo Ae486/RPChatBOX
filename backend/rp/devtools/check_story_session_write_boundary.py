@@ -18,13 +18,12 @@ Scope limits (anti-fitting / honest disclosure):
   characterization tests (`test_session_pointer_write_authority.py`) because a
   future foreign `x.field = ...` write would still be invisible to this lint if
   it happened inside an otherwise AUTHORIZED constructor service.
-- rp/services/core_state/as_of_resolver.py is in PRODUCTION_BYPASS_DEBT
-  precisely because it writes StoryTurnRecord.core_state_snapshot_id (:516),
-  the one penetration this lint can keep visible only through its import
-  surface; it is cleared in S5e via port inversion.
+- In S5e, the StoryTurnRecord.core_state_snapshot_id field write was inverted
+  into the story owner seam, so core_state/as_of_resolver.py is now an
+  ALLOWED_READ consumer that only reads StoryTurnRecord + BranchHeadRecord.
 - This lint does NOT fully enforce the boundary. It formalizes the import +
-  construction boundary only. Listing as_of_resolver as ALLOWED_READ would be
-  dishonest because it mutates a Story record field in production.
+  construction boundary only; field-mutation authority still needs
+  characterization tests.
 """
 
 from __future__ import annotations
@@ -54,6 +53,7 @@ AUTHORIZED = frozenset(
 
 ALLOWED_READ = frozenset(
     {
+        "rp/services/core_state/as_of_resolver.py",
         "rp/services/story/turn_domain_service.py",
         "rp/services/writer/worker_memory_service.py",
         "rp/services/retrieval/search.py",
@@ -69,7 +69,7 @@ ALLOWED_READ = frozenset(
 )
 
 ALLOWED_SCHEMA = frozenset({"services/database.py"})
-PRODUCTION_BYPASS_DEBT = frozenset({"rp/services/core_state/as_of_resolver.py"})
+PRODUCTION_BYPASS_DEBT = frozenset()
 NONPROD_BYPASS_DEBT = frozenset()
 
 STORY_RECORD_NAMES = frozenset(

@@ -108,7 +108,9 @@ def test_real_tree_allowlists_are_exactly_classified() -> None:
     assert {f.path for f in result.allowed_authorized} == set(AUTHORIZED)
     assert {f.path for f in result.allowed_read} == set(ALLOWED_READ)
     assert {f.path for f in result.allowed_schema} == set(ALLOWED_SCHEMA)
-    assert {f.path for f in result.production_bypass_debt} == set(PRODUCTION_BYPASS_DEBT)
+    assert {f.path for f in result.production_bypass_debt} == set(
+        PRODUCTION_BYPASS_DEBT
+    )
     assert {f.path for f in result.nonprod_bypass_debt} == set(NONPROD_BYPASS_DEBT)
 
 

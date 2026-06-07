@@ -739,6 +739,22 @@ class StoryRuntimeIdentityService:
         self._session.flush()
         return record
 
+    def stage_turn_core_state_binding(
+        self,
+        *,
+        turn: StoryTurnRecord,
+        snapshot_id: str,
+    ) -> None:
+        """Owner seam: bind a turn to its core-state snapshot (CoreState calls via a port).
+
+        Mutates ONLY core_state_snapshot_id. Assign + flush, NEVER commit (caller owns the txn).
+        """
+        if turn.core_state_snapshot_id == snapshot_id:
+            return
+        turn.core_state_snapshot_id = snapshot_id
+        self._session.add(turn)
+        self._session.flush()
+
     def get_turn(self, turn_id: str) -> StoryTurnRecord | None:
         return self._session.get(StoryTurnRecord, turn_id)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Iterable, Any
+from typing import Any, Iterable, Protocol, runtime_checkable
 
 from sqlalchemy import asc
 from sqlmodel import Session, select
@@ -30,6 +30,15 @@ from ..runtime.read_manifest_service import BranchVisibilityResolver
 from ..story.session_service import StorySessionService
 
 
+@runtime_checkable
+class TurnCoreStateBindingPort(Protocol):
+    """Owner-side seam for binding a turn to its core-state snapshot (no commit)."""
+
+    def stage_turn_core_state_binding(
+        self, *, turn: StoryTurnRecord, snapshot_id: str
+    ) -> None: ...
+
+
 class CoreStateAsOfResolverError(RPError, ValueError):
     """Stable Core State as-of resolver error with a machine-readable code."""
 
@@ -48,6 +57,7 @@ class CoreStateAsOfResolver:
         repository: CoreStateStoreRepository | None = None,
         branch_visibility_resolver: BranchVisibilityResolver | None = None,
         mirror_service: AuthoritativeCompatibilityMirrorService | None = None,
+        turn_core_state_binding_port: TurnCoreStateBindingPort | None = None,
     ) -> None:
         self._session = session
         self._repository = repository or CoreStateStoreRepository(session)
@@ -55,6 +65,11 @@ class CoreStateAsOfResolver:
             branch_visibility_resolver or BranchVisibilityResolver(session)
         )
         self._mirror_service = mirror_service
+        if turn_core_state_binding_port is None:
+            from ..story.runtime_identity_service import StoryRuntimeIdentityService
+
+            turn_core_state_binding_port = StoryRuntimeIdentityService(session)
+        self._turn_binding_port = turn_core_state_binding_port
 
     def build_scope(
         self,
@@ -511,11 +526,10 @@ class CoreStateAsOfResolver:
         turn: StoryTurnRecord,
         snapshot_id: str,
     ) -> None:
-        if turn.core_state_snapshot_id == snapshot_id:
-            return
-        turn.core_state_snapshot_id = snapshot_id
-        self._session.add(turn)
-        self._session.flush()
+        self._turn_binding_port.stage_turn_core_state_binding(
+            turn=turn,
+            snapshot_id=snapshot_id,
+        )
 
     def _turn_order(self, *, session_id: str, branch_head_id: str) -> dict[str, int]:
         stmt = (
