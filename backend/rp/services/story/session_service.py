@@ -123,6 +123,16 @@ class StorySessionService:
         self._session.flush()
         return self._record_to_story_session(record)
 
+    def set_active_runtime_profile_snapshot(
+        self, session_record: StorySessionRecord, snapshot_id: str | None
+    ) -> None:
+        """Owner-authority assignment of the active runtime profile snapshot pointer.
+
+        Field-specific seam: assigns only this pointer on a caller-held record,
+        without flush or updated_at bump (the caller owns its transaction).
+        """
+        session_record.active_runtime_profile_snapshot_id = snapshot_id
+
     def update_session(
         self,
         *,

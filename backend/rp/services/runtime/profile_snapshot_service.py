@@ -39,6 +39,7 @@ from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )
 from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
+from rp.services.story.session_service import StorySessionService
 
 
 def _utcnow() -> datetime:
@@ -63,6 +64,7 @@ class RuntimeProfileSnapshotService:
         registry_service: MemoryContractRegistryService | None = None,
         registry_management_service: MemoryRegistryManagementService | None = None,
         retrieval_runtime_config_service: RetrievalRuntimeConfigService | None = None,
+        story_session_service: StorySessionService | None = None,
     ) -> None:
         self._session = session
         self._registry_service = registry_service
@@ -73,6 +75,9 @@ class RuntimeProfileSnapshotService:
         )
         self._retrieval_runtime_config_service = (
             retrieval_runtime_config_service or RetrievalRuntimeConfigService(session)
+        )
+        self._story_session_service = (
+            story_session_service or StorySessionService(session)
         )
 
     def compile_snapshot(
@@ -645,7 +650,9 @@ class RuntimeProfileSnapshotService:
         session_record = self._require_session_record(session_id)
         if session_record.active_runtime_profile_snapshot_id == snapshot_id:
             return
-        session_record.active_runtime_profile_snapshot_id = snapshot_id
+        self._story_session_service.set_active_runtime_profile_snapshot(
+            session_record, snapshot_id
+        )
         session_record.updated_at = updated_at or _utcnow()
         self._session.add(session_record)
         self._session.flush()
