@@ -12,9 +12,9 @@ from models.rp_memory_store import (
     MemoryProposalRecord,
     RuntimeWorkspaceMaterialRecord,
 )
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_trace import MemoryTraceBundle
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.trace import MemoryTraceBundle
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.runtime.memory_persistence_repository import (
     MemoryChangeEventRepository,

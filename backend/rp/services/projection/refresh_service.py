@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from rp.models.dsl import Layer
-from rp.models.memory_contract_registry import MemoryChangeEvent, MemoryDirtyTarget
-from rp.models.projection_refresh import (
+from rp.models.shared.dsl import Layer
+from rp.models.memory.contract_registry import MemoryChangeEvent, MemoryDirtyTarget
+from rp.models.projection.refresh import (
     ProjectionRefreshRequest,
     ProjectionRefreshServiceError,
 )
-from rp.models.story_runtime import ChapterWorkspace, SpecialistResultBundle
+from rp.models.story.runtime import ChapterWorkspace, SpecialistResultBundle
 
 from ..core_state.dual_write_service import CoreStateDualWriteService
 from ..memory.change_event_service import MemoryChangeEventService

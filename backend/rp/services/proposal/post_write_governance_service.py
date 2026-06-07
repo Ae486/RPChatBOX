@@ -6,23 +6,23 @@ from typing import Any
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.projection_refresh import ProjectionRefreshRequest
-from rp.models.dsl import ObjectRef
-from rp.models.memory_contract_registry import MemoryDirtyTarget
-from rp.models.postwrite_runtime_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.projection.refresh import ProjectionRefreshRequest
+from rp.models.shared.dsl import ObjectRef
+from rp.models.memory.contract_registry import MemoryDirtyTarget
+from rp.models.proposal.postwrite_runtime_contracts import (
     PostWriteGovernanceDispatchResult,
     WorkerProposalGovernanceEnvelope,
 )
-from rp.models.runtime_workflow_job import (
+from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,
     RuntimeWorkflowJobStatus,
 )
-from rp.models.story_runtime import ChapterWorkspace, SpecialistResultBundle, StorySession
-from rp.models.worker_memory import WorkerProposalGovernanceMetadata
-from rp.models.worker_runtime_contracts import WorkerExecutionPlan, WorkerResult
+from rp.models.story.runtime import ChapterWorkspace, SpecialistResultBundle, StorySession
+from rp.models.writer.worker_memory import WorkerProposalGovernanceMetadata
+from rp.models.writer.worker_runtime_contracts import WorkerExecutionPlan, WorkerResult
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,

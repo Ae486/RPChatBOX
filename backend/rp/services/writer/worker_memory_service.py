@@ -10,9 +10,9 @@ from sqlmodel import Session
 from config import get_settings
 from models.rp_story_store import RuntimeProfileSnapshotRecord
 from rp.errors import RPError
-from rp.models.dsl import Layer
-from rp.models.memory_contract_registry import MemorySourceRef
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Layer
+from rp.models.memory.contract_registry import MemorySourceRef
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
     MemorySearchArchivalInput,
@@ -23,9 +23,9 @@ from rp.models.memory_crud import (
     StateReadResult,
     SummaryReadResult,
 )
-from rp.models.projection_refresh import ProjectionRefreshRequest
-from rp.models.runtime_identity import RuntimeProfileSnapshotCompiledProfile
-from rp.models.worker_memory import (
+from rp.models.projection.refresh import ProjectionRefreshRequest
+from rp.models.runtime.identity import RuntimeProfileSnapshotCompiledProfile
+from rp.models.writer.worker_memory import (
     WorkerMemoryContext,
     WorkerPermissionDecision,
     WorkerProposalGovernanceMetadata,

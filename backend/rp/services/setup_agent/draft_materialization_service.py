@@ -7,8 +7,8 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.revision_overlay_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.core_state.revision_overlay_contracts import (
     DraftDocumentBlock,
     DraftDocumentBlockKind,
     DraftDocumentRecord,

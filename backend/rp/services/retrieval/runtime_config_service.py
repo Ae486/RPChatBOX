@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from models.rp_setup_store import SetupDraftBlockRecord, SetupWorkspaceRecord
 from models.rp_story_store import StorySessionRecord
-from rp.models.retrieval_runtime_config import (
+from rp.models.retrieval.runtime_config import (
     GraphExtractionRetryPolicy,
     RetrievalRuntimeConfig,
 )

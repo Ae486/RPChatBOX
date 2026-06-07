@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from rp.models.block_consumer import BlockConsumerKey
-from rp.models.block_prompt_compile import RpBlockPromptCompileView
+from rp.models.block.consumer import BlockConsumerKey
+from rp.models.block.prompt_compile import RpBlockPromptCompileView
 
 from .block_consumer_state_service import StoryBlockConsumerStateService
 from .block_prompt_context_service import StoryBlockPromptContextService

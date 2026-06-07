@@ -27,7 +27,7 @@ from models.rp_retrieval_store import (
     SourceAssetRecord,
 )
 from rp.errors import RPError
-from rp.models.memory_graph_projection import (
+from rp.models.memory.graph_projection import (
     GRAPH_CANON_STATUS_SOURCE_REFERENCE,
     GRAPH_EDGE_DIRECTION_DIRECTED,
     GRAPH_EDGE_DIRECTIONS,
@@ -63,7 +63,7 @@ from rp.models.memory_graph_projection import (
     normalize_graph_entity_type,
     normalize_graph_relation_type,
 )
-from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
+from rp.models.retrieval.runtime_config import RetrievalRuntimeConfig
 from .graph_projection_repository import MemoryGraphProjectionRepository
 from ..retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from ..story.llm_gateway import StoryLlmGateway

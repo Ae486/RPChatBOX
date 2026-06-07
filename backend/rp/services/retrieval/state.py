@@ -9,9 +9,9 @@ from typing import Protocol
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
-from rp.models.block_view import RpBlockView
-from rp.models.dsl import Layer, ObjectRef
-from rp.models.memory_crud import (
+from rp.models.block.view import RpBlockView
+from rp.models.shared.dsl import Layer, ObjectRef
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     StateReadResult,
     StateReadResultItem,

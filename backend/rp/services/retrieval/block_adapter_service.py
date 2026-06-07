@@ -5,9 +5,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Sequence
 
-from rp.models.block_view import RpBlockView
-from rp.models.dsl import Layer
-from rp.models.memory_crud import RetrievalHit
+from rp.models.block.view import RpBlockView
+from rp.models.shared.dsl import Layer
+from rp.models.memory.crud import RetrievalHit
 
 
 class RetrievalBlockAdapterService:

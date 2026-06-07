@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from rp.errors import RPError
-from rp.models.archival_evolution import (
+from rp.models.story.archival_evolution import (
     ArchivalEvolutionReceipt,
     ArchivalEvolutionRequest,
 )
-from rp.models.story_evolution_contracts import (
+from rp.models.story.evolution_contracts import (
     StoryEvolutionOperation,
     StoryEvolutionReceipt,
     StoryEvolutionRequest,

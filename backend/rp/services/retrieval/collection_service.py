@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlmodel import select
 
 from models.rp_retrieval_store import KnowledgeCollectionRecord
-from rp.models.retrieval_records import KnowledgeCollection
+from rp.models.retrieval.records import KnowledgeCollection
 
 
 def _utcnow() -> datetime:

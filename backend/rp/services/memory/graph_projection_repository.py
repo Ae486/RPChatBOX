@@ -14,7 +14,7 @@ from models.rp_retrieval_store import (
     MemoryGraphExtractionJobRecord,
     MemoryGraphNodeRecord,
 )
-from rp.models.memory_graph_projection import (
+from rp.models.memory.graph_projection import (
     GRAPH_CANON_STATUSES,
     GRAPH_EDGE_DIRECTIONS,
     GRAPH_ERROR_CODES,

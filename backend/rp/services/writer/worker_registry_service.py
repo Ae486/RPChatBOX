@@ -8,17 +8,17 @@ from typing import Any
 from sqlmodel import Session
 
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryDomainContract
-from rp.models.runtime_identity import (
+from rp.models.memory.contract_registry import MemoryDomainContract
+from rp.models.runtime.identity import (
     RuntimeProfileSnapshotCompiledProfile,
     RuntimeWorkerActivation,
 )
-from rp.models.mode_extension_contracts import (
+from rp.models.runtime.mode_extension_contracts import (
     CHARACTER_MEMORY_WORKER_ID,
     RULE_STATE_WORKER_ID,
     SCENE_INTERACTION_WORKER_ID,
 )
-from rp.models.worker_runtime_contracts import (
+from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     RuntimeWorkerRegistry,
     WorkerDescriptor,

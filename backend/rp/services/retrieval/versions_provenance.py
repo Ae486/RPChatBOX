@@ -7,8 +7,8 @@ from typing import Protocol
 
 from sqlmodel import Session
 
-from rp.models.dsl import Layer
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Layer
+from rp.models.memory.crud import (
     MemoryListVersionsInput,
     MemoryReadProvenanceInput,
     ProvenanceResult,

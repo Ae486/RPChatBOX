@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.models.setup_workspace import (
+from rp.models.setup_agent.workspace import (
     CommitProposalStatus,
     QuestionSeverity,
     QuestionStatus,

@@ -6,7 +6,7 @@ from copy import deepcopy
 import json
 
 from models.chat import ChatMessage
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
     OrchestratorPlan,

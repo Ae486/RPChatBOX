@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlmodel import select
 
 from models.rp_retrieval_store import IndexJobRecord
-from rp.models.retrieval_records import IndexJob
+from rp.models.retrieval.records import IndexJob
 
 
 def _utcnow() -> datetime:

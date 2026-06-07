@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_materialization import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.materialization import (
     ACCEPTED_STORY_SEGMENT_KIND,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
     build_recall_materialization_metadata,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     StoryArtifact,
     StoryArtifactKind,
     StoryArtifactStatus,

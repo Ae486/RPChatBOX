@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
 
 
 @dataclass(frozen=True)

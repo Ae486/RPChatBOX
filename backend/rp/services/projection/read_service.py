@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.dsl import Layer
-from rp.models.memory_crud import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.shared.dsl import Layer
+from rp.models.memory.crud import (
     MemoryGetSummaryInput,
     MemoryListVersionsInput,
     MemoryReadProvenanceInput,

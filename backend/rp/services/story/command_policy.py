@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rp.models.story_runtime import LongformChapterPhase, LongformTurnCommandKind
+from rp.models.story.runtime import LongformChapterPhase, LongformTurnCommandKind
 
 _PHASE_RULES: dict[LongformChapterPhase, set[LongformTurnCommandKind]] = {
     LongformChapterPhase.OUTLINE_DRAFTING: {

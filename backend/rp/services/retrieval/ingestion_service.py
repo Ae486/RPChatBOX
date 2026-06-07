@@ -8,7 +8,7 @@ from sqlmodel import select
 
 from models.rp_retrieval_store import EmbeddingRecordRecord, IndexJobRecord, KnowledgeChunkRecord
 from rp.errors import RPError
-from rp.models.retrieval_records import IndexJob
+from rp.models.retrieval.records import IndexJob
 from rp.retrieval.chunker import Chunker
 from rp.retrieval.embedder import Embedder
 from rp.retrieval.ingestion_warning_taxonomy import ingestion_warning, normalize_component_warnings

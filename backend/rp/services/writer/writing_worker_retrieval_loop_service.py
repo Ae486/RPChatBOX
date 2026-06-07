@@ -8,13 +8,13 @@ from typing import Any
 
 from models.chat import ChatMessage
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.retrieval_runtime_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.retrieval.runtime_contracts import (
     WriterRetrievalExpandToolInput,
     WriterRetrievalSearchToolInput,
     WriterRetrievalUsageToolInput,
 )
-from rp.models.worker_memory import WorkerSourceRefBundle
+from rp.models.writer.worker_memory import WorkerSourceRefBundle
 from rp.services.retrieval.runtime_card_service import (
     RuntimeRetrievalCardService,
     RuntimeRetrievalCardServiceError,

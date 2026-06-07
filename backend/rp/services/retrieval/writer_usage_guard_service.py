@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
 from .runtime_card_service import RuntimeRetrievalCardService
 
 

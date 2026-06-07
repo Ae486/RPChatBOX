@@ -9,9 +9,9 @@ import json
 from typing import Any
 
 from models.chat import ChatMessage
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import MemorySearchArchivalInput, MemorySearchRecallInput
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import MemorySearchArchivalInput, MemorySearchRecallInput
+from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
     OrchestratorPlan,
@@ -19,7 +19,7 @@ from rp.models.story_runtime import (
     StoryArtifact,
     StorySession,
 )
-from rp.models.worker_runtime_contracts import WorkerContextPacket
+from rp.models.writer.worker_runtime_contracts import WorkerContextPacket
 from ..core_state.authoritative_state_view_service import AuthoritativeStateViewService
 from ..memory.os_service import MemoryOsService
 from ..projection.state_service import ProjectionStateService

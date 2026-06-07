@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 from rp.errors import RPError
-from rp.models.longform_chapter_contracts import (
+from rp.models.writer.longform_chapter_contracts import (
     ChapterBridgeMaterial,
     LONGFORM_OUTLINE_SCHEMA_VERSION,
     LongformOutlineBeat,
@@ -23,13 +23,13 @@ from rp.models.longform_chapter_contracts import (
     LongformOutlineProgress,
     LongformStructuredOutline,
 )
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.runtime_workspace_material import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     ChapterWorkspace,
     StoryArtifact,
     StoryArtifactKind,

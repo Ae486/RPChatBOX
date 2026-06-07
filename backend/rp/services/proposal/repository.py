@@ -13,10 +13,10 @@ from models.rp_memory_store import (
     MemoryApplyTargetLinkRecord,
     MemoryProposalRecord,
 )
-from rp.models.core_mutation import CoreMutationEnvelope
-from rp.models.dsl import Domain, ObjectRef
-from rp.models.memory_crud import ProposalReceipt, ProposalSubmitInput
-from rp.models.worker_memory import WorkerProposalGovernanceMetadata
+from rp.models.proposal.core_mutation import CoreMutationEnvelope
+from rp.models.shared.dsl import Domain, ObjectRef
+from rp.models.memory.crud import ProposalReceipt, ProposalSubmitInput
+from rp.models.writer.worker_memory import WorkerProposalGovernanceMetadata
 
 
 def _utcnow() -> datetime:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Awaitable, Callable, Protocol, TypeVar
 
-from rp.models.memory_crud import (
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
     MemoryListVersionsInput,

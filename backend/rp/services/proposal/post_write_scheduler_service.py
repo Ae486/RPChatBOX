@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from models.rp_story_store import StoryTurnRecord
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.postwrite_runtime_contracts import PostWriteTriggerContext
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.worker_runtime_contracts import WorkerExecutionPlan
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.proposal.postwrite_runtime_contracts import PostWriteTriggerContext
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.writer.worker_runtime_contracts import WorkerExecutionPlan
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )

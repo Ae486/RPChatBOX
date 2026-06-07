@@ -9,13 +9,13 @@ from models.rp_core_state_store import (
     CoreStateAuthoritativeObjectRecord,
     CoreStateAuthoritativeRevisionRecord,
 )
-from rp.models.dsl import Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.projection_refresh import (
+from rp.models.shared.dsl import Layer, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.projection.refresh import (
     ProjectionRefreshRequest,
     ProjectionRefreshServiceError,
 )
-from rp.models.story_runtime import ChapterWorkspace, StorySession
+from rp.models.story.runtime import ChapterWorkspace, StorySession
 
 from .store_repository import CoreStateStoreRepository
 from ..memory.object_mapper import (

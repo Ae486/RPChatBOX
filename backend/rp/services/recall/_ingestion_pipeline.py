@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_materialization import build_recall_seed_section
-from rp.models.retrieval_records import IndexJob, SourceAsset
-from rp.models.setup_workspace import StoryMode
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.materialization import build_recall_seed_section
+from rp.models.retrieval.records import IndexJob, SourceAsset
+from rp.models.setup_agent.workspace import StoryMode
 
 
 @dataclass(frozen=True)

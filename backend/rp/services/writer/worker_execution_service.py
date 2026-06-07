@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from rp.errors import RPError
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
     OrchestratorPlan,
@@ -15,7 +15,7 @@ from rp.models.story_runtime import (
     StorySession,
     StorySegmentStructuredMetadata,
 )
-from rp.models.worker_runtime_contracts import (
+from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     WorkerContextPacket,
     WorkerExecutionPlan,

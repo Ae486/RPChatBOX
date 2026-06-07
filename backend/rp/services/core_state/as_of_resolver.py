@@ -14,9 +14,9 @@ from models.rp_core_state_store import (
 )
 from models.rp_story_store import BranchHeadRecord, StoryTurnRecord
 from rp.errors import RPError
-from rp.models.dsl import Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_read_contract import (
+from rp.models.shared.dsl import Layer, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.read_contract import (
     CoreStateSnapshotManifest,
     RuntimeBranchReadScope,
 )

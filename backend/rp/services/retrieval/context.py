@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlmodel import Session
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from services.database import get_engine
 
 

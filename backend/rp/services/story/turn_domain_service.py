@@ -7,14 +7,14 @@ from typing import AsyncIterator, cast
 from uuid import uuid4
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.block_consumer import BlockConsumerKey
-from rp.models.postwrite_runtime_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.block.consumer import BlockConsumerKey
+from rp.models.proposal.postwrite_runtime_contracts import (
     PostWriteExecutionEnvelope,
     PostWriteRunKind,
 )
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.story_runtime import (
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -28,12 +28,12 @@ from rp.models.story_runtime import (
     StorySegmentStructuredMetadata,
     StorySession,
 )
-from rp.models.worker_memory import WorkerSourceRefBundle
-from rp.models.writing_worker_contracts import (
+from rp.models.writer.worker_memory import WorkerSourceRefBundle
+from rp.models.writer.writing_worker_contracts import (
     WritingWorkerExecutionRequest,
     WritingWorkerExecutionResult,
 )
-from rp.models.writing_runtime import WritingPacket
+from rp.models.writer.writing_runtime import WritingPacket
 from ..runtime.context_orchestration_service import ContextOrchestrationService
 from ..writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from ..writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError

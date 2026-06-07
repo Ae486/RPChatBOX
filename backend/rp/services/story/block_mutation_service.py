@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 from rp.errors import RPError
-from rp.models.core_mutation import (
+from rp.models.proposal.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
     CoreMutationEnvelope,
     DirectCoreEditRequest,
 )
-from rp.models.block_view import RpBlockView
-from rp.models.dsl import Layer, ObjectRef
-from rp.models.memory_crud import (
+from rp.models.block.view import RpBlockView
+from rp.models.shared.dsl import Layer, ObjectRef
+from rp.models.memory.crud import (
     MemoryBlockProposalSubmitRequest,
     ProposalReceipt,
     ProposalSubmitInput,
     StatePatchOperation,
 )
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 
 from ..memory.inspection_read_service import MemoryInspectionReadService
 from ..proposal.apply_service import ProposalApplyService

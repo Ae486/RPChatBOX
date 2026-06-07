@@ -11,13 +11,13 @@ from sqlmodel import select
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.revision_overlay_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.core_state.revision_overlay_contracts import (
     LongformDraftAdoptionReceipt,
     LongformDraftSelectionReceipt,
     RewriteCandidateRecord,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,

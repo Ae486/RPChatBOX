@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from uuid import uuid4
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.mode_extension_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.mode_extension_contracts import (
     packet_sidecar_material_kinds_for_slot,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
     OrchestratorPlan,
@@ -17,14 +17,14 @@ from rp.models.story_runtime import (
     StoryArtifact,
     StorySession,
 )
-from rp.models.longform_chapter_contracts import LongformStructuredOutline
-from rp.models.runtime_workspace_material import (
+from rp.models.writer.longform_chapter_contracts import LongformStructuredOutline
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
 )
-from rp.models.worker_memory import WorkerSourceRefBundle
-from rp.models.worker_runtime_contracts import WorkerContextPacket
-from rp.models.writing_runtime import WritingPacket
+from rp.models.writer.worker_memory import WorkerSourceRefBundle
+from rp.models.writer.worker_runtime_contracts import WorkerContextPacket
+from rp.models.writer.writing_runtime import WritingPacket
 
 from ..projection.builder_context_service import BuilderProjectionContextService
 from ..writer.longform_chapter_runtime_service import LongformChapterRuntimeService

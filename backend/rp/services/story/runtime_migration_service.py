@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.models.story_runtime import LongformTurnCommandKind
+from rp.models.story.runtime import LongformTurnCommandKind
 
 from .runtime_debug_query_service import StoryRuntimeDebugQueryService
 

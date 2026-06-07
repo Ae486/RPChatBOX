@@ -1,7 +1,7 @@
 """Validation helpers for RP memory CRUD contracts."""
 from __future__ import annotations
 
-from rp.models.memory_crud import (
+from rp.models.memory.crud import (
     AppendEventOp,
     MemoryGetStateInput,
     MemoryGetSummaryInput,

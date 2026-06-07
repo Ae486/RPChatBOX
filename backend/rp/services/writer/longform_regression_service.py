@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformTurnCommandKind,
     SpecialistResultBundle,
@@ -14,7 +14,7 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
     StorySession,
 )
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
 from ..core_state.authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,
 )

@@ -19,7 +19,7 @@ from models.rp_setup_store import (
     SetupStepStateRecord,
     SetupWorkspaceRecord,
 )
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     FoundationDraft,
     FoundationEntry,
     LongformBlueprintDraft,
@@ -27,8 +27,8 @@ from rp.models.setup_drafts import (
     StoryConfigDraft,
     WritingContractDraft,
 )
-from rp.models.setup_stage import SetupStageId, SetupModeStagePlan, get_mode_stage_plan
-from rp.models.setup_workspace import (
+from rp.models.setup_agent.stage import SetupStageId, SetupModeStagePlan, get_mode_stage_plan
+from rp.models.setup_agent.workspace import (
     AcceptedCommit,
     AcceptedCommitSnapshot,
     CommitProposal,

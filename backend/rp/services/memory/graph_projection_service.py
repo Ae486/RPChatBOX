@@ -18,7 +18,7 @@ from models.rp_retrieval_store import (
     MemoryGraphNodeRecord,
     SourceAssetRecord,
 )
-from rp.models.memory_graph_projection import (
+from rp.models.memory.graph_projection import (
     GRAPH_BACKEND_POSTGRES_LIGHTWEIGHT,
     GRAPH_ERROR_MODEL_CONFIG_MISSING,
     GRAPH_EXTRACTION_SCHEMA_VERSION,
@@ -50,7 +50,7 @@ from rp.models.memory_graph_projection import (
     MemoryGraphNodeUpsert,
     MemoryGraphNodeView,
 )
-from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
+from rp.models.retrieval.runtime_config import RetrievalRuntimeConfig
 from .graph_projection_repository import MemoryGraphProjectionRepository
 from ..retrieval.runtime_config_service import RetrievalRuntimeConfigService
 

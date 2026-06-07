@@ -6,14 +6,14 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from models.rp_core_state_store import CoreStateAuthoritativeRevisionRecord
-from rp.models.core_mutation import CoreMutationEnvelope
-from rp.models.dsl import ObjectRef
-from rp.models.memory_contract_registry import (
+from rp.models.proposal.core_mutation import CoreMutationEnvelope
+from rp.models.shared.dsl import ObjectRef
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemorySourceRef,
 )
-from rp.models.memory_crud import (
+from rp.models.memory.crud import (
     AddRelationOp,
     AppendEventOp,
     PatchFieldsOp,
@@ -24,7 +24,7 @@ from rp.models.memory_crud import (
     SetStatusOp,
     UpsertRecordOp,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
 )

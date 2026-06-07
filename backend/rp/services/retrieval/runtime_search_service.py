@@ -12,18 +12,18 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import (
     MemorySearchArchivalInput,
     MemorySearchRecallInput,
     RetrievalSearchResult,
 )
-from rp.models.retrieval_runtime_contracts import (
+from rp.models.retrieval.runtime_contracts import (
     RuntimeRetrievalResultItem,
     RuntimeRetrievalSearchInput,
     RuntimeRetrievalSearchOutput,
 )
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterial
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterial
 
 DEFAULT_RUNTIME_RETRIEVAL_FINAL_TOP_K = 5
 DEFAULT_RUNTIME_RETRIEVAL_RELATION_TOP_K = 8

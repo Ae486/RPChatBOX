@@ -7,12 +7,12 @@ from datetime import timezone
 from sqlmodel import select
 
 from models.rp_retrieval_store import EmbeddingRecordRecord, KnowledgeChunkRecord
-from rp.models.retrieval_maintenance import (
+from rp.models.retrieval.maintenance import (
     RetrievalCollectionMaintenanceSnapshot,
     RetrievalRetryBatchResult,
     RetrievalStoryMaintenanceSnapshot,
 )
-from rp.models.retrieval_records import IndexJob
+from rp.models.retrieval.records import IndexJob
 from .collection_service import RetrievalCollectionService
 from .document_service import RetrievalDocumentService
 from .index_job_service import RetrievalIndexJobService

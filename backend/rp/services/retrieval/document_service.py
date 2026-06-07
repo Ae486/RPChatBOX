@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlmodel import select
 
 from models.rp_retrieval_store import ParsedDocumentRecord, SourceAssetRecord
-from rp.models.retrieval_records import ParsedDocument, ParsedDocumentSection, SourceAsset
+from rp.models.retrieval.records import ParsedDocument, ParsedDocumentSection, SourceAsset
 
 
 class RetrievalDocumentService:

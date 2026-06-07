@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_crud import AppendEventOp, PatchFieldsOp, ProposalSubmitInput
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.crud import AppendEventOp, PatchFieldsOp, ProposalSubmitInput
 
 
 class LegacyStatePatchProposalBuilder:

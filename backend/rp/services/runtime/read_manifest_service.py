@@ -16,13 +16,13 @@ from models.rp_story_store import (
     StoryTurnRecord,
 )
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.runtime_read_contract import RuntimeBranchReadScope, RuntimeReadManifest
-from rp.models.runtime_workflow_job import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.runtime.read_contract import RuntimeBranchReadScope, RuntimeReadManifest
+from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobKind,
     RuntimeWorkflowJobStatus,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,

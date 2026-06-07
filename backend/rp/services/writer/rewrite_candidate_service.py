@@ -11,21 +11,21 @@ from sqlmodel import select
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.revision_overlay_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.core_state.revision_overlay_contracts import (
     DraftDocumentRecord,
     ParagraphRewritePatch,
     ReplacementBlock,
     RewriteCandidateRecord,
     RewriteRequest,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
+from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 

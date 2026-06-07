@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 
-from rp.models.post_write_policy import (
+from rp.models.proposal.post_write_policy import (
     PolicyDecision,
     PolicyRule,
     PostWriteMaintenancePolicy,

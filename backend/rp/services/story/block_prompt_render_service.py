@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from rp.models.block_prompt_context import RpBlockPromptContextView
+from rp.models.block.prompt_context import RpBlockPromptContextView
 
 
 class StoryBlockPromptRenderService:

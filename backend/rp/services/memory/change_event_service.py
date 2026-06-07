@@ -11,7 +11,7 @@ from sqlmodel import Session
 
 from models.rp_memory_store import MemoryChangeEventRecord
 from rp.errors import RPError
-from rp.models.memory_contract_registry import (
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemoryRuntimeIdentity,

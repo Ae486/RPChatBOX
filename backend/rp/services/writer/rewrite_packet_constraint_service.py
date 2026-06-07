@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from sqlmodel import Session
 
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.story.runtime import (
     ChapterWorkspace,
     StoryArtifact,
     StoryArtifactKind,

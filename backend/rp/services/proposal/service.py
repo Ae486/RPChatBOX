@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlmodel import Session
 
 from config import get_settings
-from rp.models.memory_crud import ProposalReceipt, ProposalSubmitInput
+from rp.models.memory.crud import ProposalReceipt, ProposalSubmitInput
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,

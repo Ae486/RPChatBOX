@@ -13,19 +13,19 @@ from sqlmodel import Session, select
 
 from models.rp_story_store import RuntimeProfileSnapshotRecord, StorySessionRecord
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryLifecycleState
-from rp.models.mode_extension_contracts import (
+from rp.models.memory.contract_registry import MemoryLifecycleState
+from rp.models.runtime.mode_extension_contracts import (
     build_mode_extension_profile,
     packet_sidecar_slot_ids_for_profile,
     worker_slot_ids_for_profile,
     workspace_material_slot_ids_for_profile,
 )
-from rp.models.post_write_policy import (
+from rp.models.proposal.post_write_policy import (
     PostWriteMaintenancePolicy,
     build_balanced_policy,
     build_conservative_policy,
 )
-from rp.models.runtime_identity import (
+from rp.models.runtime.identity import (
     RuntimeProfileBudgetLatencyPolicy,
     RuntimeProfileModeProfile,
     RuntimeProfileSnapshotCompiledProfile,
@@ -33,7 +33,7 @@ from rp.models.runtime_identity import (
     RuntimeProfileWriterPolicy,
     RuntimeWorkerActivation,
 )
-from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
+from rp.models.retrieval.runtime_config import RetrievalRuntimeConfig
 from rp.services.memory.contract_registry import MemoryContractRegistryService
 from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,

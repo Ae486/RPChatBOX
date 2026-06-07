@@ -15,7 +15,7 @@ from models.rp_setup_store import (
     SetupRetrievalIngestionJobRecord,
     SetupWorkspaceRecord,
 )
-from rp.models.memory_materialization import (
+from rp.models.memory.materialization import (
     FOUNDATION_ENTRY_SOURCE_TYPE,
     IMPORTED_ASSET_SOURCE_TYPE,
     LONGFORM_BLUEPRINT_SOURCE_TYPE,
@@ -23,10 +23,10 @@ from rp.models.memory_materialization import (
     build_archival_seed_section,
     build_archival_source_metadata,
 )
-from rp.models.memory_graph_projection import GRAPH_JOB_REASON_ARCHIVAL_INGESTED
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import RetrievalIngestionState, StoryMode
+from rp.models.memory.graph_projection import GRAPH_JOB_REASON_ARCHIVAL_INGESTED
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import RetrievalIngestionState, StoryMode
 from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
 from .collection_service import RetrievalCollectionService
 from .document_service import RetrievalDocumentService

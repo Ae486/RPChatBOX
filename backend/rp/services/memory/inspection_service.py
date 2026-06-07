@@ -7,26 +7,26 @@ from typing import Any, Iterable, Sequence
 from uuid import uuid4
 
 from rp.errors import RPError
-from rp.models.archival_evolution import (
+from rp.models.story.archival_evolution import (
     ArchivalEvolutionReceipt,
     ArchivalEvolutionRequest,
 )
-from rp.models.block_view import RpBlockView
-from rp.models.core_mutation import DirectCoreEditRequest
-from rp.models.dsl import Layer
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import ProposalReceipt
-from rp.models.memory_inspection import (
+from rp.models.block.view import RpBlockView
+from rp.models.proposal.core_mutation import DirectCoreEditRequest
+from rp.models.shared.dsl import Layer
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import ProposalReceipt
+from rp.models.memory.inspection import (
     MemoryDisplayBlock,
     MemoryDisplayEntry,
     MemoryInspectionActionReceipt,
     RecallReviewAction,
     RecallReviewCommand,
 )
-from rp.models.memory_materialization import ARCHIVAL_LAYER, RECALL_LAYER
-from rp.models.retrieval_records import SourceAsset
-from rp.models.runtime_read_contract import RuntimeBranchReadScope
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialLifecycle
+from rp.models.memory.materialization import ARCHIVAL_LAYER, RECALL_LAYER
+from rp.models.retrieval.records import SourceAsset
+from rp.models.runtime.read_contract import RuntimeBranchReadScope
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialLifecycle
 
 from ..story.archival_evolution_service import ArchivalEvolutionService
 from .inspection_read_service import MemoryInspectionReadService

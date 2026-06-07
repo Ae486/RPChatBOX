@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from rp.models.longform_chapter_contracts import LONGFORM_OUTLINE_SCHEMA_VERSION
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.story_runtime import ChapterWorkspace, OrchestratorPlan, StorySession
-from rp.models.writing_runtime import PacketSection, WritingPacket
+from rp.models.writer.longform_chapter_contracts import LONGFORM_OUTLINE_SCHEMA_VERSION
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.story.runtime import ChapterWorkspace, OrchestratorPlan, StorySession
+from rp.models.writer.writing_runtime import PacketSection, WritingPacket
 
 
 class WritingPacketBuilder:

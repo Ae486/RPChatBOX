@@ -5,31 +5,31 @@ from __future__ import annotations
 from typing import Any, cast
 
 from rp.errors import RPError
-from rp.models.block_view import BlockSource, RpBlockView
-from rp.models.core_mutation import DirectCoreEditRequest
-from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import (
+from rp.models.block.view import BlockSource, RpBlockView
+from rp.models.proposal.core_mutation import DirectCoreEditRequest
+from rp.models.story.archival_evolution import ArchivalEvolutionRequest
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import (
     MemoryBlockProposalSubmitRequest,
     MemoryListVersionsInput,
     MemoryReadProvenanceInput,
     ProvenanceResult,
     VersionListResult,
 )
-from rp.models.runtime_config_contracts import (
+from rp.models.runtime.config_contracts import (
     RuntimeConfigControlReceipt,
     RuntimeConfigPatchRequest,
 )
-from rp.models.runtime_identity import BranchControlReceipt
-from rp.models.memory_inspection import RecallReviewCommand
-from rp.models.revision_overlay_contracts import (
+from rp.models.runtime.identity import BranchControlReceipt
+from rp.models.memory.inspection import RecallReviewCommand
+from rp.models.core_state.revision_overlay_contracts import (
     DraftDocumentRecord,
     ReviewOverlayMode,
     ReviewOverlayRecord,
     RevisionAnchorRef,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     ChapterWorkspaceSnapshot,
     StoryArtifact,
     StoryArtifactKind,
@@ -37,7 +37,7 @@ from rp.models.story_runtime import (
     StoryActivationResult,
     StorySession,
 )
-from rp.models.story_brainstorm import (
+from rp.models.story.brainstorm import (
     BrainstormBatchSubmitReceipt,
     BrainstormBatchSubmitRequest,
     BrainstormContinueWritingRequest,

@@ -8,13 +8,13 @@ from uuid import uuid4
 from fastapi import BackgroundTasks
 from sqlmodel import Session
 
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     FoundationEntry,
     LongformBlueprintDraft,
     StoryConfigDraft,
     WritingContractDraft,
 )
-from rp.models.setup_handoff import (
+from rp.models.setup_agent.handoff import (
     ActivationCheckResult,
     ActivationHandoff,
     RuntimeStoryConfigSeed,
@@ -22,7 +22,7 @@ from rp.models.setup_handoff import (
     SetupToolResult,
     WriterContractSeed,
 )
-from rp.models.setup_workspace import (
+from rp.models.setup_agent.workspace import (
     QuestionSeverity,
     SetupStepId,
     SetupWorkspace,

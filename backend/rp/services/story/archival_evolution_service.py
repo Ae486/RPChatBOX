@@ -11,7 +11,7 @@ from sqlmodel import select
 
 from models.rp_retrieval_store import KnowledgeCollectionRecord
 from models.rp_story_store import BranchHeadRecord
-from rp.models.archival_evolution import (
+from rp.models.story.archival_evolution import (
     ARCHIVAL_EVOLUTION_EVENT,
     ARCHIVAL_EVOLUTION_SOURCE_FAMILY,
     ARCHIVAL_LIFECYCLE_ACTIVE,
@@ -22,13 +22,13 @@ from rp.models.archival_evolution import (
     ArchivalEvolutionSection,
     ArchivalEvolutionVisibilityScope,
 )
-from rp.models.memory_contract_registry import (
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemorySourceRef,
 )
-from rp.models.memory_materialization import ARCHIVAL_LAYER
-from rp.models.retrieval_records import SourceAsset
+from rp.models.memory.materialization import ARCHIVAL_LAYER
+from rp.models.retrieval.records import SourceAsset
 from rp.retrieval.indexer import Indexer
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.retrieval.document_service import RetrievalDocumentService

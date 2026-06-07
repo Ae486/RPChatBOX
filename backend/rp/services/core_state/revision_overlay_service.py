@@ -8,8 +8,8 @@ from uuid import uuid4
 from sqlmodel import Session
 
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.revision_overlay_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.core_state.revision_overlay_contracts import (
     DraftDocumentRecord,
     ReviewOverlayInspectionRecord,
     ReviewOverlayMode,
@@ -20,7 +20,7 @@ from rp.models.revision_overlay_contracts import (
     RevisionTrackedChangeKind,
     TrackedChangeRecord,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,

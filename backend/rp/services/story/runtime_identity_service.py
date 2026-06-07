@@ -18,8 +18,8 @@ from models.rp_story_store import (
     StoryTurnRecord,
 )
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_identity import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.identity import (
     BranchControlKind,
     BranchControlReceipt,
     BranchHeadStatus,
@@ -27,7 +27,7 @@ from rp.models.runtime_identity import (
     RuntimeProfileSnapshotStatus,
     StoryTurnStatus,
 )
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialLifecycle
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialLifecycle
 from rp.services.runtime.profile_snapshot_service import (
     RuntimeProfileSnapshotService,
     RuntimeProfileSnapshotServiceError,

@@ -8,8 +8,8 @@ from uuid import uuid4
 
 from models.chat import ChatMessage
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from rp.models.longform_chapter_contracts import ChapterBridgeMaterial
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+from rp.models.writer.longform_chapter_contracts import ChapterBridgeMaterial
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 
 from .llm_gateway import StoryLlmGateway
 

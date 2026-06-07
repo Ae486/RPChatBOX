@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from ..core_state.store_repository import CoreStateStoreRepository
-from rp.models.dsl import ObjectRef
-from rp.models.memory_crud import VersionListResult
+from rp.models.shared.dsl import ObjectRef
+from rp.models.memory.crud import VersionListResult
 
 from .object_mapper import normalize_authoritative_ref
 from ..proposal.repository import ProposalRepository

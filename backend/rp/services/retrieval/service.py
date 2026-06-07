@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult
 from rp.retrieval.embedder import Embedder
 from rp.retrieval.fusion_strategy import RrfFusionStrategy
 from rp.retrieval.graph_expansion import (

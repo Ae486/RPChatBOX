@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from rp.models.block_consumer import BlockConsumerKey
-from rp.models.block_prompt_context import RpBlockPromptContextView
-from rp.models.dsl import ObjectRef
+from rp.models.block.consumer import BlockConsumerKey
+from rp.models.block.prompt_context import RpBlockPromptContextView
+from rp.models.shared.dsl import ObjectRef
 
 from ..memory.object_mapper import (
     resolve_authoritative_binding,

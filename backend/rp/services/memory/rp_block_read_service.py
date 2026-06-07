@@ -5,9 +5,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from rp.models.block_view import BlockSource, RpBlockView
-from rp.models.dsl import Domain, Layer
-from rp.models.story_runtime import (
+from rp.models.block.view import BlockSource, RpBlockView
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.story.runtime import (
     StoryArtifact,
     StoryArtifactStatus,
     StoryDiscussionEntry,

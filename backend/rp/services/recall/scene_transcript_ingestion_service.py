@@ -8,13 +8,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_materialization import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.materialization import (
     SCENE_CLOSE_EVENT,
     SCENE_TRANSCRIPT_KIND,
     build_recall_materialization_metadata,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     StoryArtifact,
     StoryArtifactKind,
     StoryArtifactStatus,

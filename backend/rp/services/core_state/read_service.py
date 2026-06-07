@@ -11,8 +11,8 @@ from .as_of_resolver import (
     CoreStateAsOfResolverError,
 )
 from .store_repository import CoreStateStoreRepository
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryListVersionsInput,
     MemoryReadProvenanceInput,

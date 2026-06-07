@@ -8,13 +8,13 @@ from uuid import uuid4
 from sqlmodel import Session, select
 
 from models.rp_story_store import StoryBlockConsumerStateRecord
-from rp.models.block_consumer import (
+from rp.models.block.consumer import (
     DEFAULT_BLOCK_CONSUMERS,
     BlockConsumerKey,
     RpBlockConsumerAttachmentView,
     RpBlockConsumerStateView,
 )
-from rp.models.block_view import RpBlockView
+from rp.models.block.view import RpBlockView
 
 from ..memory.rp_block_read_service import RpBlockReadService
 from .session_service import StorySessionService

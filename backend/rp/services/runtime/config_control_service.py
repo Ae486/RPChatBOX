@@ -16,7 +16,7 @@ from models.rp_story_store import (
     StorySessionRecord,
 )
 from rp.errors import RPError
-from rp.models.runtime_config_contracts import (
+from rp.models.runtime.config_contracts import (
     RuntimeConfigControlReceipt,
     RuntimeConfigPatchRequest,
     RuntimeConfigPreview,

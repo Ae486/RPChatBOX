@@ -8,25 +8,25 @@ from uuid import uuid4
 from sqlmodel import Session
 
 from rp.errors import RPError
-from rp.models.dsl import Domain, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.crud import (
     MemorySearchArchivalInput,
     MemorySearchRecallInput,
     RetrievalHit,
     RetrievalSearchResult,
 )
-from rp.models.retrieval_runtime_contracts import (
+from rp.models.retrieval.runtime_contracts import (
     RetrievalKnowledgeGapItem,
     RetrievalUsageRecordPayload,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.worker_memory import WorkerSourceRefBundle
+from rp.models.writer.worker_memory import WorkerSourceRefBundle
 
 from .broker import RetrievalBroker
 from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService

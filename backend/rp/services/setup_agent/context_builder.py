@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from rp.models.setup_handoff import (
+from rp.models.setup_agent.handoff import (
     SetupContextBuilderInput,
     SetupContextPacket,
     SetupStageChunkDescription,
     SetupStageHandoffPacket,
     SetupStageHandoffSourceBasis,
 )
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId
 from .workspace_service import SetupWorkspaceService
 
 

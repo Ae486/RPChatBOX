@@ -11,8 +11,8 @@ from sqlmodel import Session, select
 
 from models.rp_story_store import RuntimeWorkflowJobRecord, StoryTurnRecord
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_workflow_job import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,

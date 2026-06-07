@@ -17,7 +17,7 @@ from models.rp_story_store import (
     StorySessionRecord,
     StoryTurnRecord,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     ChapterWorkspace,
     ChapterWorkspaceSnapshot,
     LongformChapterPhase,

@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from rp.models.memory_crud import ToolErrorPayload
+from rp.models.memory.crud import ToolErrorPayload
 
 
 class MemoryCrudSerializationService:

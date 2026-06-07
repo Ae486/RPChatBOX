@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     LongformTurnCommandKind,
     OrchestratorPlan,
     SpecialistResultBundle,
     StoryArtifactKind,
 )
-from rp.models.worker_runtime_contracts import (
+from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     WorkerExecutionRequest,
     WorkerResult,

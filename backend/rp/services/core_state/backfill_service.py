@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from rp.models.dsl import Layer, ObjectRef
+from rp.models.shared.dsl import Layer, ObjectRef
 
 from .store_repository import CoreStateStoreRepository
 from ..memory.object_mapper import authoritative_bindings, projection_bindings

@@ -16,9 +16,9 @@ from rp.agent_runtime.skill_packs import (
     get_skill_pack_for_stage,
     render_skill_pack,
 )
-from rp.models.setup_handoff import SetupContextPacket
-from rp.models.setup_stage import SETUP_STAGE_MODULES, SetupStageId
-from rp.models.setup_workspace import SetupStepId, StoryMode
+from rp.models.setup_agent.handoff import SetupContextPacket
+from rp.models.setup_agent.stage import SETUP_STAGE_MODULES, SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId, StoryMode
 
 
 class SetupAgentPromptService:

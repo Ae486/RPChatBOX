@@ -11,7 +11,7 @@ from models.rp_memory_store import (
     MemoryChangeEventRecord,
     RuntimeWorkspaceMaterialRecord,
 )
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 
 
 def utcnow() -> datetime:

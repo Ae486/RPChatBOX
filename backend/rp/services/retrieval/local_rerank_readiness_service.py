@@ -7,7 +7,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from rp.models.retrieval_local_rerank import (
+from rp.models.retrieval.local_rerank import (
     LocalRerankDependencyStatus,
     LocalRerankReadiness,
 )

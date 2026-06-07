@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
-from rp.models.story_runtime import StorySession
+from rp.models.story.runtime import StorySession
 
 from ..story.session_service import StorySessionService
 

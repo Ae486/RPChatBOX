@@ -6,21 +6,21 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.mode_extension_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.runtime.mode_extension_contracts import (
     RuleCardMaterial,
     RuleStateCardMaterial,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RUNTIME_WORKSPACE_MATERIAL_LAYER,
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.story_runtime import StoryArtifact
-from rp.models.worker_runtime_contracts import WorkerExecutionRequest, WorkerResult
-from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
-from rp.models.writing_runtime import WritingPacket
+from rp.models.story.runtime import StoryArtifact
+from rp.models.writer.worker_runtime_contracts import WorkerExecutionRequest, WorkerResult
+from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
+from rp.models.writer.writing_runtime import WritingPacket
 
 from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 

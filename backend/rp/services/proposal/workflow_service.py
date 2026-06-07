@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from rp.models.core_mutation import (
+from rp.models.proposal.core_mutation import (
     CORE_MUTATION_ORIGIN_DETERMINISTIC_SYSTEM_REFRESH,
     CORE_MUTATION_ORIGIN_WORKER_PROPOSAL_APPLY,
     CoreMutationEnvelope,
 )
-from rp.models.dsl import Layer
-from rp.models.post_write_policy import (
+from rp.models.shared.dsl import Layer
+from rp.models.proposal.post_write_policy import (
     PolicyDecision,
     PostWriteMaintenancePolicy,
     build_balanced_policy,
 )
-from rp.models.memory_crud import ProposalReceipt, ProposalSubmitInput
-from rp.models.worker_memory import WorkerProposalGovernanceMetadata
+from rp.models.memory.crud import ProposalReceipt, ProposalSubmitInput
+from rp.models.writer.worker_memory import WorkerProposalGovernanceMetadata
 from rp.services.memory.crud_validation_service import MemoryCrudValidationService
 
 from .post_write_apply_handler import PostWriteApplyHandler

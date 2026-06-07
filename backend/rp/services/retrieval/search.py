@@ -12,9 +12,9 @@ from sqlmodel import Session
 
 from models.rp_retrieval_store import KnowledgeChunkRecord, SourceAssetRecord
 from models.rp_story_store import RuntimeProfileSnapshotRecord
-from rp.models.dsl import Domain
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import (
     MemorySearchArchivalInput,
     MemorySearchRecallInput,
     RetrievalHit,
@@ -22,8 +22,8 @@ from rp.models.memory_crud import (
     RetrievalSearchResult,
     RetrievalTrace,
 )
-from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
-from rp.models.runtime_identity import RuntimeProfileSnapshotCompiledProfile
+from rp.models.retrieval.runtime_config import RetrievalRuntimeConfig
+from rp.models.runtime.identity import RuntimeProfileSnapshotCompiledProfile
 from rp.observability.langfuse_scores import emit_retrieval_trace_scores
 from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,

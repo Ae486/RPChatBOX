@@ -12,13 +12,13 @@ from sqlmodel import Session
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 from rp.errors import RPError
-from rp.models.memory_contract_registry import (
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RUNTIME_WORKSPACE_MATERIAL_LAYER,
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,

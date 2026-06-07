@@ -6,13 +6,13 @@ import json
 from typing import AsyncIterator
 
 from models.chat import ChatMessage
-from rp.models.worker_memory import WorkerSourceRefBundle
+from rp.models.writer.worker_memory import WorkerSourceRefBundle
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
-from rp.models.writing_worker_contracts import (
+from rp.models.writer.writing_worker_contracts import (
     WritingWorkerExecutionRequest,
     WritingWorkerExecutionResult,
 )
-from rp.models.writing_runtime import WritingPacket
+from rp.models.writer.writing_runtime import WritingPacket
 from ..story.llm_gateway import StoryLlmGateway
 from .writing_worker_retrieval_loop_service import (
     WritingWorkerRetrievalLoopService,

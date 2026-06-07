@@ -7,8 +7,8 @@ from typing import Any
 from sqlmodel import Session
 
 from config import get_settings
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
     MemoryListVersionsInput,

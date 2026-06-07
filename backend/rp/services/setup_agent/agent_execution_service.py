@@ -23,9 +23,9 @@ from rp.models.setup_agent import (
     SetupAgentTurnRequest,
     SetupAgentTurnResponse,
 )
-from rp.models.setup_handoff import SetupContextBuilderInput
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId
+from rp.models.setup_agent.handoff import SetupContextBuilderInput
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId
 from .agent_runtime_state_service import SetupAgentRuntimeStateService
 from .context_builder import SetupContextBuilder
 from .context_compaction_service import SetupContextCompactionService

@@ -5,8 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Mapping, Sequence
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_materialization import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.materialization import (
     RECALL_LIFECYCLE_INVALIDATED,
     RECALL_LIFECYCLE_RECOMPUTED,
     RECALL_LIFECYCLE_SUPERSEDED,

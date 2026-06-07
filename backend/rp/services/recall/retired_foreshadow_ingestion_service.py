@@ -6,13 +6,13 @@ import json
 from hashlib import sha256
 from typing import Any
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_materialization import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.materialization import (
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,
     RETIRED_FORESHADOW_SUMMARY_KIND,
     build_recall_materialization_metadata,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     StoryArtifact,
     StoryArtifactKind,
     StoryArtifactStatus,

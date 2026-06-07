@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from rp.models.story_runtime import ChapterWorkspace
+from rp.models.story.runtime import ChapterWorkspace
 
 from ..story.session_service import StorySessionService
 

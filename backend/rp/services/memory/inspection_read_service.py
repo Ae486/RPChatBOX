@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from ..core_state.store_repository import CoreStateStoreRepository
-from rp.models.dsl import Layer, ObjectRef
+from rp.models.shared.dsl import Layer, ObjectRef
 
 from ..projection.builder_context_service import BuilderProjectionContextService
 from .object_mapper import authoritative_bindings, normalize_authoritative_ref

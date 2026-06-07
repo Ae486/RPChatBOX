@@ -9,13 +9,13 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
     SetupStageDraftBlock,
 )
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_truth_index import (
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.truth_index import (
     SetupTruthIndex,
     SetupTruthIndexFilters,
     SetupTruthIndexReadItem,
@@ -24,7 +24,7 @@ from rp.models.setup_truth_index import (
     SetupTruthIndexSearchItem,
     SetupTruthIndexSearchResult,
 )
-from rp.models.setup_workspace import AcceptedCommit, SetupWorkspace
+from rp.models.setup_agent.workspace import AcceptedCommit, SetupWorkspace
 
 
 class SetupTruthIndexService:

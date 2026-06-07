@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from rp.models.memory_crud import ProposalReceipt
+    from rp.models.memory.crud import ProposalReceipt
 
 
 @runtime_checkable

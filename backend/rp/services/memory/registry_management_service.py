@@ -14,7 +14,7 @@ from models.rp_registry_store import (
     MemoryWorkerDescriptorRecord,
 )
 from rp.errors import RPError
-from rp.models.memory_contract_registry import (
+from rp.models.memory.contract_registry import (
     MemoryBlockTemplate,
     MemoryContractRegistry,
     MemoryDomainContract,

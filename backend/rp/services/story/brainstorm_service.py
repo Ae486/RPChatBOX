@@ -9,14 +9,14 @@ from uuid import uuid4
 
 from models.chat import ChatMessage
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_workspace_material import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.story_brainstorm import (
+from rp.models.story.brainstorm import (
     BrainstormBatch,
     BrainstormBatchItem,
     BrainstormBatchStatus,

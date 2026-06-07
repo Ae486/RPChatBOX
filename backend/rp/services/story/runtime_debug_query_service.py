@@ -17,8 +17,8 @@ from models.rp_story_store import (
     StoryTurnRecord,
 )
 from rp.errors import RPError
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_workspace_material import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
 )

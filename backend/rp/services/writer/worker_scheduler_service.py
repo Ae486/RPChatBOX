@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.worker_runtime_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.writer.worker_runtime_contracts import (
     WorkerExecutionClass,
     WorkerExecutionItem,
     WorkerExecutionPlan,

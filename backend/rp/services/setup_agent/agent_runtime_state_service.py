@@ -23,7 +23,7 @@ from rp.agent_runtime.contracts import (
     SetupToolOutcome,
     SetupWorkingDigest,
 )
-from rp.models.setup_workspace import CommitProposalStatus, SetupStepId
+from rp.models.setup_agent.workspace import CommitProposalStatus, SetupStepId
 from .context_governor import SetupContextGovernorService
 
 

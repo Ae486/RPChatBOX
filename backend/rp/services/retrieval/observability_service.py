@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections import OrderedDict
 
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
-from rp.models.retrieval_observability import (
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult
+from rp.models.retrieval.observability import (
     RetrievalObservabilityHitView,
     RetrievalObservabilityMaintenanceView,
     RetrievalObservabilityView,
