@@ -23,7 +23,7 @@ from rp.agent_runtime.profiles import (
     build_setup_agent_profile,
 )
 from rp.agent_runtime.skill_packs import get_skill_pack_for_stage
-from rp.models.setup_agent import (
+from rp.models.setup_agent.agent import (
     SetupAgentDialogueMessage,
     SetupAgentTurnRequest,
     SetupAgentTurnResponse,

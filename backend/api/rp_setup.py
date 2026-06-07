@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
-from rp.models.setup_agent import SetupAgentTurnRequest
+from rp.models.setup_agent.agent import SetupAgentTurnRequest
 from rp.models.setup_agent.drafts import (
     FoundationEntry,
     LongformBlueprintDraft,

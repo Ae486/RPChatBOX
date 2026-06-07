@@ -28,7 +28,7 @@ from rp.context_engineering.validation import (
     filter_allowed_recovery_refs,
     validate_payload_against_policy,
 )
-from rp.models.setup_agent import SetupAgentDialogueMessage
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage
 
 _SETUP_ALLOWED_PAYLOAD_FIELDS = [
     "source_fingerprint",

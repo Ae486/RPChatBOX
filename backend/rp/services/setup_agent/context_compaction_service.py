@@ -31,7 +31,7 @@ from rp.context_engineering.contracts import (
     ContextSourceItem,
 )
 from rp.context_engineering.fingerprinting import fingerprint_source_items
-from rp.models.setup_agent import SetupAgentDialogueMessage
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage
 
 CompactPromptProvider = Callable[
     [list[ChatMessage]], dict[str, Any] | Awaitable[dict[str, Any]]

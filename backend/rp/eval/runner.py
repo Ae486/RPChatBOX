@@ -20,7 +20,7 @@ from models.rp_story_store import ChapterWorkspaceRecord, StorySessionRecord
 from rp.agent_runtime.contracts import SetupCognitiveStateSnapshot
 from rp.models.memory.crud import RetrievalQuery
 from rp.models.retrieval.records import SourceAsset
-from rp.models.setup_agent import SetupAgentTurnRequest
+from rp.models.setup_agent.agent import SetupAgentTurnRequest
 from rp.models.setup_agent.drafts import (
     FoundationEntry,
     LongformBlueprintDraft,

@@ -17,7 +17,7 @@ from rp.context_engineering.compaction import CompactPromptRunner, run_compact_o
 from rp.context_engineering.contracts import ContextCompactPromptRequest
 from rp.context_engineering.fingerprinting import fingerprint_source_items
 from rp.context_engineering.selection import select_context_sections
-from rp.models.setup_agent import SetupAgentDialogueMessage
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage
 from rp.services.setup_agent.context_compaction_service import SetupContextCompactionService
 
 

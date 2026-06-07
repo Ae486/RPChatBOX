@@ -15,7 +15,7 @@ from rp.agent_runtime.contracts import (
     SetupToolOutcome,
     SetupWorkingDigest,
 )
-from rp.models.setup_agent import SetupAgentDialogueMessage
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage
 from rp.services.setup_agent.context_compaction_service import SetupContextCompactionService
 from rp.services.setup_agent.context_governor import SetupContextGovernorService
 

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from rp.agent_runtime.contracts import RpAgentTurnResult
 from rp.eval.trace_capture import build_setup_trace
-from rp.models.setup_agent import SetupAgentTurnRequest
+from rp.models.setup_agent.agent import SetupAgentTurnRequest
 
 
 def test_build_setup_trace_emits_cognitive_artifacts_and_attributes():

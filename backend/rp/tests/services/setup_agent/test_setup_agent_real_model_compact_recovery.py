@@ -17,7 +17,7 @@ import pytest
 
 from models.model_registry import ModelCapabilityProfile, ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
-from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,

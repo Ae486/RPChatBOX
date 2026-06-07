@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from rp.models.setup_agent.stage import SetupStageId
-from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_agent.workspace import SetupStepId
 from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService

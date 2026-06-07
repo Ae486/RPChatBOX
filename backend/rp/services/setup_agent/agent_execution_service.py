@@ -19,7 +19,7 @@ from rp.agent_runtime.contracts import (
     SetupWorkingDigest,
 )
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor
-from rp.models.setup_agent import (
+from rp.models.setup_agent.agent import (
     SetupAgentTurnRequest,
     SetupAgentTurnResponse,
 )

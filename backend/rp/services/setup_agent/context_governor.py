@@ -14,7 +14,7 @@ from rp.agent_runtime.contracts import (
 from rp.context_engineering.adapters.setup import SetupContextEngineeringAdapter
 from rp.context_engineering.contracts import ContextSelectionResult
 from rp.context_engineering.selection import select_context_sections
-from rp.models.setup_agent import SetupAgentDialogueMessage
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage
 from .context_compaction_service import SetupContextCompactionService
 
 

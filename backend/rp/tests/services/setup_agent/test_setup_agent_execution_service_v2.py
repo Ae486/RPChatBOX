@@ -24,7 +24,7 @@ from rp.models.setup_agent.drafts import (
     SetupDraftSection,
     SetupStageDraftBlock,
 )
-from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
+from rp.models.setup_agent.agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
 from rp.models.setup_agent.handoff import SetupContextBuilderInput
 from rp.models.setup_agent.stage import SetupStageId
 from rp.models.setup_agent.workspace import SetupStepId, StoryMode
