@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from rp.models.dsl import Domain
-from rp.models.memory_contract_registry import (
+from rp.models.shared.dsl import Domain
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryContractRegistry,
     MemoryDirtyTarget,

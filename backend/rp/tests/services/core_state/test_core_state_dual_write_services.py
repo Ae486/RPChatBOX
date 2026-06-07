@@ -14,19 +14,19 @@ from models.rp_core_state_store import (
     CoreStateProjectionSlotRecord,
     CoreStateProjectionSlotRevisionRecord,
 )
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import (
     MemoryDirtyTarget,
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
-from rp.models.memory_crud import ProposalSubmitInput
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from rp.models.projection_refresh import (
+from rp.models.memory.crud import ProposalSubmitInput
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.projection.refresh import (
     ProjectionRefreshRequest,
     ProjectionRefreshServiceError,
 )
-from rp.models.story_runtime import LongformChapterPhase, SpecialistResultBundle
+from rp.models.story.runtime import LongformChapterPhase, SpecialistResultBundle
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )

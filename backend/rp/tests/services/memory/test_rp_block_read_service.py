@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from rp.models.dsl import Domain, Layer
-from rp.models.story_runtime import (
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.story.runtime import (
     LongformChapterPhase,
     StoryArtifactKind,
     StoryArtifactStatus,

@@ -12,32 +12,32 @@ from config import get_settings
 from main import create_app
 from models.rp_retrieval_store import SourceAssetRecord
 from models.rp_story_store import RuntimeWorkflowJobRecord, StoryTurnRecord
-from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.dsl import Domain
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_crud import MemorySearchArchivalInput
-from rp.models.mode_extension_contracts import (
+from rp.models.story.archival_evolution import ArchivalEvolutionRequest
+from rp.models.shared.dsl import Domain
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.crud import MemorySearchArchivalInput
+from rp.models.runtime.mode_extension_contracts import (
     RULE_CARD_SLOT_ID,
     RULE_STATE_CARD_SLOT_ID,
     RULE_STATE_WORKER_ID,
     RuleCardMaterial,
     RuleStateCardMaterial,
 )
-from rp.models.revision_overlay_contracts import (
+from rp.models.core_state.revision_overlay_contracts import (
     RevisionAnchorRef,
 )
-from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterialKind,
 )
-from rp.models.runtime_workflow_job import (
+from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,
 )
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     OrchestratorPlan,
@@ -86,7 +86,7 @@ from rp.tests.services.runtime.test_runtime_config_control_service import (
     _control_service,
     _seed_story_session,
 )
-from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
+from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 from services.database import get_engine
 from services.langfuse_config_service import reset_langfuse_config_service
 from services.langfuse_service import reset_langfuse_service

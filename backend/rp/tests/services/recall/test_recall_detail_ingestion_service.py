@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from rp.models.dsl import Domain
-from rp.models.memory_crud import MemorySearchRecallInput
-from rp.models.retrieval_records import IndexJob
-from rp.models.story_runtime import (
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import MemorySearchRecallInput
+from rp.models.retrieval.records import IndexJob
+from rp.models.story.runtime import (
     LongformChapterPhase,
     StoryArtifactKind,
     StoryArtifactStatus,

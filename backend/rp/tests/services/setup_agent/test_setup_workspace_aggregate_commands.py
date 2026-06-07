@@ -11,8 +11,8 @@ from models.rp_setup_store import (
     SetupRetrievalIngestionJobRecord,
     SetupWorkspaceRecord,
 )
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import RetrievalIngestionState, SetupStepId, StoryMode
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import RetrievalIngestionState, SetupStepId, StoryMode
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 
 

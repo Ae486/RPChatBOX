@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from rp.models.dsl import Domain
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.shared.dsl import Domain
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.retrieval.context import RetrievalBrokerContext
 from rp.services.retrieval.search import SearchBroker
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService

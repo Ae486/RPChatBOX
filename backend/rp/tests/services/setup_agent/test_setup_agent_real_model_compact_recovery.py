@@ -18,13 +18,13 @@ import pytest
 from models.model_registry import ModelCapabilityProfile, ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
     SetupStageDraftBlock,
 )
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId, StoryMode
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId, StoryMode
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from services.model_registry import get_model_registry_service

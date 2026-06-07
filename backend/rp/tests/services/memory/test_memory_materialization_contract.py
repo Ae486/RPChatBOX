@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_materialization import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.materialization import (
     CONTINUITY_NOTE_KIND,
     FOUNDATION_ENTRY_SOURCE_TYPE,
     HEAVY_REGRESSION_CHAPTER_CLOSE_EVENT,

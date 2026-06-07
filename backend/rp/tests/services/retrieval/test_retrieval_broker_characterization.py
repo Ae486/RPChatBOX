@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import pytest
 
-from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
 from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
@@ -19,8 +19,8 @@ from rp.models.memory.crud import (
     RetrievalSearchResult,
     RetrievalTrace,
 )
-from rp.models.setup_drafts import StoryConfigDraft
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_agent.drafts import StoryConfigDraft
+from rp.models.setup_agent.workspace import StoryMode
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.retrieval.runtime_config_service import RetrievalRuntimeConfigService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService

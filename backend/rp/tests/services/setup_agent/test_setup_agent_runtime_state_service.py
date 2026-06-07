@@ -18,7 +18,7 @@ from rp.agent_runtime.contracts import (
     SetupToolOutcome,
     SetupWorkingDigest,
 )
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     ChapterBlueprintEntry,
     FoundationEntry,
     LongformBlueprintDraft,
@@ -26,9 +26,9 @@ from rp.models.setup_drafts import (
     SetupDraftSection,
     SetupStageDraftBlock,
 )
-from rp.models.setup_handoff import SetupContextBuilderInput
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId, StoryMode
+from rp.models.setup_agent.handoff import SetupContextBuilderInput
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId, StoryMode
 from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_agent.context_builder import SetupContextBuilder
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService

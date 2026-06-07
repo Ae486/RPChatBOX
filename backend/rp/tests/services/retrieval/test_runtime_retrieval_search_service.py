@@ -5,17 +5,17 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from rp.models.dsl import Domain
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import (
     MemorySearchArchivalInput,
     MemorySearchRecallInput,
     RetrievalSearchResult,
 )
-from rp.models.retrieval_runtime_contracts import RuntimeRetrievalSearchInput
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterial
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialVisibility
+from rp.models.retrieval.runtime_contracts import RuntimeRetrievalSearchInput
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterial
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialVisibility
 from rp.services.retrieval.runtime_search_service import RuntimeRetrievalSearchService
 
 

@@ -16,14 +16,14 @@ from models.rp_story_store import (
     RuntimeWorkflowJobRecord,
     StoryTurnRecord,
 )
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import RetrievalHit
-from rp.models.projection_refresh import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import RetrievalHit
+from rp.models.projection.refresh import (
     ProjectionRefreshRequest,
     ProjectionRefreshServiceError,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     LongformTurnRequest,
@@ -33,7 +33,7 @@ from rp.models.story_runtime import (
     StoryArtifactStatus,
     StoryArtifactKind,
 )
-from rp.models.story_brainstorm import (
+from rp.models.story.brainstorm import (
     BrainstormBatchSubmitRequest,
     BrainstormDiscussionRequest,
     BrainstormItemStatus,
@@ -41,18 +41,18 @@ from rp.models.story_brainstorm import (
     BrainstormSessionStartRequest,
     BrainstormSummarizeRequest,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
 )
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.runtime_workflow_job import RuntimeWorkflowJobStatus
-from rp.models.writing_worker_contracts import (
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.workflow_job import RuntimeWorkflowJobStatus
+from rp.models.writer.writing_worker_contracts import (
     WritingWorkerExecutionRequest,
     WritingWorkerExecutionResult,
 )
-from rp.models.writing_runtime import WritingPacket
+from rp.models.writer.writing_runtime import WritingPacket
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.graphs.story_graph_runner import StoryGraphRunner
 from rp.services.core_state.authoritative_state_view_service import AuthoritativeStateViewService
@@ -108,7 +108,7 @@ from rp.services.writer.writing_packet_builder import WritingPacketBuilder
 from rp.tests.services._helpers.core_state_dual_write_helpers import (
     build_seeded_core_state_dual_write_service_from_story_service,
 )
-from rp.models.worker_runtime_contracts import (
+from rp.models.writer.worker_runtime_contracts import (
     WorkerExecutionItem,
     WorkerExecutionPlan,
     WorkerPlanSource,

@@ -9,10 +9,10 @@ import pytest
 from sqlmodel import select
 
 from models.rp_retrieval_store import KnowledgeChunkRecord
-from rp.models.dsl import Domain
-from rp.models.memory_crud import MemorySearchRecallInput
-from rp.models.retrieval_records import IndexJob
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import MemorySearchRecallInput
+from rp.models.retrieval.records import IndexJob
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.recall.continuity_note_ingestion_service import (
     RecallContinuityNoteIngestionService,
 )

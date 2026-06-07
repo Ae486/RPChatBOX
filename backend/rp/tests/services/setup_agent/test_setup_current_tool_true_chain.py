@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import StoryMode
 from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_agent.context_builder import SetupContextBuilder
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService

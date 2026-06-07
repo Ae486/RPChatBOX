@@ -9,13 +9,13 @@ from typing import Any, cast
 
 import pytest
 
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
     SetupStageDraftBlock,
 )
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import (
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import (
     CommitProposalStatus,
     QuestionSeverity,
     QuestionStatus,

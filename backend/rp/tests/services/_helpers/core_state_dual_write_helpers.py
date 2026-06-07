@@ -7,7 +7,7 @@ repeat activation seeding after a test has already advanced Core revisions.
 
 from __future__ import annotations
 
-from rp.models.dsl import Layer
+from rp.models.shared.dsl import Layer
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 

@@ -6,15 +6,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from rp.models.dsl import Domain
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import (
     RetrievalHit,
     RetrievalQuery,
     RetrievalSearchResult,
     RetrievalTrace,
 )
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_workspace import StoryMode
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.workspace import StoryMode
 from rp.retrieval.keyword_retriever import KeywordRetriever
 from rp.retrieval.query_preprocessor import DefaultQueryPreprocessor
 from rp.retrieval.rrf_fusion import reciprocal_rank_fusion

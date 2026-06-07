@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.revision_overlay_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.core_state.revision_overlay_contracts import (
     LongformDraftAdoptionReceipt,
     LongformDraftSelectionReceipt,
     ReplacementBlock,
     RevisionAnchorRef,
 )
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.setup_agent.draft_selection_service import (
     DraftSelectionService,

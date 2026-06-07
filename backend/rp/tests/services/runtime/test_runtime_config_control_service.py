@@ -14,15 +14,15 @@ from models.rp_story_store import (
     StorySessionRecord,
     StoryTurnRecord,
 )
-from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.runtime_workflow_job import (
+from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,
 )
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase, LongformTurnCommandKind
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase, LongformTurnCommandKind
 from rp.services.runtime.config_control_service import (
     RuntimeConfigControlService,
     RuntimeConfigControlServiceError,

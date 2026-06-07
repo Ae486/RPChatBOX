@@ -7,9 +7,9 @@ from typing import Any, cast
 
 import pytest
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     LongformTurnRequest,
@@ -1184,7 +1184,7 @@ def _writer_result(
     identity: MemoryRuntimeIdentity,
     output_text: str,
 ):
-    from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
+    from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 
     return WritingWorkerExecutionResult(
         request_id=f"writer-request:{identity.turn_id}",
@@ -1250,7 +1250,7 @@ def _build_context_orchestration_service(
 
 
 def _segment_plan():
-    from rp.models.story_runtime import OrchestratorPlan
+    from rp.models.story.runtime import OrchestratorPlan
 
     return OrchestratorPlan(
         output_kind=StoryArtifactKind.STORY_SEGMENT,
@@ -1259,7 +1259,7 @@ def _segment_plan():
 
 
 def _specialist_bundle():
-    from rp.models.story_runtime import SpecialistResultBundle
+    from rp.models.story.runtime import SpecialistResultBundle
 
     return SpecialistResultBundle(writer_hints=["Runtime Hint"])
 

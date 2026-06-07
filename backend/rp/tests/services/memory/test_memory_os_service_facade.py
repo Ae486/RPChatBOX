@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from rp.models.dsl import Domain, Layer, ObjectRef
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
 from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,

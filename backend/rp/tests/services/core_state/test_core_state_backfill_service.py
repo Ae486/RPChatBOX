@@ -11,10 +11,10 @@ from models.rp_core_state_store import (
     CoreStateProjectionSlotRecord,
     CoreStateProjectionSlotRevisionRecord,
 )
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_crud import ProposalSubmitInput
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.memory.crud import ProposalSubmitInput
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.core_state.backfill_service import CoreStateBackfillService
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.store_repository import CoreStateStoreRepository

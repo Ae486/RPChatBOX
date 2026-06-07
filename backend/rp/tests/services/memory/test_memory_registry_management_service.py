@@ -6,7 +6,7 @@ from sqlmodel import select
 
 from models.rp_registry_store import MemoryModeProfileRecord
 from models.rp_story_store import RuntimeProfileSnapshotRecord, StoryTurnRecord
-from rp.models.memory_contract_registry import (
+from rp.models.memory.contract_registry import (
     MemoryBlockTemplate,
     MemoryDomainContract,
     MemoryLifecycleState,
@@ -14,8 +14,8 @@ from rp.models.memory_contract_registry import (
     MemoryWorkerDescriptor,
     MemoryWorkerModeDefault,
 )
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.memory.contract_registry import (
     CORE_STATE_AUTHORITATIVE_LAYER,
     RUNTIME_WORKSPACE_LAYER,

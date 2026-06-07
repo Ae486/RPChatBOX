@@ -8,24 +8,24 @@ from typing import Any
 import pytest
 
 from models.rp_story_store import BranchHeadRecord
-from rp.models.archival_evolution import (
+from rp.models.story.archival_evolution import (
     ArchivalEvolutionReceipt,
     ArchivalEvolutionRequest,
 )
-from rp.models.block_view import RpBlockView
-from rp.models.core_mutation import DirectCoreEditRequest
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import ProposalReceipt
-from rp.models.memory_inspection import RecallReviewCommand
-from rp.models.retrieval_records import SourceAsset
-from rp.models.runtime_workspace_material import (
+from rp.models.block.view import RpBlockView
+from rp.models.proposal.core_mutation import DirectCoreEditRequest
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import ProposalReceipt
+from rp.models.memory.inspection import RecallReviewCommand
+from rp.models.retrieval.records import SourceAsset
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.memory.inspection_service import (
     MemoryInspectionError,
     MemoryInspectionService,

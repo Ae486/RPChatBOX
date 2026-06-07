@@ -5,10 +5,10 @@ from __future__ import annotations
 from sqlmodel import select
 
 from models.rp_story_store import RuntimeProfileSnapshotRecord, StorySessionRecord
-from rp.models.runtime_identity import RuntimeProfileSnapshotCompiledProfile
-from rp.models.setup_drafts import StoryConfigDraft
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.runtime.identity import RuntimeProfileSnapshotCompiledProfile
+from rp.models.setup_agent.drafts import StoryConfigDraft
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story.session_service import StorySessionService

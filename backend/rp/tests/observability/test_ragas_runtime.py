@@ -9,7 +9,7 @@ from rp.eval.ragas_runtime import (
     _select_instructor_mode,
     resolve_ragas_runtime_bindings,
 )
-from rp.models.retrieval_runtime_config import RetrievalRuntimeConfig
+from rp.models.retrieval.runtime_config import RetrievalRuntimeConfig
 
 
 class _FakeLiteLLMService:

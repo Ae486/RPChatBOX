@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from rp.agent_runtime.contracts import SetupDraftRefReadInput, SetupDraftRefReadResult
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
     SetupStageDraftBlock,
 )
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import StoryMode
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.setup_agent_memory.service import SetupSessionMemoryService
 

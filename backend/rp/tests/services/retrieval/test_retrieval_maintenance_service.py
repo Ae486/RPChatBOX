@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from sqlmodel import select
 
 from models.rp_retrieval_store import EmbeddingRecordRecord, KnowledgeChunkRecord
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_workspace import StoryMode
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.workspace import StoryMode
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
@@ -224,7 +224,7 @@ def test_backfill_collection_embeddings_only_targets_collection_assets(retrieval
 
 
 def test_retry_story_failed_jobs_dedupes_latest_failed_targets(retrieval_session):
-    from rp.models.retrieval_records import EmbeddingRecord, KnowledgeChunk
+    from rp.models.retrieval.records import EmbeddingRecord, KnowledgeChunk
     from rp.retrieval.embedder import Embedder
 
     class InvalidEmbedder(Embedder):
@@ -283,7 +283,7 @@ def test_retry_story_failed_jobs_dedupes_latest_failed_targets(retrieval_session
 
 
 def test_retry_collection_failed_jobs_respects_limit_and_collection_scope(retrieval_session):
-    from rp.models.retrieval_records import EmbeddingRecord, KnowledgeChunk
+    from rp.models.retrieval.records import EmbeddingRecord, KnowledgeChunk
     from rp.retrieval.embedder import Embedder
 
     class InvalidEmbedder(Embedder):

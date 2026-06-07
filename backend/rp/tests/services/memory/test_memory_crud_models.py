@@ -4,8 +4,8 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     ProposalReceipt,
     ProposalSubmitInput,

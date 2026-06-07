@@ -8,17 +8,17 @@ from copy import deepcopy
 import pytest
 
 from config import get_settings
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.memory.crud import (
     MemoryGetSummaryInput,
     MemorySearchRecallInput,
     ProposalSubmitInput,
 )
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
-from rp.models.projection_refresh import ProjectionRefreshRequest
-from rp.models.worker_memory import WorkerMemoryContext
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
+from rp.models.projection.refresh import ProjectionRefreshRequest
+from rp.models.writer.worker_memory import WorkerMemoryContext
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.retrieval.collection_service import RetrievalCollectionService

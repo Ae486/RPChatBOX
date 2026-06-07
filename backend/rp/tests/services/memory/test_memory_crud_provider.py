@@ -5,9 +5,9 @@ import json
 import pytest
 
 from config import get_settings
-from rp.models.dsl import Domain, Layer
+from rp.models.shared.dsl import Domain, Layer
 from rp.models.memory.crud import RetrievalHit, RetrievalSearchResult, RetrievalTrace
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory.os_service import MemoryOsService
 from rp.services.proposal.repository import ProposalRepository

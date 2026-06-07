@@ -6,8 +6,8 @@ import pytest
 from sqlmodel import select
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.story_brainstorm import (
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.story.brainstorm import (
     BrainstormBatchSubmitRequest,
     BrainstormContinueWritingRequest,
     BrainstormDiscussionRequest,
@@ -17,8 +17,8 @@ from rp.models.story_brainstorm import (
     BrainstormSessionStartRequest,
     BrainstormSummarizeRequest,
 )
-from rp.models.story_runtime import LongformChapterPhase
-from rp.models.story_runtime import StoryArtifactKind, StoryArtifactStatus
+from rp.models.story.runtime import LongformChapterPhase
+from rp.models.story.runtime import StoryArtifactKind, StoryArtifactStatus
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.memory.inspection_read_service import MemoryInspectionReadService
 from rp.services.memory.rp_block_read_service import RpBlockReadService

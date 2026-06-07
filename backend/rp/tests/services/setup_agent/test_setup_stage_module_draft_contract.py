@@ -6,13 +6,13 @@ import pytest
 from pydantic import ValidationError
 
 from models.rp_setup_store import SetupDraftBlockRecord
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
     SetupStageDraftBlock,
 )
-from rp.models.setup_stage import SetupStageId, get_stage_module
-from rp.models.setup_workspace import SetupStepId, SetupStepLifecycleState, StoryMode
+from rp.models.setup_agent.stage import SetupStageId, get_stage_module
+from rp.models.setup_agent.workspace import SetupStepId, SetupStepLifecycleState, StoryMode
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 
 

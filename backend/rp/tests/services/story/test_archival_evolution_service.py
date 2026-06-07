@@ -12,27 +12,27 @@ from models.rp_retrieval_store import (
     SourceAssetRecord,
 )
 from models.rp_story_store import BranchHeadRecord
-from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_crud import MemorySearchArchivalInput, ProposalSubmitInput
-from rp.models.memory_materialization import (
+from rp.models.story.archival_evolution import ArchivalEvolutionRequest
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.crud import MemorySearchArchivalInput, ProposalSubmitInput
+from rp.models.memory.materialization import (
     FOUNDATION_ENTRY_SOURCE_TYPE,
     SETUP_COMMIT_IMPORT_EVENT,
     build_archival_seed_section,
     build_archival_source_metadata,
 )
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
-from rp.models.story_evolution_contracts import (
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
+from rp.models.story.evolution_contracts import (
     StoryEvolutionOperation,
     StoryEvolutionRequest,
     StoryEvolutionStatus,
     StoryEvolutionTargetLayer,
 )
-from rp.models.worker_memory import WorkerProposalGovernanceMetadata
+from rp.models.writer.worker_memory import WorkerProposalGovernanceMetadata
 from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler

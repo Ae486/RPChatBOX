@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from models.rp_story_store import ensure_story_store_compatible_schema
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     LongformTurnRequest,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_crud import RetrievalHit
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.crud import RetrievalHit
 from rp.services.retrieval.block_adapter_service import RetrievalBlockAdapterService
 
 

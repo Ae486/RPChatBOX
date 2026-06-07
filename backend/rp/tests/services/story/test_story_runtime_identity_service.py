@@ -14,19 +14,19 @@ from models.rp_story_store import (
     StorySessionRecord,
     StoryTurnRecord,
 )
-from rp.models.runtime_identity import (
+from rp.models.runtime.identity import (
     BranchControlKind,
     BranchHeadStatus,
     BranchVisibilityState,
     StoryTurnStatus,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
 )
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     StoryArtifactKind,
     StoryArtifactStatus,

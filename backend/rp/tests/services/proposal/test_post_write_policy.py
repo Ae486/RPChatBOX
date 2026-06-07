@@ -1,5 +1,5 @@
 """Tests for post-write maintenance policy matching."""
-from rp.models.post_write_policy import (
+from rp.models.proposal.post_write_policy import (
     PolicyDecision,
     PolicyRule,
     PostWriteMaintenancePolicy,

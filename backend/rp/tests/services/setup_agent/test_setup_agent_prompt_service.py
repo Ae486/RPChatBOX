@@ -15,9 +15,9 @@ from rp.agent_runtime.profiles import (
     SETUP_AGENT_VISIBLE_TOOLS,
     build_setup_agent_capability_plan,
 )
-from rp.models.setup_handoff import SetupContextPacket
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId, StoryMode
+from rp.models.setup_agent.handoff import SetupContextPacket
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId, StoryMode
 from rp.services.setup_agent.agent_prompt_service import SetupAgentPromptService
 
 

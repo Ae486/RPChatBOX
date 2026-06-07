@@ -30,16 +30,16 @@ from models.rp_retrieval_store import (
     SourceAssetRecord,
 )
 from models.rp_story_store import StorySessionRecord
-from rp.models.core_mutation import DirectCoreEditRequest
+from rp.models.proposal.core_mutation import DirectCoreEditRequest
 from rp.devtools.legal_longform_session_seed import (
     LegalLongformSessionSeedError,
     LegalLongformSessionSeeder,
     load_default_template,
 )
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import MemorySearchRecallInput
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import MemorySearchRecallInput
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )

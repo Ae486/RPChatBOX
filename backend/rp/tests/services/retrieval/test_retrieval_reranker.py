@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from models.model_registry import ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
 from models.chat import ChatMessage
-from rp.models.dsl import Domain
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
 from rp.retrieval.reranker import CrossEncoderReranker, LLMReranker
 from rp.retrieval.reranker_backends import (
     HostedRerankerBackend,

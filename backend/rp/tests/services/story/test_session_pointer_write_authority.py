@@ -16,10 +16,10 @@ from models.rp_story_store import (
     BranchHeadRecord,
     StorySessionRecord,
 )
-from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
+from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
 from rp.devtools.check_story_session_write_boundary import DEFAULT_BACKEND_ROOT
 from rp.models.setup_agent.workspace import StoryMode
-from rp.models.runtime_identity import StoryTurnStatus
+from rp.models.runtime.identity import StoryTurnStatus
 from rp.models.story.runtime import LongformChapterPhase
 from rp.services.runtime.config_control_service import RuntimeConfigControlService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService

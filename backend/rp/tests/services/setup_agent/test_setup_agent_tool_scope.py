@@ -12,7 +12,7 @@ from rp.agent_runtime.profiles import (
     build_setup_agent_capability_plan,
     build_setup_agent_tool_scope,
 )
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_agent.stage import SetupStageId
 
 
 LEGACY_PATCH_TOOLS = {

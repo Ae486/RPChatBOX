@@ -7,8 +7,8 @@ import json
 import pytest
 
 from config import get_settings
-from rp.models.dsl import Layer
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.shared.dsl import Layer
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.story.session_service import StorySessionService

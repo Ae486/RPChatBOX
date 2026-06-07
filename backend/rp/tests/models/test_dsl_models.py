@@ -1,5 +1,5 @@
 """Tests for RP shared DSL models."""
-from rp.models.dsl import Domain, Layer, ObjectRef, TypedEnvelope
+from rp.models.shared.dsl import Domain, Layer, ObjectRef, TypedEnvelope
 
 
 def test_typed_envelope_canonical_dump_excludes_none():

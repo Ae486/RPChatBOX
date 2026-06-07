@@ -5,11 +5,11 @@ from __future__ import annotations
 from copy import deepcopy
 
 from models.rp_story_store import StoryTurnRecord
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import MemoryGetStateInput
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import MemoryGetStateInput
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.core_state.authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,
 )

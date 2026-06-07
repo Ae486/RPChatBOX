@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from rp.models.block_prompt_context import RpBlockPromptContextView
-from rp.models.block_view import RpBlockView
-from rp.models.dsl import Domain, Layer
+from rp.models.block.prompt_context import RpBlockPromptContextView
+from rp.models.block.view import RpBlockView
+from rp.models.shared.dsl import Domain, Layer
 from rp.services.story.block_prompt_render_service import StoryBlockPromptRenderService
 
 

@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from rp.models.dsl import Domain
-from rp.models.memory_crud import MemorySearchRecallInput, RetrievalSearchResult
-from rp.models.retrieval_runtime_contracts import RetrievalKnowledgeGapItem
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
-from rp.models.retrieval_records import SourceAsset
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import MemorySearchRecallInput, RetrievalSearchResult
+from rp.models.retrieval.runtime_contracts import RetrievalKnowledgeGapItem
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
+from rp.models.retrieval.records import SourceAsset
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
@@ -22,7 +22,7 @@ from rp.services.retrieval.runtime_card_service import (
 )
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.session_service import StorySessionService
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterialVisibility,
 )
 

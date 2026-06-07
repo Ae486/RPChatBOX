@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from models.rp_story_store import BranchHeadRecord
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime.identity import (
     BranchHeadStatus,
     BranchVisibilityState,

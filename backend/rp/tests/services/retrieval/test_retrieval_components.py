@@ -6,11 +6,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from rp.models.dsl import Domain
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
-from rp.models.retrieval_records import KnowledgeChunk
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_workspace import StoryMode
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.retrieval.records import KnowledgeChunk
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.workspace import StoryMode
 from rp.retrieval.chunker import Chunker
 from rp.retrieval.embedder import Embedder, _EmbeddingTarget
 from rp.retrieval.hybrid_retriever import HybridRetriever

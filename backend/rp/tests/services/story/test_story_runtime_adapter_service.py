@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.story.runtime import (
     LongformTurnCommandKind,
     OrchestratorPlan,
     SpecialistResultBundle,
     StoryArtifactKind,
 )
-from rp.models.worker_runtime_contracts import (
+from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     WorkerDescriptor,
     WorkerExecutionClass,

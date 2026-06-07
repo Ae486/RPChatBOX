@@ -7,25 +7,25 @@ from sqlmodel import select
 
 from models.rp_retrieval_store import SourceAssetRecord
 from models.rp_story_store import RuntimeWorkflowJobRecord, StorySessionRecord, StoryTurnRecord
-from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.dsl import Domain
-from rp.models.memory_crud import MemorySearchArchivalInput
-from rp.models.mode_extension_contracts import (
+from rp.models.story.archival_evolution import ArchivalEvolutionRequest
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import MemorySearchArchivalInput
+from rp.models.runtime.mode_extension_contracts import (
     RULE_CARD_SLOT_ID,
     RULE_STATE_CARD_SLOT_ID,
     RULE_STATE_WORKER_ID,
     RuleCardMaterial,
     RuleStateCardMaterial,
 )
-from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.runtime_workflow_job import (
+from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,
 )
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     OrchestratorPlan,

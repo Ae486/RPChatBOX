@@ -10,48 +10,48 @@ import pytest
 from sqlmodel import select
 
 from models.rp_story_store import BranchHeadRecord, RuntimeProfileSnapshotRecord
-from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.core_mutation import (
+from rp.models.story.archival_evolution import ArchivalEvolutionRequest
+from rp.models.proposal.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
     CoreMutationEnvelope,
     DirectCoreEditRequest,
 )
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
-from rp.models.memory_materialization import (
+from rp.models.memory.materialization import (
     FOUNDATION_ENTRY_SOURCE_TYPE,
     SETUP_COMMIT_IMPORT_EVENT,
     build_archival_seed_section,
     build_archival_source_metadata,
 )
-from rp.models.memory_crud import (
+from rp.models.memory.crud import (
     MemoryBlockProposalSubmitRequest,
     ProposalSubmitInput,
 )
-from rp.models.longform_chapter_contracts import ChapterBridgeMaterial
-from rp.models.mode_extension_contracts import RuleCardMaterial, RuleStateCardMaterial
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from rp.models.retrieval_records import SourceAsset
-from rp.models.runtime_workspace_material import (
+from rp.models.writer.longform_chapter_contracts import ChapterBridgeMaterial
+from rp.models.runtime.mode_extension_contracts import RuleCardMaterial, RuleStateCardMaterial
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.retrieval.records import SourceAsset
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.models.runtime_identity import StoryTurnStatus
+from rp.models.runtime.identity import StoryTurnStatus
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )

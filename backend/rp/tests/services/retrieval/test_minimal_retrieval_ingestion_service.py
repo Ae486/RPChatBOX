@@ -19,13 +19,13 @@ from models.rp_setup_store import (
     SetupRetrievalIngestionJobRecord,
     SetupWorkspaceRecord,
 )
-from rp.models.dsl import Domain
-from rp.models.memory_graph_projection import (
+from rp.models.shared.dsl import Domain
+from rp.models.memory.graph_projection import (
     GRAPH_JOB_REASON_ARCHIVAL_INGESTED,
     GRAPH_JOB_STATUS_QUEUED,
 )
-from rp.models.memory_crud import MemorySearchArchivalInput
-from rp.models.setup_workspace import RetrievalIngestionState
+from rp.models.memory.crud import MemorySearchArchivalInput
+from rp.models.setup_agent.workspace import RetrievalIngestionState
 from rp.services.retrieval.minimal_ingestion_service import (
     MinimalRetrievalIngestionService,
 )

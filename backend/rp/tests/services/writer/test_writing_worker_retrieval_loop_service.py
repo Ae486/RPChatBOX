@@ -6,15 +6,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from rp.models.dsl import Domain
-from rp.models.memory_crud import MemorySearchRecallInput
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialVisibility
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
-from rp.models.writing_worker_contracts import WritingWorkerExecutionRequest
-from rp.models.writing_runtime import WritingPacket
-from rp.models.retrieval_records import SourceAsset
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import MemorySearchRecallInput
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialVisibility
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
+from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionRequest
+from rp.models.writer.writing_runtime import WritingPacket
+from rp.models.retrieval.records import SourceAsset
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService

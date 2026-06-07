@@ -18,26 +18,26 @@ from models.rp_story_store import (
     ChapterWorkspaceRecord,
     StorySessionRecord,
 )
-from rp.models.core_mutation import (
+from rp.models.proposal.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
     CoreMutationEnvelope,
 )
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
-from rp.models.memory_crud import ProposalSubmitInput
-from rp.models.runtime_workspace_material import (
+from rp.models.memory.crud import ProposalSubmitInput
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.memory.trace_read_service import MemoryTraceReadService
 from rp.services.proposal.repository import ProposalRepository

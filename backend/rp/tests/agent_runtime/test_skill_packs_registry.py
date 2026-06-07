@@ -13,7 +13,7 @@ from rp.agent_runtime.skill_packs import (
     load_registry,
     render_skill_pack,
 )
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_agent.stage import SetupStageId
 
 
 REQUIRED_BODY_SECTIONS = (

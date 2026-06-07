@@ -7,16 +7,16 @@ from typing import Any, cast
 
 import pytest
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     OrchestratorPlan,
     SpecialistResultBundle,
     StoryArtifactKind,
 )
-from rp.models.worker_runtime_contracts import WorkerPlanSource
+from rp.models.writer.worker_runtime_contracts import WorkerPlanSource
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story.session_service import StorySessionService
@@ -32,7 +32,7 @@ from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFaca
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
 from rp.services.writer.worker_execution_service import WorkerExecutionService
 from rp.services.writer.worker_registry_service import (
     LONGFORM_MEMORY_WORKER_ID,

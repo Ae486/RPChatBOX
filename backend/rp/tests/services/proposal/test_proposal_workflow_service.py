@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from rp.models.core_mutation import (
+from rp.models.proposal.core_mutation import (
     CORE_MUTATION_ORIGIN_DETERMINISTIC_SYSTEM_REFRESH,
     CORE_MUTATION_ORIGIN_WORKER_PROPOSAL_APPLY,
 )
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_crud import MemorySearchRecallInput, ProposalSubmitInput
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from rp.models.story_runtime import (
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.crud import MemorySearchRecallInput, ProposalSubmitInput
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.story.runtime import (
     LongformChapterPhase,
     OrchestratorPlan,
     SpecialistResultBundle,
@@ -48,7 +48,7 @@ from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.tests.services._helpers.core_state_dual_write_helpers import (
     build_seeded_core_state_dual_write_service_from_story_service,
 )
-from rp.models.worker_memory import WorkerProposalGovernanceMetadata
+from rp.models.writer.worker_memory import WorkerProposalGovernanceMetadata
 
 
 def _seed_story_runtime(retrieval_session):

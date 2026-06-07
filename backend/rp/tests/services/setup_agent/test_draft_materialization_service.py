@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.revision_overlay_contracts import DraftDocumentBlock, DraftDocumentRecord
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.core_state.revision_overlay_contracts import DraftDocumentBlock, DraftDocumentRecord
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 
 

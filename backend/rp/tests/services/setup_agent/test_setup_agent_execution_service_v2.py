@@ -19,15 +19,15 @@ from rp.agent_runtime.profiles import (
 )
 from rp.agent_runtime.executor import RpAgentRuntimeExecutor
 from rp.agent_runtime.tools import RuntimeToolExecutor
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
     SetupStageDraftBlock,
 )
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
-from rp.models.setup_handoff import SetupContextBuilderInput
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId, StoryMode
+from rp.models.setup_agent.handoff import SetupContextBuilderInput
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId, StoryMode
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from rp.agent_runtime.adapters import SetupRuntimeAdapter
 from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService

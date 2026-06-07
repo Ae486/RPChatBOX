@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.memory.registry_management_service import (
     MemoryRegistryManagementService,
 )

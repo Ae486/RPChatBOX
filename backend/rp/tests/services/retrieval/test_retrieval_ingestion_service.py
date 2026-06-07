@@ -12,11 +12,11 @@ from models.rp_retrieval_store import (
     ParsedDocumentRecord,
     SourceAssetRecord,
 )
-from rp.models.retrieval_records import EmbeddingRecord, KnowledgeChunk
-from rp.models.retrieval_records import SourceAsset
+from rp.models.retrieval.records import EmbeddingRecord, KnowledgeChunk
+from rp.models.retrieval.records import SourceAsset
 from rp.retrieval.embedder import Embedder
 from rp.retrieval.parser import Parser
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_agent.workspace import StoryMode
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService

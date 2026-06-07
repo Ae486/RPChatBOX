@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.mode_extension_contracts import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.mode_extension_contracts import (
     CHARACTER_MEMORY_WORKER_ID,
     RULE_CARD_SLOT_ID,
     RULE_STATE_CARD_SLOT_ID,
@@ -14,16 +14,16 @@ from rp.models.mode_extension_contracts import (
     RuleCardMaterial,
     RuleStateCardMaterial,
 )
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     OrchestratorPlan,
     SpecialistResultBundle,
     StoryArtifactKind,
 )
-from rp.models.worker_runtime_contracts import WorkerResultStatus
+from rp.models.writer.worker_runtime_contracts import WorkerResultStatus
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )

@@ -6,13 +6,13 @@ import pytest
 from sqlmodel import Session, select
 
 from models.rp_memory_store import MemoryChangeEventRecord
-from rp.models.memory_contract_registry import (
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,

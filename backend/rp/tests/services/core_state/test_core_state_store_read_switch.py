@@ -6,8 +6,8 @@ import pytest
 from sqlmodel import select
 
 from models.rp_core_state_store import CoreStateProjectionSlotRecord
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
     MemoryListVersionsInput,
@@ -35,9 +35,9 @@ from rp.services.story.session_core_state_adapter import StorySessionCoreStateAd
 from rp.services.story.session_service import StorySessionService
 from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
-from rp.models.memory_crud import ProposalSubmitInput
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.memory.crud import ProposalSubmitInput
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.story.runtime import LongformChapterPhase
 
 
 async def _seed_dual_written_runtime(retrieval_session):

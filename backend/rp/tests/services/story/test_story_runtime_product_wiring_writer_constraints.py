@@ -10,9 +10,9 @@ from sqlmodel import select
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 from rp.graphs.story_graph_nodes import StoryGraphNodes
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     OrchestratorPlan,
@@ -32,7 +32,7 @@ from rp.services.story.runtime_identity_service import StoryRuntimeIdentityServi
 from rp.services.writer.writing_worker_execution_service import (
     WritingWorkerExecutionService,
 )
-from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
+from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.tests.services.writer.test_longform_chapter_runtime_service import (
     _accept_outline,
     _artifact_runtime_metadata,
@@ -1619,7 +1619,7 @@ def _record_draft(
 
 
 def _anchor(block_id: str):
-    from rp.models.revision_overlay_contracts import RevisionAnchorRef
+    from rp.models.core_state.revision_overlay_contracts import RevisionAnchorRef
 
     return RevisionAnchorRef(anchor_scope="single_block", block_ids=[block_id])
 
@@ -1656,7 +1656,7 @@ def _request(
     command_kind: LongformTurnCommandKind,
     target_artifact_id: str | None = None,
 ):
-    from rp.models.story_runtime import LongformTurnRequest
+    from rp.models.story.runtime import LongformTurnRequest
 
     return LongformTurnRequest(
         session_id=session_id,

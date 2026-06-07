@@ -14,9 +14,9 @@ from models.rp_retrieval_store import (
     KnowledgeCollectionRecord,
     SourceAssetRecord,
 )
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity, MemorySourceRef
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
     MemoryListVersionsInput,
@@ -28,16 +28,16 @@ from rp.models.memory_crud import (
     RetrievalSearchResult,
     RetrievalTrace,
 )
-from rp.models.memory_graph_projection import (
+from rp.models.memory.graph_projection import (
     GRAPH_REL_AFFILIATED_WITH,
     MemoryGraphEdgeUpsert,
     MemoryGraphEvidenceUpsert,
     MemoryGraphNodeUpsert,
 )
-from rp.models.retrieval_records import SourceAsset
+from rp.models.retrieval.records import SourceAsset
 from rp.retrieval.graph_expansion import graph_expansion_summary_from_trace
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     StoryArtifactKind,
     StoryArtifactStatus,

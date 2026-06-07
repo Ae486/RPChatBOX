@@ -5,16 +5,16 @@ from __future__ import annotations
 import pytest
 
 from models.rp_story_store import BranchHeadRecord
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryListVersionsInput,
     MemoryReadProvenanceInput,
     ProposalSubmitInput,
 )
-from rp.models.memory_contract_registry import MemorySourceRef
-from rp.models.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.memory.contract_registry import MemorySourceRef
+from rp.models.proposal.post_write_policy import PolicyDecision, PostWriteMaintenancePolicy
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.projection.chapter_workspace_adapter import (
     ChapterWorkspaceProjectionAdapter,
 )
@@ -48,12 +48,12 @@ from rp.services.story.runtime_identity_service import StoryRuntimeIdentityServi
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
-from rp.models.runtime_workspace_material import (
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
 )
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.runtime_workflow_job import (
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,

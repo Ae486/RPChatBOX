@@ -14,9 +14,9 @@ from models.rp_retrieval_store import (
     MemoryGraphExtractionJobRecord,
     MemoryGraphNodeRecord,
 )
-from rp.models.dsl import Domain
-from rp.models.memory_crud import MemorySearchArchivalInput
-from rp.models.memory_graph_projection import (
+from rp.models.shared.dsl import Domain
+from rp.models.memory.crud import MemorySearchArchivalInput
+from rp.models.memory.graph_projection import (
     GRAPH_ENTITY_CHARACTER,
     GRAPH_ENTITY_TERM_OR_CONCEPT,
     GRAPH_ERROR_EXTRACTION_TIMEOUT,
@@ -47,10 +47,10 @@ from rp.models.memory_graph_projection import (
     normalize_graph_relation_type,
     validate_graph_entity_type,
 )
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_drafts import StoryConfigDraft
-from rp.models.story_runtime import LongformChapterPhase
-from rp.models.setup_workspace import StoryMode
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.drafts import StoryConfigDraft
+from rp.models.story.runtime import LongformChapterPhase
+from rp.models.setup_agent.workspace import StoryMode
 from rp.services.memory.graph_extraction_service import MemoryGraphExtractionService
 from rp.services.memory.graph_projection_service import MemoryGraphProjectionService
 from rp.services.retrieval.broker import RetrievalBroker
