@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from rp.models.memory_crud import RetrievalQuery
+from rp.models.memory.crud import RetrievalQuery
 from .query_analysis import build_query_analysis
 
 

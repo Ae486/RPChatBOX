@@ -13,7 +13,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeDecorator, UserDefinedType
 from sqlmodel import Field, SQLModel
 
-from rp.models.memory_graph_projection import (
+from rp.models.memory.graph_projection import (
     GRAPH_CANON_STATUS_SOURCE_REFERENCE,
     GRAPH_EDGE_DIRECTION_DIRECTED,
     GRAPH_ENTITY_SCHEMA_VERSION,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlmodel import Session
 
-from rp.models.memory_graph_projection import (
+from rp.models.memory.graph_projection import (
     GRAPH_JOB_REASON_ARCHIVAL_INGESTED,
     GRAPH_JOB_REASON_MANUAL_RETRY,
     GRAPH_JOB_STATUS_FAILED,

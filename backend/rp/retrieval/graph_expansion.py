@@ -18,8 +18,8 @@ from models.rp_retrieval_store import (
     MemoryGraphNodeRecord,
     SourceAssetRecord,
 )
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult, RetrievalTrace
-from rp.models.memory_graph_projection import (
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.memory.graph_projection import (
     GRAPH_BACKEND_POSTGRES_LIGHTWEIGHT,
     GRAPH_SOURCE_LAYER_ARCHIVAL,
     GRAPH_SOURCE_STATUS_SOURCE_REFERENCE,

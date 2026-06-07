@@ -11,7 +11,7 @@ from models.rp_retrieval_store import (
     KnowledgeChunkRecord,
     ensure_pgvector_hnsw_index,
 )
-from rp.models.retrieval_records import EmbeddingRecord, KnowledgeChunk
+from rp.models.retrieval.records import EmbeddingRecord, KnowledgeChunk
 
 
 def _utcnow() -> datetime:

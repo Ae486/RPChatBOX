@@ -8,7 +8,7 @@ from rp.agent_runtime.contracts import (
     SetupCapabilityPlan,
 )
 from rp.agent_runtime.prompts.setup_agent import capability_guidance_text
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_agent.stage import SetupStageId
 
 SETUP_READ_ONLY_MEMORY_TOOLS: tuple[str, ...] = (
     "setup.memory.search",

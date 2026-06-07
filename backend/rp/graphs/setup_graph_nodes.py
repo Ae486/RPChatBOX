@@ -1,9 +1,9 @@
 """Node adapters for the phase-1 SetupGraph shell."""
 from __future__ import annotations
 
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_agent.stage import SetupStageId
 from rp.models.setup_agent import SetupAgentDialogueMessage, SetupAgentTurnRequest
-from rp.models.setup_workspace import SetupStepId
+from rp.models.setup_agent.workspace import SetupStepId
 from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 

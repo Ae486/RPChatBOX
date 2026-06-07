@@ -7,8 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId
 
 
 class RuntimeProfile(BaseModel):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.models.setup_drafts import SetupStageDraftBlock
+from rp.models.setup_agent.drafts import SetupStageDraftBlock
 from rp.tools.setup_tool_contracts import SetupStageEntryWriteInput
 
 from .stage_entry_common import StageEntryToolBase

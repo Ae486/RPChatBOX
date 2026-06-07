@@ -15,7 +15,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_agent.stage import SetupStageId
 
 logger = logging.getLogger(__name__)
 

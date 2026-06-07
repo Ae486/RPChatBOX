@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.models.setup_handoff import SetupToolResult
+from rp.models.setup_agent.handoff import SetupToolResult
 
 from .base import SetupToolFamilyBase
 

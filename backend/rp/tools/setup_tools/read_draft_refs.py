@@ -12,8 +12,8 @@ from rp.agent_runtime.contracts import (
     SetupDraftRefReadItem,
     SetupDraftRefReadResult,
 )
-from rp.models.setup_drafts import SetupStageDraftBlock
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_agent.drafts import SetupStageDraftBlock
+from rp.models.setup_agent.stage import SetupStageId
 from rp.tools.setup_tool_contracts import SetupToolContractError
 
 from .base import SetupToolFamilyBase

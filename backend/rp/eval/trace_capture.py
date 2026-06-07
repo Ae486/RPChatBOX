@@ -6,7 +6,7 @@ from typing import Any
 
 from rp.agent_runtime.contracts import RpAgentTurnResult
 from rp.models.setup_agent import SetupAgentTurnRequest
-from rp.models.setup_workspace import SetupWorkspace
+from rp.models.setup_agent.workspace import SetupWorkspace
 
 from .models import EvalArtifact, EvalEvent, EvalSpan, EvalTrace
 

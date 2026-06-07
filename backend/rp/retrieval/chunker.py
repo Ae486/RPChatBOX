@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from rp.models.retrieval_records import KnowledgeChunk, ParsedDocument
+from rp.models.retrieval.records import KnowledgeChunk, ParsedDocument
 
 from .context_rendering import (
     build_context_header,

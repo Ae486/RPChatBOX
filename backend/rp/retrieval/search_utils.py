@@ -15,8 +15,8 @@ from models.rp_retrieval_store import (
     KnowledgeCollectionRecord,
     SourceAssetRecord,
 )
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_crud import (
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.crud import (
     RetrievalHit,
     RetrievalQuery,
     RetrievalSearchResult,

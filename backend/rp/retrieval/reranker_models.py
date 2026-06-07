@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rp.models.memory_crud import RetrievalHit
+from rp.models.memory.crud import RetrievalHit
 
 
 class RerankCandidate(BaseModel):

@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import AsyncIterator
 
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.story_runtime import (
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     LongformTurnRequest,
     OrchestratorPlan,
     SpecialistResultBundle,
 )
-from rp.models.writing_worker_contracts import WritingWorkerExecutionResult
-from rp.models.writing_runtime import WritingPacket
+from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
+from rp.models.writer.writing_runtime import WritingPacket
 from rp.services.story.command_policy import validate_story_command
 from rp.services.story.turn_domain_service import StoryTurnDomainService
 

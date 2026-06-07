@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from rp.models.story_runtime import StoryActivationResult
+from rp.models.story.runtime import StoryActivationResult
 
 from .activation_graph_nodes import ActivationGraphNodes
 from .activation_graph_state import ActivationGraphState

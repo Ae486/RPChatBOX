@@ -1,7 +1,7 @@
 """Node adapters for the phase-1 ActivationGraph shell."""
 from __future__ import annotations
 
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.story.runtime import LongformChapterPhase
 from rp.services.setup_agent.runtime_controller import SetupRuntimeController
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story.activation_service import StoryActivationService

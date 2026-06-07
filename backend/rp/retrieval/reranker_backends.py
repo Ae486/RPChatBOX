@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from time import perf_counter
 
-from rp.models.memory_crud import RetrievalQuery
+from rp.models.memory.crud import RetrievalQuery
 from services.litellm_service import LiteLLMService, get_litellm_service
 from services.model_registry import ModelRegistryService, get_model_registry_service
 from services.provider_registry import ProviderRegistryService, get_provider_registry_service

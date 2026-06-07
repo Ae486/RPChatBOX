@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId
 
 STAGE_OBJECTIVES: dict[SetupStageId | SetupStepId, str] = {
     SetupStageId.WORLD_BACKGROUND: (

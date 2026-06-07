@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from rp.models.setup_handoff import SetupContextBuilderInput
-from rp.models.setup_stage import SetupStageId
-from rp.models.setup_workspace import SetupStepId
+from rp.models.setup_agent.handoff import SetupContextBuilderInput
+from rp.models.setup_agent.stage import SetupStageId
+from rp.models.setup_agent.workspace import SetupStepId
 from rp.services.setup_agent.agent_runtime_state_service import (
     SetupAgentRuntimeStateService,
 )

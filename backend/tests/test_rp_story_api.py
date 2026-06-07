@@ -14,36 +14,36 @@ from api.rp_story import _story_controller
 from config import get_settings
 from models.rp_story_store import BranchHeadRecord, StorySessionRecord, StoryTurnRecord
 from rp.graphs.story_graph_runner import StoryGraphRunner
-from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.core_mutation import (
+from rp.models.story.archival_evolution import ArchivalEvolutionRequest
+from rp.models.proposal.core_mutation import (
     CORE_MUTATION_ORIGIN_USER_DIRECT_EDIT,
     CoreMutationEnvelope,
 )
-from rp.models.longform_chapter_contracts import ChapterBridgeMaterial
-from rp.models.dsl import Domain, Layer, ObjectRef
-from rp.models.memory_contract_registry import (
+from rp.models.writer.longform_chapter_contracts import ChapterBridgeMaterial
+from rp.models.shared.dsl import Domain, Layer, ObjectRef
+from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
     MemoryDirtyTarget,
     MemoryRuntimeIdentity,
     MemorySourceRef,
 )
-from rp.models.memory_materialization import (
+from rp.models.memory.materialization import (
     FOUNDATION_ENTRY_SOURCE_TYPE,
     SETUP_COMMIT_IMPORT_EVENT,
     build_archival_seed_section,
     build_archival_source_metadata,
 )
-from rp.models.memory_crud import ProposalSubmitInput
-from rp.models.mode_extension_contracts import RuleCardMaterial, RuleStateCardMaterial
-from rp.models.retrieval_records import SourceAsset
-from rp.models.runtime_identity import StoryTurnStatus
-from rp.models.runtime_workspace_material import (
+from rp.models.memory.crud import ProposalSubmitInput
+from rp.models.runtime.mode_extension_contracts import RuleCardMaterial, RuleStateCardMaterial
+from rp.models.retrieval.records import SourceAsset
+from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
     RuntimeWorkspaceMaterialVisibility,
 )
-from rp.models.story_brainstorm import (
+from rp.models.story.brainstorm import (
     BrainstormBatch,
     BrainstormBatchItem,
     BrainstormBatchSubmitReceipt,
@@ -51,7 +51,7 @@ from rp.models.story_brainstorm import (
     BrainstormMessage,
     BrainstormSession,
 )
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     SpecialistResultBundle,
@@ -62,7 +62,7 @@ from rp.services.core_state.authoritative_compatibility_mirror_service import (
     AuthoritativeCompatibilityMirrorService,
 )
 from rp.services.core_state.dual_write_service import CoreStateDualWriteService
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_agent.workspace import StoryMode
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
 from rp.services.memory.change_event_service import MemoryChangeEventService

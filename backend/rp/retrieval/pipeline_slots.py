@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult
 
 
 class QueryPreprocessor(Protocol):

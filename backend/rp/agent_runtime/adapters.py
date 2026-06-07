@@ -28,8 +28,8 @@ from rp.models.setup_agent import (
     SetupAgentTurnRequest,
     SetupAgentTurnResponse,
 )
-from rp.models.setup_handoff import SetupContextPacket
-from rp.models.setup_workspace import (
+from rp.models.setup_agent.handoff import SetupContextPacket
+from rp.models.setup_agent.workspace import (
     CommitProposalStatus,
     QuestionSeverity,
     QuestionStatus,

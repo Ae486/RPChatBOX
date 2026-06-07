@@ -8,7 +8,7 @@ from typing import Any, AsyncIterator, cast
 
 from langgraph.graph import END, START, StateGraph
 
-from rp.models.story_runtime import (
+from rp.models.story.runtime import (
     LongformTurnCommandKind,
     LongformTurnRequest,
     LongformTurnResponse,

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from rp.models.retrieval_records import ParsedDocument, ParsedDocumentSection, SourceAsset
+from rp.models.retrieval.records import ParsedDocument, ParsedDocumentSection, SourceAsset
 
 
 def _utcnow() -> datetime:

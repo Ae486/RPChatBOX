@@ -11,16 +11,16 @@ from sqlmodel import Session
 
 from config import get_settings
 from rp.graphs.story_graph_runner import StoryGraphRunner
-from rp.models.archival_evolution import ArchivalEvolutionRequest
-from rp.models.block_view import BlockSource
-from rp.models.core_mutation import DirectCoreEditRequest
-from rp.models.dsl import Domain, Layer
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_crud import MemoryBlockProposalSubmitRequest
-from rp.models.memory_inspection import RecallReviewCommand
-from rp.models.runtime_config_contracts import RuntimeConfigPatchRequest
-from rp.models.runtime_workspace_material import RuntimeWorkspaceMaterialKind
-from rp.models.story_brainstorm import (
+from rp.models.story.archival_evolution import ArchivalEvolutionRequest
+from rp.models.block.view import BlockSource
+from rp.models.proposal.core_mutation import DirectCoreEditRequest
+from rp.models.shared.dsl import Domain, Layer
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.crud import MemoryBlockProposalSubmitRequest
+from rp.models.memory.inspection import RecallReviewCommand
+from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
+from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.models.story.brainstorm import (
     BrainstormBatchSubmitRequest,
     BrainstormContinueWritingRequest,
     BrainstormDiscussionRequest,
@@ -29,8 +29,8 @@ from rp.models.story_brainstorm import (
     BrainstormSessionStartRequest,
     BrainstormSummarizeRequest,
 )
-from rp.models.story_runtime import ChapterWorkspaceSnapshot
-from rp.models.story_runtime import LongformTurnRequest
+from rp.models.story.runtime import ChapterWorkspaceSnapshot
+from rp.models.story.runtime import LongformTurnRequest
 from rp.services.runtime.config_control_service import (
     RuntimeConfigControlServiceError,
 )

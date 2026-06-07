@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult
 
 from .pipeline_slots import FusionStrategy, Retriever
 

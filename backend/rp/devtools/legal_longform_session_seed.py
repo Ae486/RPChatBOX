@@ -49,18 +49,18 @@ from models.rp_story_store import (
     StoryTurnRecord,
 )
 from rp.errors import RPError
-from rp.models.dsl import Domain
-from rp.models.longform_chapter_contracts import LongformStructuredOutline
-from rp.models.memory_contract_registry import MemoryRuntimeIdentity
-from rp.models.memory_materialization import (
+from rp.models.shared.dsl import Domain
+from rp.models.writer.longform_chapter_contracts import LongformStructuredOutline
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.memory.materialization import (
     FOUNDATION_ENTRY_SOURCE_TYPE,
     SETUP_COMMIT_IMPORT_EVENT,
     build_archival_seed_section,
     build_archival_source_metadata,
 )
-from rp.models.retrieval_records import SourceAsset
-from rp.models.setup_workspace import StoryMode
-from rp.models.story_runtime import (
+from rp.models.retrieval.records import SourceAsset
+from rp.models.setup_agent.workspace import StoryMode
+from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     StoryArtifactKind,
@@ -1398,7 +1398,7 @@ class LegalLongformSessionSeeder:
 
     @staticmethod
     def _settled_status():
-        from rp.models.runtime_identity import StoryTurnStatus
+        from rp.models.runtime.identity import StoryTurnStatus
 
         return StoryTurnStatus.SETTLED
 

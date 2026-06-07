@@ -18,18 +18,18 @@ from models.rp_retrieval_store import (
 )
 from models.rp_story_store import ChapterWorkspaceRecord, StorySessionRecord
 from rp.agent_runtime.contracts import SetupCognitiveStateSnapshot
-from rp.models.memory_crud import RetrievalQuery
-from rp.models.retrieval_records import SourceAsset
+from rp.models.memory.crud import RetrievalQuery
+from rp.models.retrieval.records import SourceAsset
 from rp.models.setup_agent import SetupAgentTurnRequest
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     FoundationEntry,
     LongformBlueprintDraft,
     StoryConfigDraft,
     WritingContractDraft,
 )
-from rp.models.setup_handoff import ActivationCheckResult
-from rp.models.setup_workspace import SetupStepId, SetupWorkspace, StoryMode
-from rp.models.story_runtime import LongformChapterPhase
+from rp.models.setup_agent.handoff import ActivationCheckResult
+from rp.models.setup_agent.workspace import SetupStepId, SetupWorkspace, StoryMode
+from rp.models.story.runtime import LongformChapterPhase
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
 from rp.retrieval.embedder import Embedder
 from rp.services.retrieval.minimal_ingestion_service import MinimalRetrievalIngestionService

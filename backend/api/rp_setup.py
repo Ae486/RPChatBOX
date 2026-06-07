@@ -10,13 +10,13 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from rp.models.setup_agent import SetupAgentTurnRequest
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     FoundationEntry,
     LongformBlueprintDraft,
     StoryConfigDraft,
     WritingContractDraft,
 )
-from rp.models.setup_workspace import (
+from rp.models.setup_agent.workspace import (
     ImportedAssetParseStatus,
     QuestionSeverity,
     SetupStepId,

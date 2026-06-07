@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import Session
 
-from rp.models.memory_graph_projection import (
+from rp.models.memory.graph_projection import (
     GRAPH_EXTRACTION_SCHEMA_VERSION,
     GRAPH_JOB_REASON_MANUAL_REBUILD,
     GRAPH_TAXONOMY_VERSION,

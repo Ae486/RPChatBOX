@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from models.mcp_config import McpToolInfo
-from rp.models.memory_crud import (
+from rp.models.memory.crud import (
     MemoryGetStateInput,
     MemoryGetSummaryInput,
     MemoryListVersionsInput,

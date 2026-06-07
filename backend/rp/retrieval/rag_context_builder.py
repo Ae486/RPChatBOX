@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from rp.models.memory_crud import RetrievalSearchResult
+from rp.models.memory.crud import RetrievalSearchResult
 
 from .context_rendering import build_rag_excerpt
 

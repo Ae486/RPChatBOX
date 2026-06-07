@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.memory.crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
 from .search_utils import build_filters_applied
 
 

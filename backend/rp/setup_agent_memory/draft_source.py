@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     FoundationEntry,
     SetupDraftEntry,
     SetupDraftSection,

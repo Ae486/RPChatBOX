@@ -6,7 +6,7 @@ from typing import Any
 
 from models.model_registry import ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
-from rp.models.setup_workspace import StoryMode
+from rp.models.setup_agent.workspace import StoryMode
 from services.model_registry import get_model_registry_service
 from services.provider_registry import get_provider_registry_service
 

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rp.errors import RPError
-from rp.models.setup_workspace import SetupStepId
+from rp.models.setup_agent.workspace import SetupStepId
 
 
 class SetupRegisterAssetInput(BaseModel):

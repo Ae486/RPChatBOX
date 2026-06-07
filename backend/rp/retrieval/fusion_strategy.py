@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import Sequence
 
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
+from rp.models.memory.crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult, RetrievalTrace
 from .rrf_fusion import reciprocal_rank_fusion
 from .search_utils import build_filters_applied
 

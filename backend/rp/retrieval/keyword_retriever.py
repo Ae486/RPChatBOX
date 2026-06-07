@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlmodel import select
 
 from models.rp_retrieval_store import KnowledgeChunkRecord, KnowledgeCollectionRecord, SourceAssetRecord
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult
 from .search_utils import (
     build_chunk_search_result,
     build_empty_chunk_search_result,

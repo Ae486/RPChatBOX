@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult
 from .fusion_strategy import RrfFusionStrategy
 from .keyword_retriever import KeywordRetriever
 from .pipeline_slots import FusionStrategy

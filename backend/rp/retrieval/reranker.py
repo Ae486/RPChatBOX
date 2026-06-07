@@ -7,7 +7,7 @@ import re
 import time
 
 from models.chat import ChatMessage
-from rp.models.memory_crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult
+from rp.models.memory.crud import RetrievalHit, RetrievalQuery, RetrievalSearchResult
 from rp.services.story.llm_gateway import StoryLlmGateway
 from services.model_registry import ModelRegistryService, get_model_registry_service
 from .reranker_backends import HostedRerankerBackend, LocalCrossEncoderBackend, RerankerBackendChain

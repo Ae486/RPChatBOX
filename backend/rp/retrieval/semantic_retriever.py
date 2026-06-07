@@ -13,7 +13,7 @@ from models.rp_retrieval_store import (
     KnowledgeCollectionRecord,
     SourceAssetRecord,
 )
-from rp.models.memory_crud import RetrievalQuery, RetrievalSearchResult
+from rp.models.memory.crud import RetrievalQuery, RetrievalSearchResult
 from .embedder import Embedder
 from .search_utils import (
     build_chunk_search_result,

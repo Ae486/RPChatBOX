@@ -7,13 +7,13 @@ import hashlib
 import json
 import re
 
-from rp.models.setup_drafts import (
+from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
     SetupDraftSectionKind,
     SetupStageDraftBlock,
 )
-from rp.models.setup_stage import SetupStageId
+from rp.models.setup_agent.stage import SetupStageId
 from rp.tools.setup_tool_contracts import (
     SetupStageEntryChangesInput,
     SetupStageEntrySectionInput,
