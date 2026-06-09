@@ -25,6 +25,7 @@ import '../pages/prestory_setup_page.dart';
 import '../pages/model_services_page.dart';
 import '../pages/mcp_servers_page.dart';
 import '../pages/keyboard_test_page.dart';
+import '../pages/markdown_lab_page.dart';
 import '../main.dart' show globalModelServiceManager, globalMcpClientService;
 import '../services/backend_langfuse_service.dart';
 import '../services/image_persistence_service.dart';
@@ -767,6 +768,24 @@ class _SettingsPageState extends State<SettingsPage> {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const KeyboardTestPage(),
+                    ),
+                  );
+                },
+              ),
+            ),
+          if (kDebugMode) SizedBox(height: context.owuiSpacing.lg),
+          if (kDebugMode)
+            OwuiCard(
+              child: ListTile(
+                leading: const Icon(OwuiIcons.code, size: 32),
+                title: const Text('Markdown 渲染试验场'),
+                subtitle: const Text('评估 flutter_smooth_markdown 渲染/流式'),
+                trailing: const Icon(OwuiIcons.chevronRight),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const MarkdownLabPage(),
                     ),
                   );
                 },

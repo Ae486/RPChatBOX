@@ -373,6 +373,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.32"
+  flutter_smooth_markdown:
+    dependency: "direct main"
+    description:
+      name: flutter_smooth_markdown
+      sha256: "7a59bbc06f2670bd920e26161e9fce68b126a0b6279a95c47049dfb0f38165ee"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.2"
   flutter_spinkit:
     dependency: "direct main"
     description:
