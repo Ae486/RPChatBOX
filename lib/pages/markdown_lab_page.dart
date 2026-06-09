@@ -632,6 +632,13 @@ class _LabCodeBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final codeStyle = styleSheet.codeBlockStyle ??
         const TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.5);
+    final fs = codeStyle.fontSize ?? 13.0;
+    final lh = codeStyle.height ?? 1.5;
+    // 行号与代码套同一 forceStrutHeight 的 StrutStyle，强制每行等高 → 逐行对齐。
+    // 印证 markstream/Monaco：行号虽是独立列，靠「统一 lineHeight」对齐。
+    // 偏移根因：旧版行号是 N 个独立 Text(各自行盒)，代码是单个多行 RichText，
+    // 多行段落行距 != 独立 Text 堆叠 → 逐行累积漂移。改两边为同 strut 的多行文本块。
+    final strut = StrutStyle(forceStrutHeight: true, fontSize: fs, height: lh);
     final theme = dark ? vs2015Theme : githubTheme;
 
     final lines = code.split('\n');
@@ -657,14 +664,8 @@ class _LabCodeBlock extends StatelessWidget {
     final gutterStyle = codeStyle.copyWith(
       color: (dark ? Colors.white : Colors.black).withValues(alpha: 0.32),
     );
-    // 行号列：与代码同 fontSize/height，逐行等高 → 天然对齐(无软换行预测)。
-    final gutter = Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 1; i <= lineCount; i++) Text('$i', style: gutterStyle),
-      ],
-    );
+    // 行号：单个多行 Text（与代码同为「一个多行文本块」，行盒机制一致）。
+    final lineNumbers = [for (var i = 1; i <= lineCount; i++) '$i'].join('\n');
 
     return Container(
       decoration: styleSheet.codeBlockDecoration,
@@ -672,12 +673,24 @@ class _LabCodeBlock extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(padding: const EdgeInsets.only(right: 12), child: gutter),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Text(
+              lineNumbers,
+              style: gutterStyle,
+              strutStyle: strut,
+              textAlign: TextAlign.right,
+            ),
+          ),
           // 代码区横向滚动(softWrap:false)，行号列固定不随其移动。
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: RichText(text: codeSpan, softWrap: false),
+              child: RichText(
+                text: codeSpan,
+                strutStyle: strut,
+                softWrap: false,
+              ),
             ),
           ),
         ],
