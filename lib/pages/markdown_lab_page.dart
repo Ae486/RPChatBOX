@@ -11,6 +11,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
+// flutter_math_fork 经 smooth_markdown 传递引入；lab 直接用 Math.tex 的 onErrorFallback。
+// ignore: depend_on_referenced_packages
+import 'package:flutter_math_fork/flutter_math.dart' show Math, MathStyle;
 
 /// 默认测试样本：覆盖文章 + 表格 + 代码 + 行内/块级 LaTeX + think + mermaid
 const String _kSample = r'''
@@ -125,11 +128,12 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
     ..register(const MermaidPlugin());
 
   /// 自定义 builder 注册表（合并在 enhanced 内置之上、优先级最高）：
-  /// - inline_math/block_math：enhanced 内置表漏注册，这里补回 → 修复 enhanced LaTeX
+  /// - inline_math/block_math：补回 enhanced 漏注册的 math builder，并加 onErrorFallback
+  ///   解析失败回退源码原文(不红字) → 修复 enhanced LaTeX + 消除流式错误闪烁
   /// - mermaid：默认表本就不含；用自写 builder 覆盖 → 居中、且不抢页面滚轮
   BuilderRegistry _builders() => BuilderRegistry()
-    ..register('inline_math', const InlineMathBuilder())
-    ..register('block_math', const BlockMathBuilder())
+    ..register('inline_math', const _SafeInlineMathBuilder())
+    ..register('block_math', const _SafeBlockMathBuilder())
     ..register('mermaid', _LabMermaidBuilder(dark: _dark));
 
   MarkdownConfig get _config =>
@@ -501,6 +505,66 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 安全行内公式：解析失败回退源码原文(等宽)，不显示红字报错。
+/// 落地用户诉求"把临时语法错误的报错改空白"——取源码原文而非纯空白，避免吞掉真错信息。
+class _SafeInlineMathBuilder extends MarkdownWidgetBuilder {
+  const _SafeInlineMathBuilder();
+
+  @override
+  bool canBuild(MarkdownNode node) => node is InlineMathNode;
+
+  @override
+  Widget build(
+    MarkdownNode node,
+    MarkdownStyleSheet styleSheet,
+    MarkdownRenderContext context,
+  ) {
+    final n = node as InlineMathNode;
+    return Math.tex(
+      n.latex,
+      mathStyle: MathStyle.text,
+      textStyle: styleSheet.textStyle,
+      onErrorFallback: (_) => Text(
+        '\$${n.latex}\$',
+        style: (styleSheet.textStyle ?? const TextStyle())
+            .copyWith(fontFamily: 'monospace'),
+      ),
+    );
+  }
+}
+
+/// 安全块级公式：同上，解析失败回退源码原文(居中、等宽)。
+class _SafeBlockMathBuilder extends MarkdownWidgetBuilder {
+  const _SafeBlockMathBuilder();
+
+  @override
+  bool canBuild(MarkdownNode node) => node is BlockMathNode;
+
+  @override
+  Widget build(
+    MarkdownNode node,
+    MarkdownStyleSheet styleSheet,
+    MarkdownRenderContext context,
+  ) {
+    final n = node as BlockMathNode;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Math.tex(
+          n.latex,
+          mathStyle: MathStyle.display,
+          textStyle: styleSheet.textStyle,
+          onErrorFallback: (_) => Text(
+            n.latex,
+            style: (styleSheet.textStyle ?? const TextStyle())
+                .copyWith(fontFamily: 'monospace'),
+          ),
+        ),
       ),
     );
   }
