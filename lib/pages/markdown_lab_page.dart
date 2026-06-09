@@ -257,50 +257,28 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
     return false;
   }
 
-  /// 收敛切分：流式(!isFinal)时把末尾"未闭合块级构造"从送入解析器的文本剥离为 tail，
-  /// 避免半截语法被当完整块错误渲染（表格首行泄漏 / $$ 闪烁的根因）。
-  /// final 时不剥离——让尾部落定、该报错就报错（对应 markstream 的 final 门控）。
-  ({String stable, String tail}) _splitForRender(String src, bool isFinal) {
-    if (isFinal || src.isEmpty) return (stable: src, tail: '');
+  /// 边输出边渲染（相信数据流语法正确）。流式时唯一的预处理：隐藏"未成型表格头"
+  /// ——分隔行 |---| 到达前的表格行会被引擎当普通段落显示出 raw `|x|x|`，故先裁掉
+  /// 不显示（这是 raw 泄漏，onErrorFallback 救不了，因为它并未报错）。
+  /// 其余一律照常喂引擎；latex/mermaid 流式中的临时语法错误由 builder 的
+  /// onErrorFallback 兜成空白，避免红字<->正常的跳变。final 时不裁。
+  String _renderSource(String src, bool isFinal) {
+    if (isFinal || src.isEmpty) return src;
     final lines = src.split('\n');
-    int cut = lines.length;
-
-    // 1) 未闭合围栏 ```(含 ```mermaid)：fence 行奇数 → 从最后一个起挂起
-    final fence = <int>[];
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].trimLeft().startsWith('```')) fence.add(i);
-    }
-    if (fence.length.isOdd) cut = math.min(cut, fence.last);
-
-    // 2) 未闭合块级公式 $$：仅统计 cut 之前的独占行 $$；奇数 → 从最后一个起挂起
-    int dLast = -1, dCount = 0;
-    for (var i = 0; i < cut; i++) {
-      if (lines[i].trim() == r'$$') {
-        dCount++;
-        dLast = i;
-      }
-    }
-    if (dCount.isOdd) cut = math.min(cut, dLast);
-
-    // 3) 未完成表格：末尾连续表格行但尚无分隔行(|---|) → 整段挂起(只治首行泄漏)
-    int t = cut;
+    int t = lines.length;
     bool sawSep = false;
     while (t > 0) {
       final ln = lines[t - 1];
-      if (ln.trim().isEmpty || !ln.contains('|')) break;
+      if (ln.trim().isEmpty || !ln.contains('|')) break; // 段落边界 / 非表格行
       if (_isTableSeparator(ln)) {
         sawSep = true;
         break;
       }
       t--;
     }
-    if (!sawSep) cut = math.min(cut, t);
-
-    if (cut >= lines.length) return (stable: src, tail: '');
-    return (
-      stable: lines.sublist(0, cut).join('\n'),
-      tail: lines.sublist(cut).join('\n'),
-    );
+    // 末尾存在「表格行但尚无分隔行」→ 裁掉这段未成型表格头(隐藏)
+    if (sawSep || t == lines.length) return src;
+    return lines.sublist(0, t).join('\n');
   }
 
   /// 表格分隔行判定：形如 `| --- | :--: |`，仅由 | : - 空格组成且含 - 与 |
@@ -320,11 +298,10 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
     final bool isFinal = _mode == _LabMode.staticRender ? true : _isFinal;
     final String source =
         _mode == _LabMode.staticRender ? _textController.text : _streamText;
-    final split = _splitForRender(source, isFinal);
 
-    final markdown = SmoothMarkdown(
+    return SmoothMarkdown(
       key: ValueKey<int>(_session),
-      data: split.stable,
+      data: _renderSource(source, isFinal),
       styleSheet: _styleSheet,
       config: _config,
       useEnhancedComponents: _enhanced,
@@ -333,25 +310,6 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
       plugins: _plugins(),
       builderRegistry: _builders(),
       onTapLink: (url) => _toast('Link: $url'),
-    );
-
-    if (split.tail.isEmpty) return markdown;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [markdown, _buildTail(split.tail)],
-    );
-  }
-
-  /// 未闭合尾部的"活动"呈现：低调等宽原文，既不被错误渲染又保留流式实时可见。
-  Widget _buildTail(String tail) {
-    final fg = (_dark ? Colors.white : Colors.black).withValues(alpha: 0.45);
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Text(
-        tail,
-        style: TextStyle(
-            fontFamily: 'monospace', fontSize: 13, height: 1.4, color: fg),
-      ),
     );
   }
 
@@ -510,8 +468,8 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
   }
 }
 
-/// 安全行内公式：解析失败回退源码原文(等宽)，不显示红字报错。
-/// 落地用户诉求"把临时语法错误的报错改空白"——取源码原文而非纯空白，避免吞掉真错信息。
+/// 安全行内公式：临时/最终语法错误均回退为空白，不显示红字报错。
+/// 落地用户诉求"把报错改为空白"——流式中相信数据流，临时不合法时不跳红字。
 class _SafeInlineMathBuilder extends MarkdownWidgetBuilder {
   const _SafeInlineMathBuilder();
 
@@ -529,16 +487,13 @@ class _SafeInlineMathBuilder extends MarkdownWidgetBuilder {
       n.latex,
       mathStyle: MathStyle.text,
       textStyle: styleSheet.textStyle,
-      onErrorFallback: (_) => Text(
-        '\$${n.latex}\$',
-        style: (styleSheet.textStyle ?? const TextStyle())
-            .copyWith(fontFamily: 'monospace'),
-      ),
+      // 临时语法错误 → 空白(不红字、不暴露 raw)；合法即渲染。
+      onErrorFallback: (_) => const SizedBox.shrink(),
     );
   }
 }
 
-/// 安全块级公式：同上，解析失败回退源码原文(居中、等宽)。
+/// 安全块级公式：同上，解析失败回退为空白。
 class _SafeBlockMathBuilder extends MarkdownWidgetBuilder {
   const _SafeBlockMathBuilder();
 
@@ -559,11 +514,7 @@ class _SafeBlockMathBuilder extends MarkdownWidgetBuilder {
           n.latex,
           mathStyle: MathStyle.display,
           textStyle: styleSheet.textStyle,
-          onErrorFallback: (_) => Text(
-            n.latex,
-            style: (styleSheet.textStyle ?? const TextStyle())
-                .copyWith(fontFamily: 'monospace'),
-          ),
+          onErrorFallback: (_) => const SizedBox.shrink(),
         ),
       ),
     );
