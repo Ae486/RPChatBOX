@@ -5,15 +5,20 @@
 /// 仅用于工程评估，不接入生产链路。可从设置页进入。
 library;
 
+// 下列 flutter_math_fork / flutter_highlight / highlight 均经 smooth_markdown
+// 传递引入（非主工程直接依赖），lab 评估用于复用其公式渲染与语法高亮：
+// ignore_for_file: depend_on_referenced_packages
+
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
-import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
-// flutter_math_fork 经 smooth_markdown 传递引入；lab 直接用 Math.tex 的 onErrorFallback。
-// ignore: depend_on_referenced_packages
+import 'package:flutter_highlight/themes/github.dart' show githubTheme;
+import 'package:flutter_highlight/themes/vs2015.dart' show vs2015Theme;
 import 'package:flutter_math_fork/flutter_math.dart' show Math, MathStyle;
+import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
+import 'package:highlight/highlight.dart' show highlight, Node;
 
 /// 默认测试样本：覆盖文章 + 表格 + 代码 + 行内/块级 LaTeX + think + mermaid
 const String _kSample = r'''
@@ -129,12 +134,13 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
     ..register(const MermaidPlugin());
 
   /// 自定义 builder 注册表（合并在 enhanced 内置之上、优先级最高）：
-  /// - inline_math/block_math：补回 enhanced 漏注册的 math builder，并加 onErrorFallback
-  ///   解析失败回退源码原文(不红字) → 修复 enhanced LaTeX + 消除流式错误闪烁
+  /// - inline_math/block_math：补回 enhanced 漏注册的 math builder + onErrorFallback 兜空白
+  /// - code_block：覆盖 enhanced 版，复用同款高亮 + 补固定行号 gutter
   /// - mermaid：默认表本就不含；用自写 builder 覆盖 → 居中、且不抢页面滚轮
   BuilderRegistry _builders() => BuilderRegistry()
     ..register('inline_math', const _SafeInlineMathBuilder())
     ..register('block_math', const _SafeBlockMathBuilder())
+    ..register('code_block', _LabCodeBlockBuilder(dark: _dark))
     ..register('mermaid', _LabMermaidBuilder(dark: _dark));
 
   MarkdownConfig get _config =>
@@ -558,6 +564,123 @@ class _SafeBlockMathBuilder extends MarkdownWidgetBuilder {
           textStyle: styleSheet.textStyle,
           onErrorFallback: (_) => const SizedBox.shrink(),
         ),
+      ),
+    );
+  }
+}
+
+/// 自写代码块 builder：覆盖 enhanced 版，补「固定行号 gutter」。
+/// 复用包同款高亮(highlight + flutter_highlight 主题)；长行横向滚动(不软换行)，
+/// 行号列固定在左(不随横滚)、与代码逐行等高对齐——规避生产 OwuiCodeBlock 那个
+/// 「独立 TextPainter 预测软换行数 + 硬编码 pad」在 uiScale≠1 时漂移的对齐 bug。
+class _LabCodeBlockBuilder extends MarkdownWidgetBuilder {
+  const _LabCodeBlockBuilder({this.dark = false});
+
+  final bool dark;
+
+  @override
+  bool canBuild(MarkdownNode node) => node is CodeBlockNode;
+
+  @override
+  Widget build(
+    MarkdownNode node,
+    MarkdownStyleSheet styleSheet,
+    MarkdownRenderContext context,
+  ) {
+    final n = node as CodeBlockNode;
+    return _LabCodeBlock(
+      code: n.code,
+      language: n.language,
+      styleSheet: styleSheet,
+      dark: dark,
+    );
+  }
+}
+
+class _LabCodeBlock extends StatelessWidget {
+  const _LabCodeBlock({
+    required this.code,
+    required this.language,
+    required this.styleSheet,
+    this.dark = false,
+  });
+
+  final String code;
+  final String? language;
+  final MarkdownStyleSheet styleSheet;
+  final bool dark;
+
+  /// 把 highlight 的 AST 节点转为 TextSpan（复用 enhanced 内部同款逻辑）。
+  List<TextSpan> _convert(List<Node> nodes, Map<String, TextStyle> theme) {
+    final spans = <TextSpan>[];
+    for (final node in nodes) {
+      if (node.value != null) {
+        spans.add(node.className == null
+            ? TextSpan(text: node.value)
+            : TextSpan(text: node.value, style: theme[node.className!]));
+      } else if (node.children != null) {
+        spans.add(TextSpan(
+          children: _convert(node.children!, theme),
+          style: node.className == null ? null : theme[node.className!],
+        ));
+      }
+    }
+    return spans;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final codeStyle = styleSheet.codeBlockStyle ??
+        const TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.5);
+    final theme = dark ? vs2015Theme : githubTheme;
+
+    final lines = code.split('\n');
+    if (lines.isNotEmpty && lines.last.isEmpty) lines.removeLast();
+    final lineCount = lines.isEmpty ? 1 : lines.length;
+
+    // 有语言则高亮(解析失败回退纯文本)；无语言纯文本。
+    InlineSpan codeSpan;
+    if (language != null && language!.isNotEmpty) {
+      try {
+        codeSpan = TextSpan(
+          style: codeStyle,
+          children:
+              _convert(highlight.parse(code, language: language!).nodes ?? [], theme),
+        );
+      } catch (_) {
+        codeSpan = TextSpan(text: code, style: codeStyle);
+      }
+    } else {
+      codeSpan = TextSpan(text: code, style: codeStyle);
+    }
+
+    final gutterStyle = codeStyle.copyWith(
+      color: (dark ? Colors.white : Colors.black).withValues(alpha: 0.32),
+    );
+    // 行号列：与代码同 fontSize/height，逐行等高 → 天然对齐(无软换行预测)。
+    final gutter = Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 1; i <= lineCount; i++) Text('$i', style: gutterStyle),
+      ],
+    );
+
+    return Container(
+      decoration: styleSheet.codeBlockDecoration,
+      padding: styleSheet.codeBlockPadding ?? const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(padding: const EdgeInsets.only(right: 12), child: gutter),
+          // 代码区横向滚动(softWrap:false)，行号列固定不随其移动。
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: RichText(text: codeSpan, softWrap: false),
+            ),
+          ),
+        ],
       ),
     );
   }
