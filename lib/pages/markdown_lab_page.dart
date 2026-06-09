@@ -98,6 +98,7 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
   StreamSubscription<String>? _sub;
   String _streamText = '';
   bool _streaming = false;
+  bool _isFinal = false; // 流是否已结束(onDone)；门控 loading↔硬解析(第2/3项消费)
   int _session = 0;
 
   // 跟随状态机：_stick=当前是否粘底；_autoScrolling=屏蔽自身动画产生的滚动事件；
@@ -151,6 +152,7 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
       _session++;
       _streamText = '';
       _streaming = true;
+      _isFinal = false;
       _stick = true;
       _showToBottom = false;
     });
@@ -161,7 +163,12 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
         if (_follow && _stick) _runFollow();
       },
       onDone: () {
-        if (mounted) setState(() => _streaming = false);
+        if (mounted) {
+          setState(() {
+            _streaming = false;
+            _isFinal = true; // 流结束 → 收敛：tail 并入解析、math 落定
+          });
+        }
       },
     );
   }
@@ -246,19 +253,74 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
     return false;
   }
 
+  /// 收敛切分：流式(!isFinal)时把末尾"未闭合块级构造"从送入解析器的文本剥离为 tail，
+  /// 避免半截语法被当完整块错误渲染（表格首行泄漏 / $$ 闪烁的根因）。
+  /// final 时不剥离——让尾部落定、该报错就报错（对应 markstream 的 final 门控）。
+  ({String stable, String tail}) _splitForRender(String src, bool isFinal) {
+    if (isFinal || src.isEmpty) return (stable: src, tail: '');
+    final lines = src.split('\n');
+    int cut = lines.length;
+
+    // 1) 未闭合围栏 ```(含 ```mermaid)：fence 行奇数 → 从最后一个起挂起
+    final fence = <int>[];
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trimLeft().startsWith('```')) fence.add(i);
+    }
+    if (fence.length.isOdd) cut = math.min(cut, fence.last);
+
+    // 2) 未闭合块级公式 $$：仅统计 cut 之前的独占行 $$；奇数 → 从最后一个起挂起
+    int dLast = -1, dCount = 0;
+    for (var i = 0; i < cut; i++) {
+      if (lines[i].trim() == r'$$') {
+        dCount++;
+        dLast = i;
+      }
+    }
+    if (dCount.isOdd) cut = math.min(cut, dLast);
+
+    // 3) 未完成表格：末尾连续表格行但尚无分隔行(|---|) → 整段挂起(只治首行泄漏)
+    int t = cut;
+    bool sawSep = false;
+    while (t > 0) {
+      final ln = lines[t - 1];
+      if (ln.trim().isEmpty || !ln.contains('|')) break;
+      if (_isTableSeparator(ln)) {
+        sawSep = true;
+        break;
+      }
+      t--;
+    }
+    if (!sawSep) cut = math.min(cut, t);
+
+    if (cut >= lines.length) return (stable: src, tail: '');
+    return (
+      stable: lines.sublist(0, cut).join('\n'),
+      tail: lines.sublist(cut).join('\n'),
+    );
+  }
+
+  /// 表格分隔行判定：形如 `| --- | :--: |`，仅由 | : - 空格组成且含 - 与 |
+  static bool _isTableSeparator(String line) {
+    final s = line.trim();
+    return s.contains('|') &&
+        s.contains('-') &&
+        RegExp(r'^\|?[\s:|-]+\|?$').hasMatch(s);
+  }
+
   Widget _buildOutput() {
     if (_mode == _LabMode.stream && _streamText.isEmpty && !_streaming) {
       return const Center(child: Text('点击「重放」开始模拟流式输出'));
     }
 
-    // 流式与静态都喂同一个「静态」渲染器，只是数据源不同：
-    // 流式数据由我们自己的累积器提供（见 _replay），便于做底部跟随 / 后续收敛。
-    final data =
+    // 流式与静态都喂同一个「静态」渲染器；流式数据由自建累积器提供(见 _replay)。
+    final bool isFinal = _mode == _LabMode.staticRender ? true : _isFinal;
+    final String source =
         _mode == _LabMode.staticRender ? _textController.text : _streamText;
+    final split = _splitForRender(source, isFinal);
 
-    return SmoothMarkdown(
+    final markdown = SmoothMarkdown(
       key: ValueKey<int>(_session),
-      data: data,
+      data: split.stable,
       styleSheet: _styleSheet,
       config: _config,
       useEnhancedComponents: _enhanced,
@@ -267,6 +329,25 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
       plugins: _plugins(),
       builderRegistry: _builders(),
       onTapLink: (url) => _toast('Link: $url'),
+    );
+
+    if (split.tail.isEmpty) return markdown;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [markdown, _buildTail(split.tail)],
+    );
+  }
+
+  /// 未闭合尾部的"活动"呈现：低调等宽原文，既不被错误渲染又保留流式实时可见。
+  Widget _buildTail(String tail) {
+    final fg = (_dark ? Colors.white : Colors.black).withValues(alpha: 0.45);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Text(
+        tail,
+        style: TextStyle(
+            fontFamily: 'monospace', fontSize: 13, height: 1.4, color: fg),
+      ),
     );
   }
 
