@@ -93,6 +93,7 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
   bool _dark = false;
   bool _enhanced = true;
   bool _follow = true;
+  bool _perf = false; // 性能浮层(PerformanceOverlay)开关
   double _gapMs = 18;
   int _chunkChars = 2;
 
@@ -148,6 +149,18 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
       yield text.substring(i, math.min(i + _chunkChars, text.length));
       await Future<void>.delayed(gap);
     }
+  }
+
+  /// 长文档压测样本：重复基础样本 N 次，制造 ~千行级文档。
+  /// 用于观察 smooth_markdown「每 chunk 重解析整段」在长文档下是否掉帧。
+  String _buildLongSample([int times = 20]) {
+    final b = StringBuffer();
+    for (var i = 1; i <= times; i++) {
+      b.writeln('# 第 $i 节\n');
+      b.write(_kSample);
+      b.writeln('\n---\n');
+    }
+    return b.toString();
   }
 
   void _replay() {
@@ -364,6 +377,18 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
                         child: const Icon(Icons.arrow_downward),
                       ),
                     ),
+                  if (_perf)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(
+                        child: SizedBox(
+                          height: 80,
+                          child: PerformanceOverlay.allEnabled(),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -403,6 +428,12 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
                 selected: _enhanced,
                 onSelected: (v) => setState(() => _enhanced = v),
               ),
+              const SizedBox(width: 8),
+              FilterChip(
+                label: const Text('性能浮层'),
+                selected: _perf,
+                onSelected: (v) => setState(() => _perf = v),
+              ),
               if (_mode == _LabMode.stream) const SizedBox(width: 8),
               if (_mode == _LabMode.stream)
                 FilterChip(
@@ -411,6 +442,17 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
                   onSelected: (v) => setState(() => _follow = v),
                 ),
               const Spacer(),
+              OutlinedButton.icon(
+                onPressed: () => setState(() {
+                  _textController.text = _buildLongSample();
+                  _session++;
+                  _streamText = '';
+                  _isFinal = false;
+                }),
+                icon: const Icon(Icons.article, size: 18),
+                label: const Text('长文档'),
+              ),
+              if (_mode == _LabMode.stream) const SizedBox(width: 8),
               if (_mode == _LabMode.stream)
                 FilledButton.icon(
                   onPressed: _replay,
