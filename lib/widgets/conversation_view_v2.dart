@@ -25,6 +25,7 @@ import '../adapters/proxy_openai_provider.dart';
 import '../chat_ui/owui/assistant_message.dart';
 import '../chat_ui/owui/chat_theme.dart';
 import '../chat_ui/owui/owui_icons.dart';
+import '../chat_ui/owui/owui_image_viewer.dart';
 import '../chat_ui/owui/composer/owui_composer.dart';
 import '../chat_ui/owui/message_highlight_sweep.dart';
 import '../chat_ui/owui/owui_tokens_ext.dart';

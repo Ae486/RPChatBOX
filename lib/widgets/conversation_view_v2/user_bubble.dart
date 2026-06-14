@@ -264,73 +264,10 @@ mixin _ConversationViewV2UserBubbleMixin on _ConversationViewV2StateBase {
 
   /// 显示图片预览
   void _showImagePreview(AttachedFileSnapshot file) {
-    final imageFile = File(file.path);
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // 图片
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: InteractiveViewer(
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: Image.file(
-                  imageFile,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => Container(
-                    padding: const EdgeInsets.all(32),
-                    decoration: BoxDecoration(
-                      color: Theme.of(ctx).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          OwuiIcons.brokenImage,
-                          size: 48,
-                          color: OwuiPalette.textSecondary(ctx),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '无法加载图片',
-                          style: TextStyle(
-                            color: OwuiPalette.textSecondary(ctx),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            // 关闭按钮
-            Positioned(
-              top: 0,
-              right: 0,
-              child: IconButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                icon: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(
-                    OwuiIcons.close,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => OwuiImageViewer(url: file.path),
       ),
     );
   }

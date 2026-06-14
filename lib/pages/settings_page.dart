@@ -773,8 +773,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
               ),
             ),
-          if (kDebugMode) SizedBox(height: context.owuiSpacing.lg),
-          if (kDebugMode)
+          // lab 评估页：debug + profile 显示(profile 用于性能复测)，release 隐藏
+          if (!kReleaseMode) SizedBox(height: context.owuiSpacing.lg),
+          if (!kReleaseMode)
             OwuiCard(
               child: ListTile(
                 leading: const Icon(OwuiIcons.code, size: 32),

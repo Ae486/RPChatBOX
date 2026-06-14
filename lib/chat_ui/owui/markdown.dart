@@ -21,6 +21,7 @@ import '../../rendering/markdown_stream/stable_prefix_parser.dart';
 import 'code_block.dart';
 import 'mermaid_block.dart';
 import 'owui_icons.dart';
+import 'owui_image_viewer.dart';
 import 'owui_tokens_ext.dart';
 import 'palette.dart';
 import 'stable_body.dart';
@@ -1363,93 +1364,10 @@ class _OwuiMarkdownImage extends StatelessWidget {
   }
 
   void _showImagePreview(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: InteractiveViewer(
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: _buildFullImage(ctx),
-              ),
-            ),
-            // 关闭按钮
-            Positioned(
-              top: 0,
-              right: 0,
-              child: IconButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                icon: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(OwuiIcons.close, color: Colors.white, size: 20),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFullImage(BuildContext context) {
-    final dataBytes = _tryDecodeDataImage(url);
-    if (dataBytes != null) {
-      return Image.memory(
-        dataBytes,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => _fullError(context),
-      );
-    }
-
-    final file = _tryResolveLocalFile(url);
-    if (file != null) {
-      return Image.file(
-        file,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => _fullError(context),
-      );
-    }
-
-    return CachedNetworkImage(
-      imageUrl: url,
-      fit: BoxFit.contain,
-      errorWidget: (_, __, ___) => _fullError(context),
-    );
-  }
-
-  Widget _fullError(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            OwuiIcons.brokenImage,
-            size: 48,
-            color: isDark ? Colors.white54 : Colors.black45,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Failed to load image',
-            style: TextStyle(
-              color: isDark ? Colors.white54 : Colors.black45,
-            ),
-          ),
-        ],
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => OwuiImageViewer(url: url),
       ),
     );
   }

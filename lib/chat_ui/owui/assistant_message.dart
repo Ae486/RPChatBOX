@@ -19,6 +19,7 @@ import '../../widgets/stream_manager.dart';
 import 'chat_theme.dart';
 import 'markdown.dart';
 import 'owui_icons.dart';
+import 'owui_image_viewer.dart';
 import 'owui_tokens_ext.dart';
 import 'palette.dart';
 import 'tool_call_bubble.dart';
@@ -359,100 +360,13 @@ class _ImageItem extends StatelessWidget {
   }
 
   void _showImagePreview(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: InteractiveViewer(
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: _buildFullImage(ctx),
-              ),
-            ),
-            // 关闭按钮
-            Positioned(
-              top: 0,
-              right: 0,
-              child: IconButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                icon: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(OwuiIcons.close, color: Colors.white, size: 20),
-                ),
-              ),
-            ),
-            // 修改后的提示词（如果有）
-            if (image.revisedPrompt != null && image.revisedPrompt!.isNotEmpty)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.7),
-                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-                  ),
-                  child: Text(
-                    image.revisedPrompt!,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-          ],
-        ),
+    final url = image.isLocalFile ? image.localFilePath : image.source;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => OwuiImageViewer(url: url, caption: image.revisedPrompt),
       ),
     );
-  }
-
-  Widget _buildFullImage(BuildContext context) {
-    final errorWidget = Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(OwuiIcons.brokenImage, size: 48, color: OwuiPalette.textSecondary(context)),
-          const SizedBox(height: 8),
-          Text('无法加载图片', style: TextStyle(color: OwuiPalette.textSecondary(context))),
-        ],
-      ),
-    );
-
-    if (image.isBase64) {
-      try {
-        final base64Str = image.source.split(',').last;
-        final bytes = base64Decode(base64Str);
-        return Image.memory(bytes, fit: BoxFit.contain, errorBuilder: (_, __, ___) => errorWidget);
-      } catch (_) {
-        return errorWidget;
-      }
-    } else if (image.isNetworkUrl) {
-      return CachedNetworkImage(
-        imageUrl: image.source,
-        fit: BoxFit.contain,
-        errorWidget: (_, __, ___) => errorWidget,
-      );
-    } else if (image.isLocalFile) {
-      return Image.file(File(image.localFilePath), fit: BoxFit.contain, errorBuilder: (_, __, ___) => errorWidget);
-    }
-
-    return errorWidget;
   }
 }
 
