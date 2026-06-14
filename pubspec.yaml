@@ -118,6 +118,7 @@ dependencies:
   # MCP (Model Context Protocol) 客户端
   mcp_dart: ^1.2.2
   flutter_smooth_markdown: ^0.7.2
+  win32: 5.15.0
 
 dev_dependencies:
   flutter_test:
