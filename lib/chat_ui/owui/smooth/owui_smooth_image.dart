@@ -1,5 +1,5 @@
-// markdown_lab_image.dart —— lab 图片渲染（part of markdown_lab_page）
-part of 'markdown_lab_page.dart';
+// owui_smooth_image.dart —— 图片渲染（part of owui_smooth_markdown）
+part of 'owui_smooth_markdown.dart';
 
 /// 按出现顺序提取 markdown 图片 url(供 [Image #N] 序号；含重复)。
 List<String> _extractImageUrls(String md) {
@@ -7,11 +7,11 @@ List<String> _extractImageUrls(String md) {
   return re.allMatches(md).map((m) => m.group(1) ?? '').toList();
 }
 
-/// lab 图片渲染：验证框架 imageBuilder 钩子可补齐"本地文件 / data URI"。
+/// 图片渲染：补齐框架 imageBuilder 默认缺失的「本地文件 / data URI」。
 /// 来源顺序：data URI → SVG → 本地文件 → 网络 → asset。点击进入 OwuiImageViewer 全屏。
 /// 字节/解码/剪贴板与全屏查看器复用 owui 共享实现(image_clipboard_win / owui_image_viewer)。
-class _LabImage extends StatelessWidget {
-  const _LabImage({required this.url, this.alt, this.index = 0});
+class _SmoothImage extends StatelessWidget {
+  const _SmoothImage({required this.url, this.alt, this.index = 0});
 
   final String url;
   final String? alt;

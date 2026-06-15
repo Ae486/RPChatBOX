@@ -3,50 +3,25 @@
 /// POS: 临时试验页 / 评估 smooth_markdown 是否适合改造为 markstream 式策略
 ///
 /// 仅用于工程评估，不接入生产链路。可从设置页进入。
-/// 拆分：本库为瘦壳(页面/控制/配置)；样本/揭示动画/块 builder/图片分置于 part 文件。
+/// 拆分：本库为瘦壳(页面/控制/对照台)；样本/揭示动画分置于 part 文件。
+/// 渲染统一委托共享模块 OwuiSmoothMarkdown（与生产同源）。
 library;
 
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'
     show ScrollDirection, RenderRepaintBoundary;
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
-import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-import '../chat_ui/owui/image_clipboard_win.dart';
-import '../chat_ui/owui/owui_image_viewer.dart';
 import '../chat_ui/owui/markdown.dart' show OwuiMarkdown;
-// 以下三方包均为 smooth_markdown 的传递依赖；lab 直接复用其能力(API 取自包源码)。
-// ignore: depend_on_referenced_packages
-import 'package:flutter_math_fork/flutter_math.dart' show Math, MathStyle;
-// ignore: depend_on_referenced_packages
-import 'package:highlight/highlight.dart' show highlight, Node;
-// ignore: depend_on_referenced_packages
-import 'package:flutter_highlight/themes/github.dart' as hl_light;
-// ignore: depend_on_referenced_packages
-import 'package:flutter_highlight/themes/vs2015.dart' as hl_dark;
+import '../chat_ui/owui/smooth/owui_smooth_markdown.dart';
 
 part 'markdown_lab_samples.dart';
 part 'markdown_lab_reveal.dart';
-part 'markdown_lab_builders.dart';
-part 'markdown_lab_image.dart';
-
-/// 展开/收起动画时长（毫秒）。想让动画更快就调小、更慢就调大；
-/// 缓动曲线见各处 AnimatedSize 的 `curve:`（如 Curves.easeOutCubic）。
-const int _kExpandMs = 220;
 
 /// 主题切换「圆形揭示」动画时长（毫秒）。新主题从一角扩散铺满的快慢。
 const int _kThemeRevealMs = 520;
-
-/// 统一圆角半径：改这一个值，所有"有圆角"的卡片/控件一起变。
-const double _kRadius = 10;
-
-/// 表格最小宽度(逻辑像素)：可用宽度小于它时表格固定此宽+横向滚动，否则铺满。
-const double _kTableMinWidth = 480;
 
 class MarkdownLabPage extends StatefulWidget {
   const MarkdownLabPage({super.key});
@@ -102,35 +77,6 @@ class _MarkdownLabPageState extends State<MarkdownLabPage> {
     _textController.dispose();
     super.dispose();
   }
-
-  /// 解析插件：think / tool_call / artifact / mermaid / admonition
-  /// admonition 由包提供 plugin(识别 `::: type` 块)，但包未配套 builder → 见 _builders。
-  ParserPluginRegistry _plugins() => ParserPluginRegistry()
-    ..register(const ThinkingPlugin())
-    ..register(const ToolCallPlugin())
-    ..register(const ArtifactPlugin())
-    ..register(const MermaidPlugin())
-    ..register(const AdmonitionPlugin());
-
-  /// 自定义 builder 注册表（合并在 enhanced 内置之上、优先级最高）。
-  /// 原则：框架有可用的直接用，仅对"缺失/不达标"的块自建：
-  /// - inline_math/block_math：补回 enhanced 漏注册的 math builder + onErrorFallback
-  ///   (解析失败回退空白，修复 enhanced LaTeX + 消除流式错误闪烁)
-  /// - mermaid：默认两表均未注册；自建带头部栏(类型/切换/复位/复制/导出/全屏/缩放)
-  /// - code_block：框架 EnhancedCodeBlock 把语言/复制浮在右上角且无折叠；自建独立头部栏
-  /// - admonition：框架有 plugin 无 builder(否则显示 Unknown)；自建语义色块
-  BuilderRegistry _builders(bool dark) => BuilderRegistry()
-    ..register('inline_math', const _SafeInlineMathBuilder())
-    ..register('block_math', const _SafeBlockMathBuilder())
-    ..register('mermaid', _LabMermaidBuilder(dark: dark))
-    ..register('code_block', const _LabCodeBlockBuilder())
-    ..register('admonition', const _LabAdmonitionBuilder())
-    ..register('header', const _LabHeaderBuilder()) // 覆盖框架：去标题左侧竖线
-    ..register('table', const _LabTableBuilder()) // 覆盖框架：最小宽+横向滚动
-    ..register('link', const _LabLinkBuilder()); // 覆盖框架：链接 hover 不改变行高
-
-  MarkdownConfig get _config =>
-      const MarkdownConfig(enableLatex: true, enableEmoji: true);
 
   Stream<String> _simulate(String text) async* {
     final gap = Duration(milliseconds: _gapMs.round());
@@ -305,38 +251,6 @@ void main() {
     return false;
   }
 
-  /// 边输出边渲染（相信数据流语法正确）。流式时唯一的预处理：隐藏"未成型表格头"
-  /// ——分隔行 |---| 到达前的表格行会被引擎当普通段落显示出 raw `|x|x|`，故先裁掉
-  /// 不显示（这是 raw 泄漏，onErrorFallback 救不了，因为它并未报错）。
-  /// 其余一律照常喂引擎；latex/mermaid 流式中的临时语法错误由 builder 的
-  /// onErrorFallback 兜成空白，避免红字<->正常的跳变。final 时不裁。
-  String _renderSource(String src, bool isFinal) {
-    if (isFinal || src.isEmpty) return src;
-    final lines = src.split('\n');
-    int t = lines.length;
-    bool sawSep = false;
-    while (t > 0) {
-      final ln = lines[t - 1];
-      if (ln.trim().isEmpty || !ln.contains('|')) break; // 段落边界 / 非表格行
-      if (_isTableSeparator(ln)) {
-        sawSep = true;
-        break;
-      }
-      t--;
-    }
-    // 末尾存在「表格行但尚无分隔行」→ 裁掉这段未成型表格头(隐藏)
-    if (sawSep || t == lines.length) return src;
-    return lines.sublist(0, t).join('\n');
-  }
-
-  /// 表格分隔行判定：形如 `| --- | :--: |`，仅由 | : - 空格组成且含 - 与 |
-  static bool _isTableSeparator(String line) {
-    final s = line.trim();
-    return s.contains('|') &&
-        s.contains('-') &&
-        RegExp(r'^\|?[\s:|-]+\|?$').hasMatch(s);
-  }
-
   /// 渲染区：按当前选择的揭示方案构建。三方案共用 _canvas / _markdownBody。
   Widget _buildRevealArea() {
     final brightness = _dark ? Brightness.dark : Brightness.light;
@@ -431,25 +345,16 @@ void main() {
     );
   }
 
-  /// flutter_smooth_markdown 渲染：每次 build 全量重解析 data（见包源码 SmoothMarkdown.build）。
+  /// flutter_smooth_markdown 渲染：直接复用生产同源的共享渲染模块 OwuiSmoothMarkdown
+  /// （插件/builder/图片/表头守卫均封装其中），lab 与生产渲染规格完全一致。
   Widget _buildSmoothBody(String source, bool dark, bool isFinal) {
-    final rendered = _renderSource(source, isFinal);
-    final imageOrder = _extractImageUrls(rendered);
-    return SmoothMarkdown(
-      key: ValueKey<int>(_session),
-      data: rendered,
-      styleSheet: dark ? MarkdownStyleSheet.dark() : MarkdownStyleSheet.light(),
-      config: _config,
+    return OwuiSmoothMarkdown(
+      contentKey: ValueKey<int>(_session),
+      text: source,
+      isDark: dark,
+      isStreaming: _mode == _LabMode.stream && !isFinal,
       useEnhancedComponents: _enhanced,
-      selectable: true,
-      enableCache: false,
-      plugins: _plugins(),
-      builderRegistry: _builders(dark),
       onTapLink: (url) => _toast('Link: $url'),
-      imageBuilder: (url, alt, title) {
-        final i = imageOrder.indexOf(url);
-        return _LabImage(url: url, alt: alt, index: i >= 0 ? i + 1 : 0);
-      },
     );
   }
 

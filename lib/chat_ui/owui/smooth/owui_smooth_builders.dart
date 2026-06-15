@@ -1,8 +1,8 @@
-// markdown_lab_builders.dart —— lab 自建块渲染 builder 与配套 widget（part of markdown_lab_page）
-part of 'markdown_lab_page.dart';
+// owui_smooth_builders.dart —— 自建块渲染 builder 与配套 widget（part of owui_smooth_markdown）
+part of 'owui_smooth_markdown.dart';
 
 /// 安全行内公式：临时/最终语法错误均回退为空白，不显示红字报错。
-/// 落地用户诉求"把报错改为空白"——流式中相信数据流，临时不合法时不跳红字。
+/// 流式中相信数据流，临时不合法时不跳红字。
 class _SafeInlineMathBuilder extends MarkdownWidgetBuilder {
   const _SafeInlineMathBuilder();
 
@@ -55,10 +55,10 @@ class _SafeBlockMathBuilder extends MarkdownWidgetBuilder {
 }
 
 /// 自写 mermaid builder：覆盖包内置渲染（包默认两表均未注册 mermaid）。
-/// 头部参照设计稿(Image#1)：左=图表类型，中=预览/源码切换，右=复位/复制/导出/全屏/收起；
+/// 头部：左=图表类型，中=预览/源码切换，右=复位/复制/导出/全屏/收起；
 /// 预览区右上角=缩放按钮+百分比。用包公开的 [MermaidDiagram]（CustomPainter，无 WebView）。
-class _LabMermaidBuilder extends MarkdownWidgetBuilder {
-  const _LabMermaidBuilder({this.dark = false});
+class _MermaidBuilder extends MarkdownWidgetBuilder {
+  const _MermaidBuilder({this.dark = false});
 
   final bool dark;
 
@@ -183,8 +183,7 @@ class _MermaidChartViewState extends State<_MermaidChartView> {
     _toast('已复制源码');
   }
 
-  /// 导出：RepaintBoundary 截图为 PNG。lab 验证捕获能力（提示尺寸）；
-  /// 落盘/分享是宿主层细节，留待生产接入。
+  /// 导出：RepaintBoundary 截图为 PNG（提示尺寸）；落盘/分享留待宿主层接入。
   Future<void> _export() async {
     if (_collapsed || _showSource) {
       _toast('请在预览模式下导出');
@@ -249,12 +248,10 @@ class _MermaidChartViewState extends State<_MermaidChartView> {
         children: [
           _buildHeader(cs),
           if (fill)
-            // 全屏：撑满剩余空间（折叠时留空）
             Expanded(
               child: _collapsed ? const SizedBox.shrink() : _buildBody(cs),
             )
           else
-            // 内联：用 AnimatedSize 做展开/收起的高度过渡动画
             AnimatedSize(
               duration: const Duration(milliseconds: _kExpandMs),
               curve: Curves.easeOutCubic,
@@ -271,7 +268,7 @@ class _MermaidChartViewState extends State<_MermaidChartView> {
 
   Widget _buildHeader(ColorScheme cs) {
     return Container(
-      height: 48, // ← 图表头部高度。想更高/更矮就改这个数（单位：逻辑像素）
+      height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest,
@@ -289,9 +286,9 @@ class _MermaidChartViewState extends State<_MermaidChartView> {
               color: cs.onSurface,
             ),
           ),
-          const Spacer(), // 左弹簧：把 预览|源码 推向中间
+          const Spacer(),
           _toggle(cs),
-          const Spacer(), // 右弹簧：与左对称 → toggle 居中
+          const Spacer(),
           _hbtn(Icons.content_copy, _copied ? '已复制' : '复制源码', _copySource,
               active: _copied),
           _hbtn(Icons.download_outlined, '导出 PNG', _export),
@@ -309,7 +306,6 @@ class _MermaidChartViewState extends State<_MermaidChartView> {
   }
 
   Widget _toggle(ColorScheme cs) {
-    // 一个分段：图标 + 文字。选中=主题色加粗，未选中=次要灰
     Widget seg(
             IconData icon, String label, bool selected, VoidCallback onTap) =>
         InkWell(
@@ -336,7 +332,6 @@ class _MermaidChartViewState extends State<_MermaidChartView> {
             ),
           ),
         );
-    // 无背景：眼睛图标 预览 | 代码图标 源码
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -454,10 +449,10 @@ class _MermaidChartViewState extends State<_MermaidChartView> {
   }
 }
 
-/// 自建代码块：独立头部栏（左语言/右复制+收起），参照设计稿(Image#2)。
+/// 自建代码块：独立头部栏（左语言/右复制+收起）。
 /// 复用框架同款高亮(highlight.parse + github/vs2015 主题表)，复制真实现，可折叠。
-class _LabCodeBlockBuilder extends MarkdownWidgetBuilder {
-  const _LabCodeBlockBuilder();
+class _CodeBlockBuilder extends MarkdownWidgetBuilder {
+  const _CodeBlockBuilder();
 
   @override
   bool canBuild(MarkdownNode node) => node is CodeBlockNode;
@@ -469,13 +464,13 @@ class _LabCodeBlockBuilder extends MarkdownWidgetBuilder {
     MarkdownRenderContext context,
   ) {
     final n = node as CodeBlockNode;
-    return _LabCodeBlock(
+    return _CodeBlock(
         code: n.code, language: n.language, styleSheet: styleSheet);
   }
 }
 
-class _LabCodeBlock extends StatefulWidget {
-  const _LabCodeBlock({
+class _CodeBlock extends StatefulWidget {
+  const _CodeBlock({
     required this.code,
     required this.styleSheet,
     this.language,
@@ -486,10 +481,10 @@ class _LabCodeBlock extends StatefulWidget {
   final MarkdownStyleSheet styleSheet;
 
   @override
-  State<_LabCodeBlock> createState() => _LabCodeBlockState();
+  State<_CodeBlock> createState() => _CodeBlockState();
 }
 
-class _LabCodeBlockState extends State<_LabCodeBlock> {
+class _CodeBlockState extends State<_CodeBlock> {
   bool _collapsed = false;
   bool _copied = false;
   Timer? _timer;
@@ -527,7 +522,7 @@ class _LabCodeBlockState extends State<_LabCodeBlock> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            height: 48, // ← 代码块头部高度。想更高/更矮就改这个数
+            height: 48,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: cs.surfaceContainerHighest,
@@ -573,7 +568,6 @@ class _LabCodeBlockState extends State<_LabCodeBlock> {
               ],
             ),
           ),
-          // 展开/收起平滑动画（与图表一致，时长见 _kExpandMs）
           AnimatedSize(
             duration: const Duration(milliseconds: _kExpandMs),
             curve: Curves.easeOutCubic,
@@ -605,21 +599,42 @@ class _LabCodeBlockState extends State<_LabCodeBlock> {
       final theme = dark ? hl_dark.vs2015Theme : hl_light.githubTheme;
       final nodes = highlight.parse(widget.code, language: lang).nodes;
       if (nodes == null || nodes.isEmpty) {
-        return Text(widget.code, style: base); // 无高亮结果 → 纯文本兜底
+        return Text(widget.code, style: base);
       }
       return Text.rich(
           TextSpan(style: base, children: _convertHighlightNodes(nodes, theme)));
     } catch (_) {
-      return Text(widget.code, style: base); // 未知语言/解析失败 → 纯文本
+      return Text(widget.code, style: base);
     }
   }
 }
 
-/// 自建 admonition：包有 plugin 无 builder（否则显示 Unknown node type）。
-/// 正文用 context.blockRenderer 复用框架渲染器；视图层(_LabAdmonition)用 BuildContext
-/// 读 Theme 深浅，配色经 alpha 适配。
-class _LabAdmonitionBuilder extends MarkdownWidgetBuilder {
-  const _LabAdmonitionBuilder();
+/// 复刻框架 EnhancedCodeBlock 的高亮转换(highlight Node → TextSpan)。
+List<TextSpan> _convertHighlightNodes(
+  List<Node> nodes,
+  Map<String, TextStyle> theme,
+) {
+  final spans = <TextSpan>[];
+  for (final node in nodes) {
+    final cls = node.className;
+    if (node.value != null) {
+      spans.add(cls == null
+          ? TextSpan(text: node.value)
+          : TextSpan(text: node.value, style: theme[cls]));
+    } else if (node.children != null) {
+      spans.add(TextSpan(
+        children: _convertHighlightNodes(node.children!, theme),
+        style: cls == null ? null : theme[cls],
+      ));
+    }
+  }
+  return spans;
+}
+
+/// 自建 admonition：包有 plugin 无 builder。正文用 context.blockRenderer 复用框架渲染器；
+/// 视图层(_Admonition)用 BuildContext 读 Theme 深浅，配色经 alpha 适配。
+class _AdmonitionBuilder extends MarkdownWidgetBuilder {
+  const _AdmonitionBuilder();
 
   @override
   bool canBuild(MarkdownNode node) => node is AdmonitionNode;
@@ -631,14 +646,13 @@ class _LabAdmonitionBuilder extends MarkdownWidgetBuilder {
     MarkdownRenderContext context,
   ) {
     final n = node as AdmonitionNode;
-    // blockRenderer 仅在此处(持 MarkdownRenderContext)可用，先算好正文交给视图层。
-    return _LabAdmonition(
+    return _Admonition(
         node: n, body: context.blockRenderer?.call(n.children));
   }
 }
 
-class _LabAdmonition extends StatelessWidget {
-  const _LabAdmonition({required this.node, this.body});
+class _Admonition extends StatelessWidget {
+  const _Admonition({required this.node, this.body});
 
   final AdmonitionNode node;
   final Widget? body;
@@ -670,11 +684,10 @@ class _LabAdmonition extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       decoration: BoxDecoration(
-        // 无圆角、无四周边框，仅淡色填充 + 左侧较深色竖线(类似引用块)
         color: color.withValues(alpha: dark ? 0.16 : 0.08),
         border: Border(
           left: BorderSide(
-            color: Color.lerp(color, Colors.black, 0.25)!, // 对应色的较深版
+            color: Color.lerp(color, Colors.black, 0.25)!,
             width: 3,
           ),
         ),
@@ -707,32 +720,10 @@ class _LabAdmonition extends StatelessWidget {
   }
 }
 
-/// 复刻框架 EnhancedCodeBlock 的高亮转换(highlight Node → TextSpan)。
-List<TextSpan> _convertHighlightNodes(
-  List<Node> nodes,
-  Map<String, TextStyle> theme,
-) {
-  final spans = <TextSpan>[];
-  for (final node in nodes) {
-    final cls = node.className;
-    if (node.value != null) {
-      spans.add(cls == null
-          ? TextSpan(text: node.value)
-          : TextSpan(text: node.value, style: theme[cls]));
-    } else if (node.children != null) {
-      spans.add(TextSpan(
-        children: _convertHighlightNodes(node.children!, theme),
-        style: cls == null ? null : theme[cls],
-      ));
-    }
-  }
-  return spans;
-}
-
 /// 自建 header builder：覆盖框架 EnhancedHeaderBuilder，去掉标题左侧渐变竖线
-/// (保留 h1/h2 底部渐变细线)。注册 key 'header'，优先级高于框架。
-class _LabHeaderBuilder extends MarkdownWidgetBuilder {
-  const _LabHeaderBuilder();
+/// (保留 h1/h2 底部渐变细线)。
+class _HeaderBuilder extends MarkdownWidgetBuilder {
+  const _HeaderBuilder();
 
   @override
   bool canBuild(MarkdownNode node) => node is HeaderNode;
@@ -757,12 +748,12 @@ class _LabHeaderBuilder extends MarkdownWidgetBuilder {
     final text = (h.children?.isNotEmpty ?? false) && inline != null
         ? inline(h.children!, style)
         : Text(h.content, style: style);
-    return _LabHeader(level: h.level, child: text);
+    return _Header(level: h.level, child: text);
   }
 }
 
-class _LabHeader extends StatelessWidget {
-  const _LabHeader({required this.level, required this.child});
+class _Header extends StatelessWidget {
+  const _Header({required this.level, required this.child});
 
   final int level;
   final Widget child;
@@ -773,12 +764,10 @@ class _LabHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 仅标题文本，无左侧竖线
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: child,
         ),
-        // 保留 h1/h2 底部渐变细线(如也不想要，删掉这段即可)
         if (level <= 2)
           Container(
             height: 2,
@@ -797,9 +786,9 @@ class _LabHeader extends StatelessWidget {
 }
 
 /// 自建 table builder：覆盖框架 TableBuilder(barrel 未导出，故复刻其渲染)。
-/// 可用宽度 < _kTableMinWidth 时表格固定该宽并横向滚动，否则铺满(参考生产 owui 表格)。
-class _LabTableBuilder extends MarkdownWidgetBuilder {
-  const _LabTableBuilder();
+/// 可用宽度 < _kTableMinWidth 时表格固定该宽并横向滚动，否则铺满。
+class _TableBuilder extends MarkdownWidgetBuilder {
+  const _TableBuilder();
 
   @override
   bool canBuild(MarkdownNode node) => node is TableNode;
@@ -811,7 +800,6 @@ class _LabTableBuilder extends MarkdownWidgetBuilder {
     MarkdownRenderContext context,
   ) {
     final t = node as TableNode;
-    // 列数 = 表头/对齐/各行单元格数的最大值
     var cols = t.alignments.length;
     if (t.headers.length > cols) cols = t.headers.length;
     for (final r in t.rows) {
@@ -860,24 +848,22 @@ class _LabTableBuilder extends MarkdownWidgetBuilder {
       ],
     );
 
-    return _LabTableScroller(table: table);
+    return _TableScroller(table: table);
   }
 }
 
-/// 表格横向滚动包装(参考生产 owui `_OwuiMarkdownTableWrapper`)：
-/// 可用宽度 < _kTableMinWidth 时固定该宽并显示可拖动横向滚动条；否则铺满。
-/// 显式 ScrollController + thumbVisibility 让桌面端能拖动滚动条横向滚动
-/// (此前无 controller/滚动条，滚轮被外层纵向滚动截获，表现为"滚不动")。
-class _LabTableScroller extends StatefulWidget {
-  const _LabTableScroller({required this.table});
+/// 表格横向滚动包装：可用宽度 < _kTableMinWidth 时固定该宽并显示可拖动横向滚动条；否则铺满。
+/// 显式 ScrollController + thumbVisibility 让桌面端能拖动滚动条横向滚动。
+class _TableScroller extends StatefulWidget {
+  const _TableScroller({required this.table});
 
   final Widget table;
 
   @override
-  State<_LabTableScroller> createState() => _LabTableScrollerState();
+  State<_TableScroller> createState() => _TableScrollerState();
 }
 
-class _LabTableScrollerState extends State<_LabTableScroller> {
+class _TableScrollerState extends State<_TableScroller> {
   final ScrollController _h = ScrollController();
 
   @override
@@ -891,7 +877,6 @@ class _LabTableScrollerState extends State<_LabTableScroller> {
     return LayoutBuilder(
       builder: (ctx, c) {
         if (c.maxWidth >= _kTableMinWidth) return widget.table; // 够宽：铺满
-        // 窄屏：固定最小宽 + 始终可见且可拖动的横向滚动条
         return Scrollbar(
           controller: _h,
           thumbVisibility: true,
@@ -907,10 +892,9 @@ class _LabTableScrollerState extends State<_LabTableScroller> {
   }
 }
 
-/// 覆盖框架增强链接：保留 hover 颜色反馈，但下划线宽度恒定，
-/// 不再因 border 宽度 1→2px 动画而改变行高(框架 enhanced_link_builder 的副作用)。
-class _LabLinkBuilder extends MarkdownWidgetBuilder {
-  const _LabLinkBuilder();
+/// 覆盖框架增强链接：保留 hover 颜色反馈，但下划线宽度恒定，不因 border 1→2px 改变行高。
+class _LinkBuilder extends MarkdownWidgetBuilder {
+  const _LinkBuilder();
 
   @override
   bool canBuild(MarkdownNode node) => node is LinkNode;
@@ -929,7 +913,7 @@ class _LabLinkBuilder extends MarkdownWidgetBuilder {
             style: styleSheet.linkStyle);
     final external =
         n.url.startsWith('http://') || n.url.startsWith('https://');
-    return _LabLink(
+    return _Link(
       url: n.url,
       color: styleSheet.linkStyle?.color ?? Colors.blue,
       external: external,
@@ -939,8 +923,8 @@ class _LabLinkBuilder extends MarkdownWidgetBuilder {
   }
 }
 
-class _LabLink extends StatefulWidget {
-  const _LabLink({
+class _Link extends StatefulWidget {
+  const _Link({
     required this.url,
     required this.color,
     required this.external,
@@ -955,10 +939,10 @@ class _LabLink extends StatefulWidget {
   final Widget child;
 
   @override
-  State<_LabLink> createState() => _LabLinkState();
+  State<_Link> createState() => _LinkState();
 }
 
-class _LabLinkState extends State<_LabLink> {
+class _LinkState extends State<_Link> {
   bool _hover = false;
 
   @override
