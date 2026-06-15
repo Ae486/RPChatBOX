@@ -12,42 +12,10 @@ part of '../conversation_view_v2.dart';
 /// - Sub-flags can be overridden via `--dart-define` at build/run time.
 /// - Runtime tuning available via [StreamingTuningParams] for debugging.
 class MarkstreamV2StreamingFlags {
-  static bool _masterEnabled(ConversationSettings settings) {
-    return settings.enableExperimentalStreamingMarkdown;
-  }
-
-  static const bool _p0CodeBlockPreviewDuringStreaming = bool.fromEnvironment(
-    'MS_P0_CODE_PREVIEW',
-    defaultValue: true,
-  );
-
-  static const bool _p0MermaidStablePlaceholderDuringStreaming = bool.fromEnvironment(
-    'MS_P0_MERMAID_PLACEHOLDER',
-    defaultValue: true,
-  );
-
-  static const bool _p0AnchorAutoFollow = bool.fromEnvironment(
-    'MS_P0_ANCHOR_AUTO_FOLLOW',
-    defaultValue: true,
-  );
-
   static const bool _p0StableFlowReveal = bool.fromEnvironment(
     'MS_P0_STABLE_FLOW_REVEAL',
     defaultValue: true,
   );
-
-  static bool codeBlockPreviewDuringStreaming(ConversationSettings settings) {
-    return _masterEnabled(settings) && _p0CodeBlockPreviewDuringStreaming;
-  }
-
-  static bool mermaidStablePlaceholderDuringStreaming(ConversationSettings settings) {
-    return _masterEnabled(settings) && _p0MermaidStablePlaceholderDuringStreaming;
-  }
-
-  static bool anchorAutoFollow(ConversationSettings settings) {
-    // 始终使用运行时参数，不受主开关限制
-    return StreamingTuningParams.instance.anchorAutoFollow && _p0AnchorAutoFollow;
-  }
 
   static bool stableFlowReveal(ConversationSettings settings) {
     // 始终启用渐进式渲染，不受主开关限制
@@ -82,21 +50,6 @@ class MarkstreamV2StreamingFlags {
   static int scrollDurationMs(ConversationSettings settings) {
     // 始终使用运行时参数
     return StreamingTuningParams.instance.scrollDurationMs;
-  }
-
-  static int scrollThrottleMs(ConversationSettings settings) {
-    // 始终使用运行时参数
-    return StreamingTuningParams.instance.scrollThrottleMs;
-  }
-
-  static int fadeInDurationMs(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 150;
-    return StreamingTuningParams.instance.fadeInDurationMs;
-  }
-
-  static double fadeInStartOpacity(ConversationSettings settings) {
-    if (!_masterEnabled(settings)) return 0.3;
-    return StreamingTuningParams.instance.fadeInStartOpacity;
   }
 }
 
@@ -145,10 +98,6 @@ class StreamingTuningParams extends ChangeNotifier {
         'revealMaxLagChars': _revealMaxLagChars,
         'nearBottomPx': _nearBottomPx,
         'scrollDurationMs': _scrollDurationMs,
-        'scrollThrottleMs': _scrollThrottleMs,
-        'anchorAutoFollow': _anchorAutoFollow,
-        'fadeInDurationMs': _fadeInDurationMs,
-        'fadeInStartOpacity': _fadeInStartOpacity,
       };
       await prefs.setString(_prefsKey, jsonEncode(payload));
       if (_persistNonce == expectedNonce) {
@@ -185,16 +134,6 @@ class StreamingTuningParams extends ChangeNotifier {
         if (v is double) return v;
         if (v is num) return v.toDouble();
         if (v is String) return double.tryParse(v);
-        return null;
-      }
-
-      bool? readBool(String key) {
-        final v = map[key];
-        if (v is bool) return v;
-        if (v is String) {
-          if (v == 'true') return true;
-          if (v == 'false') return false;
-        }
         return null;
       }
 
@@ -248,39 +187,6 @@ class StreamingTuningParams extends ChangeNotifier {
         final clamped = scrollDurationMs.clamp(0, 500);
         if (clamped != _scrollDurationMs) {
           _scrollDurationMs = clamped;
-          changed = true;
-        }
-      }
-
-      final scrollThrottleMs = readInt('scrollThrottleMs');
-      if (scrollThrottleMs != null) {
-        final clamped = scrollThrottleMs.clamp(0, 1000);
-        if (clamped != _scrollThrottleMs) {
-          _scrollThrottleMs = clamped;
-          changed = true;
-        }
-      }
-
-      final anchorAutoFollow = readBool('anchorAutoFollow');
-      if (anchorAutoFollow != null && anchorAutoFollow != _anchorAutoFollow) {
-        _anchorAutoFollow = anchorAutoFollow;
-        changed = true;
-      }
-
-      final fadeInDurationMs = readInt('fadeInDurationMs');
-      if (fadeInDurationMs != null) {
-        final clamped = fadeInDurationMs.clamp(50, 500);
-        if (clamped != _fadeInDurationMs) {
-          _fadeInDurationMs = clamped;
-          changed = true;
-        }
-      }
-
-      final fadeInStartOpacity = readDouble('fadeInStartOpacity');
-      if (fadeInStartOpacity != null) {
-        final clamped = fadeInStartOpacity.clamp(0.0, 1.0);
-        if (clamped != _fadeInStartOpacity) {
-          _fadeInStartOpacity = clamped;
           changed = true;
         }
       }
@@ -347,44 +253,6 @@ class StreamingTuningParams extends ChangeNotifier {
     _markDirtyAndScheduleSave();
   }
 
-  int _scrollThrottleMs = 800;
-  int get scrollThrottleMs => _scrollThrottleMs;
-  set scrollThrottleMs(int v) {
-    if (_scrollThrottleMs == v) return;
-    _scrollThrottleMs = v;
-    notifyListeners();
-    _markDirtyAndScheduleSave();
-  }
-
-  // 智能跟随模式：true=检查是否在底部，false=始终跟随
-  bool _anchorAutoFollow = true;
-  bool get anchorAutoFollow => _anchorAutoFollow;
-  set anchorAutoFollow(bool v) {
-    if (_anchorAutoFollow == v) return;
-    _anchorAutoFollow = v;
-    notifyListeners();
-    _markDirtyAndScheduleSave();
-  }
-
-  // 淡入动画参数
-  int _fadeInDurationMs = 150;
-  int get fadeInDurationMs => _fadeInDurationMs;
-  set fadeInDurationMs(int v) {
-    if (_fadeInDurationMs == v) return;
-    _fadeInDurationMs = v;
-    notifyListeners();
-    _markDirtyAndScheduleSave();
-  }
-
-  double _fadeInStartOpacity = 0.3;
-  double get fadeInStartOpacity => _fadeInStartOpacity;
-  set fadeInStartOpacity(double v) {
-    if (_fadeInStartOpacity == v) return;
-    _fadeInStartOpacity = v;
-    notifyListeners();
-    _markDirtyAndScheduleSave();
-  }
-
   /// 重置为默认值
   void reset() {
     _revealTickMs = 32;
@@ -393,10 +261,6 @@ class StreamingTuningParams extends ChangeNotifier {
     _revealMaxLagChars = 1200;
     _nearBottomPx = 80.0;
     _scrollDurationMs = 160;
-    _scrollThrottleMs = 800;
-    _anchorAutoFollow = true;
-    _fadeInDurationMs = 150;
-    _fadeInStartOpacity = 0.3;
     notifyListeners();
     _markDirtyAndScheduleSave();
   }
@@ -410,10 +274,6 @@ revealMinBufferChars: $_revealMinBufferChars
 revealMaxLagChars: $_revealMaxLagChars
 nearBottomPx: $_nearBottomPx
 scrollDurationMs: $_scrollDurationMs
-scrollThrottleMs: $_scrollThrottleMs
-anchorAutoFollow: $_anchorAutoFollow
-fadeInDurationMs: $_fadeInDurationMs
-fadeInStartOpacity: $_fadeInStartOpacity
 ''';
   }
 }
@@ -547,40 +407,6 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
               unit: 'ms',
               onChanged: (v) => _params.scrollDurationMs = v.round(),
             ),
-            _buildSlider(
-              label: '滚动节流',
-              value: _params.scrollThrottleMs.toDouble(),
-              min: 0, max: 1000,
-              unit: 'ms',
-              onChanged: (v) => _params.scrollThrottleMs = v.round(),
-            ),
-            _buildSwitch(
-              label: '智能跟随',
-              value: _params.anchorAutoFollow,
-              description: '开：用户上滑时停止跟随\n关：始终跟随到底部',
-              onChanged: (v) => _params.anchorAutoFollow = v,
-            ),
-          ]),
-
-          const SizedBox(height: 12),
-
-          // 淡入动画
-          _buildSection('淡入动画', [
-            _buildSlider(
-              label: '动画时长',
-              value: _params.fadeInDurationMs.toDouble(),
-              min: 50, max: 500,
-              unit: 'ms',
-              onChanged: (v) => _params.fadeInDurationMs = v.round(),
-            ),
-            _buildSlider(
-              label: '起始透明度',
-              value: _params.fadeInStartOpacity,
-              min: 0, max: 1,
-              unit: '',
-              decimals: 2,
-              onChanged: (v) => _params.fadeInStartOpacity = v,
-            ),
           ]),
         ],
       ),
@@ -620,36 +446,6 @@ class _StreamingTuningPanelState extends State<StreamingTuningPanel> {
           ),
         ),
         SizedBox(width: 60, child: Text('$displayValue$unit', style: const TextStyle(fontSize: 11))),
-      ],
-    );
-  }
-
-  Widget _buildSwitch({
-    required String label,
-    required bool value,
-    required String description,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return Row(
-      children: [
-        SizedBox(width: 90, child: Text(label, style: const TextStyle(fontSize: 12))),
-        Expanded(
-          child: Tooltip(
-            message: description,
-            child: Text(
-              value ? '开' : '关',
-              style: TextStyle(
-                fontSize: 11,
-                color: value ? Colors.green : Colors.grey,
-              ),
-            ),
-          ),
-        ),
-        Switch(
-          value: value,
-          onChanged: onChanged,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
       ],
     );
   }

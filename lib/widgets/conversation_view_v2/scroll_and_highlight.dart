@@ -189,25 +189,14 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
     if (!force && !_autoFollowEnabled) return;
     if (_chatController.messages.isEmpty) return;
 
-    final useAnchor =
-        !force && MarkstreamV2StreamingFlags.anchorAutoFollow(_conversationSettings);
-    if (!useAnchor) {
-      // force 模式绕过节流检查
-      if (!force) {
-        final now = DateTime.now();
-        final throttleMs = MarkstreamV2StreamingFlags.scrollThrottleMs(_conversationSettings);
-        if (now.difference(_lastAutoFollowRequest) <
-            Duration(milliseconds: throttleMs)) {
-          return;
-        }
-        _lastAutoFollowRequest = now;
-      }
-
+    // force（回到底部按钮 / 搜索跳转）：无条件滚到底，不受贴底门控。
+    if (force) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _isDisposed) return;
         final lastIndex = _chatController.messages.length - 1;
         if (lastIndex < 0) return;
-        final durationMs = MarkstreamV2StreamingFlags.scrollDurationMs(_conversationSettings);
+        final durationMs =
+            MarkstreamV2StreamingFlags.scrollDurationMs(_conversationSettings);
         MarkstreamV2StreamingMetrics.onScrollToIndex();
         _chatController.scrollToIndex(
           lastIndex,
@@ -220,6 +209,7 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
       return;
     }
 
+    // 非 force（流式新内容）：lab 智能跟随——仅贴底时跟随，经 pending 合帧调度。
     if (!_isNearBottom) return;
 
     _pendingAutoFollow = true;
@@ -272,18 +262,10 @@ mixin _ConversationViewV2ScrollMixin on _ConversationViewV2StateBase {
     _isNearBottom = isNearBottom;
 
     if (notification is ScrollUpdateNotification) {
-      final currentPixels = metrics.pixels;
-      final scrolledUp = currentPixels < _lastScrollPixels;
-      _lastScrollPixels = currentPixels;
-
-      if (scrolledUp && _autoFollowEnabled) {
-        _pendingAutoFollow = false;
-        _pendingAutoFollowSmooth = false;
-        setState(() {
-          _autoFollowEnabled = false;
-          _showScrollToBottom = true;
-        });
-      } else if (isNearBottom && !_autoFollowEnabled) {
+      // 脱离只认 UserScrollNotification（真实手势）：块级结构(代码块/表格/Mermaid)
+      // 撑高引起的布局位移不再被误判为「用户上滑」，避免长块处跟随丢失。
+      // 此处仅做「贴底恢复 / 浮钮可见性」，幂等且不触发脱离。
+      if (isNearBottom && !_autoFollowEnabled) {
         setState(() {
           _autoFollowEnabled = true;
           _showScrollToBottom = false;

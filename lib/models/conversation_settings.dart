@@ -14,6 +14,8 @@ class ConversationSettings {
   final bool enableVision;
   final bool enableTools;
   final bool enableNetwork;
+  /// 历史实验开关：换 markdown 渲染框架后已无行为（恒 no-op）。
+  /// 保留字段仅为持久化/后端 schema 兼容，避免跨语言迁移；默认 false，UI 已下线。
   final bool enableExperimentalStreamingMarkdown;
   final int contextLength;
   final DateTime createdAt;

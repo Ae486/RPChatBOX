@@ -359,17 +359,12 @@ void main() {
   }
 
   /// 生产渲染器对照：OwuiMarkdown 内部委托共享 OwuiSmoothMarkdown（与 smooth 同引擎，全量重解析）。
-  /// 差异仅在生产包装层：think 剥离 + 缩进码块归一预处理；enhanced 恒开（不受「Enhanced」chip 影响）；
-  /// selectable=!isStreaming。stableCacheKey/enableSmooth*/enableFadeIn 已为 no-op，仅保留签名兼容调用方。
+  /// 差异仅在生产包装层：think 剥离 + 缩进码块归一预处理。
   Widget _buildProductionBody(String source, bool dark, bool isFinal) {
     return OwuiMarkdown(
       text: source,
       isDark: dark,
       isStreaming: _mode == _LabMode.stream && !isFinal,
-      stableCacheKey: Object.hash(dark, _session),
-      enableSmoothCodeBlock: _enhanced,
-      enableSmoothMermaid: _enhanced,
-      enableFadeIn: _enhanced,
     );
   }
 

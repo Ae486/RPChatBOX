@@ -17,25 +17,11 @@ class OwuiMarkdown extends StatelessWidget {
   final bool isDark;
   final bool isStreaming;
 
-  /// 以下流式/缓存相关参数为历史契约，精简替换后多为 no-op（保留签名以免改动调用方）。
-  final Object? stableCacheKey;
-  final bool enableSmoothCodeBlock;
-  final bool enableSmoothMermaid;
-  final bool enableFadeIn;
-  final Duration fadeInDuration;
-  final double fadeInStartOpacity;
-
   const OwuiMarkdown({
     super.key,
     required this.text,
     required this.isDark,
     required this.isStreaming,
-    this.stableCacheKey,
-    this.enableSmoothCodeBlock = false,
-    this.enableSmoothMermaid = false,
-    this.enableFadeIn = false,
-    this.fadeInDuration = const Duration(milliseconds: 150),
-    this.fadeInStartOpacity = 0.3,
   });
 
   @visibleForTesting

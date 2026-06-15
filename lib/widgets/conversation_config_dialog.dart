@@ -31,7 +31,6 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
   late ModelParameters _parameters;
   late int _contextLength;
   late bool _enableTools;
-  late bool _enableExperimentalStreamingMarkdown;
 
   @override
   void initState() {
@@ -39,8 +38,6 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
     _parameters = widget.settings.parameters;
     _contextLength = widget.settings.contextLength;
     _enableTools = widget.settings.enableTools;
-    _enableExperimentalStreamingMarkdown =
-        widget.settings.enableExperimentalStreamingMarkdown;
   }
 
   void _save() {
@@ -48,7 +45,6 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
       parameters: _parameters,
       contextLength: _contextLength,
       enableTools: _enableTools,
-      enableExperimentalStreamingMarkdown: _enableExperimentalStreamingMarkdown,
     );
 
     widget.onSave(updated);
@@ -175,20 +171,6 @@ class _ConversationConfigDialogState extends State<ConversationConfigDialog> {
                       onChanged: (value) {
                         setState(() {
                           _enableTools = value;
-                        });
-                      },
-                    ),
-
-                    SizedBox(height: ChatBoxTokens.spacing.xl),
-
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('实验性：流式 Markdown（稳定前缀）'),
-                      subtitle: const Text('仅影响正在生成中的 AI 回复；默认关闭，可随时回退。'),
-                      value: _enableExperimentalStreamingMarkdown,
-                      onChanged: (value) {
-                        setState(() {
-                          _enableExperimentalStreamingMarkdown = value;
                         });
                       },
                     ),

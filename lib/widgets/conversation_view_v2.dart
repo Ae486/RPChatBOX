@@ -153,8 +153,6 @@ abstract class _ConversationViewV2StateBase extends State<ConversationViewV2>
   bool _autoFollowScheduled = false;
 
   bool _showScrollToBottom = false;
-  double _lastScrollPixels = 0;
-  DateTime _lastAutoFollowRequest = DateTime.fromMillisecondsSinceEpoch(0);
 
   // 调试面板状态
   bool _showTuningPanel = false;
