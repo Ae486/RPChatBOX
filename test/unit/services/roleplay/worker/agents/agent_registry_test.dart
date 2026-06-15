@@ -3,7 +3,6 @@ import 'package:chatboxapp/services/roleplay/worker/agents/agent_registry.dart';
 import 'package:chatboxapp/services/roleplay/worker/agents/agent_types.dart';
 import 'package:chatboxapp/services/roleplay/worker/agents/model_adapter.dart';
 import 'package:chatboxapp/services/roleplay/worker/agents/telemetry/agent_metrics.dart';
-import 'package:chatboxapp/services/roleplay/worker/rp_memory_snapshot.dart';
 
 void main() {
   group('AgentRegistry', () {
@@ -13,51 +12,51 @@ void main() {
       registry = AgentRegistry();
     });
 
-    test('registers and retrieves handler', () {
-      registry.register('test_agent', (req) async {
-        return AgentResult.success(agentId: req.agentId, proposals: []);
-      });
+    const descriptor = AgentDescriptor(
+      id: 'test_agent',
+      promptKey: 'test_agent',
+    );
+
+    test('registers and retrieves descriptor', () {
+      registry.register(descriptor);
 
       expect(registry.has('test_agent'), isTrue);
       expect(registry.get('test_agent'), isNotNull);
+      expect(registry.get('test_agent')!.id, 'test_agent');
     });
 
-    test('returns null for unregistered agent', () {
+    test('returns null/false for unregistered agent', () {
       expect(registry.has('unknown'), isFalse);
       expect(registry.get('unknown'), isNull);
     });
 
-    test('executes registered agent', () async {
-      registry.register('test_agent', (req) async {
-        return AgentResult.success(
-          agentId: req.agentId,
-          proposals: [{'kind': 'TEST'}],
-        );
-      });
-
-      final request = AgentRequest(
-        agentId: 'test_agent',
-        inputs: {},
-        memoryReader: RpWorkerMemoryReader({}),
-        modelId: 'test',
-      );
-
-      final result = await registry.execute(request);
-      expect(result.ok, isTrue);
-      expect(result.proposals.length, 1);
+    test('getOrThrow throws for unregistered agent', () {
+      expect(() => registry.getOrThrow('unknown'), throwsStateError);
     });
 
-    test('returns error for unregistered agent execution', () async {
-      final request = AgentRequest(
-        agentId: 'unknown',
-        inputs: {},
-        memoryReader: RpWorkerMemoryReader({}),
-        modelId: 'test',
-      );
+    test('rejects duplicate agentId', () {
+      registry.register(descriptor);
+      expect(() => registry.register(descriptor), throwsStateError);
+    });
 
-      final result = await registry.execute(request);
-      expect(result.ok, isFalse);
-      expect(result.errorCode, isNotNull);
+    test('registerAll exposes registered and enabled agents', () {
+      registry.registerAll(allAgentDescriptors);
+
+      expect(registry.registeredAgents.length, allAgentDescriptors.length);
+      expect(
+        registry.enabledAgents.length,
+        allAgentDescriptors.where((d) => d.enabledByDefault).length,
+      );
+    });
+
+    test('unregister and clear remove descriptors', () {
+      registry.register(descriptor);
+      registry.unregister('test_agent');
+      expect(registry.has('test_agent'), isFalse);
+
+      registry.registerAll(allAgentDescriptors);
+      registry.clear();
+      expect(registry.registeredAgents, isEmpty);
     });
   });
 

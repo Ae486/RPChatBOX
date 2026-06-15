@@ -21,7 +21,7 @@ void main() {
         expect(model.modelName, equals('gpt-4'));
         expect(model.displayName, equals('GPT-4'));
         expect(model.isEnabled, isTrue); // 默认值
-        expect(model.capabilities, contains(ModelCapability.text)); // 默认值
+        expect(model.capabilities, isEmpty); // 未指定时默认空集
       });
 
       test('should create with all fields', () {
@@ -31,7 +31,7 @@ void main() {
           providerId: 'provider-id',
           modelName: 'gpt-4-vision',
           displayName: 'GPT-4 Vision',
-          capabilities: {ModelCapability.text, ModelCapability.vision},
+          capabilities: {ModelCapability.vision, ModelCapability.tool},
           defaultParams: const ModelParameters(temperature: 0.5),
           isEnabled: false,
           description: 'Multimodal model',
@@ -56,7 +56,7 @@ void main() {
           providerId: 'provider-id',
           modelName: 'gpt-4',
           displayName: 'GPT-4',
-          capabilities: {ModelCapability.text, ModelCapability.tool},
+          capabilities: {ModelCapability.vision, ModelCapability.tool},
           defaultParams: const ModelParameters(temperature: 0.8, maxTokens: 4096),
           isEnabled: true,
           description: 'Test model',
@@ -70,7 +70,7 @@ void main() {
         expect(json['providerId'], equals('provider-id'));
         expect(json['modelName'], equals('gpt-4'));
         expect(json['displayName'], equals('GPT-4'));
-        expect(json['capabilities'], containsAll(['text', 'tool']));
+        expect(json['capabilities'], containsAll(['vision', 'tool']));
         expect(json['defaultParams']['temperature'], equals(0.8));
         expect(json['defaultParams']['maxTokens'], equals(4096));
         expect(json['isEnabled'], isTrue);
@@ -98,8 +98,9 @@ void main() {
         expect(model.providerId, equals('provider-id'));
         expect(model.modelName, equals('gpt-4'));
         expect(model.displayName, equals('GPT-4'));
-        expect(model.capabilities.contains(ModelCapability.text), isTrue);
+        // 'text' 已非能力枚举，反序列化时被丢弃；仅保留 vision
         expect(model.capabilities.contains(ModelCapability.vision), isTrue);
+        expect(model.capabilities.length, equals(1));
         expect(model.defaultParams.temperature, equals(0.5));
         expect(model.isEnabled, isTrue);
         expect(model.description, equals('Test model'));
@@ -119,7 +120,7 @@ void main() {
         final model = ModelConfig.fromJson(json);
 
         expect(model.isEnabled, isTrue); // 默认值
-        expect(model.capabilities, contains(ModelCapability.text)); // 默认值
+        expect(model.capabilities, isEmpty); // 未指定时默认空集
         expect(model.description, isNull);
       });
 
@@ -130,15 +131,15 @@ void main() {
           'providerId': 'provider-id',
           'modelName': 'gpt-4',
           'displayName': 'GPT-4',
-          'capabilities': ['text', 'unknown_capability'],
+          'capabilities': ['vision', 'unknown_capability'],
           'createdAt': now.toIso8601String(),
           'updatedAt': now.toIso8601String(),
         };
 
         final model = ModelConfig.fromJson(json);
 
-        // 未知能力应该回退到 text
-        expect(model.capabilities.contains(ModelCapability.text), isTrue);
+        // 未知/不支持的 wire 值被丢弃，仅保留已知能力
+        expect(model.capabilities, equals({ModelCapability.vision}));
       });
 
       test('should roundtrip serialize/deserialize', () {
@@ -147,7 +148,7 @@ void main() {
           providerId: 'provider-id',
           modelName: 'claude-3-opus',
           displayName: 'Claude 3 Opus',
-          capabilities: {ModelCapability.text, ModelCapability.vision, ModelCapability.tool},
+          capabilities: {ModelCapability.vision, ModelCapability.tool, ModelCapability.network},
           defaultParams: const ModelParameters(
             temperature: 0.7,
             maxTokens: 4096,
@@ -201,12 +202,12 @@ void main() {
           providerId: 'provider-id',
           modelName: 'gpt-4-vision',
           displayName: 'GPT-4 Vision',
-          capabilities: {ModelCapability.text, ModelCapability.vision},
+          capabilities: {ModelCapability.vision, ModelCapability.tool},
         );
 
-        expect(model.hasCapability(ModelCapability.text), isTrue);
         expect(model.hasCapability(ModelCapability.vision), isTrue);
-        expect(model.hasCapability(ModelCapability.audio), isFalse);
+        expect(model.hasCapability(ModelCapability.tool), isTrue);
+        expect(model.hasCapability(ModelCapability.network), isFalse);
       });
 
       test('should detect multimodal model', () {
@@ -215,7 +216,7 @@ void main() {
           providerId: 'provider-id',
           modelName: 'gpt-3.5',
           displayName: 'GPT-3.5',
-          capabilities: {ModelCapability.text},
+          capabilities: {ModelCapability.tool},
         );
 
         final multimodal = ModelConfig(
@@ -223,7 +224,7 @@ void main() {
           providerId: 'provider-id',
           modelName: 'gpt-4-vision',
           displayName: 'GPT-4 Vision',
-          capabilities: {ModelCapability.text, ModelCapability.vision},
+          capabilities: {ModelCapability.vision},
         );
 
         expect(textOnly.isMultimodal, isFalse);
@@ -236,7 +237,7 @@ void main() {
           providerId: 'provider-id',
           modelName: 'gpt-4',
           displayName: 'GPT-4',
-          capabilities: {ModelCapability.text, ModelCapability.tool},
+          capabilities: {ModelCapability.vision, ModelCapability.tool},
         );
 
         final icons = model.capabilityIcons;
@@ -347,12 +348,12 @@ void main() {
   // ============ ModelCapability 测试 ============
   group('ModelCapability', () {
     test('should have correct display names', () {
-      expect(ModelCapability.text.displayName, equals('文本'));
+      expect(ModelCapability.reasoning.displayName, equals('推理'));
       expect(ModelCapability.vision.displayName, equals('视觉'));
       expect(ModelCapability.network.displayName, equals('联网'));
       expect(ModelCapability.tool.displayName, equals('工具'));
-      expect(ModelCapability.audio.displayName, equals('音频'));
-      expect(ModelCapability.video.displayName, equals('视频'));
+      expect(ModelCapability.embedding.displayName, equals('Embedding'));
+      expect(ModelCapability.rerank.displayName, equals('Rerank'));
     });
 
     test('should have icons', () {

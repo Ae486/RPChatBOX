@@ -577,9 +577,15 @@ void main() {
             proxyApiUrl: 'https://proxy.example.test',
           );
 
+          final model = ModelConfig(
+            id: 'model-routed',
+            providerId: 'provider-1',
+            modelName: 'gpt-4o-mini',
+            displayName: 'GPT-4o Mini',
+          );
           final result = await manager.testProviderWithModel(
             provider,
-            'gpt-4o-mini',
+            model,
           );
 
           expect(result.success, isTrue);
@@ -684,7 +690,7 @@ void main() {
             providerId: 'provider-1',
             modelName: 'gpt-4o-mini',
             displayName: 'GPT-4o Mini',
-            capabilities: {ModelCapability.text, ModelCapability.tool},
+            capabilities: {ModelCapability.tool},
           );
           await manager.addModel(model);
           await manager.syncModelsToBackend();
