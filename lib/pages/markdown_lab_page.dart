@@ -32,9 +32,9 @@ class MarkdownLabPage extends StatefulWidget {
 
 enum _LabMode { staticRender, stream }
 
-/// 渲染引擎对照（换框架 GATE）：
-/// - smooth：flutter_smooth_markdown，每次 build 全量重解析 data（O(n)/帧）。
-/// - production：生产 OwuiMarkdown，StablePrefixParser 切稳定前缀，仅尾巴随 chunk 重解析。
+/// 渲染引擎对照（换框架后二者同引擎，仅包装层差异；保留作回归对照）：
+/// - smooth：直喂共享 OwuiSmoothMarkdown，每次 build 全量重解析 data（O(n)/帧）。
+/// - production：经生产 OwuiMarkdown（同样委托 OwuiSmoothMarkdown），多 think 剥离/缩进码块归一预处理。
 enum _RenderEngine { smooth, production }
 
 class _MarkdownLabPageState extends State<MarkdownLabPage> {
@@ -358,10 +358,9 @@ void main() {
     );
   }
 
-  /// 生产渲染器对照：StablePrefixParser 切稳定前缀/尾巴，稳定段缓存、仅尾巴随 chunk 重解析。
-  /// 喂原始累积文本，复刻生产流式路径（think 剥离/围栏归一）。
-  /// 平滑代码/Mermaid/淡入特效与 Smooth 侧的 useEnhancedComponents 一同受「Enhanced」开关控制，
-  /// 便于公平 A/B：关 Enhanced=纯解析/渲染对比；开 Enhanced=全特效体验对比。
+  /// 生产渲染器对照：OwuiMarkdown 内部委托共享 OwuiSmoothMarkdown（与 smooth 同引擎，全量重解析）。
+  /// 差异仅在生产包装层：think 剥离 + 缩进码块归一预处理；enhanced 恒开（不受「Enhanced」chip 影响）；
+  /// selectable=!isStreaming。stableCacheKey/enableSmooth*/enableFadeIn 已为 no-op，仅保留签名兼容调用方。
   Widget _buildProductionBody(String source, bool dark, bool isFinal) {
     return OwuiMarkdown(
       text: source,
