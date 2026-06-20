@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from rp.models.setup_agent.stage import SetupStageId
 from rp.models.setup_agent.workspace import SetupStepId
 
+from .runtime_tool_contracts import RuntimeToolCall, RuntimeToolResult
+
 
 class RuntimeProfile(BaseModel):
     """Fixed runtime behavior for one agent profile."""
@@ -257,30 +259,6 @@ class RpAgentTurnInput(BaseModel):
     context_bundle: dict[str, Any] = Field(default_factory=dict)
     tool_scope: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class RuntimeToolCall(BaseModel):
-    """Normalized model-declared tool call."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    call_id: str
-    tool_name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    source_round: int
-
-
-class RuntimeToolResult(BaseModel):
-    """Normalized tool execution outcome."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    call_id: str
-    tool_name: str
-    success: bool
-    content_text: str
-    error_code: str | None = None
-    structured_payload: dict[str, Any] | None = None
 
 
 SetupOutputClassification = Literal[

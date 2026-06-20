@@ -13,52 +13,12 @@ from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobKind,
     RuntimeWorkflowJobStatus,
 )
-from rp.models.setup_agent.workspace import StoryMode
-from rp.models.story.runtime import LongformChapterPhase
-from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
-from rp.services.setup_agent.workspace_service import SetupWorkspaceService
-from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
-from rp.services.story.session_service import StorySessionService
-
-
-def _seed_story_session(retrieval_session, *, story_id: str):
-    workspace = SetupWorkspaceService(retrieval_session).create_workspace(
-        story_id=story_id,
-        mode=StoryMode.LONGFORM,
-    )
-    return StorySessionService(retrieval_session).create_session(
-        story_id=story_id,
-        source_workspace_id=workspace.workspace_id,
-        mode=StoryMode.LONGFORM.value,
-        runtime_story_config={},
-        writer_contract={},
-        current_state_json={},
-        initial_phase=LongformChapterPhase.OUTLINE_DRAFTING,
-    )
+from rp.tests.helpers.runtime_seed import seed_runtime_identity
 
 
 def _seed_runtime_identity(retrieval_session, *, story_id: str):
-    story_session = _seed_story_session(
-        retrieval_session,
-        story_id=story_id,
-    )
-    snapshot_service = RuntimeProfileSnapshotService(retrieval_session)
-    snapshot = snapshot_service.ensure_active_snapshot(
-        session_id=story_session.session_id,
-        created_from=f"test.{story_id}.snapshot",
-    )
-    identity_service = StoryRuntimeIdentityService(
-        retrieval_session,
-        runtime_profile_snapshot_service=snapshot_service,
-    )
-    identity = identity_service.resolve_runtime_entry_identity(
-        session_id=story_session.session_id,
-        command_kind="continue",
-        actor="story_runtime",
-        requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
-    )
-    return identity
+    return seed_runtime_identity(retrieval_session, story_id=story_id)
 
 
 def _ensure_projection_refresh_job(

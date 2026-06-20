@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from models.mcp_config import McpToolInfo
 
-from .contracts import RuntimeToolCall, RuntimeToolResult
+from .runtime_tool_contracts import RuntimeToolCall, RuntimeToolResult
 
 
 class RuntimeToolManagerLike(Protocol):
