@@ -33,6 +33,7 @@ from rp.models.story.runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from rp.models.runtime.identity import StoryTurnStatus
 from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.retrieval.broker import RetrievalBroker
@@ -111,11 +112,8 @@ def test_second_stage_runtime_config_publish_keeps_started_turn_and_pending_job_
     )
     retrieval_session.commit()
 
-    next_identity = identity_service.resolve_runtime_entry_identity(
-        session_id=story_session.session_id,
-        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
-        actor="second-stage-runtime-config-next",
-    )
+    # The in-flight STARTED turn + its pending job retain the OLD snapshot across the
+    # hot publish (the snapshot-isolation intent this regression guards).
     turn_row = retrieval_session.get(StoryTurnRecord, started_identity.turn_id)
     job_row = retrieval_session.get(RuntimeWorkflowJobRecord, pending_job.job_id)
     active_snapshot = snapshot_service.require_active_snapshot(
@@ -125,12 +123,28 @@ def test_second_stage_runtime_config_publish_keeps_started_turn_and_pending_job_
     assert receipt.previous_snapshot_id == initial_snapshot.runtime_profile_snapshot_id
     assert active_snapshot.runtime_profile_snapshot_id == receipt.published_snapshot_id
     assert turn_row is not None
+    assert turn_row.status == StoryTurnStatus.STARTED.value
     assert turn_row.runtime_profile_snapshot_id == (
         initial_snapshot.runtime_profile_snapshot_id
     )
     assert job_row is not None
     assert job_row.runtime_profile_snapshot_id == (
         initial_snapshot.runtime_profile_snapshot_id
+    )
+
+    # TURN-012 / NUM-016: a second writer-prose turn is only admissible once the prior
+    # in-flight turn is terminal. Settle turn 1 before resolving the next intake (the
+    # turn_in_flight guard would otherwise — correctly — reject a duplicate writer turn).
+    identity_service.update_turn_status(
+        turn_id=started_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+    )
+    retrieval_session.commit()
+
+    next_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=story_session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+        actor="second-stage-runtime-config-next",
     )
     assert next_identity.runtime_profile_snapshot_id == receipt.published_snapshot_id
     assert next_identity.runtime_profile_snapshot_id != (
