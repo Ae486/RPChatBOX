@@ -106,6 +106,7 @@ def create_db_and_tables() -> None:
         StoryDiscussionEntryRecord,
         StorySessionRecord,
         StoryTurnRecord,
+        TurnInterruptReceiptRecord,
         ensure_story_store_compatible_schema,
     )
 
@@ -139,6 +140,7 @@ def create_db_and_tables() -> None:
         RuntimeConfigControlReceiptRecord,
         RuntimeWorkflowJobRecord,
         StoryTurnRecord,
+        TurnInterruptReceiptRecord,
         MemoryProposalRecord,
         MemoryApplyReceiptRecord,
         MemoryApplyTargetLinkRecord,

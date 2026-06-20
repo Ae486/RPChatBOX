@@ -13,7 +13,7 @@ from rp.models.proposal.postwrite_runtime_contracts import (
     PostWriteExecutionEnvelope,
     PostWriteRunKind,
 )
-from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.identity import INTERRUPTED_BY_RESTART, StoryTurnStatus
 from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformChapterPhase,
@@ -449,6 +449,45 @@ class StoryTurnDomainService:
             for session_id, identity in self._runtime_identity_by_session.items()
             if identity.turn_id != normalized_turn_id
         }
+
+    def finalize_interrupted_turn(
+        self,
+        *,
+        turn_id: str,
+        reason: str = INTERRUPTED_BY_RESTART,
+    ) -> None:
+        identity_service = self._runtime_identity_service
+        if identity_service is None:
+            return
+        turn = identity_service.get_turn_record(turn_id=turn_id)
+        if turn is None:
+            return
+        if turn.visible_output_ref is not None:
+            return
+        turn = identity_service.update_turn_status(
+            turn_id=turn_id,
+            status=StoryTurnStatus.FAILED,
+            failure_reason=reason,
+        )
+        if self._runtime_workflow_job_service is not None:
+            identity = MemoryRuntimeIdentity(
+                story_id=turn.story_id,
+                session_id=turn.session_id,
+                branch_head_id=turn.branch_head_id,
+                turn_id=turn.turn_id,
+                runtime_profile_snapshot_id=turn.runtime_profile_snapshot_id,
+            )
+            self._runtime_workflow_job_service.mark_required_jobs_failed(
+                identity=identity,
+                reason=reason,
+            )
+        identity_service.record_interrupt_receipt(turn_id=turn_id, reason=reason)
+        self._story_session_service.commit()
+
+    def list_interrupt_receipts(self, *, turn_id: str):
+        if self._runtime_identity_service is None:
+            return []
+        return self._runtime_identity_service.list_interrupt_receipts(turn_id=turn_id)
 
     def record_graph_checkpoint_binding(
         self,

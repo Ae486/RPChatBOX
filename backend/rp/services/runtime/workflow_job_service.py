@@ -274,6 +274,40 @@ class RuntimeWorkflowJobService:
         self._session.flush()
         return updated
 
+    def mark_required_jobs_failed(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        reason: str,
+        job_kinds: Iterable[RuntimeWorkflowJobKind] = CREATION_TIME_OBLIGATION_KINDS,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[RuntimeWorkflowJobRecord]:
+        normalized_reason = _require_non_blank(reason, field_name="reason")
+        jobs_by_kind = {
+            job.job_kind: job for job in self.list_jobs_for_turn(turn_id=identity.turn_id)
+        }
+        updated: list[RuntimeWorkflowJobRecord] = []
+        now = _utcnow()
+        for job_kind in job_kinds:
+            job = jobs_by_kind.get(job_kind.value)
+            if job is None:
+                continue
+            if _is_terminal_status(job.status):
+                updated.append(job)
+                continue
+            job.status = RuntimeWorkflowJobStatus.FAILED.value
+            job.failure_reason = normalized_reason
+            job.completed_at = now
+            job.updated_at = now
+            job.metadata_json = {
+                **dict(job.metadata_json or {}),
+                **dict(metadata or {}),
+            }
+            self._session.add(job)
+            updated.append(job)
+        self._session.flush()
+        return updated
+
     def mark_required_jobs_completed(
         self,
         *,

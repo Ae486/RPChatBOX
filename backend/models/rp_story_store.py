@@ -222,6 +222,34 @@ class BranchControlReceiptRecord(SQLModel, table=True):  # type: ignore[call-arg
     created_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
+class TurnInterruptReceiptRecord(SQLModel, table=True):  # type: ignore[call-arg]
+    """Idempotent restart/interrupt finalize receipt, outside the story-turn timeline."""
+
+    __tablename__ = "rp_story_turn_interrupt_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "turn_id",
+            "reason",
+            name="uq_rp_story_turn_interrupt_receipts_turn_reason",
+        ),
+    )
+
+    receipt_id: str = Field(primary_key=True, index=True)
+    turn_id: str = Field(foreign_key="rp_story_turns.turn_id", index=True)
+    story_id: str = Field(index=True)
+    session_id: str = Field(foreign_key="rp_story_sessions.session_id", index=True)
+    branch_head_id: str = Field(
+        foreign_key="rp_story_branch_heads.branch_head_id",
+        index=True,
+    )
+    reason: str = Field(index=True)
+    metadata_json: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(_JSON_VARIANT, nullable=False),
+    )
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
 class RuntimeProfileSnapshotRecord(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = "rp_runtime_profile_snapshots"
 

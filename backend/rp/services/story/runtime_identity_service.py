@@ -7,6 +7,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import asc
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
@@ -16,6 +17,7 @@ from models.rp_story_store import (
     StoryArtifactRecord,
     StorySessionRecord,
     StoryTurnRecord,
+    TurnInterruptReceiptRecord,
 )
 from rp.errors import RPError
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
@@ -767,6 +769,61 @@ class StoryRuntimeIdentityService:
         turn.core_state_snapshot_id = snapshot_id
         self._session.add(turn)
         self._session.flush()
+
+    def record_interrupt_receipt(
+        self,
+        *,
+        turn_id: str,
+        reason: str,
+    ) -> TurnInterruptReceiptRecord:
+        existing = self._session.exec(
+            select(TurnInterruptReceiptRecord)
+            .where(TurnInterruptReceiptRecord.turn_id == turn_id)
+            .where(TurnInterruptReceiptRecord.reason == reason)
+        ).first()
+        if existing is not None:
+            return existing
+        turn = self._session.get(StoryTurnRecord, turn_id)
+        if turn is None:
+            raise StoryRuntimeIdentityServiceError(
+                "runtime_turn_not_found",
+                turn_id,
+            )
+        record = TurnInterruptReceiptRecord(
+            receipt_id=f"turn-interrupt:{uuid4().hex}",
+            turn_id=turn_id,
+            story_id=turn.story_id,
+            session_id=turn.session_id,
+            branch_head_id=turn.branch_head_id,
+            reason=reason,
+        )
+        self._session.add(record)
+        try:
+            self._session.flush()
+        except IntegrityError:
+            self._session.rollback()
+            return self._session.exec(
+                select(TurnInterruptReceiptRecord)
+                .where(TurnInterruptReceiptRecord.turn_id == turn_id)
+                .where(TurnInterruptReceiptRecord.reason == reason)
+            ).one()
+        return record
+
+    def list_interrupt_receipts(
+        self,
+        *,
+        turn_id: str,
+    ) -> list[TurnInterruptReceiptRecord]:
+        return list(
+            self._session.exec(
+                select(TurnInterruptReceiptRecord)
+                .where(TurnInterruptReceiptRecord.turn_id == turn_id)
+                .order_by(TurnInterruptReceiptRecord.created_at.asc())
+            ).all()
+        )
+
+    def get_turn_record(self, *, turn_id: str) -> StoryTurnRecord | None:
+        return self._session.get(StoryTurnRecord, turn_id)
 
     def get_turn(self, turn_id: str) -> StoryTurnRecord | None:
         return self._session.get(StoryTurnRecord, turn_id)

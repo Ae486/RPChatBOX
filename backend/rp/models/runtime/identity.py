@@ -15,6 +15,9 @@ from rp.models.proposal.post_write_policy import (
 from rp.models.retrieval.runtime_config import RetrievalRuntimeConfig
 
 
+INTERRUPTED_BY_RESTART = "interrupted_by_restart"
+
+
 def _require_non_blank(value: str | None, *, field_name: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import AsyncIterator
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.identity import INTERRUPTED_BY_RESTART
 from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -419,6 +420,20 @@ class StoryGraphNodes:
             failed=failed,
         )
         return {"status": "failed" if failed else "completed"}
+
+    def finalize_interrupted_turn(
+        self,
+        *,
+        turn_id: str,
+        reason: str = INTERRUPTED_BY_RESTART,
+    ) -> None:
+        self._domain_service.finalize_interrupted_turn(
+            turn_id=turn_id,
+            reason=reason,
+        )
+
+    def list_interrupt_receipts(self, *, turn_id: str):
+        return self._domain_service.list_interrupt_receipts(turn_id=turn_id)
 
     def record_graph_checkpoint_binding(
         self,

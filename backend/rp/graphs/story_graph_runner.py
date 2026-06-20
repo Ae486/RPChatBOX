@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import json
 from typing import Any, AsyncIterator, cast
 
 from langgraph.graph import END, START, StateGraph
 
+from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.identity import INTERRUPTED_BY_RESTART
 from rp.models.story.runtime import (
     LongformTurnCommandKind,
     LongformTurnRequest,
@@ -245,6 +248,20 @@ class StoryGraphRunner:
                     ),
                 )
                 yield self._typed({"type": "done"})
+            except (asyncio.CancelledError, GeneratorExit):
+                identity_payload = (current_state or {}).get("runtime_identity") or {}
+                try:
+                    turn_id = MemoryRuntimeIdentity.model_validate(
+                        identity_payload
+                    ).turn_id
+                except Exception:
+                    turn_id = None
+                if turn_id:
+                    self._nodes.finalize_interrupted_turn(
+                        turn_id=turn_id,
+                        reason=INTERRUPTED_BY_RESTART,
+                    )
+                raise
             except Exception as exc:
                 final_values = {
                     "assistant_text": "".join(text_parts),
