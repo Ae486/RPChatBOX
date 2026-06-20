@@ -68,6 +68,16 @@ from ..writer.writing_packet_builder import WritingPacketBuilder
 from ..writer.writing_worker_execution_service import WritingWorkerExecutionService
 
 
+class WriterFinalizationRejected(Exception):
+    """Raised when writer finalization is rejected before visible output is set."""
+
+    reason_code: str
+
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(reason_code)
+
+
 class StoryTurnDomainService:
     """Own longform turn domain logic independent of graph/controller shell."""
 
@@ -1673,12 +1683,26 @@ class StoryTurnDomainService:
         )
         if self._runtime_identity_service is None:
             return
+        self._apply_writer_finalization_gate(
+            turn_id=identity.turn_id,
+            writer_result=finalized_result,
+        )
         self._runtime_identity_service.update_turn_status(
             turn_id=identity.turn_id,
             status=StoryTurnStatus.POST_WRITE_PENDING,
             visible_output_ref=finalized_result.visible_output_ref,
             selected_output_ref=finalized_result.selected_output_ref,
         )
+
+    def _apply_writer_finalization_gate(
+        self,
+        *,
+        turn_id: str,
+        writer_result: WritingWorkerExecutionResult,
+    ) -> None:
+        """S4/RET-005 will raise WriterFinalizationRejected here before visibility commit."""
+
+        return None
 
     def _record_runtime_retrieval_usage_for_artifact(
         self,

@@ -69,6 +69,11 @@ class StoryRuntimeIdentityService:
         "discarded",
         "deleted",
     }
+    _WRITER_PROSE_COMMANDS = {"write_next_segment", "rewrite_pending_segment"}
+    _TURN_TERMINAL = {
+        StoryTurnStatus.SETTLED.value,
+        StoryTurnStatus.FAILED.value,
+    }
 
     def __init__(
         self,
@@ -638,6 +643,14 @@ class StoryRuntimeIdentityService:
                 f"snapshot_session_mismatch:{snapshot_id}",
             )
 
+        if command_kind in self._WRITER_PROSE_COMMANDS:
+            blocking = self._branch_has_in_flight_writer_turn(branch=branch)
+            if blocking is not None:
+                raise StoryRuntimeIdentityServiceError(
+                    "turn_in_flight",
+                    blocking.turn_id,
+                )
+
         turn = self.create_turn(
             session_id=session_record.session_id,
             story_id=session_record.story_id,
@@ -873,6 +886,22 @@ class StoryRuntimeIdentityService:
         }:
             return "control"
         return "generation"
+
+    def _branch_has_in_flight_writer_turn(
+        self,
+        *,
+        branch: BranchHeadRecord,
+    ) -> StoryTurnRecord | None:
+        rows = self._session.exec(
+            select(StoryTurnRecord)
+            .where(StoryTurnRecord.branch_head_id == branch.branch_head_id)
+            .where(StoryTurnRecord.command_kind.in_(self._WRITER_PROSE_COMMANDS))
+            .where(~StoryTurnRecord.status.in_(self._TURN_TERMINAL))
+        ).all()
+        for turn in rows:
+            if not self._turn_hidden_by_rollback(branch=branch, turn=turn):
+                return turn
+        return None
 
     def _require_session_record(self, session_id: str) -> StorySessionRecord:
         record = self._session.get(StorySessionRecord, session_id)

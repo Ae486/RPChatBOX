@@ -12,6 +12,7 @@ class RuntimeWorkflowJobKind(StrEnum):
     PROPOSAL_SUBMIT = "proposal_submit"
     PROPOSAL_APPLY = "proposal_apply"
     RETRIEVAL_USAGE_PERSIST = "retrieval_usage_persist"
+    SCHEDULER_MAINTENANCE_GATE = "scheduler_maintenance_gate"
     RECALL_MATERIALIZATION = "recall_materialization"
     ARCHIVAL_MATERIALIZATION = "archival_materialization"
     ARCHIVAL_REINDEX = "archival_reindex"
