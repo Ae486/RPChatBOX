@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator, cast
+from typing import AsyncIterator, Protocol, cast
 from uuid import uuid4
 
 from models.rp_story_store import RuntimeWorkflowJobRecord
@@ -14,6 +14,8 @@ from rp.models.proposal.postwrite_runtime_contracts import (
     PostWriteRunKind,
 )
 from rp.models.runtime.identity import INTERRUPTED_BY_RESTART, StoryTurnStatus
+from rp.models.runtime.orchestrator_dispatch import OrchestratorPlanProposal
+from rp.models.runtime.reason_codes import SchedulerReasonCode
 from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformChapterPhase,
@@ -29,6 +31,7 @@ from rp.models.story.runtime import (
     StorySession,
 )
 from rp.models.writer.worker_memory import WorkerSourceRefBundle
+from rp.models.writer.worker_runtime_contracts import WorkerPlanSource
 from rp.models.writer.writing_worker_contracts import (
     WritingWorkerExecutionRequest,
     WritingWorkerExecutionResult,
@@ -41,7 +44,10 @@ from ..writer.longform_orchestrator_service import LongformOrchestratorService
 from ..writer.longform_regression_service import LongformRegressionService
 from ..writer.longform_specialist_service import LongformSpecialistService
 from ..proposal.post_write_governance_service import PostWriteGovernanceService
-from ..proposal.post_write_scheduler_service import PostWriteSchedulerService
+from ..proposal.post_write_scheduler_service import (
+    POST_WRITE_MAINTENANCE_PHASE,
+    PostWriteSchedulerService,
+)
 from ..projection.builder_context_service import BuilderProjectionContextService
 from ..projection.state_service import ProjectionStateService
 from ..recall.scene_transcript_ingestion_service import (
@@ -53,7 +59,9 @@ from .runtime_identity_service import StoryRuntimeIdentityService
 from .runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from .session_service import StorySessionService
 from ..runtime.read_manifest_service import RuntimeReadManifestService
+from ..runtime.scheduler_decision_service import SchedulerDecisionError
 from ..runtime.workflow_job_service import (
+    RuntimeWorkflowJobServiceError,
     RuntimeWorkflowJobService,
     TurnSettlementEvaluation,
 )
@@ -66,6 +74,17 @@ from ..writer.worker_scheduler_service import (
 )
 from ..writer.writing_packet_builder import WritingPacketBuilder
 from ..writer.writing_worker_execution_service import WritingWorkerExecutionService
+
+
+class OrchestratorDispatchProvider(Protocol):
+    def propose(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        phase: str,
+        turn,
+        trigger_context,
+    ) -> OrchestratorPlanProposal | None: ...
 
 
 class WriterFinalizationRejected(Exception):
@@ -109,6 +128,7 @@ class StoryTurnDomainService:
         runtime_workflow_job_service: RuntimeWorkflowJobService | None = None,
         post_write_scheduler_service: PostWriteSchedulerService | None = None,
         post_write_governance_service: PostWriteGovernanceService | None = None,
+        orchestrator_dispatch_provider: OrchestratorDispatchProvider | None = None,
         story_runtime_adapter_service: StoryRuntimeAdapterService | None = None,
         longform_chapter_runtime_service: LongformChapterRuntimeService | None = None,
         rewrite_packet_constraint_service: RewritePacketConstraintService | None = None,
@@ -212,6 +232,7 @@ class StoryTurnDomainService:
         )
         self._post_write_scheduler_service = post_write_scheduler_service
         self._post_write_governance_service = post_write_governance_service
+        self._orchestrator_dispatch_provider = orchestrator_dispatch_provider
         self._story_runtime_adapter_service = (
             story_runtime_adapter_service or StoryRuntimeAdapterService()
         )
@@ -743,9 +764,46 @@ class StoryTurnDomainService:
             turn_id=runtime_identity.turn_id,
             status=StoryTurnStatus.POST_WRITE_RUNNING,
         )
-        worker_plan = self._post_write_scheduler_service.build_worker_plan(
-            identity=runtime_identity,
-        )
+        proposal = None
+        if self._orchestrator_dispatch_provider is not None:
+            proposal = self._orchestrator_dispatch_provider.propose(
+                identity=runtime_identity,
+                phase=POST_WRITE_MAINTENANCE_PHASE,
+                turn=turn,
+                trigger_context=trigger_context,
+            )
+        try:
+            worker_plan = self._post_write_scheduler_service.build_worker_plan(
+                identity=runtime_identity,
+                proposal=proposal,
+            )
+        except SchedulerDecisionError as exc:
+            return self._run_minimal_post_write(
+                identity=runtime_identity,
+                jobs=jobs,
+                reason=exc.message,
+                trigger_context_payload=trigger_context.model_dump(mode="json"),
+            )
+        gate_job = None
+        if worker_plan.plan_source == WorkerPlanSource.ORCHESTRATOR:
+            try:
+                gate_job = (
+                    self._runtime_workflow_job_service.ensure_scheduler_maintenance_gate(
+                        identity=runtime_identity,
+                        scheduler_job_id=worker_plan.plan_id,
+                        anchor_turn_id=runtime_identity.turn_id,
+                        metadata={"phase": POST_WRITE_MAINTENANCE_PHASE},
+                    )
+                )
+            except RuntimeWorkflowJobServiceError as exc:
+                if exc.code == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value:
+                    return self._run_minimal_post_write(
+                        identity=runtime_identity,
+                        jobs=jobs,
+                        reason=exc.code,
+                        trigger_context_payload=trigger_context.model_dump(mode="json"),
+                    )
+                raise
         command_kind = self._coerce_turn_command_kind(turn.command_kind)
         execution = await self._worker_execution_service.execute_plan(
             session=session,
@@ -775,6 +833,12 @@ class StoryTurnDomainService:
                 specialist_bundle=execution.specialist_bundle,
             )
         )
+        if gate_job is not None:
+            self._runtime_workflow_job_service.mark_job_completed(
+                job_id=gate_job.job_id,
+                reason="post_write_full_schedule_completed",
+                metadata={"worker_plan_id": worker_plan.plan_id},
+            )
         completed_obligations = (
             self._runtime_workflow_job_service.mark_required_jobs_completed(
                 identity=runtime_identity,

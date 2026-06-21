@@ -55,6 +55,7 @@ class OrchestratorPlanProposal(BaseModel):
     identity: MemoryRuntimeIdentity
     phase: str
     dispatch_input: OrchestratorDispatchToolInput
+    source_unit_count: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

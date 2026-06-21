@@ -363,6 +363,7 @@ class RuntimeWorkflowJobRecord(SQLModel, table=True):  # type: ignore[call-arg]
     required_for_turn_completion: bool = Field(default=False, index=True)
     worker_id: str | None = Field(default=None, index=True)
     parent_job_id: str | None = Field(default=None, index=True)
+    anchor_turn_id: str | None = Field(default=None, index=True)
     idempotency_key: str = Field(index=True)
     source_ref_ids_json: list[str] = Field(
         default_factory=list,
@@ -517,6 +518,14 @@ def ensure_story_store_compatible_schema(engine: Engine) -> None:
             "TIMESTAMP WITH TIME ZONE"
             if dialect == "postgresql"
             else "DATETIME",
+        )
+
+    if "rp_runtime_workflow_jobs" in tables:
+        _ensure_column(
+            engine,
+            "rp_runtime_workflow_jobs",
+            "anchor_turn_id",
+            "VARCHAR",
         )
 
     if "rp_story_branch_heads" in tables:

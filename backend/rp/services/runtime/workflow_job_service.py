@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from models.rp_story_store import RuntimeWorkflowJobRecord, StoryTurnRecord
 from rp.errors import RPError
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.runtime.reason_codes import SchedulerReasonCode
 from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
@@ -102,6 +103,7 @@ class RuntimeWorkflowJobService:
         trace_refs: Iterable[str] = (),
         worker_id: str | None = None,
         parent_job_id: str | None = None,
+        anchor_turn_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> RuntimeWorkflowJobRecord:
         turn = self._require_turn(identity)
@@ -129,6 +131,7 @@ class RuntimeWorkflowJobService:
             required_for_turn_completion=required_for_turn_completion,
             worker_id=_optional_text(worker_id),
             parent_job_id=_optional_text(parent_job_id),
+            anchor_turn_id=_optional_text(anchor_turn_id) or identity.turn_id,
             idempotency_key=idempotency_key,
             source_ref_ids_json=_unique_non_blank(source_ref_ids),
             result_ref_ids_json=_unique_non_blank(result_ref_ids),
@@ -141,6 +144,51 @@ class RuntimeWorkflowJobService:
         self._session.add(turn)
         self._session.flush()
         return record
+
+    def ensure_scheduler_maintenance_gate(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        scheduler_job_id: str,
+        anchor_turn_id: str | None = None,
+        required_for_turn_completion: bool = True,
+        source_ref_ids: Iterable[str] = (),
+        trace_refs: Iterable[str] = (),
+        metadata: dict[str, Any] | None = None,
+    ) -> RuntimeWorkflowJobRecord:
+        anchor = _optional_text(anchor_turn_id) or identity.turn_id
+        scheduler_job_id = _require_non_blank(
+            scheduler_job_id,
+            field_name="scheduler_job_id",
+        )
+        for job in self.list_jobs_for_turn(turn_id=identity.turn_id):
+            if (
+                job.job_kind
+                != RuntimeWorkflowJobKind.SCHEDULER_MAINTENANCE_GATE.value
+                or (job.anchor_turn_id or job.turn_id) != anchor
+            ):
+                continue
+            if not _is_terminal_status(job.status):
+                job_scheduler_id = (job.metadata_json or {}).get("scheduler_job_id")
+                if job_scheduler_id == scheduler_job_id:
+                    return job
+                raise RuntimeWorkflowJobServiceError(
+                    SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value,
+                    f"anchor={anchor}",
+                )
+
+        # W5-A longform post-write policy hard-blocks settlement on maintenance.
+        return self.ensure_job(
+            identity=identity,
+            job_kind=RuntimeWorkflowJobKind.SCHEDULER_MAINTENANCE_GATE,
+            job_category=RuntimeWorkflowJobCategory.TURN_FINALIZATION,
+            creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+            required_for_turn_completion=required_for_turn_completion,
+            anchor_turn_id=anchor,
+            source_ref_ids=source_ref_ids,
+            trace_refs=trace_refs,
+            metadata={**dict(metadata or {}), "scheduler_job_id": scheduler_job_id},
+        )
 
     def mark_job_running(
         self,

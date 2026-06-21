@@ -5,11 +5,18 @@ from __future__ import annotations
 from models.rp_story_store import StoryTurnRecord
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.proposal.postwrite_runtime_contracts import PostWriteTriggerContext
+from rp.models.runtime.orchestrator_dispatch import OrchestratorPlanProposal
 from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.writer.worker_runtime_contracts import WorkerExecutionPlan
+from rp.services.runtime.scheduler_decision_service import (
+    SchedulerDecisionError,
+    SchedulerDecisionService,
+)
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
+from rp.models.runtime.reason_codes import SchedulerFailureCategory
+from rp.services.writer.worker_registry_service import WorkerRegistryService
 from rp.services.writer.worker_scheduler_service import WorkerSchedulerService
 
 
@@ -24,9 +31,13 @@ class PostWriteSchedulerService:
         *,
         worker_scheduler_service: WorkerSchedulerService,
         runtime_workspace_material_service: RuntimeWorkspaceMaterialService | None,
+        scheduler_decision_service: SchedulerDecisionService | None = None,
+        worker_registry_service: WorkerRegistryService | None = None,
     ) -> None:
         self._worker_scheduler_service = worker_scheduler_service
         self._runtime_workspace_material_service = runtime_workspace_material_service
+        self._scheduler_decision_service = scheduler_decision_service
+        self._worker_registry_service = worker_registry_service
 
     def build_trigger_context(
         self,
@@ -79,10 +90,35 @@ class PostWriteSchedulerService:
         self,
         *,
         identity: MemoryRuntimeIdentity,
+        proposal: OrchestratorPlanProposal | None = None,
     ) -> WorkerExecutionPlan:
-        return self._worker_scheduler_service.build_plan(
+        if proposal is None:
+            return self._worker_scheduler_service.build_plan(
+                identity=identity,
+                phase=POST_WRITE_MAINTENANCE_PHASE,
+            )
+        if (
+            self._scheduler_decision_service is None
+            or self._worker_registry_service is None
+        ):
+            raise SchedulerDecisionError(
+                category=SchedulerFailureCategory.VALIDATION_ERROR,
+                message="scheduler_decision_unavailable",
+            )
+        if proposal.source_unit_count is None:
+            raise SchedulerDecisionError(
+                category=SchedulerFailureCategory.VALIDATION_ERROR,
+                message="source_unit_count_missing",
+            )
+        registry = self._worker_registry_service.build_registry_for_snapshot(
+            snapshot_id=identity.runtime_profile_snapshot_id,
+        )
+        return self._scheduler_decision_service.decide(
             identity=identity,
             phase=POST_WRITE_MAINTENANCE_PHASE,
+            dispatch_input=proposal.dispatch_input,
+            registry=registry,
+            source_unit_count=proposal.source_unit_count,
         )
 
     def _turn_material_counts(
