@@ -156,3 +156,50 @@ Main-brain actions:
   - honest direct-apply target subset;
   - invalid handoff job failure receipt;
   - no legacy-label hiding and no truth mutation outside apply.
+
+## 2026-06-23 — S3c implementation and check gate passed
+
+Main-brain actions:
+
+- Dispatched a Codex exec implement subagent for S3c. It timed out before
+  producing a summary, so main-brain stopped the child process and took over the
+  resulting diff.
+- Reviewed the diff against `10-S3c-implementation-brief.md`.
+- Ran the new focused tests:
+
+```text
+9 passed, 1 warning in 11.01s
+```
+
+- Ran the full S3c gate:
+
+```text
+69 passed, 1 warning in 77.54s
+```
+
+- Ran independent `codex exec review --uncommitted`.
+- Accepted and fixed the blocking review finding:
+  - failed S3 handoff now records a failed job and returns the job ref instead
+    of re-raising and risking transaction rollback.
+- Reran focused tests:
+
+```text
+9 passed, 1 warning in 11.69s
+```
+
+- Reran the full S3c gate:
+
+```text
+69 passed, 1 warning in 77.63s
+```
+
+- Wrote `S3c-check-record.md` and `11-S3c-implementation-result.md`.
+
+Remaining unrelated worktree noise:
+
+- `.gitignore`
+- `.trellis/.template-hashes.json`
+- `backend/services/conversation_source.py`
+- `backend/tests/test_conversation_source_api.py`
+
+These were not staged or modified for S3c.

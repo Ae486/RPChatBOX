@@ -30,6 +30,12 @@ from rp.services.core_state.legacy_state_patch_proposal_builder import (
 from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 
+from .memory_candidate_proposal_adapter import (
+    CandidateProposalHandoff,
+    MemoryCandidateProposalAdapter,
+    MemoryCandidateProposalAdapterError,
+    S3_MEMORY_MAINTENANCE_CANDIDATE_KIND,
+)
 from .workflow_service import ProposalWorkflowService
 
 
@@ -53,6 +59,7 @@ class PostWriteGovernanceService:
         proposal_workflow_service: ProposalWorkflowService | None = None,
         legacy_state_patch_proposal_builder: LegacyStatePatchProposalBuilder
         | None = None,
+        memory_candidate_proposal_adapter: MemoryCandidateProposalAdapter | None = None,
     ) -> None:
         self._runtime_workflow_job_service = runtime_workflow_job_service
         self._projection_refresh_service = projection_refresh_service
@@ -60,6 +67,9 @@ class PostWriteGovernanceService:
         self._proposal_workflow_service = proposal_workflow_service
         self._legacy_state_patch_proposal_builder = (
             legacy_state_patch_proposal_builder or LegacyStatePatchProposalBuilder()
+        )
+        self._memory_candidate_proposal_adapter = (
+            memory_candidate_proposal_adapter or MemoryCandidateProposalAdapter()
         )
 
     async def dispatch_worker_results(
@@ -230,37 +240,65 @@ class PostWriteGovernanceService:
         )
         proposal_refs: list[str] = []
         governance_payloads: list[dict[str, Any]] = []
-        for result in proposal_results:
-            envelope = self._build_governance_envelope(
-                identity=identity,
-                result=result,
-            )
-            governance_payloads.append(envelope.model_dump(mode="json"))
-            governance_metadata = WorkerProposalGovernanceMetadata(
-                identity=identity,
-                worker_id=envelope.worker_id,
-                phase=envelope.phase,
-                runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
-                permission_decision=envelope.permission_decision,
-                permission_reason_codes=list(envelope.permission_reason_codes),
-                source_refs=list(envelope.source_refs),
-                trace_refs=list(envelope.trace_refs),
-            )
-            for candidate in result.proposal_candidates:
-                proposal_inputs = self._proposal_inputs_from_candidate(
-                    story_id=session.story_id,
-                    mode=session.mode,
-                    candidate=candidate,
+        try:
+            for result in proposal_results:
+                envelope = self._build_governance_envelope(
+                    identity=identity,
+                    result=result,
                 )
-                for proposal_input in proposal_inputs:
-                    receipt = await self._proposal_workflow_service.submit_and_route(
-                        proposal_input,
-                        session_id=session.session_id,
-                        chapter_workspace_id=chapter.chapter_workspace_id,
-                        submit_source="post_write_worker",
-                        governance_metadata=governance_metadata,
+                governance_payloads.append(envelope.model_dump(mode="json"))
+                governance_metadata = WorkerProposalGovernanceMetadata(
+                    identity=identity,
+                    worker_id=envelope.worker_id,
+                    phase=envelope.phase,
+                    runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+                    permission_decision=envelope.permission_decision,
+                    permission_reason_codes=list(envelope.permission_reason_codes),
+                    source_refs=list(envelope.source_refs),
+                    trace_refs=list(envelope.trace_refs),
+                )
+                for candidate in result.proposal_candidates:
+                    proposal_handoffs = self._proposal_handoffs_from_candidate(
+                        identity=identity,
+                        story_id=session.story_id,
+                        mode=session.mode,
+                        candidate=candidate,
                     )
-                    proposal_refs.append(f"proposal:{receipt.proposal_id}")
+                    for handoff in proposal_handoffs:
+                        effective_governance_metadata = (
+                            _merge_governance_metadata_for_handoff(
+                                governance_metadata=governance_metadata,
+                                handoff=handoff,
+                            )
+                        )
+                        receipt = (
+                            await self._proposal_workflow_service.submit_and_route(
+                                handoff.proposal_input,
+                                session_id=session.session_id,
+                                chapter_workspace_id=chapter.chapter_workspace_id,
+                                submit_source="post_write_worker",
+                                policy=handoff.policy,
+                                governance_metadata=effective_governance_metadata,
+                            )
+                        )
+                        proposal_refs.append(f"proposal:{receipt.proposal_id}")
+        except Exception as exc:
+            failure_code = _failure_code_from_exception(exc)
+            failed_job = self._runtime_workflow_job_service.mark_job_failed(
+                job_id=job.job_id,
+                reason=failure_code,
+                metadata={
+                    "dispatch_owner": "post_write_governance_service",
+                    "proposal_governance_failure_reason_code": failure_code,
+                    "proposal_governance_failure_detail": str(exc),
+                },
+                last_error={
+                    "code": failure_code,
+                    "message": str(exc),
+                    "stage": "proposal_governance_dispatch",
+                },
+            )
+            return [f"runtime_job:{failed_job.job_id}"]
         completed = self._runtime_workflow_job_service.mark_job_completed(
             job_id=job.job_id,
             reason="proposal_governance_completed",
@@ -501,14 +539,30 @@ class PostWriteGovernanceService:
             },
         )
 
-    def _proposal_inputs_from_candidate(
+    def _proposal_handoffs_from_candidate(
         self,
         *,
+        identity: MemoryRuntimeIdentity,
         story_id: str,
         mode: str,
         candidate: dict[str, Any],
-    ):
+    ) -> list[CandidateProposalHandoff]:
         candidate_kind = str(candidate.get("candidate_kind") or "").strip()
+        if candidate_kind == S3_MEMORY_MAINTENANCE_CANDIDATE_KIND:
+            try:
+                return self._memory_candidate_proposal_adapter.build_handoffs(
+                    identity=identity,
+                    story_id=story_id,
+                    mode=mode,
+                    candidate=candidate,
+                )
+            except MemoryCandidateProposalAdapterError:
+                raise
+            except Exception as exc:
+                raise PostWriteGovernanceServiceError(
+                    "post_write_s3_candidate_adapter_failed",
+                    str(exc),
+                ) from exc
         if candidate_kind != "legacy_state_patch":
             raise PostWriteGovernanceServiceError(
                 "post_write_proposal_candidate_unsupported",
@@ -520,15 +574,27 @@ class PostWriteGovernanceService:
                 "post_write_proposal_candidate_payload_invalid",
                 candidate_kind,
             )
-        return self._legacy_state_patch_proposal_builder.build_inputs(
-            story_id=story_id,
-            mode=mode,
-            patch=dict(payload),
-        )
+        return [
+            CandidateProposalHandoff(proposal_input=proposal_input)
+            for proposal_input in self._legacy_state_patch_proposal_builder.build_inputs(
+                story_id=story_id,
+                mode=mode,
+                patch=dict(payload),
+            )
+        ]
 
 
 def _worker_result_ref(*, identity: MemoryRuntimeIdentity, result: WorkerResult) -> str:
     return f"worker_result:{identity.turn_id}:{result.worker_id}:{result.phase}"
+
+
+def _failure_code_from_exception(exc: Exception) -> str:
+    explicit_code = getattr(exc, "code", None)
+    if isinstance(explicit_code, str) and explicit_code.strip():
+        return explicit_code.strip()
+    message = str(exc)
+    prefix = message.split(":", 1)[0].strip()
+    return prefix or exc.__class__.__name__
 
 
 def _worker_result_source_ref_ids(result: WorkerResult) -> list[str]:
@@ -607,6 +673,38 @@ def _merge_source_refs(refs: list[MemorySourceRef]) -> list[MemorySourceRef]:
     return merged
 
 
+def _merge_governance_metadata_for_handoff(
+    *,
+    governance_metadata: WorkerProposalGovernanceMetadata,
+    handoff: CandidateProposalHandoff,
+) -> WorkerProposalGovernanceMetadata:
+    return governance_metadata.model_copy(
+        update={
+            "permission_reason_codes": _unique_non_blank(
+                [
+                    *governance_metadata.permission_reason_codes,
+                    "s3_memory_maintenance_candidate"
+                    if handoff.metadata.get("original_candidate_kind")
+                    == S3_MEMORY_MAINTENANCE_CANDIDATE_KIND
+                    else "",
+                ]
+            ),
+            "source_refs": _merge_source_refs(
+                [
+                    *governance_metadata.source_refs,
+                    *handoff.source_refs,
+                ]
+            ),
+            "trace_refs": _unique_non_blank(
+                [
+                    *governance_metadata.trace_refs,
+                    *handoff.trace_refs,
+                ]
+            ),
+        }
+    )
+
+
 def _merge_object_refs(refs: list[ObjectRef]) -> list[ObjectRef]:
     merged: list[ObjectRef] = []
     seen: set[tuple[str, str, str, str | None]] = set()
@@ -621,7 +719,7 @@ def _merge_object_refs(refs: list[ObjectRef]) -> list[ObjectRef]:
 
 def _merge_dirty_targets(targets: list[MemoryDirtyTarget]) -> list[MemoryDirtyTarget]:
     merged: list[MemoryDirtyTarget] = []
-    seen: set[tuple[str, str, str, str | None, str | None]] = set()
+    seen: set[tuple[str, str, str | None, str | None, str | None]] = set()
     for target in targets:
         key = (
             target.target_kind,
@@ -690,6 +788,7 @@ def _unique_non_blank(values: list[str]) -> list[str]:
 def _is_terminal(job: RuntimeWorkflowJobRecord) -> bool:
     return job.status in {
         RuntimeWorkflowJobStatus.COMPLETED.value,
+        RuntimeWorkflowJobStatus.FAILED.value,
         RuntimeWorkflowJobStatus.DEFERRED.value,
         RuntimeWorkflowJobStatus.CANCELLED.value,
     }

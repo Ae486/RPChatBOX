@@ -270,6 +270,31 @@ class RuntimeWorkflowJobService:
         self._session.flush()
         return job
 
+    def mark_job_failed(
+        self,
+        *,
+        job_id: str,
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+        last_error: dict[str, Any] | None = None,
+    ) -> RuntimeWorkflowJobRecord:
+        job = self._require_job(job_id)
+        if _is_terminal_status(job.status):
+            return job
+        now = _utcnow()
+        job.status = RuntimeWorkflowJobStatus.FAILED.value
+        job.failure_reason = _require_non_blank(reason, field_name="reason")
+        job.completed_at = now
+        job.updated_at = now
+        job.last_error_json = dict(last_error or {})
+        job.metadata_json = {
+            **dict(job.metadata_json or {}),
+            **dict(metadata or {}),
+        }
+        self._session.add(job)
+        self._session.flush()
+        return job
+
     def list_jobs_for_turn(
         self,
         *,

@@ -41,8 +41,11 @@ implementation plan.
     S3b.
 13. `10-S3c-implementation-brief.md` — bounded implement-worker brief for
     governance routing and proposal handoff.
-14. `review-record.md` — standing assistant planning review.
-15. `worklog.md` — planning and execution trace for this S3 directory.
+14. `S3c-check-record.md` — fresh reviewer/check record for the S3c slice.
+15. `11-S3c-implementation-result.md` — main-brain result and gate record for
+    S3c.
+16. `review-record.md` — standing assistant planning review.
+17. `worklog.md` — planning and execution trace for this S3 directory.
 
 ## Current Gate
 
@@ -52,7 +55,8 @@ Current step:
 S3a registry/candidate contracts passed
   -> S3b memory worker adapter passed
   -> S3c governance routing / proposal handoff brief prepared
-  -> next: S3c implementation and fresh check
+  -> S3c implementation and fresh check passed
+  -> next: S3d maintenance lock / stale-base integration brief
 ```
 
 S3a and S3b are completed implementation slices. S3c must still be planned as a
