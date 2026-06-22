@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from models.mcp_config import McpToolInfo
-from rp.agent_runtime.tools import RuntimeToolRegistryView
-from rp.agent_runtime.profiles import (
+from rp.agent_runtime.setup.tools import RuntimeToolRegistryView
+from rp.agent_runtime.setup.profiles import (
     SETUP_STAGE_ENTRY_TOOLS,
     SETUP_AGENT_VISIBLE_TOOLS,
     build_setup_agent_capability_plan,

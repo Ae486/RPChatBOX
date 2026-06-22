@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     SetupCompactRecoveryHint,
     SetupContextCompactSummary,
     SetupToolOutcome,

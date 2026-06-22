@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rp.agent_runtime.contracts import RpAgentTurnResult
+from rp.agent_runtime.setup.contracts import RpAgentTurnResult
 from rp.models.setup_agent.agent import SetupAgentTurnRequest
 from rp.models.setup_agent.workspace import SetupWorkspace
 

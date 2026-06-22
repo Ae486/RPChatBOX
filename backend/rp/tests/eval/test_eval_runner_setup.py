@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from rp.agent_runtime.contracts import SetupCognitiveStateSnapshot
+from rp.agent_runtime.setup.contracts import SetupCognitiveStateSnapshot
 from models.model_registry import ModelRegistryEntry
 from models.provider_registry import ProviderRegistryEntry
 from rp.eval.case_loader import load_case

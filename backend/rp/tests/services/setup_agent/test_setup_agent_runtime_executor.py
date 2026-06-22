@@ -7,16 +7,16 @@ from typing import Any
 
 import pytest
 
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     RpAgentTurnInput,
     RuntimeProfile,
     RuntimeToolCall,
     RuntimeToolResult,
 )
-from rp.agent_runtime.events import RuntimeEvent, TypedSseEventAdapter
-from rp.agent_runtime.executor import RpAgentRuntimeExecutor, _RuntimeRunDriver
-from rp.agent_runtime.state import RpAgentRunState
-from rp.agent_runtime.tools import RuntimeToolExecutor
+from rp.agent_runtime.setup.events import RuntimeEvent, TypedSseEventAdapter
+from rp.agent_runtime.setup.executor import RpAgentRuntimeExecutor, _RuntimeRunDriver
+from rp.agent_runtime.kernel.state import RpAgentRunState
+from rp.agent_runtime.setup.tools import RuntimeToolExecutor
 
 
 def _turn_input(
@@ -2178,7 +2178,7 @@ async def test_runtime_executor_emits_langfuse_generation_and_tool_observations(
 ):
     fake_langfuse = _FakeLangfuseService()
     monkeypatch.setattr(
-        "rp.agent_runtime.executor.get_langfuse_service",
+        "rp.agent_runtime.setup.executor.get_langfuse_service",
         lambda: fake_langfuse,
     )
     tool_executor = _FakeToolExecutor()

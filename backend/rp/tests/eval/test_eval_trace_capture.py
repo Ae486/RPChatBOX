@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from rp.agent_runtime.contracts import RpAgentTurnResult
+from rp.agent_runtime.setup.contracts import RpAgentTurnResult
 from rp.eval.trace_capture import build_setup_trace
 from rp.models.setup_agent.agent import SetupAgentTurnRequest
 

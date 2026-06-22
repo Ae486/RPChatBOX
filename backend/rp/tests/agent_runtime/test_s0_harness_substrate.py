@@ -1,22 +1,14 @@
 """Oracle node-5 Tier-B: S0 harness substrate contract-split (S0-O1, S0-O2).
 
-These pin the S0 *target* before it is built (oracle-first), so both are RED today.
-
 S0-O1 [HAR-003] import audit: the story-harness import path must be setup-free.
-Today it is NOT — spike#1 proved ``rp.agent_runtime.tools`` transitively pulls
-``rp.models.setup_agent.*`` via ``contracts.py:10-11``. We import the harness
-entry modules in a FRESH interpreter and assert no ``setup_agent`` module is
-loaded; this fails RED until S0 extracts a setup-free ``runtime_tool_contracts``.
+We import the story-owned harness and shared kernel entry modules in a FRESH
+interpreter and assert no ``setup_agent`` module is loaded. Setup-only modules
+such as ``rp.agent_runtime.setup.tools`` are intentionally excluded from this
+story import audit.
 
 S0-O2 [HAR-009/012/013] consumer-backed factory: the real ``create_story_harness``
 test factory must compile ``build_runtime_graph`` on the split substrate and run a
-definition-layer-registered fake executor through >=2 tool-rounds. The factory
-does not exist yet; the import is guarded so this file COLLECTS, then a clean
-assertion fails on the gap. Target shape is the pi-mono-adapted seam
-(_borrowable-pi-mono-harness.md): test_minimal profile + per-harness fake
-registration + scripted response queue + abort contract + cleanup.
-
-Neither assertion may be weakened to green — they serve the S0 SoT, not today's code.
+definition-layer-registered fake executor through >=2 tool-rounds.
 """
 
 from __future__ import annotations
@@ -30,15 +22,15 @@ _BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 # Harness entry modules whose transitive imports must be free of setup_agent.
 _HARNESS_ENTRY_MODULES = (
-    "rp.agent_runtime.story_harness",
-    "rp.agent_runtime.graph",
-    "rp.agent_runtime.tools",
+    "rp.agent_runtime.story.story_harness",
+    "rp.agent_runtime.kernel.graph",
+    "rp.agent_runtime.kernel.runtime_tool_contracts",
 )
 
 # S0-O2 target: the setup-free harness factory + its test_minimal profile. Guarded
 # so a missing module yields a clean failing assertion, not a collection error.
 try:  # pragma: no cover - exercised once S0 lands
-    from rp.agent_runtime.story_harness import (  # type: ignore[attr-defined]
+    from rp.agent_runtime.story.story_harness import (
         TEST_MINIMAL_PROFILE,
         create_story_harness,
     )
@@ -64,15 +56,14 @@ def test_s0_o1_story_harness_import_path_is_setup_free() -> None:
     )
     assert proc.returncode == 0, (
         "HAR-003: the story-harness import path still pulls setup_agent modules "
-        "(spike#1 leakage via rp.agent_runtime.contracts:10-11). S0 must extract a "
-        f"setup-free runtime_tool_contracts. Leaked modules: {proc.stdout.strip()}\n"
+        f"after the physical split. Leaked modules: {proc.stdout.strip()}\n"
         f"{proc.stderr.strip()}"
     )
 
 
 def test_s0_o2_create_story_harness_runs_fake_through_two_tool_rounds() -> None:
     assert create_story_harness is not None and TEST_MINIMAL_PROFILE is not None, (
-        "S0 substrate not built: rp.agent_runtime.story_harness.create_story_harness "
+        "S0 substrate not built: rp.agent_runtime.story.story_harness.create_story_harness "
         "(+ TEST_MINIMAL_PROFILE) must compile build_runtime_graph on the setup-free "
         "split substrate and run a definition-layer-registered fake executor through "
         ">=2 tool-rounds (HAR-009/012/013)."

@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from rp.agent_runtime.prompts.setup_agent import tool_description_text
-from rp.agent_runtime.profiles import build_setup_agent_capability_plan
+from rp.agent_runtime.setup.prompts import tool_description_text
+from rp.agent_runtime.setup.profiles import build_setup_agent_capability_plan
 from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,

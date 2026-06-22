@@ -6,7 +6,7 @@ from typing import AsyncIterator, cast
 
 from langgraph.graph import END, START, StateGraph
 
-from rp.agent_runtime.contracts import RpAgentTurnResult
+from rp.agent_runtime.setup.contracts import RpAgentTurnResult
 from rp.models.setup_agent.agent import SetupAgentTurnRequest, SetupAgentTurnResponse
 from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
 

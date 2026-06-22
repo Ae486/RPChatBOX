@@ -5,9 +5,9 @@ from __future__ import annotations
 from config import get_settings
 from sqlmodel import Session
 
-from rp.agent_runtime.adapters import SetupRuntimeAdapter
-from rp.agent_runtime.executor import RpAgentRuntimeExecutor
-from rp.agent_runtime.tools import RuntimeToolExecutor
+from rp.agent_runtime.setup.adapters import SetupRuntimeAdapter
+from rp.agent_runtime.setup.executor import RpAgentRuntimeExecutor
+from rp.agent_runtime.setup.tools import RuntimeToolExecutor
 from rp.graphs.activation_graph_nodes import ActivationGraphNodes
 from rp.graphs.activation_graph_runner import ActivationGraphRunner
 from rp.graphs.setup_graph_nodes import SetupGraphNodes

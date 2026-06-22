@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from models.rp_setup_store import SetupPendingUserEditDeltaRecord
-from rp.agent_runtime.contracts import ChunkCandidate, DiscussionState, DraftTruthWrite
+from rp.agent_runtime.setup.contracts import ChunkCandidate, DiscussionState, DraftTruthWrite
 from rp.models.setup_agent.handoff import SetupContextBuilderInput
 from rp.models.setup_agent.workspace import SetupStepId, StoryMode
 from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService

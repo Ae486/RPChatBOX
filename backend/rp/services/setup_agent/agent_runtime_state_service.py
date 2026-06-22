@@ -10,7 +10,7 @@ from uuid import uuid4
 from sqlmodel import Session, select
 
 from models.rp_setup_store import SetupAgentRuntimeStateRecord
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     ChunkCandidate,
     DiscussionState,
     DraftTruthWrite,

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from models.mcp_config import McpToolInfo
-from rp.agent_runtime.prompts.setup_agent import tool_description_text
+from rp.agent_runtime.setup.prompts import tool_description_text
 from rp.setup_agent_memory.contracts import (
     SetupSessionMemoryOpenInput,
     SetupSessionMemoryReadInput,

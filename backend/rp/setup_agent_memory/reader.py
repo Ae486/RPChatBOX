@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from rp.agent_runtime.contracts import SetupDraftRefReadInput, SetupDraftRefReadResult
+from rp.agent_runtime.setup.contracts import SetupDraftRefReadInput, SetupDraftRefReadResult
 from rp.services.setup_agent.truth_index_service import SetupTruthIndexService
 
 from .contracts import (

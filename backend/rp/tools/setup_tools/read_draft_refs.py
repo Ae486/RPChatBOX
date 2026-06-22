@@ -7,7 +7,7 @@ import json
 
 from pydantic import BaseModel
 
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     SetupDraftRefReadInput,
     SetupDraftRefReadItem,
     SetupDraftRefReadResult,

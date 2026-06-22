@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from models.mcp_config import McpServerConfig, McpToolInfo
-from rp.agent_runtime.tools import RuntimeToolRegistryView
+from rp.agent_runtime.setup.tools import RuntimeToolRegistryView
 from services.mcp_manager import McpManager
 from services.tool_runtime_service import ToolRuntimeService
 

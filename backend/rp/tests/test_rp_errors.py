@@ -9,7 +9,7 @@ from rp.errors import (
     RPUpstreamError,
     RPValidationError,
 )
-from rp.agent_runtime.executor import _ProviderStreamPayloadError
+from rp.agent_runtime.setup.executor import _ProviderStreamPayloadError
 from rp.context_engineering.compaction import ContextCompactPromptFailure
 from rp.services.memory.graph_extraction_service import _StructuredOutputInvalid
 from rp.services.retrieval.ingestion_service import _AssetProcessingError

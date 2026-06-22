@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     DiscussionCandidateDirection,
     DiscussionState,
     SetupCognitiveSourceBasis,

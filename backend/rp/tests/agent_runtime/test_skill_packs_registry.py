@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rp.agent_runtime.skill_packs import (
+from rp.agent_runtime.setup.skill_packs import (
     STAGE_SKILL_PACKS,
     SkillPackRecord,
     get_skill_pack_for_stage,

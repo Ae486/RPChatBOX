@@ -1,10 +1,11 @@
 """Enforce the rp.agent_runtime kernel/setup/story import boundary.
 
-The ``rp.agent_runtime`` package intentionally co-locates the shared runtime
-kernel, the setup-only runtime adapter, and the story-only harness. This lint
-keeps those zones mechanically visible so future maintenance cannot wire setup
-runtime code into the story harness path, or let the shared kernel depend on a
-side-specific layer.
+The ``rp.agent_runtime`` package is physically split into shared ``kernel``,
+setup-only ``setup``, and story-only ``story`` implementation zones. Root-level
+modules may exist only as compatibility shims; this lint scans the real
+implementation zones so future maintenance cannot wire setup runtime code into
+the story harness path, or let the shared kernel depend on a side-specific
+layer.
 """
 
 from __future__ import annotations
@@ -20,17 +21,38 @@ DEFAULT_BACKEND_ROOT = CHECKER_PATH.parents[2]
 ZoneName = Literal["kernel", "setup", "story"]
 
 ZONES: dict[str, ZoneName] = {
-    "state.py": "kernel",
-    "graph.py": "kernel",
-    "runtime_tool_contracts.py": "kernel",
-    "contracts.py": "setup",
-    "executor.py": "setup",
-    "policies.py": "setup",
-    "adapters.py": "setup",
-    "profiles.py": "setup",
-    "events.py": "setup",
-    "tools.py": "setup",
-    "story_harness.py": "story",
+    "kernel/state.py": "kernel",
+    "kernel/graph.py": "kernel",
+    "kernel/runtime_tool_contracts.py": "kernel",
+    "setup/contracts.py": "setup",
+    "setup/executor.py": "setup",
+    "setup/policies.py": "setup",
+    "setup/adapters.py": "setup",
+    "setup/profiles.py": "setup",
+    "setup/events.py": "setup",
+    "setup/tools.py": "setup",
+    "setup/prompts/__init__.py": "setup",
+    "setup/prompts/compact.py": "setup",
+    "setup/prompts/main.py": "setup",
+    "setup/prompts/stages.py": "setup",
+    "setup/prompts/tools.py": "setup",
+    "setup/skill_packs/__init__.py": "setup",
+    "setup/skill_packs/registry.py": "setup",
+    "story/story_harness.py": "story",
+}
+
+LEGACY_MODULE_ZONES: dict[str, ZoneName] = {
+    "state": "kernel",
+    "graph": "kernel",
+    "runtime_tool_contracts": "kernel",
+    "contracts": "setup",
+    "executor": "setup",
+    "policies": "setup",
+    "adapters": "setup",
+    "profiles": "setup",
+    "events": "setup",
+    "tools": "setup",
+    "story_harness": "story",
 }
 
 KERNEL_LEAK = "KERNEL_LEAK"
@@ -82,13 +104,15 @@ def scan_agent_runtime_zone_boundary(*, backend_root: Path) -> ScanResult:
     kernel_leaks: list[ImportViolation] = []
     setup_to_story: list[ImportViolation] = []
     story_to_setup: list[ImportViolation] = []
+    scanned_paths: set[Path] = set()
     files_scanned = 0
 
     agent_runtime_root = backend_root / "rp" / "agent_runtime"
-    for filename, zone in sorted(ZONES.items()):
-        file_path = agent_runtime_root / filename
+    for relative_path, zone in sorted(ZONES.items()):
+        file_path = agent_runtime_root / relative_path
         if not file_path.exists():
             continue
+        scanned_paths.add(file_path)
         files_scanned += 1
         references = _import_references(file_path, backend_root=backend_root)
         if zone == "kernel":
@@ -97,6 +121,15 @@ def scan_agent_runtime_zone_boundary(*, backend_root: Path) -> ScanResult:
             setup_to_story.extend(_setup_to_story(references))
         elif zone == "story":
             story_to_setup.extend(_story_to_setup(references))
+
+    setup_runtime_root = agent_runtime_root / "setup"
+    for file_path in _iter_python_files(setup_runtime_root):
+        if file_path in scanned_paths:
+            continue
+        scanned_paths.add(file_path)
+        files_scanned += 1
+        references = _import_references(file_path, backend_root=backend_root)
+        setup_to_story.extend(_setup_to_story(references))
 
     setup_services_root = backend_root / "rp" / "services" / "setup_agent"
     for file_path in _iter_python_files(setup_services_root):
@@ -168,11 +201,22 @@ def _import_from_targets(module_name: str, node: ast.ImportFrom) -> list[str]:
     if not module_name:
         return []
 
-    # ``from rp.agent_runtime import story_harness`` names the side module only
-    # through the imported alias, so resolve these package-level forms as the
-    # concrete child module. For normal ``from x.y import Symbol`` imports, the
-    # owning module ``x.y`` is the boundary-relevant target.
-    if module_name in {"rp.agent_runtime", "rp.services", "rp.models"}:
+    # ``from rp.agent_runtime.story import story_harness`` names the concrete
+    # module only through the imported alias, so resolve package-level forms as
+    # the concrete child module. For normal ``from x.y import Symbol`` imports,
+    # the owning module ``x.y`` is the boundary-relevant target.
+    if module_name in {
+        "rp.agent_runtime",
+        "rp.agent_runtime.kernel",
+        "rp.agent_runtime.setup",
+        "rp.agent_runtime.setup.prompts",
+        "rp.agent_runtime.setup.skill_packs",
+        "rp.agent_runtime.story",
+        "rp.agent_runtime.prompts.setup_agent",
+        "rp.agent_runtime.skill_packs",
+        "rp.services",
+        "rp.models",
+    }:
         return [
             f"{module_name}.{alias.name}"
             for alias in node.names
@@ -236,7 +280,8 @@ def _setup_to_story(references: list[ImportReference]) -> list[ImportViolation]:
 def _story_to_setup(references: list[ImportReference]) -> list[ImportViolation]:
     findings: list[ImportViolation] = []
     for reference in references:
-        if _agent_runtime_zone(reference.imported) == "setup":
+        zone = _agent_runtime_zone(reference.imported)
+        if zone is not None and zone != "kernel":
             findings.append(
                 _violation(
                     code=STORY_TO_SETUP,
@@ -259,13 +304,23 @@ def _agent_runtime_zone(imported: str) -> ZoneName | None:
     prefix = "rp.agent_runtime."
     if not imported.startswith(prefix):
         return None
-    child = imported[len(prefix) :].split(".", maxsplit=1)[0]
-    return ZONES.get(f"{child}.py")
+    relative = imported[len(prefix) :]
+    child = relative.split(".", maxsplit=1)[0]
+    if child in {"kernel", "setup", "story"}:
+        return child  # type: ignore[return-value]
+    return LEGACY_MODULE_ZONES.get(child)
 
 
 def _is_story_harness(imported: str) -> bool:
-    return imported == "rp.agent_runtime.story_harness" or imported.startswith(
-        "rp.agent_runtime.story_harness."
+    return (
+        imported == "rp.agent_runtime.story.story_harness"
+        or imported.startswith("rp.agent_runtime.story.story_harness.")
+        or imported == "rp.agent_runtime.story_harness"
+        or imported.startswith("rp.agent_runtime.story_harness.")
+        or (
+            imported.startswith("rp.agent_runtime.")
+            and imported.split(".")[-1] == "story_harness"
+        )
     )
 
 

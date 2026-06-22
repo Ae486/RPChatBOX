@@ -1,31 +1,6 @@
-"""Setup-free runtime tool contracts for RP agent execution."""
+"""Compatibility shim for rp.agent_runtime.kernel.runtime_tool_contracts."""
 
 from __future__ import annotations
 
-from typing import Any
+from rp.agent_runtime.kernel.runtime_tool_contracts import *  # noqa: F401, F403
 
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class RuntimeToolCall(BaseModel):
-    """Normalized model-declared tool call."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    call_id: str
-    tool_name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    source_round: int
-
-
-class RuntimeToolResult(BaseModel):
-    """Normalized tool execution outcome."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    call_id: str
-    tool_name: str
-    success: bool
-    content_text: str
-    error_code: str | None = None
-    structured_payload: dict[str, Any] | None = None

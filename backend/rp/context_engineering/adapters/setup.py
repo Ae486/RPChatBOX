@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     SetupContextCompactSummary,
     SetupContextGovernanceReport,
     SetupToolOutcome,

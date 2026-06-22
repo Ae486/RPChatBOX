@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import json
 
-from rp.agent_runtime.contracts import SetupCapabilityPlan
-from rp.agent_runtime.prompts.setup_agent import (
+from rp.agent_runtime.setup.contracts import SetupCapabilityPlan
+from rp.agent_runtime.setup.prompts import (
     capability_guidance_text,
     render_setup_agent_system_prompt,
     render_specialist_preamble,
     stage_objective_text,
 )
-from rp.agent_runtime.profiles import build_setup_agent_capability_plan
-from rp.agent_runtime.skill_packs import (
+from rp.agent_runtime.setup.profiles import build_setup_agent_capability_plan
+from rp.agent_runtime.setup.skill_packs import (
     get_skill_pack_for_stage,
     render_skill_pack,
 )

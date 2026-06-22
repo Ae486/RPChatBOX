@@ -8,8 +8,8 @@ import logging
 from typing import Any, AsyncIterator, Literal, cast
 
 from models.chat import ChatCompletionRequest, ChatMessage
-from rp.agent_runtime.adapters import SetupRuntimeAdapter
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.adapters import SetupRuntimeAdapter
+from rp.agent_runtime.setup.contracts import (
     RpAgentTurnResult,
     RpAgentTurnInput,
     RuntimeProfile,
@@ -18,7 +18,7 @@ from rp.agent_runtime.contracts import (
     SetupToolOutcome,
     SetupWorkingDigest,
 )
-from rp.agent_runtime.executor import RpAgentRuntimeExecutor
+from rp.agent_runtime.setup.executor import RpAgentRuntimeExecutor
 from rp.models.setup_agent.agent import (
     SetupAgentTurnRequest,
     SetupAgentTurnResponse,

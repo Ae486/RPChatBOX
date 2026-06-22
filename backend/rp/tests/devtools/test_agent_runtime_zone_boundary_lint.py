@@ -33,7 +33,7 @@ def test_real_tree_is_clean() -> None:
 def test_kernel_leak_fails(tmp_path: Path) -> None:
     backend_root = tmp_path / "backend"
     _write_python(
-        backend_root / "rp" / "agent_runtime" / "state.py",
+        backend_root / "rp" / "agent_runtime" / "kernel" / "state.py",
         "from rp.services.setup_agent.context_governor import "
         "SetupContextGovernorService\n",
     )
@@ -49,12 +49,12 @@ def test_kernel_leak_fails(tmp_path: Path) -> None:
 def test_setup_to_story_fails(tmp_path: Path) -> None:
     backend_root = tmp_path / "backend"
     _write_python(
-        backend_root / "rp" / "agent_runtime" / "contracts.py",
-        "from .story_harness import create_story_harness\n",
+        backend_root / "rp" / "agent_runtime" / "setup" / "contracts.py",
+        "from rp.agent_runtime.story.story_harness import create_story_harness\n",
     )
     _write_python(
         backend_root / "rp" / "services" / "setup_agent" / "runtime_controller.py",
-        "from rp.agent_runtime import story_harness\n",
+        "from rp.agent_runtime.story import story_harness\n",
     )
 
     result = _scan(backend_root)
@@ -64,7 +64,7 @@ def test_setup_to_story_fails(tmp_path: Path) -> None:
         SETUP_TO_STORY,
     ]
     assert {finding.path for finding in result.setup_to_story} == {
-        "rp/agent_runtime/contracts.py",
+        "rp/agent_runtime/setup/contracts.py",
         "rp/services/setup_agent/runtime_controller.py",
     }
     assert result.kernel_leaks == []
@@ -74,8 +74,8 @@ def test_setup_to_story_fails(tmp_path: Path) -> None:
 def test_story_to_setup_fails(tmp_path: Path) -> None:
     backend_root = tmp_path / "backend"
     _write_python(
-        backend_root / "rp" / "agent_runtime" / "story_harness.py",
-        "from .contracts import SetupCapabilityPlan\n"
+        backend_root / "rp" / "agent_runtime" / "story" / "story_harness.py",
+        "from rp.agent_runtime.setup.contracts import SetupCapabilityPlan\n"
         "from rp.services.setup_agent.context_governor import "
         "SetupContextGovernorService\n",
     )
@@ -87,7 +87,7 @@ def test_story_to_setup_fails(tmp_path: Path) -> None:
         STORY_TO_SETUP,
     ]
     assert {finding.imported for finding in result.story_to_setup} == {
-        "rp.agent_runtime.contracts",
+        "rp.agent_runtime.setup.contracts",
         "rp.services.setup_agent.context_governor",
     }
     assert result.kernel_leaks == []

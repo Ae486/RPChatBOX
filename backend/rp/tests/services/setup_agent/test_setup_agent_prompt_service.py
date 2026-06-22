@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from rp.agent_runtime.contracts import SetupCapabilityGuidanceFragment
-from rp.agent_runtime.prompts.setup_agent import (
+from rp.agent_runtime.setup.contracts import SetupCapabilityGuidanceFragment
+from rp.agent_runtime.setup.prompts import (
     SYSTEM_PROMPT_TEMPLATE,
     capability_guidance_text,
     compact_prompt_system_prompt,
     stage_objective_text,
 )
-from rp.agent_runtime.profiles import (
+from rp.agent_runtime.setup.profiles import (
     SETUP_AGENT_VISIBLE_TOOLS,
     build_setup_agent_capability_plan,
 )

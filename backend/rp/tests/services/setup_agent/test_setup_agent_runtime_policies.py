@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     RuntimeProfile,
     RuntimeToolResult,
     SetupCognitiveStateSummary,
@@ -11,7 +11,7 @@ from rp.agent_runtime.contracts import (
     SetupToolOutcome,
     SetupWorkingDigest,
 )
-from rp.agent_runtime.policies import (
+from rp.agent_runtime.setup.policies import (
     CompletionGuardPolicy,
     ReflectionTriggerPolicy,
     RepairDecisionPolicy,

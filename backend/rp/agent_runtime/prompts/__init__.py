@@ -1,1 +1,1 @@
-"""Prompt assets for RP agent runtimes."""
+"""Compatibility package for setup prompt helpers."""

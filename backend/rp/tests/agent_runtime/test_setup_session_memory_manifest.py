@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rp.agent_runtime.contracts import SetupDraftRefReadInput, SetupDraftRefReadResult
+from rp.agent_runtime.setup.contracts import SetupDraftRefReadInput, SetupDraftRefReadResult
 from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,

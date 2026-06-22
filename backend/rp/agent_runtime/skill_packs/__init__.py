@@ -1,19 +1,6 @@
-"""SetupAgent stage SkillPack registry."""
+"""Compatibility shim for rp.agent_runtime.setup.skill_packs."""
 
 from __future__ import annotations
 
-from rp.agent_runtime.skill_packs.registry import (
-    STAGE_SKILL_PACKS,
-    SkillPackRecord,
-    get_skill_pack_for_stage,
-    load_registry,
-    render_skill_pack,
-)
+from rp.agent_runtime.setup.skill_packs import *  # noqa: F401, F403
 
-__all__ = [
-    "STAGE_SKILL_PACKS",
-    "SkillPackRecord",
-    "get_skill_pack_for_stage",
-    "load_registry",
-    "render_skill_pack",
-]

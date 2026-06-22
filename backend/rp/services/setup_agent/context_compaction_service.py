@@ -10,13 +10,13 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from models.chat import ChatMessage
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     SetupCompactRecoveryHint,
     SetupContextCompactSummary,
     SetupToolOutcome,
     SetupWorkingDigest,
 )
-from rp.agent_runtime.prompts.setup_agent import compact_prompt_system_prompt
+from rp.agent_runtime.setup.prompts import compact_prompt_system_prompt
 from rp.context_engineering.compaction import (
     CompactPromptRunner,
     ContextCompactPromptFailure,

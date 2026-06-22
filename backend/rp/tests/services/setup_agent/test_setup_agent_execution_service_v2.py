@@ -8,17 +8,17 @@ from typing import Any
 import pytest
 
 from models.chat import ProviderConfig
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     RpAgentTurnResult,
     RuntimeToolResult,
     SetupWorkingDigest,
 )
-from rp.agent_runtime.profiles import (
+from rp.agent_runtime.setup.profiles import (
     build_setup_agent_capability_plan,
     build_setup_agent_tool_scope,
 )
-from rp.agent_runtime.executor import RpAgentRuntimeExecutor
-from rp.agent_runtime.tools import RuntimeToolExecutor
+from rp.agent_runtime.setup.executor import RpAgentRuntimeExecutor
+from rp.agent_runtime.setup.tools import RuntimeToolExecutor
 from rp.models.setup_agent.drafts import (
     SetupDraftEntry,
     SetupDraftSection,
@@ -29,7 +29,7 @@ from rp.models.setup_agent.handoff import SetupContextBuilderInput
 from rp.models.setup_agent.stage import SetupStageId
 from rp.models.setup_agent.workspace import SetupStepId, StoryMode
 from rp.runtime.rp_runtime_factory import RpRuntimeFactory
-from rp.agent_runtime.adapters import SetupRuntimeAdapter
+from rp.agent_runtime.setup.adapters import SetupRuntimeAdapter
 from rp.services.setup_agent.agent_execution_service import SetupAgentExecutionService
 from rp.services.setup_agent.agent_runtime_state_service import SetupAgentRuntimeStateService
 from rp.services.setup_agent.context_builder import SetupContextBuilder

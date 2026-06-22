@@ -8,7 +8,7 @@ import pytest
 
 from models.rp_setup_store import SetupPendingUserEditDeltaRecord
 
-from rp.agent_runtime.contracts import (
+from rp.agent_runtime.setup.contracts import (
     ChunkCandidate,
     DiscussionState,
     DraftTruthWrite,

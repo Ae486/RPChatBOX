@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from rp.agent_runtime.profiles import (
+from rp.agent_runtime.setup.profiles import (
     SETUP_STAGE_ENTRY_TOOLS,
     build_setup_agent_tool_scope,
 )
