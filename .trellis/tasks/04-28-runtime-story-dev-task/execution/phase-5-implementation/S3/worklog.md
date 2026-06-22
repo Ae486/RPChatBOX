@@ -288,3 +288,32 @@ Remaining unrelated worktree noise:
 - `backend/tests/test_conversation_source_api.py`
 
 These were not staged or modified for S3d.
+
+## 2026-06-23 — S3e implementation brief prepared
+
+Main-brain actions:
+
+- Continued after commit `e3274bc`.
+- Ran YCE to locate the real backend entrypoints for S3d lock wiring:
+  - `StoryGraphNodes.validate_command`
+  - `StoryTurnDomainService`
+  - `StoryRuntimeController`
+  - `RpRuntimeFactory`
+  - `api/rp_story.py`
+- Read S3d result/check records, task PRD, backend specs, and current code
+  evidence.
+- Determined that the next slice should not alter harness prompts or add LLM
+  permission design. The lock belongs in service-layer operation guards.
+- Wrote `14-S3e-implementation-brief.md`.
+
+Current gate:
+
+```text
+S3e brief prepared
+  -> implementation pending
+  -> fresh check pending
+```
+
+Production code touched: no.
+
+Tests run: none. This was a planning/documentation step.
