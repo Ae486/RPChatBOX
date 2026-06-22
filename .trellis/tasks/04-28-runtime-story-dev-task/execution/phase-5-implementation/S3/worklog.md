@@ -55,3 +55,14 @@ Main-brain actions:
   - executable `legacy_state_patch` boundary test;
   - explicit `base_block_revision_id` to current `base_refs` bridge.
 - Recorded main-brain adjudication in `05-main-brain-adjudication.md`.
+
+## 2026-06-23 — S3a implementation brief prepared
+
+Main-brain actions:
+
+- Ran YCE for S3a registry/candidate-contract code anchors.
+- Read current memory registry code and tests.
+- Confirmed current bootstrap registry is the older 13-domain Memory OS
+  foundation, not the authoritative W5/S3 five-domain longform contract.
+- Wrote `06-S3a-implementation-brief.md` to bound the first implement-worker
+  slice to registry, candidate DTOs, validator, and tests only.

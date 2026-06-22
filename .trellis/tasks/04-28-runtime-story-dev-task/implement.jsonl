@@ -52,3 +52,4 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/04-standing-assistant-review-brief.md", "reason": "Standing assistant/reviewer brief that implementers must treat as the planning review gate before code."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/review-record.md", "reason": "Standing assistant planning review findings that were accepted into the S3 plan."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/05-main-brain-adjudication.md", "reason": "Main-brain adjudication of S3 planning-review concerns and resulting implementation gate decision."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/06-S3a-implementation-brief.md", "reason": "Bounded implement-worker brief for S3a registry and memory maintenance candidate contracts."}

@@ -52,3 +52,4 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/04-standing-assistant-review-brief.md", "reason": "Verify planning-review concerns were handled before implementation and no mandatory review gate was skipped."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/review-record.md", "reason": "Verify standing assistant concerns remain addressed by the code and tests."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/05-main-brain-adjudication.md", "reason": "Verify main-brain accepted concerns were actually implemented or tested before gate pass."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/06-S3a-implementation-brief.md", "reason": "Verify S3a implementation stayed inside the bounded registry/candidate-contract slice."}
