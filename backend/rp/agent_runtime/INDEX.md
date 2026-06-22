@@ -1,8 +1,8 @@
 # rp.agent_runtime ownership index
 
 `backend/rp/agent_runtime/` is physically split into three implementation
-zones. Root-level modules are compatibility shims only; new implementation work
-belongs in `kernel/`, `setup/`, or `story/`.
+zones. Runtime implementation work belongs in `kernel/`, `setup/`, or `story/`;
+the package root contains only package/documentation files.
 
 | Path | Zone | Ownership |
 |---|---|---|
@@ -19,13 +19,6 @@ belongs in `kernel/`, `setup/`, or `story/`.
 | `setup/prompts/` | `[SETUP-only]` | SetupAgent prompt text and prompt accessors. |
 | `setup/skill_packs/` | `[SETUP-only]` | SetupAgent stage SkillPack registry and assets. |
 | `story/story_harness.py` | `[STORY-only]` | Story harness substrate over the shared kernel. |
-
-## Compatibility shims
-
-Root modules such as `rp.agent_runtime.contracts`,
-`rp.agent_runtime.executor`, `rp.agent_runtime.state`, and
-`rp.agent_runtime.story_harness` are compatibility shims. They must stay thin
-re-export files and must not grow implementation logic.
 
 ## Decoupling rules
 
