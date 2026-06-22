@@ -32,8 +32,10 @@ implementation plan.
 6. `05-main-brain-adjudication.md` — main-brain decisions on reviewer findings.
 7. `06-S3a-implementation-brief.md` — bounded implement-worker brief for the
    first registry/candidate-contract slice.
-8. `review-record.md` — standing assistant planning review.
-9. `worklog.md` — planning and execution trace for this S3 directory.
+8. `S3a-check-record.md` — fresh reviewer/check record for the S3a slice.
+9. `07-S3a-implementation-result.md` — main-brain result and gate record for S3a.
+10. `review-record.md` — standing assistant planning review.
+11. `worklog.md` — planning and execution trace for this S3 directory.
 
 ## Current Gate
 

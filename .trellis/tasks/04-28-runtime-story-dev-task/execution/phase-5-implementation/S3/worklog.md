@@ -66,3 +66,27 @@ Main-brain actions:
   foundation, not the authoritative W5/S3 five-domain longform contract.
 - Wrote `06-S3a-implementation-brief.md` to bound the first implement-worker
   slice to registry, candidate DTOs, validator, and tests only.
+
+## 2026-06-23 — S3a implementation and check gate passed
+
+Main-brain actions:
+
+- Dispatched an implement worker for S3a. The worker process exceeded its shell
+  timeout and was stopped after writing code/tests; main-brain took over the
+  diff.
+- Reviewed the diff, made small validation/test corrections, and ran the S3a
+  gate: `44 passed, 1 warning`.
+- Dispatched a fresh check/reviewer. It fixed three review findings:
+  - topology tests no longer derive expected values from implementation
+    constants;
+  - extra-field tests no longer pass for the wrong reason;
+  - `append_item` cannot target an existing fact id/handle.
+- Main-brain reran the gate:
+
+```text
+45 passed, 1 warning in 0.35s
+```
+
+- Wrote `S3a-check-record.md` and `07-S3a-implementation-result.md`.
+- Production truth/apply paths remain untouched; S3a is registry/candidate/
+  validator only.
