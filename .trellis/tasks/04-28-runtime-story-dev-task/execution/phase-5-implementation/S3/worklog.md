@@ -243,6 +243,91 @@ Production code touched: no.
 
 Tests run: none. This was a planning/documentation step.
 
+## 2026-06-23 — S3f implementation and fresh review gate passed
+
+Main-brain actions:
+
+- Added `backend/tests/test_story_runtime_s3_memory_worker_e2e.py` as the S3f
+  closing gate.
+- Kept S3f test-only: no production service or controller code was changed.
+- Entered through `StoryTurnDomainService.trigger_post_write()` instead of
+  private governance helpers.
+- Built a local fake worker executor that consumes the scheduler-selected
+  `LongformMemoryWorker` and calls `MemoryMaintenanceWorkerAdapter` with
+  deterministic structured output.
+- Used real governance/workflow/apply/lock services for the rest of the path.
+- Covered:
+  - review-required proposal, pending lock, governed apply, lock clear;
+  - direct apply through proposal/apply receipt;
+  - adapter invalid structured output with no proposal/apply/mutation;
+  - governance handoff failure with failed proposal job and no mutation.
+- Ran focused S3f test:
+
+```text
+4 passed, 5 warnings
+```
+
+- Ran S3b/S3c regression:
+
+```text
+15 passed, 1 warning
+```
+
+- Ran S3d/S2b regression:
+
+```text
+29 passed, 1 warning
+```
+
+- Ran focused ruff:
+
+```text
+All checks passed!
+```
+
+- Ran service-size:
+
+```text
+FAIL
+```
+
+The service-size failure is the known residual debt from oversized story
+services and already-committed S3a/S3b/S3c hard function offenders; S3f added no
+production service file.
+
+- Dispatched fresh read-only Codex review session
+  `019ef1b7-663a-7dc0-8ff3-3b69a9aace33`.
+- Review verdict was `PASS_WITH_CONCERNS`.
+- Accepted and fixed both actionable findings:
+  - success paths now assert the proposal governance job completed;
+  - adapter failure now asserts the maintenance lock remains inactive.
+- Deferred the production executor migration finding as an expected residual
+  gap and recorded it in `17-S3f-implementation-result.md`.
+- Wrote:
+  - `S3f-fresh-review-brief.md`
+  - `S3f-fresh-review-output.md`
+  - `S3f-check-record.md`
+  - `17-S3f-implementation-result.md`
+
+Current gate:
+
+```text
+S3f functional closing gate passed
+  -> commit pending
+  -> next recommended slice: service-size / production executor migration
+     planning before S4/S5/S6 expansion
+```
+
+Remaining unrelated worktree noise is still excluded from S3f:
+
+- `.gitignore`
+- `.trellis/.template-hashes.json`
+- `backend/rp/services/story/runtime_controller.py`
+- `backend/rp/services/story/turn_domain_service.py`
+- `backend/rp/tests/services/writer/test_longform_chapter_runtime_service.py`
+- `backend/services/conversation_source.py`
+- `backend/tests/test_conversation_source_api.py`
+
 ## 2026-06-23 — S3d implementation and check gate passed
 
 Main-brain actions:
