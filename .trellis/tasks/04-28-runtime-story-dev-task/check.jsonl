@@ -55,3 +55,4 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/06-S3a-implementation-brief.md", "reason": "Verify S3a implementation stayed inside the bounded registry/candidate-contract slice."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/S3a-check-record.md", "reason": "Verify S3a reviewer findings stay fixed and do not regress in later slices."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/07-S3a-implementation-result.md", "reason": "Verify later S3 work builds on the S3a gate result without reopening completed scope."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/08-S3b-implementation-brief.md", "reason": "Verify S3b implementation stays inside the adapter/fake structured-output slice and does not cross into governance/apply."}

@@ -34,8 +34,10 @@ implementation plan.
    first registry/candidate-contract slice.
 8. `S3a-check-record.md` — fresh reviewer/check record for the S3a slice.
 9. `07-S3a-implementation-result.md` — main-brain result and gate record for S3a.
-10. `review-record.md` — standing assistant planning review.
-11. `worklog.md` — planning and execution trace for this S3 directory.
+10. `08-S3b-implementation-brief.md` — bounded implement-worker brief for the
+    memory worker adapter / fake harness slice.
+11. `review-record.md` — standing assistant planning review.
+12. `worklog.md` — planning and execution trace for this S3 directory.
 
 ## Current Gate
 

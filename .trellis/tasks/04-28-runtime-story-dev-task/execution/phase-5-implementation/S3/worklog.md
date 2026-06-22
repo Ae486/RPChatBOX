@@ -90,3 +90,16 @@ Main-brain actions:
 - Wrote `S3a-check-record.md` and `07-S3a-implementation-result.md`.
 - Production truth/apply paths remain untouched; S3a is registry/candidate/
   validator only.
+
+## 2026-06-23 — S3b implementation brief prepared
+
+Main-brain actions:
+
+- Ran YCE for S3b worker execution / harness / adapter anchors.
+- Confirmed current longform memory worker execution still routes through
+  `LongformSpecialistService` and `legacy_state_patch` compatibility.
+- Confirmed `story_harness.py` is still a minimal S0 scripted harness; S3b must
+  not push memory policy into harness core.
+- Wrote `08-S3b-implementation-brief.md`, requiring a bounded
+  MemoryMaintenanceWorker adapter / fake structured-output path with no
+  proposal/apply or truth mutation.
