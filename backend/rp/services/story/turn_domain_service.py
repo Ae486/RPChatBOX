@@ -787,12 +787,19 @@ class StoryTurnDomainService:
         gate_job = None
         if worker_plan.plan_source == WorkerPlanSource.ORCHESTRATOR:
             try:
+                # Stable per-turn fingerprint (NUM-016 idempotent replay key). turn_id
+                # is the correct window granularity ONLY for the single-maintenance-per-turn
+                # W5-A case; a later K-window/multi-gate slice must add a window/source
+                # discriminator here AND in _job_idempotency_key (deferred debt).
                 gate_job = (
                     self._runtime_workflow_job_service.ensure_scheduler_maintenance_gate(
                         identity=runtime_identity,
-                        scheduler_job_id=worker_plan.plan_id,
+                        scheduler_job_id=f"scheduler_maintenance:{runtime_identity.turn_id}",
                         anchor_turn_id=runtime_identity.turn_id,
-                        metadata={"phase": POST_WRITE_MAINTENANCE_PHASE},
+                        metadata={
+                            "phase": POST_WRITE_MAINTENANCE_PHASE,
+                            "worker_plan_id": worker_plan.plan_id,
+                        },
                     )
                 )
             except RuntimeWorkflowJobServiceError as exc:

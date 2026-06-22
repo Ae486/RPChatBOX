@@ -405,11 +405,21 @@ async def test_g1_valid_proposal_builds_orchestrator_plan_and_gate(retrieval_ses
     assert [item["worker_id"] for item in worker_plan_dump["selected_workers"]] == [
         LONGFORM_MEMORY_WORKER_ID
     ]
+    # [C2] the validated source-unit selection must be carried into the plan item
+    # (decide() range-checks it; it must not be dropped — S3 reads it from here).
+    selected_item = worker_plan_dump["selected_workers"][0]
+    assert selected_item["scheduler_constraints"]["source_unit_numbers"] == [1]
     gates = _gate_jobs(ctx)
     assert len(gates) == 1
     gate = gates[0]
     assert gate.anchor_turn_id == ctx.identity.turn_id
-    assert gate.metadata_json["scheduler_job_id"] == worker_plan_dump["plan_id"]
+    # [C3] scheduler_job_id is a STABLE per-turn fingerprint (grill: window/source
+    # fingerprint idempotency), NOT the ephemeral uuid4 plan_id; the plan_id is
+    # carried separately for trace.
+    assert gate.metadata_json["scheduler_job_id"] == (
+        f"scheduler_maintenance:{ctx.identity.turn_id}"
+    )
+    assert gate.metadata_json["worker_plan_id"] == worker_plan_dump["plan_id"]
     assert gate.required_for_turn_completion is True
 
     retrieval_session.commit()

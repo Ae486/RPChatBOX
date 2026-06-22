@@ -97,6 +97,7 @@ class SchedulerDecisionService:
                     scheduler_constraints={
                         "selection_source": "orchestrator_dispatch",
                         "orchestrator_reason_codes": list(selection.reason_codes),
+                        "source_unit_numbers": list(selection.source_unit_numbers),
                     },
                 )
             )
