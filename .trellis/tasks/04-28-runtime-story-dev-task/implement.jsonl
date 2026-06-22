@@ -56,3 +56,5 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/S3a-check-record.md", "reason": "Fresh reviewer findings and verification evidence for the S3a registry/candidate-contract slice."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/07-S3a-implementation-result.md", "reason": "Main-brain S3a implementation result, gate evidence, and remaining-work boundary for later S3 slices."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/08-S3b-implementation-brief.md", "reason": "Bounded implement-worker brief for S3b memory worker adapter and fake structured-output path."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/S3b-check-record.md", "reason": "Fresh reviewer findings and verification evidence for the S3b memory worker adapter slice."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/09-S3b-implementation-result.md", "reason": "Main-brain S3b implementation result, gate evidence, and remaining-work boundary for S3c."}

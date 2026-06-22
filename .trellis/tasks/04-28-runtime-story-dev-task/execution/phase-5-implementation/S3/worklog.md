@@ -103,3 +103,35 @@ Main-brain actions:
 - Wrote `08-S3b-implementation-brief.md`, requiring a bounded
   MemoryMaintenanceWorker adapter / fake structured-output path with no
   proposal/apply or truth mutation.
+
+## 2026-06-23 — S3b implementation and check gate passed
+
+Main-brain actions:
+
+- Reviewed the S3b adapter and tests against the brief, S3 PRD/SDD/test plan,
+  backend specs, and S3a contracts.
+- Confirmed S3b stayed adapter-only:
+  - no setup-agent import or executor reuse;
+  - no proposal/apply call;
+  - no Core/projection truth mutation;
+  - no Runtime Workspace persistence;
+  - no change to existing `legacy_state_patch` compatibility path.
+- Fresh reviewer fixed fail-closed coverage for candidate-batch schema version,
+  worker-output schema version, worker id mismatch, and candidate-batch schema
+  mismatch.
+- Main-brain reran the S3b gate from `H:\chatboxapp\backend`:
+
+```text
+45 passed, 1 warning in 17.80s
+```
+
+- Wrote `S3b-check-record.md` and `09-S3b-implementation-result.md`.
+
+Next gate:
+
+```text
+S3c governance routing / proposal handoff brief
+  -> review
+  -> bounded implementation
+  -> fresh check
+```
