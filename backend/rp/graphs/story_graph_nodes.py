@@ -15,7 +15,11 @@ from rp.models.story.runtime import (
 )
 from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.models.writer.writing_runtime import WritingPacket
+from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockError
 from rp.services.story.command_policy import validate_story_command
+from rp.services.story.maintenance_guard_service import (
+    StoryRuntimeMaintenanceGuardService,
+)
 from rp.services.story.turn_domain_service import StoryTurnDomainService
 
 from .story_graph_state import StoryGraphState
@@ -30,8 +34,14 @@ class StoryGraphNodes:
         LongformTurnCommandKind.COMPLETE_CHAPTER,
     }
 
-    def __init__(self, *, domain_service: StoryTurnDomainService) -> None:
+    def __init__(
+        self,
+        *,
+        domain_service: StoryTurnDomainService,
+        maintenance_guard_service: StoryRuntimeMaintenanceGuardService | None = None,
+    ) -> None:
         self._domain_service = domain_service
+        self._maintenance_guard_service = maintenance_guard_service
 
     def resolve_graph_thread_binding(self, *, session_id: str) -> dict[str, str]:
         return self._domain_service.resolve_graph_thread_binding(
@@ -129,6 +139,22 @@ class StoryGraphNodes:
                 "error": {
                     "message": str(exc),
                     "type": "story_command_not_allowed",
+                },
+                "status": "failed",
+            }
+        try:
+            if self._maintenance_guard_service is not None:
+                self._maintenance_guard_service.require_story_command_allowed(
+                    command_kind=command_kind,
+                    runtime_identity=self._runtime_identity_from_state(state),
+                )
+        except RuntimeMaintenanceLockError as exc:
+            return {
+                "error": {
+                    "message": str(exc),
+                    "type": exc.code,
+                    "code": exc.code,
+                    "operation": exc.operation,
                 },
                 "status": "failed",
             }

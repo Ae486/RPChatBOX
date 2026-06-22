@@ -34,6 +34,7 @@ from rp.models.story.runtime import LongformTurnRequest
 from rp.services.runtime.config_control_service import (
     RuntimeConfigControlServiceError,
 )
+from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockError
 from rp.services.story.runtime_identity_service import (
     StoryRuntimeIdentityServiceError,
 )
@@ -308,6 +309,34 @@ def _runtime_config_invalid(exc: Exception) -> HTTPException:
     )
 
 
+def _runtime_maintenance_lock_error(exc: RuntimeMaintenanceLockError) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": exc.code,
+                "operation": exc.operation,
+                "causes": [
+                    {
+                        "reason_code": cause.reason_code,
+                        "source_kind": cause.source_kind,
+                        "source_id": cause.source_id,
+                        "story_id": cause.story_id,
+                        "session_id": cause.session_id,
+                        "branch_head_id": cause.branch_head_id,
+                        "turn_id": cause.turn_id,
+                        "status": cause.status,
+                        "operation": cause.operation,
+                        "metadata": dict(cause.metadata),
+                    }
+                    for cause in exc.causes
+                ],
+            }
+        },
+    )
+
+
 def _branch_control_payload(*, snapshot: ChapterWorkspaceSnapshot, receipt: dict) -> dict:
     return {
         "data": {
@@ -416,6 +445,8 @@ async def create_story_branch(
                 "surface": "segment_action_menu",
             },
         )
+    except RuntimeMaintenanceLockError as exc:
+        raise _runtime_maintenance_lock_error(exc) from exc
     except StoryRuntimeIdentityServiceError as exc:
         raise _story_branch_control_invalid(exc) from exc
     return _branch_control_payload(
@@ -440,6 +471,8 @@ async def switch_story_branch(
                 "surface": "branch_panel",
             },
         )
+    except RuntimeMaintenanceLockError as exc:
+        raise _runtime_maintenance_lock_error(exc) from exc
     except StoryRuntimeIdentityServiceError as exc:
         raise _story_branch_control_invalid(exc) from exc
     return _branch_control_payload(
@@ -488,6 +521,8 @@ async def rollback_story_branch(
                 "surface": "segment_action_menu",
             },
         )
+    except RuntimeMaintenanceLockError as exc:
+        raise _runtime_maintenance_lock_error(exc) from exc
     except StoryRuntimeIdentityServiceError as exc:
         raise _story_branch_control_invalid(exc) from exc
     return _branch_control_payload(
@@ -1090,6 +1125,8 @@ async def direct_edit_story_core_memory(
                 str(item.get("proposal_id") or ""),
             ],
         )
+    except RuntimeMaintenanceLockError as exc:
+        raise _runtime_maintenance_lock_error(exc) from exc
     except ValueError as exc:
         if str(exc).startswith("StorySession not found:"):
             raise HTTPException(
@@ -1175,6 +1212,8 @@ async def evolve_story_archival_memory(
                 *list(item.get("event_ids") or []),
             ],
         )
+    except RuntimeMaintenanceLockError as exc:
+        raise _runtime_maintenance_lock_error(exc) from exc
     except ValueError as exc:
         if str(exc).startswith("StorySession not found:"):
             raise HTTPException(

@@ -8,10 +8,11 @@ from typing import Any, cast
 import pytest
 from sqlmodel import select
 
-from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
+from models.rp_memory_store import MemoryProposalRecord, RuntimeWorkspaceMaterialRecord
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.reason_codes import SchedulerReasonCode
 from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -20,7 +21,11 @@ from rp.models.story.runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
+from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockService
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
+from rp.services.story.maintenance_guard_service import (
+    StoryRuntimeMaintenanceGuardService,
+)
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
@@ -841,6 +846,78 @@ def test_child_branch_can_write_next_segment_when_main_pending_is_hidden(
     assert generation_inputs["accepted_segment_ids"] == [base_segment.artifact_id]
 
 
+@pytest.mark.parametrize(
+    ("command_kind", "phase", "operation"),
+    [
+        (
+            LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+            LongformChapterPhase.SEGMENT_DRAFTING,
+            "story_progression",
+        ),
+        (
+            LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+            LongformChapterPhase.SEGMENT_REVIEW,
+            "story_progression",
+        ),
+        (
+            LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
+            LongformChapterPhase.SEGMENT_REVIEW,
+            "rewrite",
+        ),
+        (
+            LongformTurnCommandKind.COMPLETE_CHAPTER,
+            LongformChapterPhase.SEGMENT_DRAFTING,
+            "chapter_complete",
+        ),
+    ],
+)
+def test_story_graph_validation_rejects_locked_current_branch_commands(
+    retrieval_session,
+    command_kind: LongformTurnCommandKind,
+    phase: LongformChapterPhase,
+    operation: str,
+):
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=phase,
+    )
+    story_session_service.commit()
+    runtime_identity, _identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=command_kind,
+        created_from=f"s3e.locked.{command_kind.value}",
+        actor=f"s3e.locked.{command_kind.value}",
+    )
+    _seed_review_required_proposal(retrieval_session, identity=runtime_identity)
+    graph_nodes = StoryGraphNodes(
+        domain_service=_build_turn_domain_service(
+            story_session_service,
+            retrieval_session,
+        ),
+        maintenance_guard_service=StoryRuntimeMaintenanceGuardService(
+            RuntimeMaintenanceLockService(retrieval_session)
+        ),
+    )
+
+    result = graph_nodes.validate_command(
+        {
+            "session_id": session.session_id,
+            "command_kind": command_kind.value,
+            "runtime_identity": runtime_identity.model_dump(mode="json"),
+        }
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
+    assert result["error"]["operation"] == operation
+    _identity_service.update_turn_status(
+        turn_id=runtime_identity.turn_id,
+        status=StoryTurnStatus.FAILED,
+    )
+
+
 def test_branch_writer_packet_omits_source_future_projection_digest(
     retrieval_session,
 ):
@@ -1648,6 +1725,35 @@ def _resolve_runtime_identity(
         requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
     )
     return identity, identity_service
+
+
+def _seed_review_required_proposal(
+    retrieval_session,
+    *,
+    identity: MemoryRuntimeIdentity,
+) -> MemoryProposalRecord:
+    proposal = MemoryProposalRecord(
+        proposal_id=f"proposal:s3e:{identity.turn_id}",
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        chapter_workspace_id=None,
+        mode="longform",
+        domain="plot_thread",
+        domain_path="plot_thread.active",
+        status="review_required",
+        policy_decision="review_required",
+        submit_source="post_write_worker|worker=longform_memory_worker",
+        operations_json=[],
+        base_refs_json=[],
+        governance_metadata_json={
+            "identity": identity.model_dump(mode="json"),
+            "worker_id": "longform_memory_worker",
+            "phase": "post_write_maintenance",
+        },
+    )
+    retrieval_session.add(proposal)
+    retrieval_session.flush()
+    return proposal
 
 
 def _request(

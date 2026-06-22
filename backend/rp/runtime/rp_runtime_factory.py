@@ -86,6 +86,7 @@ from rp.services.runtime.read_manifest_service import (
 )
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.services.runtime.config_control_service import RuntimeConfigControlService
+from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
@@ -111,6 +112,10 @@ from rp.services.story.block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
 from rp.services.story.brainstorm_service import StoryBrainstormService
+from rp.services.story.maintenance_guard_service import StoryRuntimeMaintenanceGuardService
+from rp.services.story.maintenance_guarded_runtime_controller import (
+    MaintenanceGuardedStoryRuntimeController,
+)
 from rp.services.story.runtime_controller import StoryRuntimeController
 from rp.services.story.runtime_debug_query_service import (
     StoryRuntimeDebugQueryService,
@@ -723,7 +728,10 @@ class RpRuntimeFactory:
             worker_memory_service=WorkerMemoryService(session=self._session),
             core_state_as_of_resolver=core_state_as_of_resolver,
         )
-        return StoryRuntimeController(
+        return MaintenanceGuardedStoryRuntimeController(
+            runtime_maintenance_guard_service=StoryRuntimeMaintenanceGuardService(
+                RuntimeMaintenanceLockService(self._session)
+            ),
             story_session_service=story_session_service,
             story_activation_service=story_activation_service,
             version_history_read_service=version_history_read_service,
@@ -757,5 +765,8 @@ class RpRuntimeFactory:
         return StoryGraphRunner(
             nodes=StoryGraphNodes(
                 domain_service=self.build_story_turn_domain_service(),
+                maintenance_guard_service=StoryRuntimeMaintenanceGuardService(
+                    RuntimeMaintenanceLockService(self._session)
+                ),
             ),
         )

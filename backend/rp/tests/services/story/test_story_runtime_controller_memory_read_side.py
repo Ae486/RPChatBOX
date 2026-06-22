@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from sqlmodel import select
 
+from models.rp_memory_store import MemoryProposalRecord
 from models.rp_story_store import BranchHeadRecord, RuntimeProfileSnapshotRecord
 from rp.models.story.archival_evolution import ArchivalEvolutionRequest
 from rp.models.proposal.core_mutation import (
@@ -74,6 +75,11 @@ from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.runtime.config_control_service import RuntimeConfigControlService
+from rp.services.runtime.maintenance_lock_service import (
+    RuntimeMaintenanceLockError,
+    RuntimeMaintenanceLockService,
+    RuntimeMaintenanceOperation,
+)
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime.workspace_material_service import (
@@ -90,6 +96,12 @@ from rp.services.story.block_mutation_service import (
 from rp.services.story.runtime_controller import (
     MemoryBlockHistoryUnsupportedError,
     StoryRuntimeController,
+)
+from rp.services.story.maintenance_guard_service import (
+    StoryRuntimeMaintenanceGuardService,
+)
+from rp.services.story.maintenance_guarded_runtime_controller import (
+    MaintenanceGuardedStoryRuntimeController,
 )
 from rp.services.story.runtime_debug_query_service import StoryRuntimeDebugQueryService
 from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
@@ -259,6 +271,7 @@ def _build_controller(
     repository: ProposalRepository,
     *,
     inject_core_state_resolver: bool = False,
+    runtime_maintenance_lock_service: RuntimeMaintenanceLockService | None = None,
 ):
     core_state_adapter = StorySessionCoreStateAdapter(story_session_service)
     core_repo = CoreStateStoreRepository(retrieval_session)
@@ -340,7 +353,17 @@ def _build_controller(
         memory_trace_read_service=MemoryTraceReadService(session=retrieval_session),
         runtime_workflow_job_service=RuntimeWorkflowJobService(retrieval_session),
     )
-    return StoryRuntimeController(
+    controller_type = (
+        MaintenanceGuardedStoryRuntimeController
+        if runtime_maintenance_lock_service is not None
+        else StoryRuntimeController
+    )
+    controller_kwargs: dict[str, Any] = {}
+    if runtime_maintenance_lock_service is not None:
+        controller_kwargs["runtime_maintenance_guard_service"] = (
+            StoryRuntimeMaintenanceGuardService(runtime_maintenance_lock_service)
+        )
+    return controller_type(
         story_session_service=story_session_service,
         story_activation_service=cast(Any, SimpleNamespace()),
         version_history_read_service=version_history_read_service,
@@ -356,6 +379,7 @@ def _build_controller(
         story_runtime_migration_service=StoryRuntimeMigrationService(
             debug_query_service=debug_query_service,
         ),
+        **controller_kwargs,
     )
 
 
@@ -374,6 +398,162 @@ def _build_runtime_identity(retrieval_session, *, session_id: str):
         command_kind="write_next_segment",
         actor="memory_direct_edit_test",
         requested_runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+
+
+def _seed_review_required_proposal(
+    retrieval_session,
+    *,
+    identity: MemoryRuntimeIdentity,
+) -> MemoryProposalRecord:
+    proposal = MemoryProposalRecord(
+        proposal_id=f"proposal:s3e-controller:{identity.turn_id}",
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        chapter_workspace_id=None,
+        mode="longform",
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        status="review_required",
+        policy_decision="review_required",
+        submit_source="post_write_worker|worker=longform_memory_worker",
+        operations_json=[],
+        base_refs_json=[],
+        governance_metadata_json={
+            "identity": identity.model_dump(mode="json"),
+            "worker_id": "longform_memory_worker",
+            "phase": "post_write_maintenance",
+        },
+    )
+    retrieval_session.add(proposal)
+    retrieval_session.flush()
+    return proposal
+
+
+def test_story_runtime_controller_blocks_branch_controls_when_locked(
+    retrieval_session,
+):
+    session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    runtime_identity = _build_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+    )
+    _seed_review_required_proposal(retrieval_session, identity=runtime_identity)
+    controller = _build_controller(
+        retrieval_session,
+        story_session_service,
+        repository,
+        runtime_maintenance_lock_service=RuntimeMaintenanceLockService(
+            retrieval_session
+        ),
+    )
+
+    cases = [
+        (
+            controller.create_branch_from_turn,
+            {"origin_turn_id": runtime_identity.turn_id},
+            RuntimeMaintenanceOperation.BRANCH_CREATE,
+        ),
+        (
+            controller.switch_branch,
+            {"branch_head_id": "branch:s3e-other"},
+            RuntimeMaintenanceOperation.BRANCH_SWITCH,
+        ),
+        (
+            controller.rollback_to_turn,
+            {"target_turn_id": runtime_identity.turn_id},
+            RuntimeMaintenanceOperation.ROLLBACK,
+        ),
+    ]
+    for method, kwargs, operation in cases:
+        with pytest.raises(RuntimeMaintenanceLockError) as exc_info:
+            method(session_id=session.session_id, **kwargs)
+        assert exc_info.value.code == "maintenance_in_progress"
+        assert exc_info.value.operation == operation.value
+
+
+@pytest.mark.asyncio
+async def test_story_runtime_controller_blocks_memory_mutations_when_locked(
+    retrieval_session,
+):
+    session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    runtime_identity = _build_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+    )
+    _seed_review_required_proposal(retrieval_session, identity=runtime_identity)
+    controller = _build_controller(
+        retrieval_session,
+        story_session_service,
+        repository,
+        runtime_maintenance_lock_service=RuntimeMaintenanceLockService(
+            retrieval_session
+        ),
+    )
+
+    direct_edit_request = DirectCoreEditRequest(
+        identity=runtime_identity,
+        actor="user.memory_editor",
+        domain=Domain.CHAPTER,
+        domain_path="chapter.current",
+        operations=[
+            {
+                "kind": "patch_fields",
+                "target_ref": {
+                    "object_id": "chapter.current",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.CHAPTER,
+                    "domain_path": "chapter.current",
+                    "revision": 1,
+                },
+                "field_patch": {"title": "Blocked Direct Edit"},
+            }
+        ],
+        base_refs=[
+            {
+                "object_id": "chapter.current",
+                "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                "domain": Domain.CHAPTER,
+                "domain_path": "chapter.current",
+                "scope": "story",
+                "revision": 1,
+            }
+        ],
+        reason="blocked by maintenance",
+    )
+    with pytest.raises(RuntimeMaintenanceLockError) as direct_exc:
+        await controller.direct_edit_core_memory(
+            session_id=session.session_id,
+            payload=direct_edit_request,
+        )
+    assert (
+        direct_exc.value.operation
+        == RuntimeMaintenanceOperation.CORE_MEMORY_EDIT.value
+    )
+
+    archival_request = ArchivalEvolutionRequest(
+        identity=runtime_identity,
+        actor="user.archival_editor",
+        source_asset_id="source-s3e-locked",
+        expected_source_version=1,
+        replacement_sections=[
+            {
+                "text": "Blocked archival replacement.",
+                "metadata": {"domain": Domain.WORLD_RULE.value},
+            }
+        ],
+        reason="blocked by maintenance",
+    )
+    with pytest.raises(RuntimeMaintenanceLockError) as archival_exc:
+        controller.evolve_archival_memory(
+            session_id=session.session_id,
+            request=archival_request,
+        )
+    assert (
+        archival_exc.value.operation
+        == RuntimeMaintenanceOperation.STORY_EVOLUTION_OR_ARCHIVAL_EDIT.value
     )
 
 

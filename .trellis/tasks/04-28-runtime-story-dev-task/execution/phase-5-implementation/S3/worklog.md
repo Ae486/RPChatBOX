@@ -317,3 +317,52 @@ S3e brief prepared
 Production code touched: no.
 
 Tests run: none. This was a planning/documentation step.
+
+## 2026-06-23 — S3e implementation and check gate passed
+
+Main-brain actions:
+
+- Reviewed the S3e implementation against `14-S3e-implementation-brief.md`,
+  S3d result/check records, backend specs, and current code evidence.
+- Kept the lock out of prompts, harness code, setup-agent logic, and LLM
+  permission policy.
+- Added small service-layer guard components instead of expanding already large
+  story services:
+  - `StoryRuntimeMaintenanceGuardService`;
+  - `MaintenanceGuardedStoryRuntimeController`.
+- Wired graph command validation and runtime factory construction so real story
+  progression, branch, rollback, Core edit, and Archival evolution entrypoints
+  respect the current-branch maintenance lock.
+- Ran independent read-only Codex review:
+
+```text
+session: 019ef18d-3a56-7a11-9479-fd2fe19e5b0d
+```
+
+- Accepted the reviewer's proposal-apply coverage gap and added a direct API
+  contract test proving proposal apply remains allowed while locked and clears
+  the blocker.
+- Did not accept branch delete as a S3e blocker because the S3e brief explicitly
+  deferred new branch delete policy.
+- Reran the S3e gate:
+
+```text
+S3e focused selector: 9 passed, 64 deselected, 17 warnings
+S3d/S3c/S1/S2 regression set: 39 passed, 1 warning
+ruff: All checks passed!
+```
+
+- Ran `python backend/rp/devtools/check_service_sizes.py`; it still fails on
+  residual service-size debt from pre-existing story baseline drift and
+  already-committed S3a/S3b/S3c hard function offenders, not on the new S3e
+  guard components.
+- Wrote `S3e-check-record.md` and `15-S3e-implementation-result.md`.
+
+Remaining unrelated worktree noise:
+
+- `.gitignore`
+- `.trellis/.template-hashes.json`
+- `backend/services/conversation_source.py`
+- `backend/tests/test_conversation_source_api.py`
+
+These are not part of S3e and must not be staged into the S3e commit.

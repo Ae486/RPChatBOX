@@ -1,6 +1,6 @@
 # S3 Implementation Planning Index
 
-Status: planning gate in progress
+Status: S3e implementation gate passed
 Task: `.trellis/tasks/04-28-runtime-story-dev-task`
 Slice: S3 — Memory domain/block + worker family + proposal/apply
 
@@ -51,8 +51,11 @@ implementation plan.
     S3d.
 19. `14-S3e-implementation-brief.md` — bounded implement brief for wiring the
     maintenance lock into real backend entrypoints.
-20. `review-record.md` — standing assistant planning review.
-21. `worklog.md` — planning and execution trace for this S3 directory.
+20. `S3e-check-record.md` — fresh reviewer/check record for the S3e slice.
+21. `15-S3e-implementation-result.md` — main-brain result and gate record for
+    S3e.
+22. `review-record.md` — standing assistant planning review.
+23. `worklog.md` — planning and execution trace for this S3 directory.
 
 ## Current Gate
 
@@ -63,16 +66,16 @@ S3a registry/candidate contracts passed
   -> S3b memory worker adapter passed
   -> S3c implementation and fresh check passed
   -> S3d implementation and fresh check passed
-  -> S3e maintenance lock entrypoint wiring brief prepared
-  -> next: S3e implementation and fresh check
+  -> S3e maintenance lock entrypoint wiring passed
+  -> next: decide next S3/S4 slice after reviewing residual service-size and branch-delete policy debt
 ```
 
-S3a, S3b, S3c, and S3d are completed implementation slices. S3e is planned as
-the first integration slice that wires the S3d lock into real backend
-entrypoints. S3d leaves one explicit residual gate risk: the global service-size
-checker is already red due to pre-existing story baseline drift and
-already-committed S3a/S3b/S3c hard function offenders. The S3d service itself
-is not a new hard offender.
+S3a, S3b, S3c, S3d, and S3e are completed implementation slices. S3e is the
+first integration slice that wires the S3d lock into real backend entrypoints.
+S3d/S3e leave one explicit residual gate risk: the global service-size checker
+is already red due to pre-existing story baseline drift and already-committed
+S3a/S3b/S3c hard function offenders. The S3d service and S3e guard components
+are not new hard offenders.
 
 ## Non-Negotiable Rules
 

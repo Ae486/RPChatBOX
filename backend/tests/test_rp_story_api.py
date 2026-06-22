@@ -65,6 +65,12 @@ from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.models.setup_agent.workspace import StoryMode
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
+from rp.services.runtime.maintenance_lock_service import (
+    RuntimeMaintenanceLockCause,
+    RuntimeMaintenanceLockError,
+    RuntimeMaintenanceLockService,
+    RuntimeMaintenanceOperation,
+)
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
@@ -155,6 +161,17 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
                 "recent_segment_digest": ["Mirror API segment"],
                 "current_state_digest": ["Mirror API state"],
             },
+        )
+        snapshot = RuntimeProfileSnapshotService(db_session).ensure_active_snapshot(
+            session_id=story_session.session_id,
+            created_from="test.api.formal_memory_block",
+        )
+        proposal_identity = MemoryRuntimeIdentity(
+            story_id=story_session.story_id,
+            session_id=story_session.session_id,
+            branch_head_id=story_session.active_branch_head_id,
+            turn_id="turn-api-block-review-required",
+            runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
         )
         core_repo = CoreStateStoreRepository(db_session)
         core_state_dual_write_service = CoreStateDualWriteService(repository=core_repo)
@@ -319,6 +336,17 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             session_id=story_session.session_id,
             chapter_workspace_id=chapter.chapter_workspace_id,
         )
+        matching_review_required_record = proposal_repo.get_proposal_record(
+            matching_review_required.proposal_id
+        )
+        if matching_review_required_record is None:
+            raise AssertionError("review-required proposal was not persisted")
+        matching_review_required_record.governance_metadata_json = {
+            "identity": proposal_identity.model_dump(mode="json"),
+            "worker_id": "longform_memory_worker",
+            "phase": "post_write_maintenance",
+        }
+        db_session.add(matching_review_required_record)
         same_domain_other_block = proposal_repo.create_proposal(
             input_model=ProposalSubmitInput(
                 story_id=story_session.story_id,
@@ -409,6 +437,8 @@ def _seed_formal_memory_block_session() -> dict[str, str]:
             "matching_applied_proposal_id": matching_applied.proposal_id,
             "same_domain_other_proposal_id": same_domain_other_block.proposal_id,
             "projection_target_proposal_id": projection_target.proposal_id,
+            "story_id": story_session.story_id,
+            "branch_head_id": proposal_identity.branch_head_id,
         }
         db_session.commit()
         return result
@@ -4079,6 +4109,80 @@ def test_story_memory_action_routes_return_refreshable_receipts(client):
     } <= set(archival_payload["action_metadata"]["affected_refs"])
 
 
+def test_story_memory_action_route_maps_maintenance_lock_to_409(client):
+    identity = {
+        "story_id": "story-api-maintenance-lock",
+        "session_id": "session-api-maintenance-lock",
+        "branch_head_id": "branch-api-maintenance-lock",
+        "turn_id": "turn-api-maintenance-lock",
+        "runtime_profile_snapshot_id": "snapshot-api-maintenance-lock",
+    }
+
+    class _LockedMemoryActionController:
+        async def direct_edit_core_memory(self, *, session_id: str, payload):
+            assert session_id == identity["session_id"]
+            assert payload.identity.turn_id == identity["turn_id"]
+            raise RuntimeMaintenanceLockError(
+                operation=RuntimeMaintenanceOperation.CORE_MEMORY_EDIT,
+                causes=[
+                    RuntimeMaintenanceLockCause(
+                        reason_code="maintenance_in_progress",
+                        source_kind="proposal",
+                        source_id="proposal-api-maintenance-lock",
+                        story_id=identity["story_id"],
+                        session_id=identity["session_id"],
+                        branch_head_id=identity["branch_head_id"],
+                        turn_id=identity["turn_id"],
+                        status="review_required",
+                        metadata={"policy_decision": "review_required"},
+                    )
+                ],
+            )
+
+    base_ref = {
+        "object_id": "chapter.current",
+        "layer": Layer.CORE_STATE_AUTHORITATIVE.value,
+        "domain": Domain.CHAPTER.value,
+        "domain_path": "chapter.current",
+        "scope": "story",
+        "revision": 1,
+    }
+    client.app.dependency_overrides[_story_controller] = (
+        lambda: _LockedMemoryActionController()
+    )
+    try:
+        response = client.post(
+            (
+                f"/api/rp/story-sessions/{identity['session_id']}"
+                "/memory/core/direct-edit"
+            ),
+            json={
+                "identity": identity,
+                "actor": "user.memory_editor",
+                "domain": Domain.CHAPTER.value,
+                "domain_path": "chapter.current",
+                "operations": [
+                    {
+                        "kind": "patch_fields",
+                        "target_ref": base_ref,
+                        "field_patch": {"title": "Blocked API Edit"},
+                    }
+                ],
+                "base_refs": [base_ref],
+                "reason": "blocked by maintenance",
+            },
+        )
+    finally:
+        client.app.dependency_overrides.pop(_story_controller, None)
+
+    assert response.status_code == 409
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "maintenance_in_progress"
+    assert error["operation"] == "core_memory_edit"
+    assert error["causes"][0]["source_id"] == "proposal-api-maintenance-lock"
+    assert error["causes"][0]["status"] == "review_required"
+
+
 def test_story_brainstorm_routes_return_stage_w_batch_receipts(client):
     seeded = _seed_formal_memory_block_session()
     identity = _seed_memory_inspection_identity(seeded["session_id"])
@@ -4581,6 +4685,14 @@ def test_story_memory_block_proposal_detail_and_apply_routes(client, monkeypatch
     seeded = _seed_formal_memory_block_session()
     session_id = seeded["session_id"]
     proposal_id = seeded["matching_review_required_proposal_id"]
+    def _lock_active() -> bool:
+        with SqlSession(get_engine()) as db_session:
+            return RuntimeMaintenanceLockService(db_session).evaluate(
+                story_id=seeded["story_id"],
+                session_id=session_id,
+                branch_head_id=seeded["branch_head_id"],
+            ).active
+
     detail_route = (
         "/api/rp/story-sessions/"
         f"{session_id}/memory/blocks/{seeded['authoritative_block_id']}/proposals/{proposal_id}"
@@ -4596,6 +4708,7 @@ def test_story_memory_block_proposal_detail_and_apply_routes(client, monkeypatch
         f"{session_id}/memory/blocks/{seeded['authoritative_block_id']}/proposals"
     )
 
+    assert _lock_active() is True
     detail = client.get(detail_route)
     applied_detail = client.get(applied_detail_route)
     apply = client.post(apply_route)
@@ -4632,6 +4745,7 @@ def test_story_memory_block_proposal_detail_and_apply_routes(client, monkeypatch
 
     assert replay.status_code == 200
     assert replay.json()["item"] == applied_item
+    assert _lock_active() is False
 
     applied_ids = {item["proposal_id"] for item in applied_list.json()["items"]}
     assert proposal_id in applied_ids
