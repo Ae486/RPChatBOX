@@ -1,6 +1,6 @@
 # S3 Implementation Planning Index
 
-Status: S3e implementation gate passed
+Status: S3f closing gate planned
 Task: `.trellis/tasks/04-28-runtime-story-dev-task`
 Slice: S3 — Memory domain/block + worker family + proposal/apply
 
@@ -54,8 +54,12 @@ implementation plan.
 20. `S3e-check-record.md` — fresh reviewer/check record for the S3e slice.
 21. `15-S3e-implementation-result.md` — main-brain result and gate record for
     S3e.
-22. `review-record.md` — standing assistant planning review.
-23. `worklog.md` — planning and execution trace for this S3 directory.
+22. `16-S3f-closing-gate-brief.md` — bounded brief for the final S3
+    end-to-end memory-maintenance gate.
+23. `S3f-planning-review-record.md` — assistant review and main-brain
+    adjudication for the S3f brief.
+24. `review-record.md` — standing assistant planning review.
+25. `worklog.md` — planning and execution trace for this S3 directory.
 
 ## Current Gate
 
@@ -67,15 +71,22 @@ S3a registry/candidate contracts passed
   -> S3c implementation and fresh check passed
   -> S3d implementation and fresh check passed
   -> S3e maintenance lock entrypoint wiring passed
-  -> next: decide next S3/S4 slice after reviewing residual service-size and branch-delete policy debt
+  -> S3f closing gate brief reviewed and amended
+  -> next: S3f end-to-end implementation/review gate
 ```
 
 S3a, S3b, S3c, S3d, and S3e are completed implementation slices. S3e is the
 first integration slice that wires the S3d lock into real backend entrypoints.
-S3d/S3e leave one explicit residual gate risk: the global service-size checker
-is already red due to pre-existing story baseline drift and already-committed
-S3a/S3b/S3c hard function offenders. The S3d service and S3e guard components
-are not new hard offenders.
+S3f is now planned as the final S3 closing gate because the original SDD's
+end-to-end gate was displaced by the necessary S3e maintenance-lock wiring
+slice. S3f must prove the connected post-write worker -> governance -> proposal
+apply -> lock path.
+
+S3d/S3e/S3f leave one explicit residual gate risk: the global service-size
+checker is already red due to pre-existing story baseline drift and
+already-committed S3a/S3b/S3c hard function offenders. S3f must not make this
+red state worse. A dedicated service-size remediation slice should follow before
+S4/S5 depend further on oversized story services.
 
 ## Non-Negotiable Rules
 

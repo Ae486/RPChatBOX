@@ -366,3 +366,57 @@ Remaining unrelated worktree noise:
 - `backend/tests/test_conversation_source_api.py`
 
 These are not part of S3e and must not be staged into the S3e commit.
+
+## 2026-06-23 — S3f closing gate brief prepared
+
+Main-brain actions:
+
+- Recovered current state after commit `7321bab`.
+- Confirmed the worktree still has unrelated visible changes that must remain
+  out of S3 commits:
+  - `.gitignore`
+  - `.trellis/.template-hashes.json`
+  - `backend/rp/services/story/runtime_controller.py`
+  - `backend/rp/services/story/turn_domain_service.py`
+  - `backend/rp/tests/services/writer/test_longform_chapter_runtime_service.py`
+  - `backend/services/conversation_source.py`
+  - `backend/tests/test_conversation_source_api.py`
+- Ran YCE-only searches for:
+  - S3 end-to-end memory maintenance / proposal apply evidence;
+  - service-size offenders;
+  - branch delete policy.
+- Read S3 PRD/SDD/test plan, main-brain rules, harness gap plan, phase-3 slice
+  plan, and the relevant module docs.
+- Confirmed a naming drift: the original S3 SDD used `S3e` for the final
+  end-to-end/review gate, but the actual S3e slice became maintenance-lock
+  entrypoint wiring. That wiring was valid and necessary, but it did not replace
+  the final closing gate.
+- Confirmed current test coverage:
+  - S3b covers structured worker output -> non-truth candidate;
+  - S3c covers candidate -> proposal/apply by directly entering governance;
+  - S3d/S3e cover lock read model and mutation entrypoint guards;
+  - S2b covers scheduler/orchestrator gate but uses fake empty governance.
+- Decided the next slice should be S3f closing gate: connect scheduler-selected
+  worker execution to real governance/proposal/apply/lock behavior with fake
+  deterministic worker output.
+- Deferred branch delete lock policy again because current branch-delete
+  behavior is a branch/audit policy issue and S3f should not change it.
+- Recorded service-size as a blocking engineering debt for the next cleanup
+  slice, while requiring S3f not to worsen it.
+- Wrote `16-S3f-closing-gate-brief.md`.
+- Dispatched read-only Codex review session
+  `019ef1a1-6741-7680-9a0d-81720f81cf76`.
+- Review verdict was `PASS_WITH_CONCERNS`.
+- Accepted all review findings and amended the brief:
+  - S3f cannot overclaim production `WorkerExecutionService` migration;
+  - S3f cannot use private `_dispatch_proposal_governance()` as the main E2E
+    entrypoint;
+  - adapter failure and governance handoff failure are separate scenarios;
+  - result wording must keep branch delete deferred;
+  - observable assertions now include scheduler gate, governance job,
+    proposal/apply receipts, lock state, and Core mutation timing.
+- Wrote `S3f-planning-review-record.md`.
+
+Production code touched: no.
+
+Tests run: none. This was a planning/documentation step.
