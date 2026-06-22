@@ -135,3 +135,24 @@ S3c governance routing / proposal handoff brief
   -> bounded implementation
   -> fresh check
 ```
+
+## 2026-06-23 — S3c implementation brief prepared
+
+Main-brain actions:
+
+- Ran YCE for proposal/governance/apply code anchors.
+- Read the current governance, workflow, apply, legacy proposal builder,
+  policy, object-mapper, state-apply, and job-ledger code.
+- Confirmed S3c's real compatibility pressure:
+  - `PostWriteGovernanceService` currently accepts only
+    `legacy_state_patch`;
+  - `ProposalWorkflowService` already handles review vs auto-apply;
+  - `ProposalApplyService` already owns base-ref conflict enforcement;
+  - current apply backend still uses old `Domain` enum and limited legacy
+    state fields, so S3 candidate targets need an explicit adapter bridge.
+- Wrote `10-S3c-implementation-brief.md` with a bounded scope:
+  - named S3 candidate-to-proposal adapter;
+  - explicit `base_block_revision_id -> base_refs` bridge;
+  - honest direct-apply target subset;
+  - invalid handoff job failure receipt;
+  - no legacy-label hiding and no truth mutation outside apply.
