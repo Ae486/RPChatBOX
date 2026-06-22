@@ -61,3 +61,4 @@
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/10-S3c-implementation-brief.md", "reason": "Verify S3c implementation follows the bounded governance/proposal handoff scope and does not hide S3 candidates as legacy patches."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/S3c-check-record.md", "reason": "Verify S3c reviewer findings stay fixed and final gate evidence remains valid."}
 {"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/11-S3c-implementation-result.md", "reason": "Verify later S3 work builds on the S3c gate result without reopening completed governance-handoff scope."}
+{"file": ".trellis/tasks/04-28-runtime-story-dev-task/execution/phase-5-implementation/S3/12-S3d-implementation-brief.md", "reason": "Verify S3d implementation follows the bounded maintenance lock, allowed operation, and stale-base integration scope."}

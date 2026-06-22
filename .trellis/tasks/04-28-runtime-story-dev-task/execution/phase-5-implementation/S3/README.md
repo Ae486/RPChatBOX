@@ -44,8 +44,10 @@ implementation plan.
 14. `S3c-check-record.md` — fresh reviewer/check record for the S3c slice.
 15. `11-S3c-implementation-result.md` — main-brain result and gate record for
     S3c.
-16. `review-record.md` — standing assistant planning review.
-17. `worklog.md` — planning and execution trace for this S3 directory.
+16. `12-S3d-implementation-brief.md` — bounded implement-worker brief for
+    maintenance lock and stale-base integration.
+17. `review-record.md` — standing assistant planning review.
+18. `worklog.md` — planning and execution trace for this S3 directory.
 
 ## Current Gate
 
@@ -54,14 +56,14 @@ Current step:
 ```text
 S3a registry/candidate contracts passed
   -> S3b memory worker adapter passed
-  -> S3c governance routing / proposal handoff brief prepared
   -> S3c implementation and fresh check passed
-  -> next: S3d maintenance lock / stale-base integration brief
+  -> S3d maintenance lock / stale-base integration brief prepared
+  -> next: S3d implementation and fresh check
 ```
 
-S3a and S3b are completed implementation slices. S3c must still be planned as a
-bounded slice before code, reviewed against Node-1 grill docs, module docs,
-frozen SoT, and current code evidence.
+S3a, S3b, and S3c are completed implementation slices. S3d is now planned as a
+bounded slice before code, grounded in Node-1 grill docs, module docs, frozen
+SoT, and current code evidence.
 
 ## Non-Negotiable Rules
 

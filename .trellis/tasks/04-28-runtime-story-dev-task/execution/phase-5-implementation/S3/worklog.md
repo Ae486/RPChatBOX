@@ -203,3 +203,42 @@ Remaining unrelated worktree noise:
 - `backend/tests/test_conversation_source_api.py`
 
 These were not staged or modified for S3c.
+
+## 2026-06-23 — S3d implementation brief prepared
+
+Main-brain actions:
+
+- Re-ran YCE with S3d-specific identifiers and confirmed the main anchors:
+  `workflow_job_service`, `post_write_governance_service`,
+  `post_write_scheduler_service`, proposal workflow tests, and S1/S2 runtime
+  job/gate tests.
+- Read S3 PRD/SDD/test plan, S3c result/check records, Node-1 maintenance-lock
+  docs, module docs, backend specs, and current code evidence.
+- Confirmed S3d should not add LLM/harness permission logic. The lock is a
+  deterministic scheduler/governance read model over jobs and proposals.
+- Confirmed the main current gap:
+  - `scheduler_maintenance_gate` exists and is covered;
+  - S3c failed handoff jobs are terminal;
+  - stale base apply rejection already belongs to `ProposalApplyService`;
+  - pending `review_required` proposals are not yet exposed as central
+    current-branch lock blockers.
+- Wrote `12-S3d-implementation-brief.md` with a bounded scope:
+  - deterministic maintenance lock service;
+  - blocked/allowed operation-family matrix;
+  - pending review proposal blockers;
+  - non-terminal required job blockers;
+  - stale-base integration without model repair;
+  - inspect/debug and proposal review actions allowed while locked.
+
+Next gate:
+
+```text
+S3d implementation
+  -> focused lock/proposal/stale-base tests
+  -> fresh review
+  -> main-brain adjudication
+```
+
+Production code touched: no.
+
+Tests run: none. This was a planning/documentation step.
