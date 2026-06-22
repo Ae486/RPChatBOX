@@ -46,8 +46,11 @@ implementation plan.
     S3c.
 16. `12-S3d-implementation-brief.md` — bounded implement-worker brief for
     maintenance lock and stale-base integration.
-17. `review-record.md` — standing assistant planning review.
-18. `worklog.md` — planning and execution trace for this S3 directory.
+17. `S3d-check-record.md` — fresh reviewer/check record for the S3d slice.
+18. `13-S3d-implementation-result.md` — main-brain result and gate record for
+    S3d.
+19. `review-record.md` — standing assistant planning review.
+20. `worklog.md` — planning and execution trace for this S3 directory.
 
 ## Current Gate
 
@@ -57,13 +60,14 @@ Current step:
 S3a registry/candidate contracts passed
   -> S3b memory worker adapter passed
   -> S3c implementation and fresh check passed
-  -> S3d maintenance lock / stale-base integration brief prepared
-  -> next: S3d implementation and fresh check
+  -> S3d implementation and fresh check passed
+  -> next: S3 integration wiring / S4 entry planning
 ```
 
-S3a, S3b, and S3c are completed implementation slices. S3d is now planned as a
-bounded slice before code, grounded in Node-1 grill docs, module docs, frozen
-SoT, and current code evidence.
+S3a, S3b, S3c, and S3d are completed implementation slices. S3d leaves one
+explicit residual gate risk: the global service-size checker is already red due
+to pre-existing story baseline drift and already-committed S3a/S3b/S3c hard
+function offenders. The S3d service itself is not a new hard offender.
 
 ## Non-Negotiable Rules
 

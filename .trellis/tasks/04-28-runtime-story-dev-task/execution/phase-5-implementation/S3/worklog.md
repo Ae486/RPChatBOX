@@ -242,3 +242,49 @@ S3d implementation
 Production code touched: no.
 
 Tests run: none. This was a planning/documentation step.
+
+## 2026-06-23 — S3d implementation and check gate passed
+
+Main-brain actions:
+
+- Reviewed the S3d implementation against `12-S3d-implementation-brief.md`,
+  S3 PRD/SDD/test plan, backend specs, and current code evidence.
+- Added `RuntimeMaintenanceLockService` as a deterministic read model over
+  current-branch required workflow jobs and branch-identified proposals.
+- Added operation-family decisions for blocked actions and allowed proposal /
+  inspect/debug actions during maintenance.
+- Restored the S3c direct-apply governance test to the worker governance path.
+- Added stale-base integration coverage: a pending review proposal locks the
+  branch, another direct apply advances revision, applying the stale review
+  proposal fails with `phase_e_apply_base_revision_conflict`, records status
+  `failed`, creates no apply receipt, and clears the lock.
+- Ran independent read-only Codex review:
+
+```text
+NO BLOCKING FINDINGS
+session: 019ef158-2b7a-70f0-a819-68c50e35b2ac
+```
+
+- Accepted and fixed the reviewer's malformed-metadata compatibility suggestion.
+  Non-dict proposal metadata is now ignored rather than crashing the lock read.
+- Reran the S3d gate:
+
+```text
+22 passed, 1 warning in 73.74s
+54 passed, 1 warning in 183.67s
+ruff: All checks passed!
+```
+
+- Ran `python backend/rp/devtools/check_service_sizes.py`; it failed on
+  pre-existing story baseline drift and already-committed S3a/S3b/S3c hard
+  function offenders, not on the new S3d service.
+- Wrote `S3d-check-record.md` and `13-S3d-implementation-result.md`.
+
+Remaining unrelated worktree noise:
+
+- `.gitignore`
+- `.trellis/.template-hashes.json`
+- `backend/services/conversation_source.py`
+- `backend/tests/test_conversation_source_api.py`
+
+These were not staged or modified for S3d.

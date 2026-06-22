@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from rp.models.proposal.core_mutation import CORE_MUTATION_ORIGIN_WORKER_PROPOSAL_APPLY
+from rp.models.proposal.post_write_policy import (
+    PolicyDecision,
+    PostWriteMaintenancePolicy,
+)
+from rp.models.memory.crud import ProposalSubmitInput
 from rp.models.runtime.workflow_job import RuntimeWorkflowJobStatus
+from rp.models.shared.dsl import Domain, Layer
 from rp.models.story.runtime import LongformChapterPhase
 from rp.models.writer.worker_runtime_contracts import (
     WorkerExecutionPlan,
@@ -25,6 +31,7 @@ from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
 from rp.services.projection.refresh_service import ProjectionRefreshService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
+from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.session_service import StorySessionService
@@ -108,9 +115,7 @@ async def test_s3_direct_apply_candidate_routes_through_proposal_apply_service(
         chapter=chapter,
         worker_plan=_worker_plan(identity),
         worker_results=[
-            _worker_result(
-                _s3_candidate(governance_route="direct_apply_allowed"),
-            )
+            _worker_result(_s3_candidate(governance_route="direct_apply_allowed"))
         ],
     )
 
@@ -166,6 +171,101 @@ async def test_invalid_s3_handoff_marks_proposal_job_failed(retrieval_session):
     assert jobs[0].metadata_json["proposal_governance_failure_reason_code"] == (
         "memory_candidate_base_revision_unparseable"
     )
+
+
+@pytest.mark.asyncio
+async def test_stale_s3_review_proposal_fails_apply_and_clears_lock(
+    retrieval_session,
+):
+    session, chapter, identity = _seed_runtime(retrieval_session)
+    _, repository, governance_service = _build_services(retrieval_session)
+    lock_service = RuntimeMaintenanceLockService(retrieval_session)
+
+    await governance_service._dispatch_proposal_governance(
+        identity=identity,
+        session=session,
+        chapter=chapter,
+        worker_plan=_worker_plan(identity),
+        worker_results=[
+            _worker_result(
+                _s3_candidate(governance_route="review_required"),
+            )
+        ],
+    )
+    review_proposal = repository.list_proposals_for_story(session.story_id)[0]
+    assert review_proposal.status == "review_required"
+    assert lock_service.evaluate(
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        branch_head_id=identity.branch_head_id,
+    ).active is True
+
+    await governance_service._proposal_workflow_service.submit_and_route(
+        ProposalSubmitInput(
+            story_id=session.story_id,
+            mode=session.mode,
+            domain=Domain.PLOT_THREAD,
+            domain_path="plot_thread.active",
+            operations=[
+                {
+                    "kind": "append_event",
+                    "target_ref": {
+                        "object_id": "plot_thread.active",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.PLOT_THREAD,
+                        "domain_path": "plot_thread.active",
+                    },
+                    "event_data": {"content": "Advance revision before review accept."},
+                }
+            ],
+            base_refs=[
+                {
+                    "object_id": "plot_thread.active",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.PLOT_THREAD,
+                    "domain_path": "plot_thread.active",
+                    "scope": "story",
+                    "revision": 1,
+                }
+            ],
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="test_direct_apply_revision_advance",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.NOTIFY_APPLY,
+        ),
+    )
+    assert repository.list_apply_receipts_for_story(
+        session.story_id,
+        session_id=session.session_id,
+    )
+
+    apply_service = (
+        governance_service._proposal_workflow_service._proposal_apply_service
+    )
+    with pytest.raises(ValueError, match="phase_e_apply_base_revision_conflict"):
+        apply_service.apply_proposal(review_proposal.proposal_id)
+
+    updated_review_proposal = repository.get_proposal_record(
+        review_proposal.proposal_id
+    )
+    assert updated_review_proposal is not None
+    assert updated_review_proposal.status == "failed"
+    assert updated_review_proposal.error_message is not None
+    assert updated_review_proposal.error_message.startswith(
+        "phase_e_apply_base_revision_conflict"
+    )
+    assert (
+        repository.list_apply_receipts_for_proposal(review_proposal.proposal_id)
+        == []
+    )
+    assert lock_service.evaluate(
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        branch_head_id=identity.branch_head_id,
+    ).active is False
 
 
 def _seed_runtime(retrieval_session):
