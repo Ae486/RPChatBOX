@@ -1,5 +1,79 @@
 # S3 Worklog
 
+## 2026-06-23 — S3g planning brief prepared
+
+Main-brain actions:
+
+- Continued after commit `6f59396`.
+- Confirmed current Trellis task binding remains
+  `.trellis/tasks/04-28-runtime-story-dev-task`.
+- Confirmed the worktree still contains unrelated visible dirty files that must
+  not be staged or reverted.
+- Ran YCE-only searches for:
+  - S3 memory worker production executor / adapter / service-size offenders;
+  - story harness / fake model / structured-output runner support.
+- Re-read Node-1/module authority docs, main-brain rules, harness gap plan, S3
+  PRD/SDD, S3f result, and S3f check record.
+- Re-ran `python backend/rp/devtools/check_service_sizes.py` and confirmed the
+  current failure set:
+  - older baseline drift in `story/runtime_identity_service.py` and
+    `story/turn_domain_service.py`;
+  - S3-owned new hard offenders in memory candidate validation, post-write
+    governance, and memory worker adapter.
+- Wrote:
+  - `18-S3g-production-executor-and-service-size-brief.md`
+  - `S3g-planning-review-brief.md`
+
+Current gate:
+
+```text
+S3g planning prepared
+  -> fresh read-only reviewer pending
+  -> main-brain adjudication pending
+  -> no production code implementation yet
+```
+
+Production code touched: no.
+
+Tests run:
+
+```text
+python backend/rp/devtools/check_service_sizes.py
+```
+
+Result:
+
+```text
+FAIL, expected current residual debt.
+```
+
+## 2026-06-23 — S3g planning review adjudicated
+
+Main-brain actions:
+
+- Dispatched read-only Codex review session
+  `019ef1cb-2b72-7a80-9136-36154b38854c`.
+- Review verdict was `PASS_WITH_CONCERNS`.
+- Accepted the review finding that S3g-b was too permissive: the first draft
+  could have allowed only a test-injected adapter path while default product
+  wiring silently stayed on the legacy specialist executor.
+- Amended `18-S3g-production-executor-and-service-size-brief.md` to require:
+  - normal runtime assembly coverage or explicit compatibility mode/config;
+  - update/replacement of the existing legacy bridge test;
+  - no claim of production executor migration completion if no production
+    structured-output runner is wired.
+- Wrote:
+  - `S3g-planning-review-output.md`
+  - `S3g-planning-review-record.md`
+
+Current gate:
+
+```text
+S3g planning review accepted
+  -> planning docs ready to commit
+  -> next implementation slice: S3g-a service-size cleanup
+```
+
 ## 2026-06-23 — P0/P2 planning documents drafted
 
 Main-brain actions:
