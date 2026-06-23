@@ -218,6 +218,9 @@ Decision as of 2026-06-23:
 - use a narrow productionization slice, not a universal executor rewrite;
 - target the production memory-maintenance structured-output runner plus a
   generic harness runner port;
+- tool calls are disabled for the first S3.5 production runner, with
+  fail-closed reason codes; the generic port must leave room for later tool-loop
+  support without implementing the full loop in this slice;
 - keep legacy specialist execution as an explicit fallback only, not the target
   path.
 
@@ -228,8 +231,8 @@ Decision record:
 Candidate promotions:
 
 - structured-output runner port;
-- normalized tool loop;
-- tool result/error envelope;
+- normalized tool loop, deferred unless explicitly added by a later slice;
+- tool result/error envelope, deferred unless explicitly added by a later slice;
 - bounded retry/repair;
 - trace/event envelope;
 - fake runner/tool fixtures.

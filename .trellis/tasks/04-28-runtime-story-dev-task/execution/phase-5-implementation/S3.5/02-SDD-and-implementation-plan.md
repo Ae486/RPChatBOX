@@ -24,9 +24,18 @@ framework/product boundary.
 
 ### 1. Generic structured-output runner port
 
-Add a generic runner interface in a story-runtime or agent-harness location.
-The exact module name should follow current project layout after implementer
-searches existing harness code.
+Add a generic runner interface in a story-runtime / agent-harness location.
+
+Allowed placement range:
+
+- a new story-runtime harness module under `backend/rp/agent_runtime/` if it is
+  setup-free and not inside `agent_runtime/setup/`;
+- or a runtime-owned service/contract module under `backend/rp/services/runtime/`
+  if the existing package layout makes that the narrower dependency direction.
+
+Do not place the generic port under `writer/` or `setup_agent/`. The memory
+runner can live under `writer/` only as a role/worker-specific adapter around
+the generic port.
 
 Candidate shape:
 
@@ -34,22 +43,37 @@ Candidate shape:
 class StructuredOutputRunRequest(BaseModel):
     run_id: str
     role: str
+    worker_id: str | None
+    phase: str | None
+    provider_id: str | None
+    model_id: str
     schema_name: str
+    schema_version: str
     messages: list[RuntimeMessage]
     response_schema: dict[str, Any] | type[BaseModel]
-    metadata: dict[str, Any]
+    tool_policy: RuntimeToolPolicy
     timeout_s: float | None
+    repair_budget: int
+    metadata: dict[str, Any]
 
 class StructuredOutputRunResult(BaseModel):
     status: Literal["completed", "failed", "cancelled", "timeout"]
     structured_output: dict[str, Any] | None
     raw_text: str | None
+    stop_reason: str | None
     reason_code: str | None
     message: str | None
+    retryable: bool
+    repair_attempts: int
+    raw_output_visibility: Literal["private_trace", "redacted", "none"]
     trace: dict[str, Any]
 ```
 
 The names can change. The semantics must not.
+
+For S3.5, `tool_policy` must declare tool calls disabled. The port should be
+able to grow into tool-call/result support later, but the memory worker runner
+must fail closed on tool calls in this slice.
 
 ### 2. Production memory-maintenance runner
 
@@ -80,6 +104,17 @@ Compatibility fallback remains explicit. If the production runner is disabled
 or unavailable in a test/dev profile, the existing S3g-b fallback metadata must
 remain visible.
 
+Configuration / assembly truth:
+
+- the factory or an injected runtime configuration object owns production runner
+  construction;
+- no adapter-local environment-variable read is allowed;
+- tests must be able to inject a fake model gateway through the same seam that
+  production wiring uses;
+- production runner unavailable + compatibility enabled means explicit fallback;
+- production runner unavailable + compatibility disabled means explicit
+  fail/degrade result, not silent legacy execution.
+
 ### 4. Trace and reason codes
 
 Trace must show:
@@ -94,6 +129,42 @@ Trace must show:
 
 Reason codes should be stable and readable. Do not introduce local aliases for
 existing maintenance lock or scheduler reason codes.
+
+Minimum S3.5 runner reason codes are defined in `01-PRD.md` FR10. Reuse existing
+adapter codes when they already match.
+
+### 5. Setup-agent leakage guard
+
+S3.5 must not introduce imports from setup-agent executor paths in new story
+harness or memory-runner modules.
+
+Guard scope:
+
+- forbid `rp.agent_runtime.setup.*` and `rp.services.setup_agent.*` imports in
+  new generic runner contracts, production memory runner modules, and their
+  direct tests;
+- do not fail the whole repository or `rp_runtime_factory.py` solely because
+  pre-existing setup factory wiring already imports setup services.
+
+The intent is to block copying setup executor policy into story runtime without
+misclassifying pre-existing setup assembly code.
+
+### 6. Non-mutation assertion strategy
+
+S3.5 implementation tests must prove runner/adapter code does not write truth
+or proposal/apply persistence directly.
+
+Minimum evidence:
+
+- successful runner output reaches `MemoryMaintenanceWorkerAdapter` and remains
+  a `WorkerResult.proposal_candidates` candidate with
+  `source_of_truth=False` and `authoritative_mutation=False`;
+- runner/adapter tests do not instantiate or call `ProposalRepository`,
+  `ProposalApplyService`, Core State write services, Recall write services, or
+  Archival write services;
+- integration tests that exercise governance must show proposal/apply side
+  effects occur only after the existing post-write governance service consumes
+  the worker candidate.
 
 ## Implementation Sub-Slices
 
@@ -115,12 +186,14 @@ Scope:
 
 - add generic runner request/result contracts;
 - add fake runner/gateway test surface;
+- declare S3.5 tool calls disabled with fail-closed result shape;
 - no memory policy inside the generic port.
 
 Gate:
 
 - unit tests prove valid output, invalid output, provider error, timeout/cancel
-  shape if supported.
+  shape, disabled-tool behavior, trace redaction/visibility, and stable reason
+  codes.
 
 ### S3.5c — Memory-maintenance production runner
 
@@ -135,6 +208,7 @@ Gate:
 
 - fake model returns valid candidate/no-op/failure and adapter receives them;
 - invalid model output becomes `WorkerResultStatus.FAILED`;
+- missing context/source/base refs map to stable reason codes;
 - legacy specialist is not called when production runner is wired.
 
 ### S3.5d — Runtime factory wiring and compatibility gate
@@ -149,6 +223,8 @@ Gate:
 
 - factory test proves production runner is supplied when enabled;
 - fallback test proves compatibility metadata remains when disabled.
+- factory-built normal path with fake model gateway proves production runner
+  enabled means `LongformSpecialistService.analyze()` is not called.
 
 ### S3.5e — Review and commit
 
@@ -163,7 +239,7 @@ Scope:
 
 | Risk | Mitigation |
 | --- | --- |
-| Accidentally copying setup-agent executor policy | Read setup only as anti-pattern/reference; import guard should prove no setup-agent executor dependency. |
+| Accidentally copying setup-agent executor policy | Read setup only as anti-pattern/reference; scoped import guard forbids setup imports in new story harness/memory runner modules. |
 | Harness core absorbs memory policy | Keep prompt/schema in memory runner and validation/governance in product services. |
 | Overbuilding universal executor | Limit S3.5 to structured-output runner port and memory worker consumer. |
 | Live provider flakiness | Deterministic fake tests are required; live smoke optional. |

@@ -153,6 +153,12 @@ that states:
 The plan should be iterated with a reviewer/assistant before implementation.
 If the plan conflicts with Node-1/module/SoT docs, fix the plan before code.
 
+For important guiding documents, reviewer iteration is mandatory rather than
+optional. Overall roadmaps, PRDs, SDDs, test/gate plans, and phase-entry
+decisions must receive a read-only adversarial review before implementation is
+authorized. The main-brain must record which reviewer findings are accepted,
+rejected, or deferred, with reasons.
+
 ## Glue Coding Rule
 
 Use glue coding deliberately:

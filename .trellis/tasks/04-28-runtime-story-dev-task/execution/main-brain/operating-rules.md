@@ -99,6 +99,12 @@ S3 agent/tool/proposal patterns become reusable.
     has already progressed before that map was sufficient, pause, write a
     retrospective gate, and audit the landed/pending work before continuing or
     committing.
+31. Important guiding documents require independent adversarial review before
+    they can authorize implementation. This includes overall roadmaps, PRDs,
+    SDDs, test/gate plans, and phase-entry decisions. Dispatch a read-only
+    reviewer, record the report, and write the main-brain adjudication before
+    production code starts. A main-brain self-review is not enough for these
+    documents.
 
 ## Framework Boundary Vocabulary
 
