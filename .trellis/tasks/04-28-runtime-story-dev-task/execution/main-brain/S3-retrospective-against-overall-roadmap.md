@@ -177,12 +177,13 @@ Current execution state:
 
 - implementation remains paused for new feature work;
 - S3g-b is cleared only as a bounded compatibility slice;
+- S3g-b bounded compatibility slice was committed as `51bc53c`;
 - S4 is not cleared to start;
-- the next action is focused verification, explicit staging, and commit of
-  S3g-b-owned files only.
+- the next action is S3.5 production-runner / harness-productionization
+  decision before any S4 implementation.
 
-This document must be updated again after the S3g-b commit records its exact
-commit hash, or if focused verification contradicts this gate decision.
+This document must be updated again if later verification contradicts this gate
+decision or if the S3g-b commit is amended/reverted.
 
 ## S3g-b Gate Decision — 2026-06-23
 
@@ -190,6 +191,12 @@ Decision:
 
 ```text
 accept S3g-b for commit as a bounded compatibility slice
+```
+
+Commit:
+
+```text
+51bc53c refactor(rp-runtime): wire S3 memory executor compatibility
 ```
 
 Rationale:

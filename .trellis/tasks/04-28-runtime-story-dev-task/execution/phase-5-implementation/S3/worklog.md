@@ -486,9 +486,14 @@ fallback. It must not be described as production structured-output runner
 completion.
 ```
 
+Commit:
+
+```text
+51bc53c refactor(rp-runtime): wire S3 memory executor compatibility
+```
+
 Required before S4:
 
-- record the S3g-b commit hash after commit;
 - complete an S3.5 decision on whether the production memory-maintenance
   structured-output runner is implemented before S4 or explicitly deferred
   with owner, risk, and next-phase impact.

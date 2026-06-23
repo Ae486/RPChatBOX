@@ -199,7 +199,7 @@ Current status:
 | S3e lock entrypoint wiring | Completed and committed. | Must verify old path compatibility and no route overclaim. |
 | S3f end-to-end closing gate | Completed and committed. | Treat as S3 reference gate, not final full-runtime completion. |
 | S3g-a service-size cleanup | Completed and committed. | Code-health slice, not a new product behavior claim. |
-| S3g-b production executor compatibility | Gate-cleared as bounded compatibility slice, not yet committed. | May be committed only with explicit S3g-b-owned staging and residual runner gap preserved. |
+| S3g-b production executor compatibility | Committed as bounded compatibility slice in `51bc53c`. | Residual production structured-output runner gap remains; do not treat this as full executor migration. |
 
 S3 is not allowed to claim full story-agent runtime completion. It is the first
 reference implementation for memory worker governance.
@@ -391,8 +391,7 @@ pass the roadmap and retrospective gate when the process order was wrong.
 Current hold:
 
 - do not continue new feature implementation;
-- do not commit anything except the gate-cleared S3g-b bounded compatibility
-  slice and its control documents;
+- S3g-b bounded compatibility slice has been committed as `51bc53c`;
 - do not start S4.
 
 Recovery steps:
@@ -403,8 +402,9 @@ Recovery steps:
    revise before commit, or split.
 4. Run focused verification for S3g-b and commit only explicit S3g-b-owned
    code/test/docs.
-5. Decide whether S3g-c / S3.5 harness productionization is required before S4.
-6. Only then resume normal implementation flow.
+5. Record S3g-b commit hash.
+6. Decide whether S3g-c / S3.5 harness productionization is required before S4.
+7. Only then resume normal implementation flow.
 
 This is the new execution order. Any later deviation must be recorded with a
 reason.
