@@ -212,6 +212,19 @@ Purpose:
   harness promotion slice before S4;
 - promote only cross-role execution mechanisms from S3 into the harness.
 
+Decision as of 2026-06-23:
+
+- S3.5 is required before S4 implementation;
+- use a narrow productionization slice, not a universal executor rewrite;
+- target the production memory-maintenance structured-output runner plus a
+  generic harness runner port;
+- keep legacy specialist execution as an explicit fallback only, not the target
+  path.
+
+Decision record:
+
+- `execution/main-brain/S3.5-harness-productionization-decision.md`
+
 Candidate promotions:
 
 - structured-output runner port;
