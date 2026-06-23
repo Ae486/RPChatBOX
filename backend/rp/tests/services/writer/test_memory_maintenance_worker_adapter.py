@@ -5,11 +5,17 @@ import pytest
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
+    WorkerContextPacket,
     WorkerDescriptor,
     WorkerExecutionClass,
     WorkerExecutionPolicy,
     WorkerExecutionRequest,
     WorkerResultStatus,
+)
+from rp.services.runtime.structured_output_runner import (
+    STRUCTURED_OUTPUT_RUNNER_REASON_TIMEOUT,
+    ScriptedStructuredOutputRunner,
+    StructuredOutputRunResult,
 )
 from rp.services.writer.memory_maintenance_worker_adapter import (
     MemoryMaintenanceWorkerAdapter,
@@ -17,6 +23,9 @@ from rp.services.writer.memory_maintenance_worker_adapter import (
     S3_MEMORY_MAINTENANCE_CANDIDATE_KIND,
     S3_MEMORY_WORKER_OUTPUT_SCHEMA_VERSION,
     ScriptedMemoryMaintenanceStructuredOutputRunner,
+)
+from rp.services.writer.production_memory_maintenance_structured_output_runner import (
+    ProductionMemoryMaintenanceStructuredOutputRunner,
 )
 from rp.services.writer.worker_registry_service import LONGFORM_MEMORY_WORKER_ID
 
@@ -78,6 +87,109 @@ async def test_scripted_runner_path_returns_candidate_batch():
     assert result.result_status == WorkerResultStatus.COMPLETED
     assert result.proposal_candidates[0]["candidate_kind"] == (
         S3_MEMORY_MAINTENANCE_CANDIDATE_KIND
+    )
+
+
+@pytest.mark.asyncio
+async def test_production_memory_runner_path_returns_candidate_batch():
+    structured_output = _candidate_output()
+    structured_output["metadata"]["runner_mode"] = "model-controlled-spoof"
+    structured_output["metadata"]["runner_trace"] = {
+        "runner_mode": "model-controlled-spoof"
+    }
+    generic_runner = ScriptedStructuredOutputRunner(
+        [
+            StructuredOutputRunResult(
+                status="completed",
+                structured_output=structured_output,
+                raw_text="{}",
+                stop_reason="stop",
+                raw_output_visibility="private_trace",
+                trace={
+                    "runner_mode": "scripted",
+                    "schema_name": "memory-maintenance-worker-output",
+                    "schema_version": S3_MEMORY_WORKER_OUTPUT_SCHEMA_VERSION,
+                    "provider_id": "provider-a",
+                    "model_id": "model-a",
+                },
+            )
+        ]
+    )
+    adapter = MemoryMaintenanceWorkerAdapter(
+        structured_output_runner=ProductionMemoryMaintenanceStructuredOutputRunner(
+            structured_output_runner=generic_runner
+        )
+    )
+
+    result = await adapter.execute(
+        request=_request(),
+        registration=_registration(),
+        context_packet=_context_packet(),
+    )
+
+    assert generic_runner.call_count == 1
+    assert result.result_status == WorkerResultStatus.COMPLETED
+    assert result.proposal_candidates[0]["candidate_kind"] == (
+        S3_MEMORY_MAINTENANCE_CANDIDATE_KIND
+    )
+    assert result.trace_summary["runner_mode"] == "scripted"
+    assert result.trace_summary["runner_schema_name"] == (
+        "memory-maintenance-worker-output"
+    )
+    assert result.trace_summary["runner_schema_version"] == (
+        S3_MEMORY_WORKER_OUTPUT_SCHEMA_VERSION
+    )
+    assert result.trace_summary["runner_provider_id"] == "provider-a"
+    assert result.trace_summary["runner_model_id"] == "model-a"
+    assert result.metadata["structured_output_metadata"]["runner_mode"] == "scripted"
+
+
+@pytest.mark.asyncio
+async def test_production_memory_runner_timeout_maps_to_stable_reason_code():
+    generic_runner = ScriptedStructuredOutputRunner(
+        [
+            StructuredOutputRunResult(
+                status="timeout",
+                reason_code=STRUCTURED_OUTPUT_RUNNER_REASON_TIMEOUT,
+                message="timed out",
+                retryable=True,
+                raw_output_visibility="none",
+                trace={"runner_mode": "scripted"},
+            )
+        ]
+    )
+    adapter = MemoryMaintenanceWorkerAdapter(
+        structured_output_runner=ProductionMemoryMaintenanceStructuredOutputRunner(
+            structured_output_runner=generic_runner
+        )
+    )
+
+    result = await adapter.execute(
+        request=_request(),
+        registration=_registration(),
+        context_packet=_context_packet(),
+    )
+
+    assert result.result_status == WorkerResultStatus.FAILED
+    assert result.trace_summary["reason_code"] == "memory_worker_timeout"
+
+
+@pytest.mark.asyncio
+async def test_production_memory_runner_missing_context_packet_maps_to_stable_reason_code():
+    adapter = MemoryMaintenanceWorkerAdapter(
+        structured_output_runner=ProductionMemoryMaintenanceStructuredOutputRunner(
+            structured_output_runner=ScriptedStructuredOutputRunner([])
+        )
+    )
+
+    result = await adapter.execute(
+        request=_request(),
+        registration=_registration(),
+    )
+
+    assert result.result_status == WorkerResultStatus.FAILED
+    assert result.trace_summary["reason_code"] == (
+        "memory_worker_context_packet_missing"
     )
 
 
@@ -172,7 +284,7 @@ async def test_unsupported_worker_output_schema_version_fails_closed():
     assert result.proposal_candidates == []
     assert result.trace_summary["failure_source"] == "schema_parse"
     assert result.trace_summary["reason_code"] == (
-        "memory_worker_structured_output_identity_mismatch"
+        "memory_worker_output_schema_version_unsupported"
     )
     assert [
         finding["reason_code"] for finding in result.validation_findings
@@ -267,6 +379,38 @@ async def test_validator_rejected_candidate_returns_failure_and_reason_codes():
 
 
 @pytest.mark.asyncio
+async def test_missing_source_refs_maps_to_memory_worker_source_ref_missing():
+    adapter = MemoryMaintenanceWorkerAdapter()
+    payload = _candidate_output()
+    payload["candidate_batch"]["candidates"][0]["source_refs"] = []
+
+    result = await adapter.execute(
+        request=_request(),
+        registration=_registration(),
+        structured_output=payload,
+    )
+
+    assert result.result_status == WorkerResultStatus.FAILED
+    assert result.trace_summary["reason_code"] == "memory_worker_source_ref_missing"
+
+
+@pytest.mark.asyncio
+async def test_missing_base_ref_maps_to_memory_worker_base_ref_missing():
+    adapter = MemoryMaintenanceWorkerAdapter()
+    payload = _candidate_output()
+    payload["candidate_batch"]["candidates"][0]["base_block_revision_id"] = None
+
+    result = await adapter.execute(
+        request=_request(),
+        registration=_registration(),
+        structured_output=payload,
+    )
+
+    assert result.result_status == WorkerResultStatus.FAILED
+    assert result.trace_summary["reason_code"] == "memory_worker_base_ref_missing"
+
+
+@pytest.mark.asyncio
 async def test_structured_worker_failure_maps_to_failed_worker_result():
     adapter = MemoryMaintenanceWorkerAdapter()
 
@@ -315,6 +459,8 @@ def _request() -> WorkerExecutionRequest:
         phase="post_write_maintenance",
         mode="longform",
         turn_id="turn-s3b-1",
+        model_id="model-a",
+        provider_id="provider-a",
         context_packet_ref="worker-packet-s3b-1",
         execution_policy=_execution_policy(),
     )
@@ -343,6 +489,18 @@ def _execution_policy() -> WorkerExecutionPolicy:
         must_record_trace=True,
         requires_runtime_workspace=True,
         requires_post_write_job=True,
+    )
+
+
+def _context_packet() -> WorkerContextPacket:
+    return WorkerContextPacket(
+        packet_id="worker-packet-s3b-1",
+        identity=_request().identity,
+        worker_id=LONGFORM_MEMORY_WORKER_ID,
+        phase="post_write_maintenance",
+        mode="longform",
+        workspace_refs=["workspace:segment-1"],
+        trace_refs=["trace:worker-plan"],
     )
 
 

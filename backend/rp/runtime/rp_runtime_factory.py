@@ -35,6 +35,7 @@ from rp.services.core_state.dual_write_service import CoreStateDualWriteService
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
+from rp.services.runtime.structured_output_runner import StoryStructuredOutputRunner
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
@@ -134,6 +135,9 @@ from rp.services.memory.version_history_read_service import VersionHistoryReadSe
 from rp.services.writer.memory_maintenance_worker_adapter import (
     MemoryMaintenanceWorkerAdapter,
 )
+from rp.services.writer.production_memory_maintenance_structured_output_runner import (
+    ProductionMemoryMaintenanceStructuredOutputRunner,
+)
 from rp.services.writer.worker_execution_service import WorkerExecutionService
 from rp.services.writer.worker_memory_service import WorkerMemoryService
 from rp.services.writer.worker_registry_service import WorkerRegistryService
@@ -148,8 +152,43 @@ from services.mcp_manager import McpManager, get_mcp_manager
 class RpRuntimeFactory:
     """Centralize RP runtime dependency wiring before deeper graph migration."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        enable_longform_memory_worker_production_runner: bool = True,
+    ) -> None:
         self._session = session
+        self._enable_longform_memory_worker_production_runner = (
+            enable_longform_memory_worker_production_runner
+        )
+
+    def _should_enable_longform_memory_worker_production_runner(self) -> bool:
+        """Own the explicit assembly seam for the S3.5 production runner path."""
+
+        return self._enable_longform_memory_worker_production_runner
+
+    @staticmethod
+    def _build_memory_worker_structured_output_runner_port():
+        """Create the generic runtime structured-output runner port."""
+
+        return StoryStructuredOutputRunner()
+
+    def _build_memory_maintenance_structured_output_runner(self):
+        """Create the memory-specific production runner when the slice is enabled."""
+
+        if not self._should_enable_longform_memory_worker_production_runner():
+            return None
+        return ProductionMemoryMaintenanceStructuredOutputRunner(
+            structured_output_runner=self._build_memory_worker_structured_output_runner_port()
+        )
+
+    def _build_longform_memory_worker_adapter(self) -> MemoryMaintenanceWorkerAdapter:
+        """Assemble the longform memory adapter through one explicit factory seam."""
+
+        return MemoryMaintenanceWorkerAdapter(
+            structured_output_runner=self._build_memory_maintenance_structured_output_runner()
+        )
 
     def _build_setup_workspace_service(self) -> SetupWorkspaceService:
         return SetupWorkspaceService(self._session)
@@ -528,7 +567,7 @@ class RpRuntimeFactory:
             longform_specialist_service=specialist_service,
             context_orchestration_service=context_orchestration_service,
             runtime_workspace_facade=runtime_workspace_facade,
-            longform_memory_worker_adapter=MemoryMaintenanceWorkerAdapter(),
+            longform_memory_worker_adapter=self._build_longform_memory_worker_adapter(),
             enable_legacy_longform_memory_worker_specialist_fallback=True,
         )
         post_write_scheduler_service = PostWriteSchedulerService(

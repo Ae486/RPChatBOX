@@ -150,8 +150,31 @@ that states:
 - tests and gate commands;
 - expected pre-existing failures, if any.
 
-The plan should be iterated with a reviewer/assistant before implementation.
+The plan must be iterated with a reviewer/assistant before implementation.
 If the plan conflicts with Node-1/module/SoT docs, fix the plan before code.
+
+## Planning Document Review Gate
+
+Important guidance documents must receive an independent read-only adversarial
+review before they can authorize implementation. This gate applies to:
+
+- project-level roadmaps;
+- PRDs;
+- SDDs;
+- test / gate plans;
+- phase-entry decisions;
+- any other document that is supposed to steer production implementation.
+
+Required review flow:
+
+1. write or update the document;
+2. dispatch a fresh reviewer that did not author the document;
+3. have the reviewer check it against Node-1 grill docs, module docs, frozen
+   SoT, and current code evidence;
+4. record which findings are accepted, rejected, or deferred, with reasons;
+5. only then authorize implementation.
+
+A main-brain self-review is not enough for these documents.
 
 For important guiding documents, reviewer iteration is mandatory rather than
 optional. Overall roadmaps, PRDs, SDDs, test/gate plans, and phase-entry

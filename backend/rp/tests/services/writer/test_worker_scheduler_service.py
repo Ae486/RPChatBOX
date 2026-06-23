@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -19,6 +20,9 @@ from rp.models.story.runtime import (
 from rp.models.writer.worker_runtime_contracts import WorkerPlanSource
 from rp.models.writer.worker_runtime_contracts import WorkerResultStatus
 from rp.runtime import rp_runtime_factory as runtime_factory_module
+from rp.services.runtime.structured_output_runner import (
+    StoryStructuredOutputRunner,
+)
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story.session_service import StorySessionService
@@ -99,6 +103,16 @@ class _RecordingSpecialistService:
         )
 
 
+class _FactoryGateway:
+    def __init__(self, *, text: str) -> None:
+        self._text = text
+        self.calls: list[dict[str, Any]] = []
+
+    async def complete_text_with_usage(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._text, {"prompt_tokens": 5, "completion_tokens": 7}
+
+
 def test_worker_scheduler_selects_active_prewrite_longform_worker_from_snapshot(
     retrieval_session,
 ):
@@ -157,7 +171,7 @@ async def test_worker_execution_service_uses_s3_memory_adapter_when_runner_exist
     )
     execution_service = WorkerExecutionService(
         worker_registry_service=fixture.registry_service,
-        longform_specialist_service=fixture.specialist,  # type: ignore[arg-type]
+        longform_specialist_service=fixture.specialist,
         context_orchestration_service=fixture.context_orchestration,
         runtime_workspace_facade=StoryRuntimeWorkspaceFacade(
             runtime_workspace_material_service=fixture.runtime_workspace_material_service
@@ -214,7 +228,7 @@ async def test_worker_execution_service_uses_explicit_legacy_compatibility_fallb
     )
     execution_service = WorkerExecutionService(
         worker_registry_service=fixture.registry_service,
-        longform_specialist_service=fixture.specialist,  # type: ignore[arg-type]
+        longform_specialist_service=fixture.specialist,
         context_orchestration_service=fixture.context_orchestration,
         runtime_workspace_facade=StoryRuntimeWorkspaceFacade(
             runtime_workspace_material_service=fixture.runtime_workspace_material_service
@@ -313,7 +327,57 @@ async def test_worker_execution_service_uses_explicit_legacy_compatibility_fallb
     ]
 
 
-def test_runtime_factory_wires_memory_worker_adapter_and_explicit_compatibility(
+@pytest.mark.asyncio
+async def test_worker_execution_service_fails_when_runner_and_compatibility_disabled(
+    retrieval_session,
+):
+    fixture = _worker_execution_fixture(
+        retrieval_session,
+        story_id="worker-execution-disabled-runner-no-compat",
+    )
+    execution_service = WorkerExecutionService(
+        worker_registry_service=fixture.registry_service,
+        longform_specialist_service=fixture.specialist,
+        context_orchestration_service=fixture.context_orchestration,
+        runtime_workspace_facade=StoryRuntimeWorkspaceFacade(
+            runtime_workspace_material_service=fixture.runtime_workspace_material_service
+        ),
+        longform_memory_worker_adapter=MemoryMaintenanceWorkerAdapter(),
+        enable_legacy_longform_memory_worker_specialist_fallback=False,
+    )
+
+    outcome = await execution_service.execute_plan(
+        session=SimpleNamespace(
+            session_id=fixture.session.session_id,
+            story_id=fixture.session.story_id,
+            mode=fixture.session.mode,
+        ),
+        chapter=fixture.chapter,
+        plan=fixture.plan,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt="Continue the chapter.",
+        orchestrator_plan=_orchestrator_plan(),
+        accepted_segments=[],
+        pending_artifact=None,
+    )
+
+    assert fixture.specialist.calls == []
+    assert outcome.specialist_bundle == SpecialistResultBundle()
+    assert len(outcome.worker_results) == 1
+    result = outcome.worker_results[0]
+    assert result.worker_id == LONGFORM_MEMORY_WORKER_ID
+    assert result.result_status == WorkerResultStatus.FAILED
+    assert result.trace_summary["reason_code"] == (
+        "memory_worker_structured_output_runner_missing"
+    )
+    assert result.trace_summary["failure_source"] == "fake_execution"
+    assert result.proposal_candidates == []
+    assert result.recall_candidates == []
+
+
+def test_runtime_factory_wires_memory_worker_adapter_with_production_runner(
     monkeypatch,
     retrieval_session,
 ):
@@ -340,10 +404,112 @@ def test_runtime_factory_wires_memory_worker_adapter_and_explicit_compatibility(
 
     adapter = captured_kwargs["longform_memory_worker_adapter"]
     assert isinstance(adapter, MemoryMaintenanceWorkerAdapter)
+    assert adapter.has_structured_output_runner is True
+    assert (
+        captured_kwargs["enable_legacy_longform_memory_worker_specialist_fallback"]
+        is True
+    )
+
+
+def test_runtime_factory_can_disable_production_runner_and_keep_compatibility_flag(
+    monkeypatch,
+    retrieval_session,
+):
+    captured_kwargs: dict[str, Any] = {}
+
+    class _StopFactory(RuntimeError):
+        pass
+
+    class _CaptureWorkerExecutionService:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            raise _StopFactory
+
+    monkeypatch.setattr(
+        runtime_factory_module,
+        "WorkerExecutionService",
+        _CaptureWorkerExecutionService,
+    )
+
+    with pytest.raises(_StopFactory):
+        runtime_factory_module.RpRuntimeFactory(
+            retrieval_session,
+            enable_longform_memory_worker_production_runner=False,
+        ).build_story_turn_domain_service()
+
+    adapter = captured_kwargs["longform_memory_worker_adapter"]
+    assert isinstance(adapter, MemoryMaintenanceWorkerAdapter)
     assert adapter.has_structured_output_runner is False
     assert (
         captured_kwargs["enable_legacy_longform_memory_worker_specialist_fallback"]
         is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_factory_built_normal_path_uses_production_runner_without_legacy_specialist_call(
+    monkeypatch,
+    retrieval_session,
+):
+    fixture = _worker_execution_fixture(
+        retrieval_session,
+        story_id="worker-execution-factory-production",
+    )
+    fake_gateway = _FactoryGateway(
+        text=json.dumps(_candidate_output(phase=PRE_WRITE_CONTEXT_PHASE))
+    )
+    specialist = _RecordingSpecialistService()
+
+    monkeypatch.setattr(
+        runtime_factory_module.RpRuntimeFactory,
+        "_build_memory_worker_structured_output_runner_port",
+        staticmethod(
+            lambda: StoryStructuredOutputRunner(llm_gateway=fake_gateway)
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_factory_module,
+        "LongformSpecialistService",
+        lambda *args, **kwargs: specialist,
+    )
+
+    turn_domain_service = runtime_factory_module.RpRuntimeFactory(
+        retrieval_session
+    ).build_story_turn_domain_service()
+    execution_service = getattr(turn_domain_service, "_worker_execution_service")
+    assert execution_service is not None
+
+    outcome = await execution_service.execute_plan(
+        session=SimpleNamespace(
+            session_id=fixture.session.session_id,
+            story_id=fixture.session.story_id,
+            mode=fixture.session.mode,
+        ),
+        chapter=fixture.chapter,
+        plan=fixture.plan,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model-a",
+        provider_id="provider-a",
+        user_prompt="Continue the chapter.",
+        orchestrator_plan=_orchestrator_plan(),
+        accepted_segments=[],
+        pending_artifact=None,
+    )
+
+    assert specialist.calls == []
+    assert len(fake_gateway.calls) == 1
+    assert outcome.specialist_bundle == SpecialistResultBundle()
+    result = outcome.worker_results[0]
+    assert result.result_status == WorkerResultStatus.COMPLETED
+    assert result.proposal_candidates[0]["candidate_kind"] == (
+        S3_MEMORY_MAINTENANCE_CANDIDATE_KIND
+    )
+    assert result.trace_summary["runner_mode"] == "production"
+    assert result.trace_summary["runner_schema_name"] == (
+        "memory-maintenance-worker-output"
+    )
+    assert result.trace_summary["runner_schema_version"] == (
+        S3_MEMORY_WORKER_OUTPUT_SCHEMA_VERSION
     )
 
 

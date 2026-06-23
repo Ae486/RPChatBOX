@@ -24,18 +24,18 @@ framework/product boundary.
 
 ### 1. Generic structured-output runner port
 
-Add a generic runner interface in a story-runtime / agent-harness location.
+Add a generic runner interface in a runtime-owned service/contract module under
+`backend/rp/services/runtime/`.
 
-Allowed placement range:
+Placement decision:
 
-- a new story-runtime harness module under `backend/rp/agent_runtime/` if it is
-  setup-free and not inside `agent_runtime/setup/`;
-- or a runtime-owned service/contract module under `backend/rp/services/runtime/`
-  if the existing package layout makes that the narrower dependency direction.
-
-Do not place the generic port under `writer/` or `setup_agent/`. The memory
-runner can live under `writer/` only as a role/worker-specific adapter around
-the generic port.
+- use `services/runtime/` as the generic port home for S3.5;
+- do not place the generic port under `writer/` or `setup_agent/`;
+- do not place the generic port under `agent_runtime/kernel/`, whose current
+  package boundary is reserved for setup-free graph substrate and should not
+  absorb runtime service dependencies;
+- the memory runner can live under `writer/` only as a role/worker-specific
+  adapter around the generic port.
 
 Candidate shape:
 

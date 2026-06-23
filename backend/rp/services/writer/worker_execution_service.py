@@ -134,6 +134,8 @@ class WorkerExecutionService:
                 phase=plan.phase,
                 mode=session.mode,
                 turn_id=plan.identity.turn_id,
+                model_id=model_id,
+                provider_id=provider_id,
                 context_packet_ref=(
                     context_packet.packet_id if context_packet is not None else None
                 ),

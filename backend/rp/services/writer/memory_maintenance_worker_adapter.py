@@ -8,6 +8,7 @@ The later S3c handoff owns governance routing.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any, Literal, Protocol
 
@@ -183,14 +184,32 @@ class MemoryMaintenanceWorkerAdapter:
                     registration=registration,
                     context_packet=context_packet,
                 )
+            except asyncio.CancelledError as exc:
+                return self._failure_result(
+                    request=request,
+                    registration=registration,
+                    reason_code="memory_worker_cancelled",
+                    message=str(exc) or "Memory worker execution was cancelled.",
+                    failure_source="runner_execution",
+                    retryable=True,
+                )
+            except TimeoutError as exc:
+                return self._failure_result(
+                    request=request,
+                    registration=registration,
+                    reason_code="memory_worker_timeout",
+                    message=str(exc) or "Memory worker execution timed out.",
+                    failure_source="runner_execution",
+                    retryable=True,
+                )
             except Exception as exc:  # pragma: no cover - exact exception type is runner-owned.
                 return self._failure_result(
                     request=request,
                     registration=registration,
-                    reason_code="memory_worker_fake_execution_failed",
+                    reason_code="memory_worker_provider_error",
                     message=str(exc),
-                    failure_source="fake_execution",
-                    retryable=False,
+                    failure_source="runner_execution",
+                    retryable=True,
                 )
 
         parsed = self._parse_structured_output(
@@ -290,14 +309,30 @@ class MemoryMaintenanceWorkerAdapter:
                 }
             )
         if findings:
+            has_schema_version_mismatch = any(
+                finding["reason_code"]
+                == "memory_worker_output_schema_version_unsupported"
+                for finding in findings
+            )
+            reason_code = (
+                "memory_worker_output_schema_version_unsupported"
+                if has_schema_version_mismatch
+                else "memory_worker_structured_output_identity_mismatch"
+            )
+            message = (
+                "Unsupported memory-maintenance worker output schema version."
+                if has_schema_version_mismatch
+                else "Structured output identity fields do not match request."
+            )
             return self._failure_result(
                 request=request,
                 registration=registration,
-                reason_code="memory_worker_structured_output_identity_mismatch",
-                message="Structured output identity fields do not match request.",
+                reason_code=reason_code,
+                message=message,
                 failure_source="schema_parse",
                 retryable=False,
                 validation_findings=findings,
+                extra_trace_summary=self._runner_trace_summary(parsed),
             )
         return parsed
 
@@ -315,7 +350,7 @@ class MemoryMaintenanceWorkerAdapter:
             batch=batch,
         )
         if validation_failure is not None:
-            return validation_failure
+            return self._with_runner_trace_summary(validation_failure, output)
 
         validation_failure = self._candidate_batch_identity_result(
             request=request,
@@ -323,14 +358,17 @@ class MemoryMaintenanceWorkerAdapter:
             batch=batch,
         )
         if validation_failure is not None:
-            return validation_failure
+            return self._with_runner_trace_summary(validation_failure, output)
 
         validation = self._validation_service.validate_batch(batch)
         if not validation.accepted:
-            return self._candidate_batch_validation_error_result(
-                request=request,
-                registration=registration,
-                validation_errors=validation.errors,
+            return self._with_runner_trace_summary(
+                self._candidate_batch_validation_error_result(
+                    request=request,
+                    registration=registration,
+                    validation_errors=validation.errors,
+                ),
+                output,
             )
 
         return self._candidate_batch_success_result(
@@ -410,10 +448,11 @@ class MemoryMaintenanceWorkerAdapter:
         registration: RuntimeWorkerRegistration,
         validation_errors: list[Any],
     ) -> WorkerResult:
+        top_reason_code = self._top_level_validation_reason_code(validation_errors)
         return self._failure_result(
             request=request,
             registration=registration,
-            reason_code="memory_worker_candidate_validation_failed",
+            reason_code=top_reason_code,
             message="Memory-maintenance candidate batch failed validation.",
             failure_source="validation",
             retryable=False,
@@ -430,6 +469,16 @@ class MemoryMaintenanceWorkerAdapter:
                 for error in validation_errors
             ],
         )
+
+    @staticmethod
+    def _top_level_validation_reason_code(validation_errors: list[Any]) -> str:
+        if len(validation_errors) == 1:
+            error_code = str(getattr(validation_errors[0], "code", "") or "")
+            if error_code == "memory_candidate_missing_source_refs":
+                return "memory_worker_source_ref_missing"
+            if error_code == "memory_candidate_missing_base_block_revision":
+                return "memory_worker_base_ref_missing"
+        return "memory_worker_candidate_validation_failed"
 
     @staticmethod
     def _candidate_batch_success_candidate(
@@ -479,6 +528,7 @@ class MemoryMaintenanceWorkerAdapter:
                 "authoritative_mutation": False,
                 "mutation_boundary": "candidate_only_no_truth_write",
                 "context_packet_ref": request.context_packet_ref,
+                **self._runner_trace_summary(output),
             },
             metadata={
                 "adapter": S3_MEMORY_WORKER_ADAPTER_ID,
@@ -517,6 +567,7 @@ class MemoryMaintenanceWorkerAdapter:
                 "source_of_truth": False,
                 "authoritative_mutation": False,
                 "context_packet_ref": request.context_packet_ref,
+                **self._runner_trace_summary(output),
             },
             metadata={
                 "adapter": S3_MEMORY_WORKER_ADAPTER_ID,
@@ -560,7 +611,53 @@ class MemoryMaintenanceWorkerAdapter:
                 "structured_output_metadata": dict(output.metadata),
                 "failure_metadata": dict(failure.metadata),
             },
+            extra_trace_summary=self._runner_trace_summary(output),
         )
+
+    @staticmethod
+    def _with_runner_trace_summary(
+        result: WorkerResult,
+        output: MemoryMaintenanceWorkerStructuredOutput,
+    ) -> WorkerResult:
+        runner_trace_summary = MemoryMaintenanceWorkerAdapter._runner_trace_summary(
+            output
+        )
+        if not runner_trace_summary:
+            return result
+        return result.model_copy(
+            update={
+                "trace_summary": {
+                    **dict(result.trace_summary),
+                    **runner_trace_summary,
+                },
+                "metadata": {
+                    **dict(result.metadata),
+                    "runner_trace_summary": runner_trace_summary,
+                },
+            }
+        )
+
+    @staticmethod
+    def _runner_trace_summary(
+        output: MemoryMaintenanceWorkerStructuredOutput,
+    ) -> dict[str, Any]:
+        runner_trace = output.metadata.get("runner_trace")
+        if not isinstance(runner_trace, dict):
+            return {}
+
+        summary: dict[str, Any] = {}
+        field_map = {
+            "runner_mode": "runner_mode",
+            "schema_name": "runner_schema_name",
+            "schema_version": "runner_schema_version",
+            "provider_id": "runner_provider_id",
+            "model_id": "runner_model_id",
+        }
+        for source_key, target_key in field_map.items():
+            value = runner_trace.get(source_key)
+            if isinstance(value, str) and value.strip():
+                summary[target_key] = value
+        return summary
 
     @staticmethod
     def _failure_result(
@@ -573,6 +670,7 @@ class MemoryMaintenanceWorkerAdapter:
         retryable: bool,
         validation_findings: list[dict[str, Any]] | None = None,
         extra_metadata: dict[str, Any] | None = None,
+        extra_trace_summary: dict[str, Any] | None = None,
     ) -> WorkerResult:
         findings = validation_findings or [
             {
@@ -596,6 +694,7 @@ class MemoryMaintenanceWorkerAdapter:
                 "source_of_truth": False,
                 "authoritative_mutation": False,
                 "context_packet_ref": request.context_packet_ref,
+                **dict(extra_trace_summary or {}),
             },
             metadata={
                 "adapter": S3_MEMORY_WORKER_ADAPTER_ID,

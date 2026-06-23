@@ -121,6 +121,8 @@ class WorkerExecutionRequest(BaseModel):
     phase: str
     mode: str
     turn_id: str
+    model_id: str | None = None
+    provider_id: str | None = None
     context_packet_ref: str | None = None
     context_packet: dict[str, Any] | None = None
     execution_policy: WorkerExecutionPolicy
@@ -134,7 +136,7 @@ class WorkerExecutionRequest(BaseModel):
     def _require_text(cls, value: str, info: ValidationInfo) -> str:
         return _require_non_blank(value, field_name=info.field_name or "value")
 
-    @field_validator("context_packet_ref", "budget_class")
+    @field_validator("model_id", "provider_id", "context_packet_ref", "budget_class")
     @classmethod
     def _normalize_optional_request_text(
         cls,
