@@ -131,6 +131,9 @@ from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.story.turn_domain_service import StoryTurnDomainService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.memory.version_history_read_service import VersionHistoryReadService
+from rp.services.writer.memory_maintenance_worker_adapter import (
+    MemoryMaintenanceWorkerAdapter,
+)
 from rp.services.writer.worker_execution_service import WorkerExecutionService
 from rp.services.writer.worker_memory_service import WorkerMemoryService
 from rp.services.writer.worker_registry_service import WorkerRegistryService
@@ -525,6 +528,8 @@ class RpRuntimeFactory:
             longform_specialist_service=specialist_service,
             context_orchestration_service=context_orchestration_service,
             runtime_workspace_facade=runtime_workspace_facade,
+            longform_memory_worker_adapter=MemoryMaintenanceWorkerAdapter(),
+            enable_legacy_longform_memory_worker_specialist_fallback=True,
         )
         post_write_scheduler_service = PostWriteSchedulerService(
             worker_scheduler_service=worker_scheduler_service,

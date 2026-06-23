@@ -24,6 +24,7 @@ from rp.models.writer.worker_runtime_contracts import (
     WorkerResultStatus,
 )
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
+from .memory_maintenance_worker_adapter import MemoryMaintenanceWorkerAdapter
 from .longform_specialist_service import LongformSpecialistService
 from rp.services.story.runtime_adapter_service import StoryRuntimeAdapterService
 from rp.services.story.runtime_workspace_facade import (
@@ -32,6 +33,11 @@ from rp.services.story.runtime_workspace_facade import (
 from .worker_registry_service import (
     LONGFORM_MEMORY_WORKER_ID,
     WorkerRegistryService,
+)
+
+LEGACY_SPECIALIST_COMPATIBILITY_MODE = "legacy_specialist_compatibility"
+MEMORY_WORKER_RUNNER_MISSING_COMPATIBILITY_REASON = (
+    "memory_worker_structured_output_runner_missing"
 )
 
 
@@ -69,6 +75,8 @@ class WorkerExecutionService:
         context_orchestration_service: ContextOrchestrationService | None = None,
         runtime_workspace_facade: StoryRuntimeWorkspaceFacade | None = None,
         story_runtime_adapter_service: StoryRuntimeAdapterService | None = None,
+        longform_memory_worker_adapter: MemoryMaintenanceWorkerAdapter | None = None,
+        enable_legacy_longform_memory_worker_specialist_fallback: bool = False,
     ) -> None:
         self._worker_registry_service = worker_registry_service
         self._longform_specialist_service = longform_specialist_service
@@ -76,6 +84,10 @@ class WorkerExecutionService:
         self._runtime_workspace_facade = runtime_workspace_facade
         self._story_runtime_adapter_service = (
             story_runtime_adapter_service or StoryRuntimeAdapterService()
+        )
+        self._longform_memory_worker_adapter = longform_memory_worker_adapter
+        self._enable_legacy_longform_memory_worker_specialist_fallback = (
+            enable_legacy_longform_memory_worker_specialist_fallback
         )
 
     async def execute_plan(
@@ -232,6 +244,37 @@ class WorkerExecutionService:
             if isinstance(request.context_packet, dict)
             else None
         )
+        if (
+            self._longform_memory_worker_adapter is not None
+            and self._longform_memory_worker_adapter.has_structured_output_runner
+        ):
+            return _WorkerAdapterOutcome(
+                worker_result=await self._longform_memory_worker_adapter.execute(
+                    request=request,
+                    registration=registration,
+                    context_packet=context_packet,
+                ),
+                specialist_bundle=SpecialistResultBundle(),
+            )
+
+        if not self._enable_legacy_longform_memory_worker_specialist_fallback:
+            if self._longform_memory_worker_adapter is not None:
+                return _WorkerAdapterOutcome(
+                    worker_result=await self._longform_memory_worker_adapter.execute(
+                        request=request,
+                        registration=registration,
+                        context_packet=context_packet,
+                    ),
+                    specialist_bundle=None,
+                )
+            return _WorkerAdapterOutcome(
+                worker_result=self._build_missing_executor_result(
+                    request=request,
+                    registration=registration,
+                ),
+                specialist_bundle=None,
+            )
+
         bundle = await self._longform_specialist_service.analyze(
             session=session,
             chapter=chapter,
@@ -250,9 +293,32 @@ class WorkerExecutionService:
             registration=registration,
             bundle=bundle,
         )
+        result = self._add_legacy_specialist_compatibility_trace(result)
         return _WorkerAdapterOutcome(
             worker_result=result,
             specialist_bundle=bundle,
+        )
+
+    @staticmethod
+    def _add_legacy_specialist_compatibility_trace(
+        result: WorkerResult,
+    ) -> WorkerResult:
+        compatibility_metadata = {
+            "executor_mode": LEGACY_SPECIALIST_COMPATIBILITY_MODE,
+            "compatibility_reason": MEMORY_WORKER_RUNNER_MISSING_COMPATIBILITY_REASON,
+            "s3_executor_migration_complete": False,
+        }
+        return result.model_copy(
+            update={
+                "trace_summary": {
+                    **dict(result.trace_summary),
+                    **compatibility_metadata,
+                },
+                "metadata": {
+                    **dict(result.metadata),
+                    **compatibility_metadata,
+                },
+            }
         )
 
     @staticmethod

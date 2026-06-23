@@ -80,6 +80,17 @@ Codex-native subagent dispatch rather than turning the main session into the
 only engineer. Avoid ad-hoc raw CLI/session dispatch unless the native path is
 unavailable, and record the reason when an exception is used.
 
+Current Codex dispatch finding, verified 2026-06-23:
+
+- official Codex docs describe true internal subagent workflows, but the current
+  non-interactive `codex exec` environment used from this API session does not
+  expose a built-in spawn tool to the child session;
+- direct main-brain-launched `codex exec` does work as an official
+  non-interactive child-session dispatch path;
+- do not nest `codex exec` inside a child Codex sandbox as the default
+  mechanism, because local testing hit `.codex/tmp` / in-process app-server
+  permission failures.
+
 Recommended loop:
 
 ```text

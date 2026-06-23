@@ -17,6 +17,8 @@ from rp.models.story.runtime import (
     StoryArtifactKind,
 )
 from rp.models.writer.worker_runtime_contracts import WorkerPlanSource
+from rp.models.writer.worker_runtime_contracts import WorkerResultStatus
+from rp.runtime import rp_runtime_factory as runtime_factory_module
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story.session_service import StorySessionService
@@ -33,6 +35,14 @@ from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
 from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
+from rp.services.writer.memory_maintenance_worker_adapter import (
+    MemoryMaintenanceWorkerAdapter,
+    S3_MEMORY_MAINTENANCE_CANDIDATE_BATCH_SCHEMA_VERSION,
+    S3_MEMORY_MAINTENANCE_CANDIDATE_KIND,
+    S3_MEMORY_WORKER_ADAPTER_ID,
+    S3_MEMORY_WORKER_OUTPUT_SCHEMA_VERSION,
+    ScriptedMemoryMaintenanceStructuredOutputRunner,
+)
 from rp.services.writer.worker_execution_service import WorkerExecutionService
 from rp.services.writer.worker_registry_service import (
     LONGFORM_MEMORY_WORKER_ID,
@@ -135,128 +145,152 @@ def test_worker_scheduler_selects_active_prewrite_longform_worker_from_snapshot(
 
 
 @pytest.mark.asyncio
-async def test_worker_execution_service_adapts_longform_memory_worker_to_legacy_bundle(
+async def test_worker_execution_service_uses_s3_memory_adapter_when_runner_exists(
     retrieval_session,
 ):
-    session, chapter = _seed_story_runtime(
+    fixture = _worker_execution_fixture(
         retrieval_session,
-        story_id="worker-execution-adapter",
+        story_id="worker-execution-s3-adapter",
     )
-    snapshot = RuntimeProfileSnapshotService(retrieval_session).ensure_active_snapshot(
-        session_id=session.session_id,
-        created_from="test.worker_execution.adapter",
-    )
-    identity = MemoryRuntimeIdentity(
-        story_id=session.story_id,
-        session_id=session.session_id,
-        branch_head_id="branch:test:main",
-        turn_id="turn:test:1",
-        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
-    )
-    registry_service = WorkerRegistryService(retrieval_session)
-    scheduler = WorkerSchedulerService(worker_registry_service=registry_service)
-    plan = scheduler.build_plan(identity=identity, phase=PRE_WRITE_CONTEXT_PHASE)
-    specialist = _RecordingSpecialistService()
-    story_session_service = StorySessionService(retrieval_session)
-    context_orchestration = ContextOrchestrationService(
-        story_session_service=story_session_service,
-        builder_projection_context_service=BuilderProjectionContextService(
-            ProjectionStateService(
-                story_session_service=story_session_service,
-                adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
-            )
-        ),
-        writing_packet_builder=WritingPacketBuilder(),
-        runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
-            session=retrieval_session
-        ),
-    )
-    runtime_workspace_material_service = RuntimeWorkspaceMaterialService(
-        session=retrieval_session
+    runner = ScriptedMemoryMaintenanceStructuredOutputRunner(
+        [_candidate_output(phase=PRE_WRITE_CONTEXT_PHASE)]
     )
     execution_service = WorkerExecutionService(
-        worker_registry_service=registry_service,
-        longform_specialist_service=specialist,  # type: ignore[arg-type]
-        context_orchestration_service=context_orchestration,
+        worker_registry_service=fixture.registry_service,
+        longform_specialist_service=fixture.specialist,  # type: ignore[arg-type]
+        context_orchestration_service=fixture.context_orchestration,
         runtime_workspace_facade=StoryRuntimeWorkspaceFacade(
-            runtime_workspace_material_service=runtime_workspace_material_service
+            runtime_workspace_material_service=fixture.runtime_workspace_material_service
         ),
-    )
-    orchestrator_plan = OrchestratorPlan(
-        output_kind=StoryArtifactKind.STORY_SEGMENT,
-        writer_instruction="Write the next segment.",
-        needs_retrieval=True,
-        archival_queries=["storm"],
-        recall_queries=["seal"],
+        longform_memory_worker_adapter=MemoryMaintenanceWorkerAdapter(
+            structured_output_runner=runner
+        ),
     )
 
     outcome = await execution_service.execute_plan(
         session=SimpleNamespace(
-            session_id=session.session_id,
-            story_id=session.story_id,
-            mode=session.mode,
+            session_id=fixture.session.session_id,
+            story_id=fixture.session.story_id,
+            mode=fixture.session.mode,
         ),
-        chapter=chapter,
-        plan=plan,
+        chapter=fixture.chapter,
+        plan=fixture.plan,
         command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
         model_id="model",
         provider_id=None,
         user_prompt="Continue the chapter.",
-        orchestrator_plan=orchestrator_plan,
+        orchestrator_plan=_orchestrator_plan(),
         accepted_segments=[],
         pending_artifact=None,
     )
 
-    assert len(specialist.calls) == 1
-    assert specialist.calls[0]["runtime_identity"] == identity
-    assert specialist.calls[0]["plan"] == orchestrator_plan
-    context_packet = cast(Any, specialist.calls[0]["context_packet"])
+    assert fixture.specialist.calls == []
+    assert runner.call_count == 1
+    assert outcome.specialist_bundle == SpecialistResultBundle()
+    assert len(outcome.worker_results) == 1
+    result = outcome.worker_results[0]
+    assert result.worker_id == LONGFORM_MEMORY_WORKER_ID
+    assert result.result_status == WorkerResultStatus.COMPLETED
+    assert result.proposal_candidates[0]["candidate_kind"] == (
+        S3_MEMORY_MAINTENANCE_CANDIDATE_KIND
+    )
+    assert result.proposal_candidates[0]["metadata"]["adapter"] == (
+        S3_MEMORY_WORKER_ADAPTER_ID
+    )
+    assert result.metadata["adapter"] == S3_MEMORY_WORKER_ADAPTER_ID
+    assert result.metadata["structured_output_metadata"] == {"fake_runner": True}
+    assert result.trace_summary["candidate_kind"] == (
+        S3_MEMORY_MAINTENANCE_CANDIDATE_KIND
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_execution_service_uses_explicit_legacy_compatibility_fallback(
+    retrieval_session,
+):
+    fixture = _worker_execution_fixture(
+        retrieval_session,
+        story_id="worker-execution-legacy-compat",
+    )
+    execution_service = WorkerExecutionService(
+        worker_registry_service=fixture.registry_service,
+        longform_specialist_service=fixture.specialist,  # type: ignore[arg-type]
+        context_orchestration_service=fixture.context_orchestration,
+        runtime_workspace_facade=StoryRuntimeWorkspaceFacade(
+            runtime_workspace_material_service=fixture.runtime_workspace_material_service
+        ),
+        longform_memory_worker_adapter=MemoryMaintenanceWorkerAdapter(),
+        enable_legacy_longform_memory_worker_specialist_fallback=True,
+    )
+
+    outcome = await execution_service.execute_plan(
+        session=SimpleNamespace(
+            session_id=fixture.session.session_id,
+            story_id=fixture.session.story_id,
+            mode=fixture.session.mode,
+        ),
+        chapter=fixture.chapter,
+        plan=fixture.plan,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        model_id="model",
+        provider_id=None,
+        user_prompt="Continue the chapter.",
+        orchestrator_plan=_orchestrator_plan(),
+        accepted_segments=[],
+        pending_artifact=None,
+    )
+
+    assert len(fixture.specialist.calls) == 1
+    assert fixture.specialist.calls[0]["runtime_identity"] == fixture.identity
+    assert fixture.specialist.calls[0]["plan"] == _orchestrator_plan()
+    context_packet = cast(Any, fixture.specialist.calls[0]["context_packet"])
     assert context_packet is not None
     assert context_packet.worker_id == LONGFORM_MEMORY_WORKER_ID
     assert context_packet.phase == PRE_WRITE_CONTEXT_PHASE
     assert context_packet.session_refs == [
-        f"story_session:{session.session_id}",
-        f"chapter_workspace:{chapter.chapter_workspace_id}",
+        f"story_session:{fixture.session.session_id}",
+        f"chapter_workspace:{fixture.chapter.chapter_workspace_id}",
     ]
     assert outcome.specialist_bundle.writer_hints == ["Hint A"]
     assert len(outcome.worker_results) == 1
-    assert outcome.worker_results[0].worker_id == LONGFORM_MEMORY_WORKER_ID
-    assert outcome.worker_results[0].metadata["legacy_bundle_kind"] == (
-        "SpecialistResultBundle"
+    result = outcome.worker_results[0]
+    assert result.worker_id == LONGFORM_MEMORY_WORKER_ID
+    assert result.metadata["legacy_bundle_kind"] == "SpecialistResultBundle"
+    assert result.metadata["context_packet_ref"].startswith("worker-packet-")
+    assert result.trace_summary["context_packet_ref"].startswith("worker-packet-")
+    assert result.trace_summary["adapter_role"] == "legacy_executor_bridge"
+    assert result.trace_summary["legacy_plan_role"] == "adapter_input"
+    assert result.metadata["runtime_truth"] == "worker_runtime_contract"
+    assert result.metadata["executor_mode"] == "legacy_specialist_compatibility"
+    assert result.trace_summary["executor_mode"] == (
+        "legacy_specialist_compatibility"
     )
-    assert outcome.worker_results[0].metadata["context_packet_ref"].startswith(
-        "worker-packet-"
+    assert result.metadata["compatibility_reason"] == (
+        "memory_worker_structured_output_runner_missing"
     )
-    assert outcome.worker_results[0].trace_summary["context_packet_ref"].startswith(
-        "worker-packet-"
+    assert result.trace_summary["compatibility_reason"] == (
+        "memory_worker_structured_output_runner_missing"
     )
-    assert outcome.worker_results[0].trace_summary["adapter_role"] == (
-        "legacy_executor_bridge"
-    )
-    assert outcome.worker_results[0].trace_summary["legacy_plan_role"] == (
-        "adapter_input"
-    )
-    assert outcome.worker_results[0].metadata["runtime_truth"] == (
-        "worker_runtime_contract"
-    )
-    assert outcome.worker_results[0].proposal_candidates == [
+    assert result.metadata["s3_executor_migration_complete"] is False
+    assert result.trace_summary["s3_executor_migration_complete"] is False
+    assert result.proposal_candidates == [
         {
             "candidate_kind": "legacy_state_patch",
             "payload": {"chapter_digest": {"current_chapter": 1}},
         }
     ]
-    assert outcome.worker_results[0].recall_candidates == [
+    assert result.recall_candidates == [
         {
             "candidate_kind": "legacy_recall_summary",
             "text": "Recall A",
         }
     ]
-    evidence_materials = runtime_workspace_material_service.list_materials(
-        identity=identity,
+    evidence_materials = fixture.runtime_workspace_material_service.list_materials(
+        identity=fixture.identity,
         material_kind=RuntimeWorkspaceMaterialKind.WORKER_EVIDENCE_BUNDLE,
     )
-    candidate_materials = runtime_workspace_material_service.list_materials(
-        identity=identity,
+    candidate_materials = fixture.runtime_workspace_material_service.list_materials(
+        identity=fixture.identity,
         material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
     )
     assert len(evidence_materials) == 1
@@ -277,3 +311,129 @@ async def test_worker_execution_service_adapts_longform_memory_worker_to_legacy_
             "text": "Recall A",
         }
     ]
+
+
+def test_runtime_factory_wires_memory_worker_adapter_and_explicit_compatibility(
+    monkeypatch,
+    retrieval_session,
+):
+    captured_kwargs: dict[str, Any] = {}
+
+    class _StopFactory(RuntimeError):
+        pass
+
+    class _CaptureWorkerExecutionService:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            raise _StopFactory
+
+    monkeypatch.setattr(
+        runtime_factory_module,
+        "WorkerExecutionService",
+        _CaptureWorkerExecutionService,
+    )
+
+    with pytest.raises(_StopFactory):
+        runtime_factory_module.RpRuntimeFactory(
+            retrieval_session
+        ).build_story_turn_domain_service()
+
+    adapter = captured_kwargs["longform_memory_worker_adapter"]
+    assert isinstance(adapter, MemoryMaintenanceWorkerAdapter)
+    assert adapter.has_structured_output_runner is False
+    assert (
+        captured_kwargs["enable_legacy_longform_memory_worker_specialist_fallback"]
+        is True
+    )
+
+
+def _orchestrator_plan() -> OrchestratorPlan:
+    return OrchestratorPlan(
+        output_kind=StoryArtifactKind.STORY_SEGMENT,
+        writer_instruction="Write the next segment.",
+        needs_retrieval=True,
+        archival_queries=["storm"],
+        recall_queries=["seal"],
+    )
+
+
+def _worker_execution_fixture(retrieval_session, *, story_id: str):
+    session, chapter = _seed_story_runtime(retrieval_session, story_id=story_id)
+    snapshot = RuntimeProfileSnapshotService(retrieval_session).ensure_active_snapshot(
+        session_id=session.session_id,
+        created_from=f"test.{story_id}",
+    )
+    identity = MemoryRuntimeIdentity(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id="branch:test:main",
+        turn_id="turn:test:1",
+        runtime_profile_snapshot_id=snapshot.runtime_profile_snapshot_id,
+    )
+    registry_service = WorkerRegistryService(retrieval_session)
+    plan = WorkerSchedulerService(worker_registry_service=registry_service).build_plan(
+        identity=identity,
+        phase=PRE_WRITE_CONTEXT_PHASE,
+    )
+    runtime_workspace_material_service = RuntimeWorkspaceMaterialService(
+        session=retrieval_session
+    )
+    story_session_service = StorySessionService(retrieval_session)
+    context_orchestration = ContextOrchestrationService(
+        story_session_service=story_session_service,
+        builder_projection_context_service=BuilderProjectionContextService(
+            ProjectionStateService(
+                story_session_service=story_session_service,
+                adapter=ChapterWorkspaceProjectionAdapter(story_session_service),
+            )
+        ),
+        writing_packet_builder=WritingPacketBuilder(),
+        runtime_workspace_material_service=runtime_workspace_material_service,
+    )
+    return SimpleNamespace(
+        session=session,
+        chapter=chapter,
+        identity=identity,
+        registry_service=registry_service,
+        plan=plan,
+        specialist=_RecordingSpecialistService(),
+        context_orchestration=context_orchestration,
+        runtime_workspace_material_service=runtime_workspace_material_service,
+    )
+
+
+def _candidate_output(*, phase: str):
+    return {
+        "schema_version": S3_MEMORY_WORKER_OUTPUT_SCHEMA_VERSION,
+        "status": "candidate_batch",
+        "worker_id": LONGFORM_MEMORY_WORKER_ID,
+        "phase": phase,
+        "candidate_batch": {
+            "schema_version": S3_MEMORY_MAINTENANCE_CANDIDATE_BATCH_SCHEMA_VERSION,
+            "worker_id": LONGFORM_MEMORY_WORKER_ID,
+            "phase": phase,
+            "candidates": [
+                {
+                    "target_domain": "current_scene",
+                    "target_block_id": "scene.frame",
+                    "base_block_revision_id": "block-revision-1",
+                    "operations": [
+                        {
+                            "kind": "append_item",
+                            "field_id": "facts",
+                            "content": "The storm has cut off the bridge.",
+                        }
+                    ],
+                    "source_refs": [
+                        {
+                            "source_type": "accepted_prose",
+                            "source_id": "segment-1",
+                            "layer": "runtime_workspace",
+                        }
+                    ],
+                    "change_summary": "Track the bridge cutoff as scene framing.",
+                }
+            ],
+        },
+        "metadata": {"fake_runner": True},
+    }

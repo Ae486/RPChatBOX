@@ -401,6 +401,98 @@ Production code touched: no.
 
 Tests run: none. This was a planning/documentation step.
 
+## 2026-06-23 — S3g-b production executor compatibility landed
+
+Main-brain actions:
+
+- Reviewed the interrupted S3g-b partial diff against
+  `21-S3g-b-production-executor-compatibility-brief.md`.
+- Confirmed the intended S3g-b code path:
+  - `LongformMemoryWorker` uses `MemoryMaintenanceWorkerAdapter` when a
+    structured-output runner exists;
+  - legacy specialist execution is allowed only through explicit compatibility
+    fallback;
+  - compatibility results carry stable metadata / trace with
+    `executor_mode="legacy_specialist_compatibility"`,
+    `compatibility_reason="memory_worker_structured_output_runner_missing"`,
+    and `s3_executor_migration_complete=False`;
+  - `rp_runtime_factory.py` wires the adapter plus explicit compatibility flag.
+- Verified the current Codex dispatch mechanics through official OpenAI Codex
+  docs and local no-op tests:
+  - true internal subagent workflow is documented by OpenAI but not exposed in
+    this non-interactive child session environment;
+  - direct main-brain-launched `codex exec` works as the verified
+    Codex-native non-interactive child-session fallback;
+  - nested `codex exec` inside a child Codex sandbox failed on `.codex/tmp` /
+    in-process app-server permissions and must not be used as the default.
+- Recorded dispatch findings in
+  `execution/main-brain/codex-subagent-dispatch-research-2026-06-23.md` and
+  amended main-brain operating rules.
+- Ran S3g-b gates:
+
+```text
+python -m pytest -n auto rp/tests/services/writer/test_worker_scheduler_service.py
+Result: 4 passed, 15 warnings.
+
+python -m pytest -n auto rp/tests/services/writer/test_memory_maintenance_worker_adapter.py rp/tests/services/proposal/test_memory_candidate_governance_routing.py
+Result: 15 passed, 15 warnings.
+
+python -m pytest -n auto tests/test_story_runtime_s3_memory_worker_e2e.py
+Result: 4 passed, 75 warnings.
+
+python -m ruff check rp/services/writer/worker_execution_service.py rp/services/writer/memory_maintenance_worker_adapter.py rp/runtime/rp_runtime_factory.py rp/tests/services/writer/test_worker_scheduler_service.py
+Result: All checks passed.
+```
+
+- Ran `python backend/rp/devtools/check_service_sizes.py`; it failed only on
+  known story-service baseline drift (`story/runtime_identity_service.py` and
+  `story/turn_domain_service.py`), not on S3g-b target files.
+- Dispatched a fresh read-only Codex review via direct `codex exec` child
+  session `019ef21b-3558-7d83-bdd8-8ea7f5ab9040`.
+- Fresh review verdict: `GO`.
+- Wrote `23-S3g-b-implementation-result.md` and `S3g-b-check-record.md`.
+
+Residual gap:
+
+- Production memory-maintenance structured-output runner is still missing. S3g-b
+  intentionally leaves the normal runtime as adapter-ready seam plus explicit
+  legacy compatibility fallback.
+
+## 2026-06-23 — S3g-b post-roadmap recovery gate
+
+Main-brain actions:
+
+- Accepted the user's process criticism: S3 had local PRD/SDD/brief/check
+  records, but lacked a sufficient project-level construction map before
+  implementation progressed.
+- Replaced `execution/main-brain/overall-implementation-roadmap.md` with a
+  mandatory pre-implementation gate covering:
+  - phase sequencing across S3/S3.5/S4/S5/S6/S7;
+  - harness versus product-service boundaries;
+  - old MVP path classification;
+  - tool contract gate;
+  - test/review/commit gates.
+- Created
+  `execution/main-brain/S3-retrospective-against-overall-roadmap.md`.
+- Re-read the S3g-b diff and classified it as a bounded compatibility slice,
+  not full production executor migration.
+- Cleared S3g-b for focused verification and explicit-path commit only.
+
+Gate decision:
+
+```text
+S3g-b may be committed as adapter-ready seam + explicit legacy compatibility
+fallback. It must not be described as production structured-output runner
+completion.
+```
+
+Required before S4:
+
+- record the S3g-b commit hash after commit;
+- complete an S3.5 decision on whether the production memory-maintenance
+  structured-output runner is implemented before S4 or explicitly deferred
+  with owner, risk, and next-phase impact.
+
 ## 2026-06-23 — S3f implementation and fresh review gate passed
 
 Main-brain actions:

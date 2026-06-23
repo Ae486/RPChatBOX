@@ -149,6 +149,12 @@ class MemoryMaintenanceWorkerAdapter:
         )
         self._structured_output_runner = structured_output_runner
 
+    @property
+    def has_structured_output_runner(self) -> bool:
+        """Report whether this adapter can execute through a configured runner."""
+
+        return self._structured_output_runner is not None
+
     async def execute(
         self,
         *,

@@ -70,8 +70,11 @@ S3 agent/tool/proposal patterns become reusable.
     implement workers for code and Trellis check / fresh review workers for
     audits.
 23. Prefer Trellis/Codex-native subagent dispatch for implement/check/review
-    work. Avoid ad-hoc raw CLI/session dispatch unless the native path is
-    unavailable; if this exception is used, record why in the slice worklog.
+    work. If the current parent session exposes true Codex internal subagent
+    workflow, use that first. In this API/main-brain environment, direct
+    main-brain-launched `codex exec` is the verified Codex-native
+    non-interactive child-session fallback; record the command, output path, and
+    session id when available.
 24. Subagents should not run pytest by default. Test execution is normally owned
     by the main-brain or a dedicated check gate. If a subagent must run pytest
     for a focused local check, it must use `-n auto` and report the exact
@@ -90,6 +93,12 @@ S3 agent/tool/proposal patterns become reusable.
 29. Preserve rollback points with small commits after coherent slices pass their
     gates. Stage only slice-owned files, and use explicit force-add only for
     required ignored Trellis task documents.
+30. Do not start a new implementation slice from only local PRD/SDD/brief
+    documents. A project-level construction map must exist first:
+    `execution/main-brain/overall-implementation-roadmap.md`. If implementation
+    has already progressed before that map was sufficient, pause, write a
+    retrospective gate, and audit the landed/pending work before continuing or
+    committing.
 
 ## Framework Boundary Vocabulary
 
@@ -126,11 +135,21 @@ review policy, and truth mutation.
 
 - Use subagents for implementation, focused audits, and large document reviews,
   preferably through Trellis/Codex-native dispatch mechanisms.
-- Give every subagent a bounded scope, source documents, forbidden actions, and
-  expected output path.
+- Give every subagent a bounded scope, source documents, relevant file anchors,
+  forbidden actions, and expected output path. The main-brain has the broader
+  project map, so it must pre-feed likely relevant files instead of forcing each
+  subagent to rediscover the whole route.
+- Subagents may gather additional information when needed. The brief should
+  allow YCE code search and exact file reads for adjacent evidence, while still
+  keeping the implementation/review scope bounded.
 - Subagents must not commit unless explicitly instructed.
 - Subagents should not run pytest by default. If pytest is necessary for their
   focused scope, they must use `-n auto` and report the exact command.
+- Do not ask a child Codex session to launch another `codex exec` from inside
+  its own sandbox. A local test showed this can fail on `.codex/tmp` /
+  in-process app-server permissions. Launch `codex exec` only from the
+  main-brain process unless an isolated writable `CODEX_HOME` / temp setup has
+  been deliberately prepared.
 - Subagents must not redefine requirements from conversation memory. They must
   read the referenced task docs.
 - For S3 and later slices, prefer vertical-slice assignments with concrete
