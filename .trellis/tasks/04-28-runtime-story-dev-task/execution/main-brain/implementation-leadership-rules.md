@@ -75,8 +75,10 @@ delegated.
 ## Standing Assistant And Review Loop
 
 Maintain a standing assistant/reviewer lane for S3. In current Trellis terms,
-this means using delegated implement/check/review workers rather than turning
-the main session into the only engineer.
+this means using delegated implement/check/review workers through Trellis or
+Codex-native subagent dispatch rather than turning the main session into the
+only engineer. Avoid ad-hoc raw CLI/session dispatch unless the native path is
+unavailable, and record the reason when an exception is used.
 
 Recommended loop:
 
@@ -171,6 +173,15 @@ paths are known.
 Direct reads of known indexed docs are preferred over semantic search when the
 path is already known.
 
+Subagent testing rule:
+
+- subagents should not run pytest by default;
+- the main-brain or a dedicated check gate normally owns pytest execution;
+- if a subagent must run pytest for a narrow local check, it must use `-n auto`
+  and report the exact command and result;
+- do not let implement workers spend time on broad test sweeps unless the slice
+  brief explicitly assigns that responsibility.
+
 ## S3 Leadership Rules
 
 S3 is the current priority and the reference implementation for later story
@@ -215,6 +226,8 @@ Default rule:
 - failing or flaky live-provider tests do not replace deterministic failures;
 - every external API/key use must follow existing project configuration and
   never print secrets.
+- broad pytest gates should be run by the main-brain or a dedicated check
+  worker; if a subagent runs pytest, use `-n auto`.
 
 ## Review Quality Bar
 

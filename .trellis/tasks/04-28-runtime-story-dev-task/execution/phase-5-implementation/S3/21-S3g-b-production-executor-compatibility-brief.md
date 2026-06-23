@@ -20,7 +20,13 @@ This slice must make the production worker execution boundary honest:
   runtime still relies on compatibility fallback.
 
 Use YCE for codebase search. Do not use ACE. Do not run git mutation commands.
-Do not edit unrelated dirty files.
+Do not edit unrelated dirty files. Prefer Trellis/Codex-native subagent
+dispatch for any follow-up implement/check/review work.
+
+Subagent pytest rule: this implementer should not run pytest by default. The
+main-brain or a dedicated check gate normally owns test execution. If the
+implementer must run pytest for a narrow local check, use `-n auto` and report
+the exact command and result.
 
 ## Requirement Authority
 
@@ -178,9 +184,9 @@ Required tests:
 From `H:\chatboxapp\backend`:
 
 ```powershell
-python -m pytest rp/tests/services/writer/test_worker_scheduler_service.py
-python -m pytest rp/tests/services/writer/test_memory_maintenance_worker_adapter.py rp/tests/services/proposal/test_memory_candidate_governance_routing.py
-python -m pytest tests/test_story_runtime_s3_memory_worker_e2e.py
+python -m pytest -n auto rp/tests/services/writer/test_worker_scheduler_service.py
+python -m pytest -n auto rp/tests/services/writer/test_memory_maintenance_worker_adapter.py rp/tests/services/proposal/test_memory_candidate_governance_routing.py
+python -m pytest -n auto tests/test_story_runtime_s3_memory_worker_e2e.py
 python -m ruff check rp/services/writer/worker_execution_service.py rp/services/writer/memory_maintenance_worker_adapter.py rp/runtime/rp_runtime_factory.py rp/tests/services/writer/test_worker_scheduler_service.py
 ```
 

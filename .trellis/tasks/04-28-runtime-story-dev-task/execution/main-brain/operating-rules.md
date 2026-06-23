@@ -69,18 +69,25 @@ S3 agent/tool/proposal patterns become reusable.
 22. The main session should avoid direct production-code edits. Prefer Trellis
     implement workers for code and Trellis check / fresh review workers for
     audits.
-23. After every phase-level milestone defined by the main-brain, dispatch a
+23. Prefer Trellis/Codex-native subagent dispatch for implement/check/review
+    work. Avoid ad-hoc raw CLI/session dispatch unless the native path is
+    unavailable; if this exception is used, record why in the slice worklog.
+24. Subagents should not run pytest by default. Test execution is normally owned
+    by the main-brain or a dedicated check gate. If a subagent must run pytest
+    for a focused local check, it must use `-n auto` and report the exact
+    command and result.
+25. After every phase-level milestone defined by the main-brain, dispatch a
     fresh reviewer that did not implement the change. The reviewer must audit
     against Node-1 grill docs, module docs, frozen SoT, and the new code/docs.
-24. Reviewer findings are advisory. The main-brain must weigh them, record
+26. Reviewer findings are advisory. The main-brain must weigh them, record
     accepted/rejected/deferred findings, and own the final gate.
-25. Use glue coding deliberately: consult project patterns, `docs/research/`,
+27. Use glue coding deliberately: consult project patterns, `docs/research/`,
     official docs, or mature framework references when needed, then reconcile
     borrowed ideas to the project SoT before implementation.
-26. For S3, prioritize a correct reference implementation over speed: it may
+28. For S3, prioritize a correct reference implementation over speed: it may
     improve the harness only for cross-role mechanisms, not by moving
     memory/proposal/apply business policy into the harness core.
-27. Preserve rollback points with small commits after coherent slices pass their
+29. Preserve rollback points with small commits after coherent slices pass their
     gates. Stage only slice-owned files, and use explicit force-add only for
     required ignored Trellis task documents.
 
@@ -117,10 +124,13 @@ review policy, and truth mutation.
 
 ## Subagent Dispatch Rules
 
-- Use subagents for implementation, focused audits, and large document reviews.
+- Use subagents for implementation, focused audits, and large document reviews,
+  preferably through Trellis/Codex-native dispatch mechanisms.
 - Give every subagent a bounded scope, source documents, forbidden actions, and
   expected output path.
 - Subagents must not commit unless explicitly instructed.
+- Subagents should not run pytest by default. If pytest is necessary for their
+  focused scope, they must use `-n auto` and report the exact command.
 - Subagents must not redefine requirements from conversation memory. They must
   read the referenced task docs.
 - For S3 and later slices, prefer vertical-slice assignments with concrete
