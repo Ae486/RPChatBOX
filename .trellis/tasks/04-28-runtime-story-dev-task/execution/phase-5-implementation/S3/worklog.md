@@ -74,6 +74,90 @@ S3g planning review accepted
   -> next implementation slice: S3g-a service-size cleanup
 ```
 
+## 2026-06-23 — S3g-a service-size cleanup implemented and verification started
+
+Main-brain actions:
+
+- Committed `19-S3g-a-service-size-cleanup-implementation-brief.md` before
+  dispatching implementation, so the code slice has a clear brief and rollback
+  boundary.
+- Dispatched a workspace-write Codex implement agent for S3g-a. Session:
+
+```text
+019ef1d6-5e3f-75d3-b8ff-a5127faf70af
+```
+
+- The implement process exited abnormally after leaving edits in the three
+  in-scope files. Main-brain took over verification from current worktree state.
+- Confirmed the only new implementation changes are in:
+  - `backend/rp/services/memory/memory_candidate_validation_service.py`
+  - `backend/rp/services/proposal/post_write_governance_service.py`
+  - `backend/rp/services/writer/memory_maintenance_worker_adapter.py`
+- Ran focused verification:
+
+```text
+S3b/S3c: 15 passed, 1 warning
+S3f E2E: 4 passed, 5 warnings
+S3a/proposal adapter: 23 passed, 1 warning
+S3d/S2b: 29 passed, 1 warning
+ruff focused: All checks passed
+diff whitespace: PASS, CRLF warnings only
+```
+
+- Ran service-size:
+
+```text
+FAIL, but S3-owned hard function offenders are gone.
+Remaining failures are older story-service baseline drift.
+```
+
+- Wrote:
+  - `S3g-a-fresh-review-brief.md`
+  - `20-S3g-a-implementation-result.md`
+
+Current gate:
+
+```text
+S3g-a implementation verified by main-brain
+  -> fresh read-only reviewer pending
+  -> main-brain adjudication pending
+  -> commit pending
+```
+
+## 2026-06-23 — S3g-a fresh review passed
+
+Main-brain actions:
+
+- Dispatched fresh read-only Codex review session:
+
+```text
+019ef1e5-616f-77e1-b7fb-4e3e89fd26e6
+```
+
+- Review verdict:
+
+```text
+PASS
+```
+
+- Reviewer found no blocking or important issues.
+- Reviewer reran service-size and confirmed S3g-a hard function offenders are
+  gone; remaining failures are the known story-service baseline drift.
+- Main-brain accepted the review. No code changes were needed.
+- Wrote:
+  - `S3g-a-fresh-review-output.md`
+  - `S3g-a-check-record.md`
+  - updated `20-S3g-a-implementation-result.md`
+
+Current gate:
+
+```text
+S3g-a accepted
+  -> commit pending
+  -> next implementation slice: S3g-b production executor migration planning /
+     implementation, with normal runtime assembly coverage required
+```
+
 ## 2026-06-23 — P0/P2 planning documents drafted
 
 Main-brain actions:

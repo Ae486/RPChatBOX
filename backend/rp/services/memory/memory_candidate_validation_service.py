@@ -157,9 +157,41 @@ class MemoryCandidateValidationService:
         operation: MemoryMaintenanceOperation,
         seen_targets: dict[str, int],
     ) -> list[MemoryCandidateValidationErrorItem]:
-        errors: list[MemoryCandidateValidationErrorItem] = []
+        errors = self._validate_operation_kind(
+            candidate_index,
+            operation_index,
+            candidate,
+            operation,
+        )
+        if errors:
+            return errors
+
+        errors = self._validate_operation_support(
+            candidate_index,
+            operation_index,
+            candidate,
+            operation,
+        )
+        if errors:
+            return errors
+
+        return self._validate_operation_payload(
+            candidate_index,
+            operation_index,
+            candidate,
+            operation,
+            seen_targets,
+        )
+
+    def _validate_operation_kind(
+        self,
+        candidate_index: int,
+        operation_index: int,
+        candidate: MemoryMaintenanceCandidate,
+        operation: MemoryMaintenanceOperation,
+    ) -> list[MemoryCandidateValidationErrorItem]:
         if operation.kind in FORBIDDEN_MEMORY_SCHEMA_OPERATION_KINDS:
-            errors.append(
+            return [
                 self._operation_error(
                     "memory_candidate_forbidden_schema_operation",
                     "workers cannot create/delete domains, create/delete blocks, or change schema",
@@ -168,11 +200,9 @@ class MemoryCandidateValidationService:
                     candidate,
                     operation,
                 )
-            )
-            return errors
-
+            ]
         if operation.kind not in SUPPORTED_MEMORY_MAINTENANCE_OPERATION_KINDS:
-            errors.append(
+            return [
                 self._operation_error(
                     "memory_candidate_unsupported_operation",
                     f"unsupported operation kind: {operation.kind}",
@@ -181,11 +211,18 @@ class MemoryCandidateValidationService:
                     candidate,
                     operation,
                 )
-            )
-            return errors
+            ]
+        return []
 
+    def _validate_operation_support(
+        self,
+        candidate_index: int,
+        operation_index: int,
+        candidate: MemoryMaintenanceCandidate,
+        operation: MemoryMaintenanceOperation,
+    ) -> list[MemoryCandidateValidationErrorItem]:
         if operation.field_id != RUNTIME_MEMORY_FACT_FIELD_ID:
-            errors.append(
+            return [
                 self._operation_error(
                     "memory_candidate_unsupported_field",
                     "S3a candidates may only target facts",
@@ -194,8 +231,7 @@ class MemoryCandidateValidationService:
                     candidate,
                     operation,
                 )
-            )
-            return errors
+            ]
 
         try:
             self._registry_service.require_operation_supported(
@@ -205,7 +241,7 @@ class MemoryCandidateValidationService:
                 operation_kind=operation.kind,
             )
         except RuntimeMemoryContractRegistryError as exc:
-            errors.append(
+            return [
                 self._operation_error(
                     "memory_candidate_unsupported_operation",
                     str(exc),
@@ -214,8 +250,18 @@ class MemoryCandidateValidationService:
                     candidate,
                     operation,
                 )
-            )
-            return errors
+            ]
+        return []
+
+    def _validate_operation_payload(
+        self,
+        candidate_index: int,
+        operation_index: int,
+        candidate: MemoryMaintenanceCandidate,
+        operation: MemoryMaintenanceOperation,
+        seen_targets: dict[str, int],
+    ) -> list[MemoryCandidateValidationErrorItem]:
+        errors: list[MemoryCandidateValidationErrorItem] = []
         if operation.kind == "append_item" and operation.target_key() is not None:
             errors.append(
                 self._operation_error(
@@ -239,35 +285,55 @@ class MemoryCandidateValidationService:
                 )
             )
         if operation.kind in {"update_item", "remove_item"}:
-            target_key = operation.target_key()
-            if target_key is None:
-                errors.append(
-                    self._operation_error(
-                        "memory_candidate_missing_target_fact",
-                        f"{operation.kind} requires target_fact_id or target_fact_handle",
-                        candidate_index,
-                        operation_index,
-                        candidate,
-                        operation,
-                    )
+            errors.extend(
+                self._validate_targeted_operation_payload(
+                    candidate_index,
+                    operation_index,
+                    candidate,
+                    operation,
+                    seen_targets,
                 )
-            else:
-                previous_index = seen_targets.get(target_key)
-                if previous_index is not None:
-                    errors.append(
-                        self._operation_error(
-                            "memory_candidate_contradictory_operations",
-                            (
-                                "candidate contains multiple operations for the "
-                                f"same fact target at operation {previous_index}"
-                            ),
-                            candidate_index,
-                            operation_index,
-                            candidate,
-                            operation,
-                        )
-                    )
-                seen_targets[target_key] = operation_index
+            )
+        return errors
+
+    def _validate_targeted_operation_payload(
+        self,
+        candidate_index: int,
+        operation_index: int,
+        candidate: MemoryMaintenanceCandidate,
+        operation: MemoryMaintenanceOperation,
+        seen_targets: dict[str, int],
+    ) -> list[MemoryCandidateValidationErrorItem]:
+        target_key = operation.target_key()
+        if target_key is None:
+            return [
+                self._operation_error(
+                    "memory_candidate_missing_target_fact",
+                    f"{operation.kind} requires target_fact_id or target_fact_handle",
+                    candidate_index,
+                    operation_index,
+                    candidate,
+                    operation,
+                )
+            ]
+
+        errors: list[MemoryCandidateValidationErrorItem] = []
+        previous_index = seen_targets.get(target_key)
+        if previous_index is not None:
+            errors.append(
+                self._operation_error(
+                    "memory_candidate_contradictory_operations",
+                    (
+                        "candidate contains multiple operations for the "
+                        f"same fact target at operation {previous_index}"
+                    ),
+                    candidate_index,
+                    operation_index,
+                    candidate,
+                    operation,
+                )
+            )
+        seen_targets[target_key] = operation_index
         return errors
 
     @staticmethod

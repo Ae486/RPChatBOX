@@ -201,119 +201,129 @@ class PostWriteGovernanceService:
         worker_plan: WorkerExecutionPlan,
         worker_results: list[WorkerResult],
     ) -> list[str]:
-        proposal_results = [
-            result for result in worker_results if result.proposal_candidates
-        ]
+        proposal_results = _select_proposal_results(worker_results)
         if not proposal_results:
             return []
+        proposal_workflow_service = self._require_proposal_workflow_service(
+            identity=identity,
+        )
+        job = _ensure_proposal_governance_job(
+            runtime_workflow_job_service=self._runtime_workflow_job_service,
+            identity=identity,
+            worker_plan=worker_plan,
+            proposal_results=proposal_results,
+        )
+        if _is_terminal(job):
+            return [f"runtime_job:{job.job_id}"]
+        _start_proposal_governance_job(
+            runtime_workflow_job_service=self._runtime_workflow_job_service,
+            job=job,
+        )
+        try:
+            proposal_refs, governance_payloads = (
+                await self._route_worker_results_to_proposal_handoffs(
+                    identity=identity,
+                    session=session,
+                    chapter=chapter,
+                    proposal_results=proposal_results,
+                    proposal_workflow_service=proposal_workflow_service,
+                )
+            )
+        except Exception as exc:
+            return _fail_proposal_governance_job(
+                runtime_workflow_job_service=self._runtime_workflow_job_service,
+                job=job,
+                exc=exc,
+            )
+        return _complete_proposal_governance_job(
+            runtime_workflow_job_service=self._runtime_workflow_job_service,
+            job=job,
+            identity=identity,
+            proposal_results=proposal_results,
+            proposal_refs=proposal_refs,
+            governance_payloads=governance_payloads,
+        )
+
+    def _require_proposal_workflow_service(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+    ) -> ProposalWorkflowService:
         if self._proposal_workflow_service is None:
             raise PostWriteGovernanceServiceError(
                 "post_write_proposal_workflow_missing",
                 identity.turn_id,
             )
-        job = self._runtime_workflow_job_service.ensure_job(
-            identity=identity,
-            job_kind=RuntimeWorkflowJobKind.PROPOSAL_SUBMIT,
-            job_category=RuntimeWorkflowJobCategory.STATE_GOVERNANCE,
-            creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
-            required_for_turn_completion=True,
-            source_ref_ids=[
-                ref
-                for result in proposal_results
-                for ref in _worker_result_source_ref_ids(result)
-            ],
-            trace_refs=[
-                _worker_result_ref(identity=identity, result=result)
-                for result in proposal_results
-            ],
-            metadata={
-                "dispatch_owner": "post_write_governance_service",
-                "worker_plan_id": worker_plan.plan_id,
-                "worker_ids": [result.worker_id for result in proposal_results],
-            },
-        )
-        if _is_terminal(job):
-            return [f"runtime_job:{job.job_id}"]
-        self._runtime_workflow_job_service.mark_job_running(
-            job_id=job.job_id,
-            reason="proposal_governance_dispatch_started",
-        )
+        return self._proposal_workflow_service
+
+    async def _route_worker_results_to_proposal_handoffs(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        proposal_results: list[WorkerResult],
+        proposal_workflow_service: ProposalWorkflowService,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         proposal_refs: list[str] = []
         governance_payloads: list[dict[str, Any]] = []
-        try:
-            for result in proposal_results:
-                envelope = self._build_governance_envelope(
-                    identity=identity,
-                    result=result,
-                )
-                governance_payloads.append(envelope.model_dump(mode="json"))
-                governance_metadata = WorkerProposalGovernanceMetadata(
-                    identity=identity,
-                    worker_id=envelope.worker_id,
-                    phase=envelope.phase,
-                    runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
-                    permission_decision=envelope.permission_decision,
-                    permission_reason_codes=list(envelope.permission_reason_codes),
-                    source_refs=list(envelope.source_refs),
-                    trace_refs=list(envelope.trace_refs),
-                )
-                for candidate in result.proposal_candidates:
-                    proposal_handoffs = self._proposal_handoffs_from_candidate(
-                        identity=identity,
-                        story_id=session.story_id,
-                        mode=session.mode,
-                        candidate=candidate,
-                    )
-                    for handoff in proposal_handoffs:
-                        effective_governance_metadata = (
-                            _merge_governance_metadata_for_handoff(
-                                governance_metadata=governance_metadata,
-                                handoff=handoff,
-                            )
-                        )
-                        receipt = (
-                            await self._proposal_workflow_service.submit_and_route(
-                                handoff.proposal_input,
-                                session_id=session.session_id,
-                                chapter_workspace_id=chapter.chapter_workspace_id,
-                                submit_source="post_write_worker",
-                                policy=handoff.policy,
-                                governance_metadata=effective_governance_metadata,
-                            )
-                        )
-                        proposal_refs.append(f"proposal:{receipt.proposal_id}")
-        except Exception as exc:
-            failure_code = _failure_code_from_exception(exc)
-            failed_job = self._runtime_workflow_job_service.mark_job_failed(
-                job_id=job.job_id,
-                reason=failure_code,
-                metadata={
-                    "dispatch_owner": "post_write_governance_service",
-                    "proposal_governance_failure_reason_code": failure_code,
-                    "proposal_governance_failure_detail": str(exc),
-                },
-                last_error={
-                    "code": failure_code,
-                    "message": str(exc),
-                    "stage": "proposal_governance_dispatch",
-                },
+        for result in proposal_results:
+            envelope = self._build_governance_envelope(
+                identity=identity,
+                result=result,
             )
-            return [f"runtime_job:{failed_job.job_id}"]
-        completed = self._runtime_workflow_job_service.mark_job_completed(
-            job_id=job.job_id,
-            reason="proposal_governance_completed",
-            result_ref_ids=proposal_refs,
-            trace_refs=[
-                ref
-                for result in proposal_results
-                for ref in _worker_result_trace_refs(identity=identity, result=result)
-            ],
-            metadata={
-                "proposal_count": len(proposal_refs),
-                "governance_envelopes": governance_payloads,
-            },
-        )
-        return [f"runtime_job:{completed.job_id}"]
+            governance_payloads.append(envelope.model_dump(mode="json"))
+            governance_metadata = _governance_metadata_from_envelope(
+                identity=identity,
+                envelope=envelope,
+            )
+            proposal_refs.extend(
+                await self._route_result_proposal_candidates(
+                    identity=identity,
+                    session=session,
+                    chapter=chapter,
+                    result=result,
+                    governance_metadata=governance_metadata,
+                    proposal_workflow_service=proposal_workflow_service,
+                )
+            )
+        return proposal_refs, governance_payloads
+
+    async def _route_result_proposal_candidates(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        result: WorkerResult,
+        governance_metadata: WorkerProposalGovernanceMetadata,
+        proposal_workflow_service: ProposalWorkflowService,
+    ) -> list[str]:
+        proposal_refs: list[str] = []
+        for candidate in result.proposal_candidates:
+            proposal_handoffs = self._proposal_handoffs_from_candidate(
+                identity=identity,
+                story_id=session.story_id,
+                mode=session.mode,
+                candidate=candidate,
+            )
+            for handoff in proposal_handoffs:
+                effective_governance_metadata = (
+                    _merge_governance_metadata_for_handoff(
+                        governance_metadata=governance_metadata,
+                        handoff=handoff,
+                    )
+                )
+                receipt = await proposal_workflow_service.submit_and_route(
+                    handoff.proposal_input,
+                    session_id=session.session_id,
+                    chapter_workspace_id=chapter.chapter_workspace_id,
+                    submit_source="post_write_worker",
+                    policy=handoff.policy,
+                    governance_metadata=effective_governance_metadata,
+                )
+                proposal_refs.append(f"proposal:{receipt.proposal_id}")
+        return proposal_refs
 
     def _record_deferred_materialization_jobs(
         self,
@@ -582,6 +592,118 @@ class PostWriteGovernanceService:
                 patch=dict(payload),
             )
         ]
+
+
+def _select_proposal_results(worker_results: list[WorkerResult]) -> list[WorkerResult]:
+    return [result for result in worker_results if result.proposal_candidates]
+
+
+def _ensure_proposal_governance_job(
+    *,
+    runtime_workflow_job_service: RuntimeWorkflowJobService,
+    identity: MemoryRuntimeIdentity,
+    worker_plan: WorkerExecutionPlan,
+    proposal_results: list[WorkerResult],
+) -> RuntimeWorkflowJobRecord:
+    return runtime_workflow_job_service.ensure_job(
+        identity=identity,
+        job_kind=RuntimeWorkflowJobKind.PROPOSAL_SUBMIT,
+        job_category=RuntimeWorkflowJobCategory.STATE_GOVERNANCE,
+        creation_mode=RuntimeWorkflowJobCreationMode.DERIVED,
+        required_for_turn_completion=True,
+        source_ref_ids=[
+            ref
+            for result in proposal_results
+            for ref in _worker_result_source_ref_ids(result)
+        ],
+        trace_refs=[
+            _worker_result_ref(identity=identity, result=result)
+            for result in proposal_results
+        ],
+        metadata={
+            "dispatch_owner": "post_write_governance_service",
+            "worker_plan_id": worker_plan.plan_id,
+            "worker_ids": [result.worker_id for result in proposal_results],
+        },
+    )
+
+
+def _start_proposal_governance_job(
+    *,
+    runtime_workflow_job_service: RuntimeWorkflowJobService,
+    job: RuntimeWorkflowJobRecord,
+) -> None:
+    runtime_workflow_job_service.mark_job_running(
+        job_id=job.job_id,
+        reason="proposal_governance_dispatch_started",
+    )
+
+
+def _governance_metadata_from_envelope(
+    *,
+    identity: MemoryRuntimeIdentity,
+    envelope: WorkerProposalGovernanceEnvelope,
+) -> WorkerProposalGovernanceMetadata:
+    return WorkerProposalGovernanceMetadata(
+        identity=identity,
+        worker_id=envelope.worker_id,
+        phase=envelope.phase,
+        runtime_profile_snapshot_id=identity.runtime_profile_snapshot_id,
+        permission_decision=envelope.permission_decision,
+        permission_reason_codes=list(envelope.permission_reason_codes),
+        source_refs=list(envelope.source_refs),
+        trace_refs=list(envelope.trace_refs),
+    )
+
+
+def _fail_proposal_governance_job(
+    *,
+    runtime_workflow_job_service: RuntimeWorkflowJobService,
+    job: RuntimeWorkflowJobRecord,
+    exc: Exception,
+) -> list[str]:
+    failure_code = _failure_code_from_exception(exc)
+    failed_job = runtime_workflow_job_service.mark_job_failed(
+        job_id=job.job_id,
+        reason=failure_code,
+        metadata={
+            "dispatch_owner": "post_write_governance_service",
+            "proposal_governance_failure_reason_code": failure_code,
+            "proposal_governance_failure_detail": str(exc),
+        },
+        last_error={
+            "code": failure_code,
+            "message": str(exc),
+            "stage": "proposal_governance_dispatch",
+        },
+    )
+    return [f"runtime_job:{failed_job.job_id}"]
+
+
+def _complete_proposal_governance_job(
+    *,
+    runtime_workflow_job_service: RuntimeWorkflowJobService,
+    job: RuntimeWorkflowJobRecord,
+    identity: MemoryRuntimeIdentity,
+    proposal_results: list[WorkerResult],
+    proposal_refs: list[str],
+    governance_payloads: list[dict[str, Any]],
+) -> list[str]:
+    completed = runtime_workflow_job_service.mark_job_completed(
+        job_id=job.job_id,
+        reason="proposal_governance_completed",
+        result_ref_ids=proposal_refs,
+        trace_refs=[
+            ref
+            for result in proposal_results
+            for ref in _worker_result_trace_refs(identity=identity, result=result)
+        ],
+        metadata={
+            "proposal_count": len(proposal_refs),
+            "governance_envelopes": governance_payloads,
+        },
+    )
+    return [f"runtime_job:{completed.job_id}"]
 
 
 def _worker_result_ref(*, identity: MemoryRuntimeIdentity, result: WorkerResult) -> str:

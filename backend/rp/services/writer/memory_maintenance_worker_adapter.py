@@ -303,94 +303,166 @@ class MemoryMaintenanceWorkerAdapter:
         output: MemoryMaintenanceWorkerStructuredOutput,
         batch: MemoryMaintenanceCandidateBatch,
     ) -> WorkerResult:
-        if (
-            batch.schema_version
-            != S3_MEMORY_MAINTENANCE_CANDIDATE_BATCH_SCHEMA_VERSION
-        ):
-            return self._failure_result(
-                request=request,
-                registration=registration,
-                reason_code="memory_worker_candidate_batch_schema_version_unsupported",
-                message=(
-                    "Unsupported memory-maintenance candidate batch schema version."
-                ),
-                failure_source="validation",
-                retryable=False,
-                validation_findings=[
-                    {
-                        "reason_code": (
-                            "memory_worker_candidate_batch_schema_version_unsupported"
-                        ),
-                        "message": (
-                            "Unsupported memory-maintenance candidate batch schema version."
-                        ),
-                        "expected_schema_version": (
-                            S3_MEMORY_MAINTENANCE_CANDIDATE_BATCH_SCHEMA_VERSION
-                        ),
-                        "actual_schema_version": batch.schema_version,
-                    }
-                ],
-            )
-        if batch.worker_id != request.worker_id or batch.phase != request.phase:
-            return self._failure_result(
-                request=request,
-                registration=registration,
-                reason_code="memory_worker_candidate_batch_identity_mismatch",
-                message="Candidate batch identity fields do not match request.",
-                failure_source="validation",
-                retryable=False,
-                validation_findings=[
-                    {
-                        "reason_code": "memory_worker_candidate_batch_identity_mismatch",
-                        "message": "Candidate batch identity fields do not match request.",
-                        "expected_worker_id": request.worker_id,
-                        "actual_worker_id": batch.worker_id,
-                        "expected_phase": request.phase,
-                        "actual_phase": batch.phase,
-                    }
-                ],
-            )
+        validation_failure = self._candidate_batch_schema_version_result(
+            request=request,
+            registration=registration,
+            batch=batch,
+        )
+        if validation_failure is not None:
+            return validation_failure
+
+        validation_failure = self._candidate_batch_identity_result(
+            request=request,
+            registration=registration,
+            batch=batch,
+        )
+        if validation_failure is not None:
+            return validation_failure
 
         validation = self._validation_service.validate_batch(batch)
         if not validation.accepted:
-            return self._failure_result(
+            return self._candidate_batch_validation_error_result(
                 request=request,
                 registration=registration,
-                reason_code="memory_worker_candidate_validation_failed",
-                message="Memory-maintenance candidate batch failed validation.",
-                failure_source="validation",
-                retryable=False,
-                validation_findings=[
-                    {
-                        "reason_code": error.code,
-                        "message": error.message,
-                        "candidate_index": error.candidate_index,
-                        "operation_index": error.operation_index,
-                        "target_domain": error.target_domain,
-                        "target_block_id": error.target_block_id,
-                        "operation_kind": error.operation_kind,
-                    }
-                    for error in validation.errors
-                ],
+                validation_errors=validation.errors,
             )
 
+        return self._candidate_batch_success_result(
+            request=request,
+            registration=registration,
+            output=output,
+            batch=batch,
+        )
+
+    def _candidate_batch_schema_version_result(
+        self,
+        *,
+        request: WorkerExecutionRequest,
+        registration: RuntimeWorkerRegistration,
+        batch: MemoryMaintenanceCandidateBatch,
+    ) -> WorkerResult | None:
+        if (
+            batch.schema_version
+            == S3_MEMORY_MAINTENANCE_CANDIDATE_BATCH_SCHEMA_VERSION
+        ):
+            return None
+        return self._failure_result(
+            request=request,
+            registration=registration,
+            reason_code="memory_worker_candidate_batch_schema_version_unsupported",
+            message="Unsupported memory-maintenance candidate batch schema version.",
+            failure_source="validation",
+            retryable=False,
+            validation_findings=[
+                {
+                    "reason_code": (
+                        "memory_worker_candidate_batch_schema_version_unsupported"
+                    ),
+                    "message": (
+                        "Unsupported memory-maintenance candidate batch schema version."
+                    ),
+                    "expected_schema_version": (
+                        S3_MEMORY_MAINTENANCE_CANDIDATE_BATCH_SCHEMA_VERSION
+                    ),
+                    "actual_schema_version": batch.schema_version,
+                }
+            ],
+        )
+
+    @staticmethod
+    def _candidate_batch_identity_result(
+        *,
+        request: WorkerExecutionRequest,
+        registration: RuntimeWorkerRegistration,
+        batch: MemoryMaintenanceCandidateBatch,
+    ) -> WorkerResult | None:
+        if batch.worker_id == request.worker_id and batch.phase == request.phase:
+            return None
+        return MemoryMaintenanceWorkerAdapter._failure_result(
+            request=request,
+            registration=registration,
+            reason_code="memory_worker_candidate_batch_identity_mismatch",
+            message="Candidate batch identity fields do not match request.",
+            failure_source="validation",
+            retryable=False,
+            validation_findings=[
+                {
+                    "reason_code": "memory_worker_candidate_batch_identity_mismatch",
+                    "message": "Candidate batch identity fields do not match request.",
+                    "expected_worker_id": request.worker_id,
+                    "actual_worker_id": batch.worker_id,
+                    "expected_phase": request.phase,
+                    "actual_phase": batch.phase,
+                }
+            ],
+        )
+
+    def _candidate_batch_validation_error_result(
+        self,
+        *,
+        request: WorkerExecutionRequest,
+        registration: RuntimeWorkerRegistration,
+        validation_errors: list[Any],
+    ) -> WorkerResult:
+        return self._failure_result(
+            request=request,
+            registration=registration,
+            reason_code="memory_worker_candidate_validation_failed",
+            message="Memory-maintenance candidate batch failed validation.",
+            failure_source="validation",
+            retryable=False,
+            validation_findings=[
+                {
+                    "reason_code": error.code,
+                    "message": error.message,
+                    "candidate_index": error.candidate_index,
+                    "operation_index": error.operation_index,
+                    "target_domain": error.target_domain,
+                    "target_block_id": error.target_block_id,
+                    "operation_kind": error.operation_kind,
+                }
+                for error in validation_errors
+            ],
+        )
+
+    @staticmethod
+    def _candidate_batch_success_candidate(
+        *,
+        registration: RuntimeWorkerRegistration,
+        output: MemoryMaintenanceWorkerStructuredOutput,
+        batch_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "candidate_kind": S3_MEMORY_MAINTENANCE_CANDIDATE_KIND,
+            "payload": batch_payload,
+            "source_of_truth": False,
+            "authoritative_mutation": False,
+            "metadata": {
+                "adapter": S3_MEMORY_WORKER_ADAPTER_ID,
+                "schema_version": output.schema_version,
+                "source_worker_id": registration.source_worker_id,
+            },
+        }
+
+    def _candidate_batch_success_result(
+        self,
+        *,
+        request: WorkerExecutionRequest,
+        registration: RuntimeWorkerRegistration,
+        output: MemoryMaintenanceWorkerStructuredOutput,
+        batch: MemoryMaintenanceCandidateBatch,
+    ) -> WorkerResult:
         batch_payload = batch.model_dump(mode="json")
         return WorkerResult(
             worker_id=request.worker_id,
             phase=request.phase,
             result_status=WorkerResultStatus.COMPLETED,
             proposal_candidates=[
-                {
-                    "candidate_kind": S3_MEMORY_MAINTENANCE_CANDIDATE_KIND,
-                    "payload": batch_payload,
-                    "source_of_truth": False,
-                    "authoritative_mutation": False,
-                    "metadata": {
-                        "adapter": S3_MEMORY_WORKER_ADAPTER_ID,
-                        "schema_version": output.schema_version,
-                        "source_worker_id": registration.source_worker_id,
-                    },
-                }
+                self._candidate_batch_success_candidate(
+                    registration=registration,
+                    output=output,
+                    batch_payload=batch_payload,
+                )
             ],
             trace_summary={
                 "adapter": S3_MEMORY_WORKER_ADAPTER_ID,
