@@ -94,6 +94,7 @@ def test_compile_snapshot_is_deterministic_and_pins_minimum_profile(
         "budget_latency_policy",
         "writer_model_profile",
         "worker_model_profiles",
+        "worker_tool_policies",
         "mode_specific_settings",
     }
     assert (
@@ -118,6 +119,7 @@ def test_compile_snapshot_is_deterministic_and_pins_minimum_profile(
     assert first.compiled_profile_json["writer_policy"] == {
         "supported_operation_modes": ["writing", "rewrite", "discussion"],
         "retrieval_mode": "bounded_tool_loop",
+        "retrieval_max_attempts": 3,
         "rewrite_requires_explicit_selection": True,
         "discussion_summary_enabled": True,
         "pov_rules": [],
