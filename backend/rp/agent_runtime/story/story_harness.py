@@ -1,8 +1,8 @@
-"""Story-owned test harness over the generic runtime graph substrate.
+"""Story-owned harness over the generic runtime graph substrate.
 
-INPUT: a scripted model response queue plus a turn goal string.
-OUTPUT: a frozen StoryHarnessResult with status and normalized tool results.
-POS: test-only story-runtime harness substrate; no setup-agent imports.
+INPUT: injected or scripted model responses plus a turn goal string.
+OUTPUT: a frozen StoryHarnessResult with status, finish reason, and tool results.
+POS: story-runtime harness over the kernel graph; injectable model/tool/hook/finalize ports; test doubles are defaults.
 """
 
 from __future__ import annotations
@@ -16,6 +16,9 @@ from uuid import uuid4
 from ..kernel.graph import build_runtime_graph
 from ..kernel.runtime_tool_contracts import RuntimeToolCall, RuntimeToolResult
 from ..kernel.state import RpAgentRunState
+from .harness_finalize import FinalizeGuardDecision, RuntimeFinalizeGuard
+from .harness_hooks import NullToolLoopHooks, RuntimeToolLoopHooks
+from .harness_ports import RuntimeModelGateway, RuntimeToolExecutor
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ class StoryHarnessResult:
     succeeded: bool
     status: str
     tool_results: list[RuntimeToolResult]
+    finish_reason: str | None = None
 
 
 class _ScriptedLLM:
@@ -126,10 +130,22 @@ class _NoopToolExecutor:
 
 
 class StoryHarness:
-    def __init__(self, *, profile: StoryHarnessProfile) -> None:
+    def __init__(
+        self,
+        *,
+        profile: StoryHarnessProfile,
+        model_gateway: RuntimeModelGateway | None = None,
+        tool_executor: RuntimeToolExecutor | None = None,
+        hooks: RuntimeToolLoopHooks | None = None,
+        finalize_guard: RuntimeFinalizeGuard | None = None,
+    ) -> None:
         self._profile = profile
-        self._llm = _ScriptedLLM()
-        self._tool_executor = _NoopToolExecutor()
+        self._llm = model_gateway if model_gateway is not None else _ScriptedLLM()
+        self._tool_executor = (
+            tool_executor if tool_executor is not None else _NoopToolExecutor()
+        )
+        self._hooks = hooks if hooks is not None else NullToolLoopHooks()
+        self._finalize_guard = finalize_guard
 
     def tool_call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -170,9 +186,20 @@ class StoryHarness:
         }
 
     def set_responses(self, responses: list[dict[str, Any]]) -> None:
-        self._llm.set_responses(responses)
+        if isinstance(self._llm, _ScriptedLLM):
+            self._llm.set_responses(responses)
+            return
+        raise RuntimeError(
+            "StoryHarness.set_responses() requires the default scripted model gateway."
+        )
 
     def run(self, *, turn_goal: str) -> StoryHarnessResult:
+        return asyncio.run(self._arun_impl(turn_goal=turn_goal))
+
+    async def arun(self, *, turn_goal: str) -> StoryHarnessResult:
+        return await self._arun_impl(turn_goal=turn_goal)
+
+    async def _arun_impl(self, *, turn_goal: str) -> StoryHarnessResult:
         graph = build_runtime_graph(
             prepare_input=self._prepare_input,
             derive_turn_goal=self._derive_turn_goal,
@@ -208,8 +235,17 @@ class StoryHarness:
             "finish_reason": None,
             "next_action": "derive_turn_goal",
         }
-        final_state = asyncio.run(graph.ainvoke(initial_state))
+        try:
+            final_state = await graph.ainvoke(initial_state)
+        except asyncio.CancelledError:
+            self._hooks.on_cancellation()
+            raise
         status = str(final_state.get("status") or "")
+        finish_reason = (
+            str(final_state["finish_reason"])
+            if final_state.get("finish_reason") is not None
+            else None
+        )
         tool_results = [
             RuntimeToolResult.model_validate(item)
             for item in final_state.get("tool_results", [])
@@ -217,15 +253,18 @@ class StoryHarness:
         return StoryHarnessResult(
             succeeded=status == "completed",
             status=status,
+            finish_reason=finish_reason,
             tool_results=tool_results,
         )
 
     @property
     def model_call_count(self) -> int:
-        return self._llm.call_count
+        return getattr(self._llm, "call_count", 0)
 
     def cleanup(self) -> None:
-        self._llm.cleanup()
+        cleanup = getattr(self._llm, "cleanup", None)
+        if callable(cleanup):
+            cleanup()
 
     def _prepare_input(self, state: RpAgentRunState) -> RpAgentRunState:
         turn_goal = str((state.get("turn_input") or {}).get("turn_goal") or "")
@@ -292,22 +331,57 @@ class StoryHarness:
         aggregated_invocations = list(state.get("tool_invocations", []))
         aggregated_results = list(state.get("tool_results", []))
         latest_batch: list[dict[str, Any]] = []
+        next_action = str(state.get("next_action") or "derive_turn_goal")
+        finish_reason = state.get("finish_reason")
         for item in state.get("pending_tool_calls", []):
             call = RuntimeToolCall.model_validate(item)
             invocation = call.model_dump(mode="json", exclude_none=True)
-            result = await self._tool_executor.execute_tool_call(
-                call,
-                visible_tool_names=self._profile.visible_tool_names,
-            )
-            result_payload = result.model_dump(mode="json", exclude_none=True)
             aggregated_invocations.append(invocation)
+            self._hooks.before_tool_call(call)
+            try:
+                result = await self._tool_executor.execute_tool_call(
+                    call,
+                    visible_tool_names=self._profile.visible_tool_names,
+                )
+            except asyncio.CancelledError:
+                self._hooks.on_cancellation()
+                raise
+            except Exception as exc:
+                self._hooks.on_tool_error(call, exc)
+                error_payload = {
+                    "error": {
+                        "code": "tool_execution_error",
+                        "message": str(exc) or exc.__class__.__name__,
+                    }
+                }
+                result = RuntimeToolResult(
+                    call_id=call.call_id,
+                    tool_name=call.tool_name,
+                    success=False,
+                    content_text=json.dumps(
+                        error_payload,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    error_code="TOOL_EXECUTION_ERROR",
+                    structured_payload={"error_payload": error_payload["error"]},
+                )
+                next_action = "finalize_failure"
+                finish_reason = "tool_execution_error"
+            else:
+                self._hooks.after_tool_result(result)
+            result_payload = result.model_dump(mode="json", exclude_none=True)
             latest_batch.append(result_payload)
             aggregated_results.append(result_payload)
+            if result.error_code == "TOOL_EXECUTION_ERROR":
+                break
         return {
             "status": "tools_executed",
             "tool_invocations": aggregated_invocations,
             "tool_results": aggregated_results,
             "latest_tool_batch": latest_batch,
+            "finish_reason": finish_reason,
+            "next_action": next_action,
         }
 
     def _apply_tool_results(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -341,6 +415,13 @@ class StoryHarness:
         }
 
     def _assess_progress(self, state: RpAgentRunState) -> RpAgentRunState:
+        if state.get("next_action") == "finalize_failure":
+            return {
+                "status": "assessed",
+                "finish_reason": state.get("finish_reason")
+                or "tool_execution_error",
+                "next_action": "finalize_failure",
+            }
         if int(state.get("round_no") or 0) >= self._profile.max_rounds:
             return {
                 "status": "assessed",
@@ -353,6 +434,15 @@ class StoryHarness:
         return {"status": "reflected", "next_action": "derive_turn_goal"}
 
     def _finalize_success(self, state: RpAgentRunState) -> RpAgentRunState:
+        if self._finalize_guard is not None:
+            decision: FinalizeGuardDecision = self._finalize_guard.evaluate_final_output(
+                assistant_text=str(state.get("assistant_text") or "")
+            )
+            if not decision.allowed:
+                return {
+                    "status": "failed",
+                    "finish_reason": decision.reason_code or "finalize_rejected",
+                }
         return {
             "status": "completed",
             "finish_reason": state.get("finish_reason") or "assistant_final_text",
