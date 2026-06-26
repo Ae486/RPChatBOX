@@ -22,11 +22,12 @@ from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotS
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.session_service import StorySessionService
-from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
-from rp.services.writer.writing_worker_retrieval_loop_service import (
-    WritingWorkerRetrievalLoopService,
-    WritingWorkerRetrievalLoopServiceError,
+from rp.services.retrieval.retrieval_tool_definitions import (
+    WRITER_RETRIEVAL_SEARCH_TOOL,
+    WRITER_RETRIEVAL_TOOL_DEFINITIONS,
 )
+from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
+from rp.services.writer.writer_retrieval_errors import WriterRetrievalError
 
 
 def _utcnow() -> datetime:
@@ -34,9 +35,10 @@ def _utcnow() -> datetime:
 
 
 def test_writer_retrieval_search_tool_schema_exposes_only_query_hints():
-    tools = WritingWorkerRetrievalLoopService._tool_definitions()
     search_tool = next(
-        tool for tool in tools if tool["function"]["name"] == "retrieval.search"
+        tool
+        for tool in WRITER_RETRIEVAL_TOOL_DEFINITIONS
+        if tool["function"]["name"] == WRITER_RETRIEVAL_SEARCH_TOOL
     )
     parameters = search_tool["function"]["parameters"]
     properties = parameters["properties"]
@@ -399,7 +401,18 @@ async def test_writing_worker_execution_service_runs_search_expand_usage_then_fi
 
     assert result.output_text == "Final segment grounded in retrieved evidence."
     assert result.usage_metadata["total_tokens"] == 66
-    assert len(result.writer_tool_trace_refs) >= 6
+    trace_refs = result.writer_tool_trace_refs
+    # Honest parity: the harness records one writer_tool ref per attempted
+    # search/expand call plus one runtime_workspace ref per produced material
+    # (search results, expansions) and the usage record.
+    assert any(
+        ref.startswith(f"writer_tool:{WRITER_RETRIEVAL_SEARCH_TOOL}:")
+        for ref in trace_refs
+    )
+    assert any(
+        ref.startswith("writer_tool:retrieval.expand:") for ref in trace_refs
+    )
+    assert any(ref.startswith("runtime_workspace:") for ref in trace_refs)
     assert result.retrieval_source_ref_bundle.retrieval_card_material_ids
     assert result.retrieval_source_ref_bundle.retrieval_expanded_chunk_material_ids
     assert result.retrieval_source_ref_bundle.retrieval_usage_material_ids
@@ -468,7 +481,7 @@ async def test_writing_worker_execution_service_fails_closed_when_final_output_s
         ),
     )
 
-    with pytest.raises(WritingWorkerRetrievalLoopServiceError) as exc_info:
+    with pytest.raises(WriterRetrievalError) as exc_info:
         await service.execute(
             request=WritingWorkerExecutionRequest(
                 request_id="writer-loop-fail-closed",
@@ -534,6 +547,20 @@ async def test_writing_worker_execution_service_enforces_attempt_limit(
                     "total_tokens": 8,
                 },
             },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Final text after the attempt limit is hit."
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                },
+            },
         ]
     )
     service = WritingWorkerExecutionService(
@@ -543,7 +570,7 @@ async def test_writing_worker_execution_service_enforces_attempt_limit(
         ),
     )
 
-    with pytest.raises(WritingWorkerRetrievalLoopServiceError) as exc_info:
+    with pytest.raises(WriterRetrievalError) as exc_info:
         await service.execute(
             request=WritingWorkerExecutionRequest(
                 request_id="writer-loop-attempt-limit",

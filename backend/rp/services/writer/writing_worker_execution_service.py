@@ -8,15 +8,19 @@ from typing import AsyncIterator
 from models.chat import ChatMessage
 from rp.models.writer.worker_memory import WorkerSourceRefBundle
 from rp.services.retrieval.runtime_card_service import RuntimeRetrievalCardService
+from rp.services.runtime.story_runtime_harness_factory import (
+    build_writer_retrieval_harness,
+)
 from rp.models.writer.writing_worker_contracts import (
     WritingWorkerExecutionRequest,
     WritingWorkerExecutionResult,
 )
 from rp.models.writer.writing_runtime import WritingPacket
 from ..story.llm_gateway import StoryLlmGateway
-from .writing_worker_retrieval_loop_service import (
-    WritingWorkerRetrievalLoopService,
-)
+from .writer_retrieval_errors import WriterRetrievalError
+
+
+WRITER_RETRIEVAL_ATTEMPT_LIMIT_EXCEEDED = "writer_retrieval_attempt_limit_exceeded"
 
 
 class WritingWorkerExecutionService:
@@ -84,20 +88,44 @@ class WritingWorkerExecutionService:
             identity = request.identity
             if identity is None:
                 raise ValueError("Runtime identity is required for retrieval loop")
-            loop_result = await self._retrieval_loop().run(
+            runtime_retrieval_card_service = self._runtime_retrieval_card_service
+            if runtime_retrieval_card_service is None:
+                raise ValueError("Runtime retrieval card service is required")
+            seed_messages = [
+                message.model_dump(mode="json", exclude_none=True)
+                for message in messages
+            ]
+            harness, provider = build_writer_retrieval_harness(
                 identity=identity,
+                llm_gateway=self._llm_gateway,
+                runtime_retrieval_card_service=runtime_retrieval_card_service,
                 model_id=request.writer_model_id,
                 provider_id=request.writer_provider_id,
-                messages=messages,
                 max_retrieval_attempts=request.max_retrieval_attempts,
                 temperature=0.7,
                 max_tokens=1600,
             )
-            text = loop_result.output_text
-            usage_metadata = loop_result.usage_metadata
-            writer_tool_trace_refs = list(loop_result.tool_trace_refs)
-            retrieval_source_ref_bundle = loop_result.source_ref_bundle
-            metadata_json["retrieval_loop_mode"] = "bounded_tool_loop"
+            result = await harness.arun(seed_messages=seed_messages)
+            if any(
+                tool_result.error_code == WRITER_RETRIEVAL_ATTEMPT_LIMIT_EXCEEDED
+                for tool_result in result.tool_results
+            ):
+                raise WriterRetrievalError(
+                    WRITER_RETRIEVAL_ATTEMPT_LIMIT_EXCEEDED,
+                    str(request.max_retrieval_attempts),
+                )
+            if not result.succeeded:
+                # Covers the usage-required finalize-guard rejection (finish_reason
+                # carries the usage-guard code) and any other harness failure.
+                raise WriterRetrievalError(
+                    result.finish_reason or "writer_retrieval_failed",
+                    identity.turn_id,
+                )
+            text = result.assistant_text
+            usage_metadata = result.usage_metadata
+            writer_tool_trace_refs = provider.tool_trace_refs
+            retrieval_source_ref_bundle = provider.build_source_ref_bundle()
+            metadata_json["retrieval_loop_mode"] = "graph_harness"
         else:
             text, usage_metadata = await self._llm_gateway.complete_text_with_usage(
                 model_id=request.writer_model_id,
@@ -192,15 +220,6 @@ class WritingWorkerExecutionService:
                 model_id=request.writer_model_id,
                 provider_id=request.writer_provider_id,
             )
-        )
-
-    def _retrieval_loop(self) -> WritingWorkerRetrievalLoopService:
-        runtime_retrieval_card_service = self._runtime_retrieval_card_service
-        if runtime_retrieval_card_service is None:
-            raise ValueError("Runtime retrieval card service is required")
-        return WritingWorkerRetrievalLoopService(
-            llm_gateway=self._llm_gateway,
-            runtime_retrieval_card_service=runtime_retrieval_card_service,
         )
 
     @staticmethod

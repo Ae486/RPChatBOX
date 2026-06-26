@@ -526,20 +526,6 @@
       "symbol": "WritingPacketBuilder.build",
       "lines": 140,
       "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
-    },
-    {
-      "kind": "function",
-      "path": "writer/writing_worker_retrieval_loop_service.py",
-      "symbol": "WritingWorkerRetrievalLoopService._tool_definitions",
-      "lines": 106,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
-    },
-    {
-      "kind": "function",
-      "path": "writer/writing_worker_retrieval_loop_service.py",
-      "symbol": "WritingWorkerRetrievalLoopService.run",
-      "lines": 110,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
     }
   ]
 }

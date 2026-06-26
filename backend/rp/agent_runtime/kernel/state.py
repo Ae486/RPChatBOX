@@ -23,6 +23,7 @@ class RpAgentRunState(TypedDict, total=False):
     tool_results: list[dict[str, Any]]
     latest_tool_batch: list[dict[str, Any]]
     assistant_text: str
+    usage_metadata: dict[str, Any]
     warnings: list[str]
     finish_reason: str | None
     error: dict[str, Any] | None

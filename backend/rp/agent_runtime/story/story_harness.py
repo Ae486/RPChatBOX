@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
@@ -39,6 +39,8 @@ class StoryHarnessResult:
     status: str
     tool_results: list[RuntimeToolResult]
     finish_reason: str | None = None
+    assistant_text: str = ""
+    usage_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class _ScriptedLLM:
@@ -196,10 +198,23 @@ class StoryHarness:
     def run(self, *, turn_goal: str) -> StoryHarnessResult:
         return asyncio.run(self._arun_impl(turn_goal=turn_goal))
 
-    async def arun(self, *, turn_goal: str) -> StoryHarnessResult:
-        return await self._arun_impl(turn_goal=turn_goal)
+    async def arun(
+        self,
+        *,
+        turn_goal: str = "",
+        seed_messages: list[dict[str, Any]] | None = None,
+    ) -> StoryHarnessResult:
+        return await self._arun_impl(
+            turn_goal=turn_goal,
+            seed_messages=seed_messages,
+        )
 
-    async def _arun_impl(self, *, turn_goal: str) -> StoryHarnessResult:
+    async def _arun_impl(
+        self,
+        *,
+        turn_goal: str,
+        seed_messages: list[dict[str, Any]] | None = None,
+    ) -> StoryHarnessResult:
         graph = build_runtime_graph(
             prepare_input=self._prepare_input,
             derive_turn_goal=self._derive_turn_goal,
@@ -223,7 +238,7 @@ class StoryHarness:
             "run_kind": "story_harness",
             "status": "initialized",
             "round_no": 0,
-            "turn_input": {"turn_goal": turn_goal},
+            "turn_input": {"turn_goal": turn_goal, "seed_messages": seed_messages},
             "turn_goal": {"text": turn_goal},
             "normalized_messages": [],
             "tool_definitions": [],
@@ -232,11 +247,15 @@ class StoryHarness:
             "tool_results": [],
             "latest_tool_batch": [],
             "assistant_text": "",
+            "usage_metadata": {},
             "finish_reason": None,
             "next_action": "derive_turn_goal",
         }
         try:
-            final_state = await graph.ainvoke(initial_state)
+            final_state = await graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": self._graph_recursion_limit()},
+            )
         except asyncio.CancelledError:
             self._hooks.on_cancellation()
             raise
@@ -255,11 +274,21 @@ class StoryHarness:
             status=status,
             finish_reason=finish_reason,
             tool_results=tool_results,
+            assistant_text=str(final_state.get("assistant_text") or ""),
+            usage_metadata=dict(final_state.get("usage_metadata") or {}),
         )
 
     @property
     def model_call_count(self) -> int:
         return getattr(self._llm, "call_count", 0)
+
+    def _graph_recursion_limit(self) -> int:
+        # Each bounded round traverses ~8 graph nodes (derive -> plan -> build ->
+        # call -> inspect -> execute -> apply -> assess). LangGraph's default
+        # recursion_limit (25) caps super-steps below what max_rounds needs, so
+        # scale the budget to the profile's round ceiling plus finalize overhead.
+        nodes_per_round = 9
+        return max(self._profile.max_rounds, 1) * nodes_per_round + 10
 
     def cleanup(self) -> None:
         cleanup = getattr(self._llm, "cleanup", None)
@@ -267,11 +296,17 @@ class StoryHarness:
             cleanup()
 
     def _prepare_input(self, state: RpAgentRunState) -> RpAgentRunState:
-        turn_goal = str((state.get("turn_input") or {}).get("turn_goal") or "")
+        turn_input = state.get("turn_input") or {}
+        seed_messages = turn_input.get("seed_messages")
+        if seed_messages:
+            normalized_messages = [dict(message) for message in seed_messages]
+        else:
+            turn_goal = str(turn_input.get("turn_goal") or "")
+            normalized_messages = [{"role": "user", "content": turn_goal}]
         return {
             "status": "running",
             "round_no": 0,
-            "normalized_messages": [{"role": "user", "content": turn_goal}],
+            "normalized_messages": normalized_messages,
         }
 
     def _derive_turn_goal(self, state: RpAgentRunState) -> RpAgentRunState:
@@ -302,7 +337,13 @@ class StoryHarness:
         response = await self._llm.chat_completion(
             dict(state.get("latest_request") or {})
         )
-        return {"status": "model_called", "latest_response": response}
+        usage_metadata = dict(state.get("usage_metadata") or {})
+        self._accumulate_usage(usage_metadata, response.get("usage"))
+        return {
+            "status": "model_called",
+            "latest_response": response,
+            "usage_metadata": usage_metadata,
+        }
 
     def _inspect_model_output(self, state: RpAgentRunState) -> RpAgentRunState:
         message = _response_message(dict(state.get("latest_response") or {}))
@@ -480,6 +521,21 @@ class StoryHarness:
             in {"derive_turn_goal", "finalize_success", "finalize_failure"}
             else "finalize_failure"
         )
+
+    @staticmethod
+    def _accumulate_usage(totals: dict[str, Any], usage: Any) -> None:
+        if not isinstance(usage, dict):
+            return
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        total_tokens = int(
+            usage.get("total_tokens") or (prompt_tokens + completion_tokens)
+        )
+        totals["prompt_tokens"] = int(totals.get("prompt_tokens") or 0) + prompt_tokens
+        totals["completion_tokens"] = (
+            int(totals.get("completion_tokens") or 0) + completion_tokens
+        )
+        totals["total_tokens"] = int(totals.get("total_tokens") or 0) + total_tokens
 
 
 def create_story_harness(
