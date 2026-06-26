@@ -30,8 +30,11 @@ from rp.services.story.runtime_adapter_service import StoryRuntimeAdapterService
 from rp.services.story.runtime_workspace_facade import (
     StoryRuntimeWorkspaceFacade,
 )
+from .worker_executor_dispatcher import (
+    WorkerExecutorDispatcher,
+    WorkerExecutorRoute,
+)
 from .worker_registry_service import (
-    LONGFORM_MEMORY_WORKER_ID,
     WorkerRegistryService,
 )
 
@@ -77,6 +80,7 @@ class WorkerExecutionService:
         story_runtime_adapter_service: StoryRuntimeAdapterService | None = None,
         longform_memory_worker_adapter: MemoryMaintenanceWorkerAdapter | None = None,
         enable_legacy_longform_memory_worker_specialist_fallback: bool = False,
+        worker_executor_dispatcher: WorkerExecutorDispatcher | None = None,
     ) -> None:
         self._worker_registry_service = worker_registry_service
         self._longform_specialist_service = longform_specialist_service
@@ -88,6 +92,9 @@ class WorkerExecutionService:
         self._longform_memory_worker_adapter = longform_memory_worker_adapter
         self._enable_legacy_longform_memory_worker_specialist_fallback = (
             enable_legacy_longform_memory_worker_specialist_fallback
+        )
+        self._worker_executor_dispatcher = (
+            worker_executor_dispatcher or WorkerExecutorDispatcher()
         )
 
     async def execute_plan(
@@ -199,7 +206,8 @@ class WorkerExecutionService:
         accepted_segments: list[StoryArtifact],
         pending_artifact: StoryArtifact | None,
     ) -> _WorkerAdapterOutcome:
-        if request.worker_id == LONGFORM_MEMORY_WORKER_ID:
+        route = self._worker_executor_dispatcher.resolve(registration.descriptor.family)
+        if route == WorkerExecutorRoute.MEMORY_MAINTENANCE_STRUCTURED_OUTPUT:
             return await self._run_longform_memory_worker(
                 request=request,
                 registration=registration,
