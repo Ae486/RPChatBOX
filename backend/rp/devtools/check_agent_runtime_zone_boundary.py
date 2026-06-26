@@ -284,12 +284,12 @@ def _story_to_setup(references: list[ImportReference]) -> list[ImportViolation]:
     findings: list[ImportViolation] = []
     for reference in references:
         zone = _agent_runtime_zone(reference.imported)
-        if zone is not None and zone != "kernel":
+        if zone == "setup":
             findings.append(
                 _violation(
                     code=STORY_TO_SETUP,
                     reference=reference,
-                    message="story_harness may import only kernel agent-runtime modules",
+                    message="story files must not import setup-zone agent-runtime modules",
                 )
             )
         elif _is_setup_service(reference.imported):
