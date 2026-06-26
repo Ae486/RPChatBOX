@@ -124,6 +124,7 @@ class RuntimeProfileWriterPolicy(BaseModel):
         default_factory=_default_writer_operation_modes
     )
     retrieval_mode: str = "bounded_tool_loop"
+    retrieval_max_attempts: int = Field(default=3, ge=1)
     rewrite_requires_explicit_selection: bool = False
     discussion_summary_enabled: bool = True
     pov_rules: list[str] = Field(default_factory=list)
@@ -169,4 +170,5 @@ class RuntimeProfileSnapshotCompiledProfile(BaseModel):
     )
     writer_model_profile: dict[str, Any] = Field(default_factory=dict)
     worker_model_profiles: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    worker_tool_policies: dict[str, dict[str, Any]] = Field(default_factory=dict)
     mode_specific_settings: dict[str, Any] = Field(default_factory=dict)

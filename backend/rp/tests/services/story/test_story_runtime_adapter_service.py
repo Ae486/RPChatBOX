@@ -7,6 +7,7 @@ from rp.models.story.runtime import (
     SpecialistResultBundle,
     StoryArtifactKind,
 )
+from rp.models.writer.worker_family import WorkerFamily
 from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     WorkerDescriptor,
@@ -79,6 +80,8 @@ def test_specialist_bundle_adapter_maps_into_worker_result_without_plan_truth():
         descriptor=WorkerDescriptor(
             worker_id=LONGFORM_MEMORY_WORKER_ID,
             display_name="Longform Memory Worker",
+            kind="memory_maintenance_worker",
+            family=WorkerFamily.MEMORY_MAINTENANCE,
             default_execution_policy="longform_memory_worker.default",
             supported_phases=["pre_write_context"],
         ),

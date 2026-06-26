@@ -29,6 +29,7 @@ import pytest
 from pydantic import ValidationError
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.writer.worker_family import WorkerFamily
 from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     RuntimeWorkerRegistry,
@@ -103,6 +104,8 @@ def _registration(
         descriptor=WorkerDescriptor(
             worker_id=worker_id,
             display_name=worker_id,
+            kind="memory_maintenance_worker",
+            family=WorkerFamily.MEMORY_MAINTENANCE,
             default_execution_policy="policy-s2a",
             supported_phases=supported_phases or [_PHASE],
         ),

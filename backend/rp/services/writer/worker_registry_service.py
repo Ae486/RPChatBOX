@@ -18,12 +18,14 @@ from rp.models.runtime.mode_extension_contracts import (
     RULE_STATE_WORKER_ID,
     SCENE_INTERACTION_WORKER_ID,
 )
+from rp.models.writer.worker_family import WorkerFamily
 from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     RuntimeWorkerRegistry,
     WorkerDescriptor,
     WorkerExecutionClass,
     WorkerExecutionPolicy,
+    WorkerToolPolicy,
 )
 from rp.services.memory.contract_registry import MemoryContractRegistryService
 from rp.services.memory.registry_management_service import (
@@ -36,12 +38,22 @@ WRITING_WORKER_ID = "WritingWorker"
 ROLEPLAY_EXTENSION_SOURCE_WORKER_ID = "specialist"
 TRPG_EXTENSION_SOURCE_WORKER_ID = "specialist"
 
+_DEFAULT_MAX_TOOL_ROUNDS_BY_FAMILY: dict[WorkerFamily, int] = {
+    WorkerFamily.MEMORY_MAINTENANCE: 8,
+    WorkerFamily.WRITER: 0,
+    WorkerFamily.RETRIEVAL: 4,
+    WorkerFamily.RUNTIME_CONTEXT: 4,
+    WorkerFamily.SIMPLE: 4,
+}
+
 
 @dataclass(frozen=True)
 class _BootstrapRuntimeWorkerSpec:
     runtime_worker_id: str
     source_worker_id: str
     display_name: str
+    kind: str
+    family: WorkerFamily
     applicable_modes: tuple[str, ...]
     owned_domains: tuple[str, ...]
     read_domains: tuple[str, ...]
@@ -210,13 +222,15 @@ class WorkerRegistryService:
         descriptor = WorkerDescriptor(
             worker_id=spec.runtime_worker_id,
             display_name=spec.display_name,
+            kind=spec.kind,
+            family=spec.family,
             owned_domains=owned_domains,
             read_domains=read_domains,
             allowed_layers=self._allowed_layers_for_domains(
                 domains_by_id=domains_by_id,
                 domain_ids=[*owned_domains, *read_domains],
             ),
-            tool_allowlist=list(spec.tool_allowlist),
+            tool_policy=self._resolve_tool_policy(spec=spec, compiled=compiled),
             default_execution_policy=spec.execution_policy.policy_id,
             supported_phases=list(spec.supported_phases),
             permission_profile_ref=_optional_text(activation_payload.get("profile_ref")),
@@ -283,6 +297,29 @@ class WorkerRegistryService:
                 seen.add(layer_key)
                 allowed_layers.append(layer)
         return allowed_layers
+
+    @staticmethod
+    def _resolve_tool_policy(
+        *,
+        spec: _BootstrapRuntimeWorkerSpec,
+        compiled: RuntimeProfileSnapshotCompiledProfile,
+    ) -> WorkerToolPolicy:
+        override = compiled.worker_tool_policies.get(spec.runtime_worker_id, {})
+        allowed_tools = list(spec.tool_allowlist)
+        max_tool_rounds = int(
+            override.get(
+                "max_tool_rounds",
+                _DEFAULT_MAX_TOOL_ROUNDS_BY_FAMILY[spec.family],
+            )
+        )
+        model_callable_tools_enabled = bool(
+            override.get("model_callable_tools_enabled", bool(allowed_tools))
+        )
+        return WorkerToolPolicy(
+            allowed_tools=allowed_tools,
+            max_tool_rounds=max_tool_rounds,
+            model_callable_tools_enabled=model_callable_tools_enabled,
+        )
 
     @staticmethod
     def _model_defaults_for_worker(
@@ -386,6 +423,8 @@ _BOOTSTRAP_RUNTIME_WORKERS: tuple[_BootstrapRuntimeWorkerSpec, ...] = (
         runtime_worker_id=LONGFORM_MEMORY_WORKER_ID,
         source_worker_id="specialist",
         display_name="Longform Memory Worker",
+        kind="memory_maintenance_worker",
+        family=WorkerFamily.MEMORY_MAINTENANCE,
         applicable_modes=("longform",),
         owned_domains=(
             "chapter",
@@ -427,6 +466,8 @@ _BOOTSTRAP_RUNTIME_WORKERS: tuple[_BootstrapRuntimeWorkerSpec, ...] = (
         runtime_worker_id=WRITING_WORKER_ID,
         source_worker_id="writer",
         display_name="Writing Worker",
+        kind="writing_worker",
+        family=WorkerFamily.WRITER,
         applicable_modes=("longform", "roleplay", "trpg"),
         owned_domains=(),
         read_domains=(),
@@ -448,6 +489,8 @@ _BOOTSTRAP_RUNTIME_WORKERS: tuple[_BootstrapRuntimeWorkerSpec, ...] = (
         runtime_worker_id=CHARACTER_MEMORY_WORKER_ID,
         source_worker_id=ROLEPLAY_EXTENSION_SOURCE_WORKER_ID,
         display_name="Character Memory Worker",
+        kind="memory_maintenance_worker",
+        family=WorkerFamily.MEMORY_MAINTENANCE,
         applicable_modes=("roleplay",),
         owned_domains=("character", "relation"),
         read_domains=("knowledge_boundary", "scene", "goal"),
@@ -487,6 +530,8 @@ _BOOTSTRAP_RUNTIME_WORKERS: tuple[_BootstrapRuntimeWorkerSpec, ...] = (
         runtime_worker_id=SCENE_INTERACTION_WORKER_ID,
         source_worker_id=ROLEPLAY_EXTENSION_SOURCE_WORKER_ID,
         display_name="Scene Interaction Worker",
+        kind="memory_maintenance_worker",
+        family=WorkerFamily.MEMORY_MAINTENANCE,
         applicable_modes=("roleplay",),
         owned_domains=("scene", "goal"),
         read_domains=("character", "knowledge_boundary", "relation"),
@@ -525,6 +570,8 @@ _BOOTSTRAP_RUNTIME_WORKERS: tuple[_BootstrapRuntimeWorkerSpec, ...] = (
         runtime_worker_id=RULE_STATE_WORKER_ID,
         source_worker_id=TRPG_EXTENSION_SOURCE_WORKER_ID,
         display_name="Rule State Worker",
+        kind="memory_maintenance_worker",
+        family=WorkerFamily.MEMORY_MAINTENANCE,
         applicable_modes=("trpg",),
         owned_domains=("rule_state", "inventory", "world_rule"),
         read_domains=("scene", "character", "goal", "knowledge_boundary"),

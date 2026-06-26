@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.writer.worker_family import WorkerFamily
 from rp.models.writer.worker_runtime_contracts import (
     RuntimeWorkerRegistration,
     WorkerContextPacket,
@@ -471,6 +472,8 @@ def _registration() -> RuntimeWorkerRegistration:
         descriptor=WorkerDescriptor(
             worker_id=LONGFORM_MEMORY_WORKER_ID,
             display_name="Longform Memory Worker",
+            kind="memory_maintenance_worker",
+            family=WorkerFamily.MEMORY_MAINTENANCE,
             default_execution_policy="longform_memory_worker.default",
             supported_phases=["post_write_maintenance"],
         ),

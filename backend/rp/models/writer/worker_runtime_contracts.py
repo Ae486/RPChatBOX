@@ -5,9 +5,18 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.writer.worker_family import WorkerFamily
 
 
 class WorkerExecutionClass(StrEnum):
@@ -36,6 +45,21 @@ class WorkerResultStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class WorkerToolPolicy(BaseModel):
+    """Normalized worker tool capability policy resolved from compiled profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_tools: list[str] = Field(default_factory=list)
+    max_tool_rounds: int = Field(default=0, ge=0)
+    model_callable_tools_enabled: bool = False
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def _normalize_allowed_tools(cls, values: list[str]) -> list[str]:
+        return _normalize_unique_text_list(values, field_name="allowed_tools")
+
+
 class WorkerDescriptor(BaseModel):
     """Runtime-facing descriptor consumed by registry, scheduler, and tests."""
 
@@ -43,10 +67,12 @@ class WorkerDescriptor(BaseModel):
 
     worker_id: str
     display_name: str
+    kind: str
+    family: WorkerFamily
     owned_domains: list[str] = Field(default_factory=list)
     read_domains: list[str] = Field(default_factory=list)
     allowed_layers: list[str] = Field(default_factory=list)
-    tool_allowlist: list[str] = Field(default_factory=list)
+    tool_policy: WorkerToolPolicy = Field(default_factory=WorkerToolPolicy)
     default_execution_policy: str
     supported_phases: list[str] = Field(default_factory=list)
     permission_profile_ref: str | None = None
@@ -59,6 +85,7 @@ class WorkerDescriptor(BaseModel):
     @field_validator(
         "worker_id",
         "display_name",
+        "kind",
         "default_execution_policy",
         "output_schema_version",
     )
@@ -77,7 +104,6 @@ class WorkerDescriptor(BaseModel):
         "owned_domains",
         "read_domains",
         "allowed_layers",
-        "tool_allowlist",
         "supported_phases",
     )
     @classmethod
@@ -87,6 +113,20 @@ class WorkerDescriptor(BaseModel):
         info: ValidationInfo,
     ) -> list[str]:
         return _normalize_unique_text_list(values, field_name=info.field_name or "value")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_derived_tool_allowlist(cls, data: Any) -> Any:
+        # ``tool_allowlist`` is a derived computed_field; ignore it on input so a
+        # model_dump()/model_validate() round-trip does not trip ``extra=forbid``.
+        if isinstance(data, dict) and "tool_allowlist" in data:
+            return {key: value for key, value in data.items() if key != "tool_allowlist"}
+        return data
+
+    @computed_field
+    @property
+    def tool_allowlist(self) -> list[str]:
+        return list(self.tool_policy.allowed_tools)
 
 
 class WorkerExecutionPolicy(BaseModel):
