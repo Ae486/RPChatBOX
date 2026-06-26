@@ -39,6 +39,9 @@ ZONES: dict[str, ZoneName] = {
     "setup/skill_packs/__init__.py": "setup",
     "setup/skill_packs/registry.py": "setup",
     "story/story_harness.py": "story",
+    "story/harness_ports.py": "story",
+    "story/harness_hooks.py": "story",
+    "story/harness_finalize.py": "story",
 }
 
 LEGACY_MODULE_ZONES: dict[str, ZoneName] = {
