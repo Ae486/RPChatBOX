@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.retrieval.runtime_contracts import RetrievalUsageLedgerSnapshot
 from rp.models.writer.worker_memory import WorkerSourceRefBundle
 from rp.models.writer.writing_runtime import WritingPacket
 
@@ -77,6 +78,7 @@ class WritingWorkerExecutionResult(BaseModel):
     retrieval_source_ref_bundle: WorkerSourceRefBundle = Field(
         default_factory=WorkerSourceRefBundle
     )
+    retrieval_usage_ledger: RetrievalUsageLedgerSnapshot | None = None
     result_status: WritingResultStatus = "completed"
     failure_reason: str | None = None
     metadata_json: dict[str, Any] = Field(default_factory=dict)

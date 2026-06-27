@@ -55,6 +55,7 @@ class RuntimeWorkspaceMaterialKind(StrEnum):
     POST_WRITE_TRACE = "post_write_trace"
     PACKET_REF = "packet_ref"
     TOKEN_USAGE_METADATA = "token_usage_metadata"
+    RETRIEVAL_USAGE_LEDGER = "retrieval_usage_ledger"
 
 
 class RuntimeWorkspaceMaterialLifecycle(StrEnum):

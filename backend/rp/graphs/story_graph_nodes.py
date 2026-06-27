@@ -20,7 +20,10 @@ from rp.services.story.command_policy import validate_story_command
 from rp.services.story.maintenance_guard_service import (
     StoryRuntimeMaintenanceGuardService,
 )
-from rp.services.story.turn_domain_service import StoryTurnDomainService
+from rp.services.story.turn_domain_service import (
+    StoryTurnDomainService,
+    WriterFinalizationRejected,
+)
 
 from .story_graph_state import StoryGraphState
 
@@ -303,24 +306,33 @@ class StoryGraphNodes:
         command_kind = LongformTurnCommandKind(state["command_kind"])
         if command_kind in self._SPECIAL_COMMANDS:
             return {}
-        response = self._domain_service.persist_generated_artifact(
-            request=self._request_from_state(state),
-            packet=WritingPacket.model_validate(state.get("writing_packet") or {}),
-            plan=OrchestratorPlan.model_validate(state.get("plan") or {}),
-            text=str(state.get("assistant_text") or ""),
-            writing_result=(
-                None
-                if not isinstance(state.get("writing_result"), dict)
-                or not state.get("writing_result")
-                else WritingWorkerExecutionResult.model_validate(
-                    state.get("writing_result") or {}
-                )
-            ),
-            specialist_bundle=SpecialistResultBundle.model_validate(
-                state.get("specialist_bundle") or {}
-            ),
-            pending_artifact_id=state.get("pending_artifact_id"),
-        )
+        try:
+            response = self._domain_service.persist_generated_artifact(
+                request=self._request_from_state(state),
+                packet=WritingPacket.model_validate(state.get("writing_packet") or {}),
+                plan=OrchestratorPlan.model_validate(state.get("plan") or {}),
+                text=str(state.get("assistant_text") or ""),
+                writing_result=(
+                    None
+                    if not isinstance(state.get("writing_result"), dict)
+                    or not state.get("writing_result")
+                    else WritingWorkerExecutionResult.model_validate(
+                        state.get("writing_result") or {}
+                    )
+                ),
+                specialist_bundle=SpecialistResultBundle.model_validate(
+                    state.get("specialist_bundle") or {}
+                ),
+                pending_artifact_id=state.get("pending_artifact_id"),
+            )
+        except WriterFinalizationRejected as exc:
+            return {
+                "error": {
+                    "message": exc.reason_code,
+                    "type": "story_turn_failed",
+                },
+                "status": "failed",
+            }
         return {
             "artifact_id": response.artifact_id,
             "artifact_kind": response.artifact_kind.value

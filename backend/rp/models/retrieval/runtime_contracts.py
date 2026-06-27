@@ -228,6 +228,22 @@ class WriterRetrievalUsageToolInput(BaseModel):
         return _normalize_text_list(values, field_name=info.field_name or "values")
 
 
+class RetrievalUsageLedgerSnapshot(BaseModel):
+    """Durable carry-forward of the writer retrieval-tool ledger gate state.
+
+    Mirrors the provider's in-flight ``_LedgerState`` (gate/tool-event state
+    only, RET-004-safe): it records generation counters and the active usage
+    material id, never auto-derives which cards the writer "actually used".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    retrieval_generation: int = 0
+    usage_generation: int = 0
+    usage_material_id: str | None = None
+    tool_trace_refs: list[str] = Field(default_factory=list)
+
+
 class RetrievalUsageRecordPayload(BaseModel):
     """Stable payload contract for Runtime Workspace retrieval usage material."""
 

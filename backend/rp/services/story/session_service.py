@@ -69,6 +69,9 @@ class StorySessionService:
     def commit(self) -> None:
         self._session.commit()
 
+    def rollback(self) -> None:
+        self._session.rollback()
+
     def get_session(self, session_id: str) -> StorySession | None:
         record = self._session.get(StorySessionRecord, session_id)
         return self._record_to_story_session(record) if record is not None else None

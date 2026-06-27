@@ -16,6 +16,12 @@ from rp.models.proposal.postwrite_runtime_contracts import (
 from rp.models.runtime.identity import INTERRUPTED_BY_RESTART, StoryTurnStatus
 from rp.models.runtime.orchestrator_dispatch import OrchestratorPlanProposal
 from rp.models.runtime.reason_codes import SchedulerReasonCode
+from rp.models.runtime.workspace_material import (
+    RuntimeWorkspaceMaterial,
+    RuntimeWorkspaceMaterialKind,
+    RuntimeWorkspaceMaterialLifecycle,
+    RuntimeWorkspaceMaterialVisibility,
+)
 from rp.models.story.runtime import (
     ChapterWorkspace,
     LongformChapterPhase,
@@ -52,6 +58,11 @@ from ..projection.builder_context_service import BuilderProjectionContextService
 from ..projection.state_service import ProjectionStateService
 from ..recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
+)
+from ..retrieval.runtime_card_service import RuntimeRetrievalCardService
+from ..retrieval.writer_usage_guard_service import (
+    WriterRetrievalUsageGuardService,
+    WriterRetrievalUsageGuardServiceError,
 )
 from ..writer.rewrite_packet_constraint_service import RewritePacketConstraintService
 from .block_consumer_state_service import StoryBlockConsumerStateService
@@ -974,20 +985,29 @@ class StoryTurnDomainService:
             chapter=chapter,
             target_artifact_id=pending_artifact_id,
         )
-        artifact, next_chapter, finalized_result = self._persist_generated_artifact_impl(
-            session=session,
-            chapter=chapter,
-            request=request,
-            packet=packet,
-            plan=plan,
-            writing_result=self._coerce_writing_result(
+        try:
+            artifact, next_chapter, finalized_result = (
+                self._persist_generated_artifact_impl(
+                    session=session,
+                    chapter=chapter,
+                    request=request,
+                    packet=packet,
+                    plan=plan,
+                    writing_result=self._coerce_writing_result(
+                        packet=packet,
+                        writing_result=writing_result,
+                        fallback_text=text,
+                    ),
+                    pending_artifact=pending_artifact,
+                    specialist_bundle=specialist_bundle,
+                )
+            )
+        except WriterFinalizationRejected as exc:
+            self._terminalize_rejected_finalization(
                 packet=packet,
-                writing_result=writing_result,
-                fallback_text=text,
-            ),
-            pending_artifact=pending_artifact,
-            specialist_bundle=specialist_bundle,
-        )
+                reason_code=exc.reason_code,
+            )
+            raise
         return LongformTurnResponse(
             session_id=session.session_id,
             chapter_workspace_id=next_chapter.chapter_workspace_id,
@@ -1000,6 +1020,29 @@ class StoryTurnDomainService:
             writing_result=finalized_result,
             warnings=list(specialist_bundle.validation_findings),
         )
+
+    def _terminalize_rejected_finalization(
+        self,
+        *,
+        packet: WritingPacket,
+        reason_code: str,
+    ) -> None:
+        """Roll back the staged writer-output writes for a gate-rejected turn and
+        terminalize it as FAILED, committing only that flip (R1/F4 ordering)."""
+
+        # F4: rollback FIRST so none of the staged writer-output writes (artifact,
+        # obligations, surface, ledger, chapter, pre-visibility status) survive...
+        self._story_session_service.rollback()
+        identity = self._packet_runtime_identity(packet)
+        if identity is None or self._runtime_identity_service is None:
+            return
+        # ...THEN flip the turn to FAILED, THEN commit ONLY that flip.
+        self._runtime_identity_service.update_turn_status(
+            turn_id=identity.turn_id,
+            status=StoryTurnStatus.FAILED,
+            failure_reason=reason_code,
+        )
+        self._story_session_service.commit()
 
     def accept_outline(
         self,
@@ -1794,7 +1837,7 @@ class StoryTurnDomainService:
         if self._runtime_identity_service is None:
             return
         self._apply_writer_finalization_gate(
-            turn_id=identity.turn_id,
+            identity=identity,
             writer_result=finalized_result,
         )
         self._runtime_identity_service.update_turn_status(
@@ -1807,11 +1850,48 @@ class StoryTurnDomainService:
     def _apply_writer_finalization_gate(
         self,
         *,
-        turn_id: str,
+        identity: MemoryRuntimeIdentity,
         writer_result: WritingWorkerExecutionResult,
     ) -> None:
-        """S4/RET-005 will raise WriterFinalizationRejected here before visibility commit."""
+        """Durable turn-level RET-005 backstop (RET-003 deterministic layer).
 
+        Defense-in-depth: rather than trusting the in-memory ``writer_result``,
+        re-apply the frozen in-flight rule
+        (``WriterRetrievalUsageGuardService.ensure_final_output_allowed``) over the
+        PERSISTED retrieval-usage ledger for this turn identity, so the property
+        holds regardless of which writer path produced the result. Raised before
+        the TURN-008 visibility commit; a raise here rolls back the staged
+        writer-output writes (R1).
+        """
+
+        del writer_result  # gate reads durable ledger state, not the in-memory result
+        material_service = self._runtime_workspace_material_service
+        if material_service is None:
+            return None
+        ledgers = material_service.list_materials(
+            identity=identity,
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_LEDGER,
+        )
+        if not ledgers:
+            return None
+        payload = ledgers[-1].payload or {}
+        retrieval_generation = int(payload.get("retrieval_generation") or 0)
+        if retrieval_generation <= 0:
+            return None
+        guard = WriterRetrievalUsageGuardService(
+            runtime_retrieval_card_service=RuntimeRetrievalCardService(
+                runtime_workspace_material_service=material_service,
+            ),
+        )
+        try:
+            guard.ensure_final_output_allowed(
+                identity=identity,
+                retrieval_generation=retrieval_generation,
+                usage_generation=int(payload.get("usage_generation") or 0),
+                usage_material_id=payload.get("usage_material_id"),
+            )
+        except WriterRetrievalUsageGuardServiceError as exc:
+            raise WriterFinalizationRejected(exc.code) from exc
         return None
 
     def _record_runtime_retrieval_usage_for_artifact(
@@ -1821,6 +1901,10 @@ class StoryTurnDomainService:
         writing_result: WritingWorkerExecutionResult,
         artifact_metadata: dict[str, object],
     ) -> None:
+        self._record_retrieval_usage_ledger_material(
+            packet=packet,
+            writing_result=writing_result,
+        )
         source_ref_bundle = writing_result.retrieval_source_ref_bundle
         if source_ref_bundle.is_empty():
             bundle_payload = packet.metadata.get("worker_source_ref_bundle")
@@ -1838,6 +1922,39 @@ class StoryTurnDomainService:
                 source_ref_bundle.retrieval_usage_material_ids
             ),
         ).model_dump(mode="json")
+
+    def _record_retrieval_usage_ledger_material(
+        self,
+        *,
+        packet: WritingPacket,
+        writing_result: WritingWorkerExecutionResult,
+    ) -> None:
+        """Persist the writer retrieval-tool gate ledger so the durable RET-005
+        gate carries forward the in-flight verdict (RET-004-safe; staged in the
+        shared session before the gate and the single finalize commit)."""
+
+        ledger = writing_result.retrieval_usage_ledger
+        if ledger is None:
+            return
+        material_service = self._runtime_workspace_material_service
+        if material_service is None:
+            return
+        identity = self._packet_runtime_identity(packet)
+        if identity is None:
+            return
+        material_service.record_material(
+            RuntimeWorkspaceMaterial(
+                material_id=f"retrieval_usage_ledger_{uuid4().hex}",
+                material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_LEDGER,
+                identity=identity,
+                domain="chapter",
+                domain_path="chapter.runtime.retrieval.usage_ledger",
+                payload=ledger.model_dump(mode="json"),
+                lifecycle=RuntimeWorkspaceMaterialLifecycle.ACTIVE,
+                visibility=RuntimeWorkspaceMaterialVisibility.RUNTIME_PRIVATE.value,
+                created_by="story.turn.finalization",
+            )
+        )
 
     @staticmethod
     def _packet_runtime_identity(

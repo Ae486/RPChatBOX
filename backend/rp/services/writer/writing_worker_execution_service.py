@@ -125,6 +125,7 @@ class WritingWorkerExecutionService:
             usage_metadata = result.usage_metadata
             writer_tool_trace_refs = provider.tool_trace_refs
             retrieval_source_ref_bundle = provider.build_source_ref_bundle()
+            retrieval_usage_ledger = provider.final_ledger_snapshot()
             metadata_json["retrieval_loop_mode"] = "graph_harness"
         else:
             text, usage_metadata = await self._llm_gateway.complete_text_with_usage(
@@ -138,6 +139,7 @@ class WritingWorkerExecutionService:
             retrieval_source_ref_bundle = self._packet_source_ref_bundle(
                 packet=request.packet
             )
+            retrieval_usage_ledger = None
             metadata_json["retrieval_loop_mode"] = "disabled"
         turn_id = request.identity.turn_id if request.identity is not None else None
         return WritingWorkerExecutionResult(
@@ -150,6 +152,7 @@ class WritingWorkerExecutionService:
             usage_metadata=usage_metadata,
             writer_tool_trace_refs=writer_tool_trace_refs,
             retrieval_source_ref_bundle=retrieval_source_ref_bundle,
+            retrieval_usage_ledger=retrieval_usage_ledger,
             result_status="completed",
             metadata_json=metadata_json,
         )

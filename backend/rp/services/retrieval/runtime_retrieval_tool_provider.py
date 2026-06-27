@@ -20,6 +20,7 @@ from rp.agent_runtime.kernel.runtime_tool_contracts import (
 from rp.agent_runtime.story.harness_finalize import FinalizeGuardDecision
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.retrieval.runtime_contracts import (
+    RetrievalUsageLedgerSnapshot,
     WriterRetrievalExpandToolInput,
     WriterRetrievalSearchToolInput,
     WriterRetrievalUsageToolInput,
@@ -188,6 +189,16 @@ class RuntimeRetrievalToolProvider:
     @property
     def tool_trace_refs(self) -> list[str]:
         return list(self._state.tool_trace_refs)
+
+    def final_ledger_snapshot(self) -> RetrievalUsageLedgerSnapshot:
+        """Read-only durable carry-forward of the in-flight gate ledger state."""
+
+        return RetrievalUsageLedgerSnapshot(
+            retrieval_generation=self._state.retrieval_generation,
+            usage_generation=self._state.usage_generation,
+            usage_material_id=self._state.usage_material_id,
+            tool_trace_refs=list(self._state.tool_trace_refs),
+        )
 
     async def _handle_search(self, *, arguments: dict[str, Any], attempt_index: int) -> str:
         payload = WriterRetrievalSearchToolInput.model_validate(arguments)
