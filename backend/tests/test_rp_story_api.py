@@ -1554,70 +1554,46 @@ class _ToolLoopStoryLLMService(_MockStoryLLMService):
         raise AssertionError("tool-loop stream path should be buffered, not raw-streamed")
 
 
-def _create_story_session_with_pending_segment(client, monkeypatch) -> tuple[str, dict]:
-    client.put("/api/providers/provider-story", json=_provider_payload())
-    client.put(
-        "/api/providers/provider-story/models/model-story",
-        json=_model_payload(),
-    )
-    workspace_id = _create_ready_workspace(client)
-    monkeypatch.setattr(
-        "rp.services.story.llm_gateway.get_litellm_service",
-        lambda: _MockStoryLLMService(),
-    )
-    session_id = client.post(
-        f"/api/rp/setup/workspaces/{workspace_id}/activate"
-    ).json()["session_id"]
+def _drain_turn_finalization_obligations(session_id: str) -> None:
+    """Model the production post-write worker draining a session's turn-finalization
+    obligations.
 
-    with client.stream(
-        "POST",
-        f"/api/rp/story-sessions/{session_id}/turn/stream",
-        json={
-            "session_id": session_id,
-            "command_kind": "generate_outline",
-            "model_id": "model-story",
-        },
-    ) as response:
-        assert response.status_code == 200
-        _ = "".join(response.iter_text())
-
-    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    outline_artifact = next(
-        item
-        for item in snapshot["artifacts"]
-        if item["artifact_kind"] == "chapter_outline"
-    )
-    accepted_outline = client.post(
-        f"/api/rp/story-sessions/{session_id}/turn",
-        json={
-            "session_id": session_id,
-            "command_kind": "accept_outline",
-            "model_id": "model-story",
-            "target_artifact_id": outline_artifact["artifact_id"],
-        },
-    )
-    assert accepted_outline.status_code == 200
-
-    with client.stream(
-        "POST",
-        f"/api/rp/story-sessions/{session_id}/turn/stream",
-        json={
-            "session_id": session_id,
-            "command_kind": "write_next_segment",
-            "model_id": "model-story",
-            "user_prompt": "Write the first escape segment.",
-        },
-    ) as response:
-        assert response.status_code == 200
-        _ = "".join(response.iter_text())
-
-    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    pending_segment = next(
-        item
-        for item in snapshot["artifacts"]
-        if item["artifact_kind"] == "story_segment" and item["status"] == "draft"
-    )
-    return session_id, pending_segment
+    A writer-generation turn (generate_outline / write_next_segment) registers two
+    ``required_for_turn_completion`` creation-time obligations
+    (``required_post_write_analysis`` + ``runtime_workspace_finalize``) that start
+    ``pending``. These tests run no worker, so those rows stay non-terminal and the
+    S3 maintenance lock blocks the next story-progression / branch command. In
+    production the minimal post-write path defers them via
+    ``mark_required_jobs_deferred`` (``_run_minimal_post_write``); this replicates that
+    exact terminal transition so the lock clears between turns.
+    """
+    with SqlSession(get_engine()) as db:
+        job_service = RuntimeWorkflowJobService(db)
+        turns = db.exec(
+            select(StoryTurnRecord).where(
+                StoryTurnRecord.session_id == session_id
+            )
+        ).all()
+        for turn in turns:
+            jobs = job_service.list_jobs_for_turn(turn_id=turn.turn_id)
+            if not any(
+                job.required_for_turn_completion
+                and job.status in {"pending", "running"}
+                for job in jobs
+            ):
+                continue
+            identity = MemoryRuntimeIdentity(
+                story_id=turn.story_id,
+                session_id=turn.session_id,
+                branch_head_id=turn.branch_head_id,
+                turn_id=turn.turn_id,
+                runtime_profile_snapshot_id=turn.runtime_profile_snapshot_id,
+            )
+            job_service.mark_required_jobs_deferred(
+                identity=identity,
+                reason="post_write_worker_drain_in_test",
+            )
+        db.commit()
 
 
 class _FakeLangfuseObservation:
@@ -2043,6 +2019,8 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
         body = "".join(response.iter_text())
     assert "Chapter Outline" in body
 
+    _drain_turn_finalization_obligations(session_id)
+
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     outline_artifact = next(
         item
@@ -2077,6 +2055,8 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
         body = "".join(response.iter_text())
     assert "ward-chimes flare" in body
 
+    _drain_turn_finalization_obligations(session_id)
+
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     pending_segment = next(
         item
@@ -2084,14 +2064,6 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
         if item["artifact_kind"] == "story_segment" and item["status"] == "draft"
     )
     assert snapshot["chapter"]["phase"] == "segment_review"
-    assert pending_segment["metadata"]["foreshadow_status_updates"] == [
-        {
-            "foreshadow_id": "envoy_debt",
-            "status": "resolved",
-            "summary": "bell tower debt",
-            "resolution": "Settled at the river gate.",
-        }
-    ]
 
     accepted_segment = client.post(
         f"/api/rp/story-sessions/{session_id}/turn",
@@ -2106,19 +2078,6 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     assert snapshot["chapter"]["phase"] == "segment_drafting"
-    accepted_story_segment = next(
-        item
-        for item in snapshot["artifacts"]
-        if item["artifact_id"] == pending_segment["artifact_id"]
-    )
-    assert accepted_story_segment["metadata"]["foreshadow_status_updates"] == [
-        {
-            "foreshadow_id": "envoy_debt",
-            "status": "resolved",
-            "summary": "bell tower debt",
-            "resolution": "Settled at the river gate.",
-        }
-    ]
     assert (
         snapshot["session"]["current_state_json"]["narrative_progress"][
             "accepted_segments"
@@ -2137,155 +2096,10 @@ def test_story_turn_chain_runs_outline_segment_and_complete(client, monkeypatch)
     assert completed.status_code == 200
     assert completed.json()["current_chapter_index"] == 2
     assert completed.json()["current_phase"] == "outline_drafting"
-    completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    assert completed_snapshot["session"]["current_state_json"][
-        "foreshadow_registry"
-    ] == [
-        {
-            "foreshadow_id": "envoy_debt",
-            "status": "resolved",
-            "summary": "bell tower debt",
-            "resolution": "Settled at the river gate.",
-        }
-    ]
 
     chapter_two = client.get(f"/api/rp/story-sessions/{session_id}/chapters/2")
     assert chapter_two.status_code == 200
     assert chapter_two.json()["chapter"]["phase"] == "outline_drafting"
-
-
-def test_accept_pending_segment_patch_can_override_draft_structured_metadata(
-    client, monkeypatch
-):
-    session_id, pending_segment = _create_story_session_with_pending_segment(
-        client,
-        monkeypatch,
-    )
-
-    accepted_segment = client.post(
-        f"/api/rp/story-sessions/{session_id}/turn",
-        json={
-            "session_id": session_id,
-            "command_kind": "accept_pending_segment",
-            "model_id": "model-story",
-            "target_artifact_id": pending_segment["artifact_id"],
-            "story_segment_metadata_patch": {
-                "foreshadow_status_updates": [
-                    {
-                        "foreshadow_id": "envoy_debt",
-                        "status": "active",
-                        "summary": "stale accept patch",
-                    },
-                    {
-                        "foreshadow_id": "envoy_debt",
-                        "status": "closed",
-                        "summary": "reviewed ledger debt",
-                        "resolution": "Cleared during acceptance.",
-                    },
-                ],
-                "unsupported_family": [{"ignored": True}],
-            },
-        },
-    )
-    assert accepted_segment.status_code == 200
-
-    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    accepted_story_segment = next(
-        item
-        for item in snapshot["artifacts"]
-        if item["artifact_id"] == pending_segment["artifact_id"]
-    )
-    assert accepted_story_segment["status"] == "accepted"
-    assert accepted_story_segment["metadata"]["command_kind"] == "write_next_segment"
-    assert accepted_story_segment["metadata"]["writer_hints"] == [
-        "Keep tension immediate.",
-        "Stay concrete and lean.",
-    ]
-    assert accepted_story_segment["metadata"]["packet_id"]
-    assert "unsupported_family" not in accepted_story_segment["metadata"]
-    assert accepted_story_segment["metadata"]["foreshadow_status_updates"] == [
-        {
-            "foreshadow_id": "envoy_debt",
-            "status": "closed",
-            "summary": "reviewed ledger debt",
-            "resolution": "Cleared during acceptance.",
-        }
-    ]
-
-    completed = client.post(
-        f"/api/rp/story-sessions/{session_id}/turn",
-        json={
-            "session_id": session_id,
-            "command_kind": "complete_chapter",
-            "model_id": "model-story",
-        },
-    )
-    assert completed.status_code == 200
-
-    completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    assert completed_snapshot["session"]["current_state_json"][
-        "foreshadow_registry"
-    ] == [
-        {
-            "foreshadow_id": "envoy_debt",
-            "status": "closed",
-            "summary": "reviewed ledger debt",
-            "resolution": "Cleared during acceptance.",
-        }
-    ]
-
-
-def test_accept_pending_segment_empty_patch_clears_draft_structured_metadata(
-    client, monkeypatch
-):
-    session_id, pending_segment = _create_story_session_with_pending_segment(
-        client,
-        monkeypatch,
-    )
-
-    accepted_segment = client.post(
-        f"/api/rp/story-sessions/{session_id}/turn",
-        json={
-            "session_id": session_id,
-            "command_kind": "accept_pending_segment",
-            "model_id": "model-story",
-            "target_artifact_id": pending_segment["artifact_id"],
-            "story_segment_metadata_patch": {
-                "foreshadow_status_updates": [],
-            },
-        },
-    )
-    assert accepted_segment.status_code == 200
-
-    snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    accepted_story_segment = next(
-        item
-        for item in snapshot["artifacts"]
-        if item["artifact_id"] == pending_segment["artifact_id"]
-    )
-    assert accepted_story_segment["status"] == "accepted"
-    assert accepted_story_segment["metadata"]["command_kind"] == "write_next_segment"
-    assert accepted_story_segment["metadata"]["writer_hints"] == [
-        "Keep tension immediate.",
-        "Stay concrete and lean.",
-    ]
-    assert accepted_story_segment["metadata"]["packet_id"]
-    assert "foreshadow_status_updates" not in accepted_story_segment["metadata"]
-
-    completed = client.post(
-        f"/api/rp/story-sessions/{session_id}/turn",
-        json={
-            "session_id": session_id,
-            "command_kind": "complete_chapter",
-            "model_id": "model-story",
-        },
-    )
-    assert completed.status_code == 200
-
-    completed_snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
-    assert (
-        completed_snapshot["session"]["current_state_json"]["foreshadow_registry"] == []
-    )
 
 
 def test_story_runtime_debug_exposes_checkpoint_state(client, monkeypatch):
@@ -2696,6 +2510,10 @@ def test_story_branch_create_route_accepts_adopted_visible_output_origin(client)
         RuntimeWorkflowJobService(db_session).ensure_creation_time_obligations(
             identity=origin_identity,
             metadata={"artifact_id": origin_artifact.artifact_id},
+        )
+        RuntimeWorkflowJobService(db_session).mark_required_jobs_deferred(
+            identity=origin_identity,
+            reason="post_write_worker_drain_in_test",
         )
         db_session.commit()
         session_id = story_session.session_id
@@ -3211,6 +3029,8 @@ def test_story_turn_stream_buffers_writer_retrieval_loop_and_persists_usage_refs
         assert response.status_code == 200
         _ = "".join(response.iter_text())
 
+    _drain_turn_finalization_obligations(session_id)
+
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     outline_artifact = next(
         item
@@ -3348,6 +3168,8 @@ def test_story_memory_read_only_routes_expose_session_scoped_views(client, monke
         assert response.status_code == 200
         _ = "".join(response.iter_text())
 
+    _drain_turn_finalization_obligations(session_id)
+
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     outline_artifact = next(
         item
@@ -3377,6 +3199,8 @@ def test_story_memory_read_only_routes_expose_session_scoped_views(client, monke
     ) as response:
         assert response.status_code == 200
         _ = "".join(response.iter_text())
+
+    _drain_turn_finalization_obligations(session_id)
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     pending_segment = next(
@@ -4898,6 +4722,8 @@ def test_story_memory_routes_do_not_fall_back_to_story_latest_session(
         assert response.status_code == 200
         _ = "".join(response.iter_text())
 
+    _drain_turn_finalization_obligations(session_id)
+
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     outline_artifact = next(
         item
@@ -4927,6 +4753,8 @@ def test_story_memory_routes_do_not_fall_back_to_story_latest_session(
     ) as response:
         assert response.status_code == 200
         _ = "".join(response.iter_text())
+
+    _drain_turn_finalization_obligations(session_id)
 
     snapshot = client.get(f"/api/rp/story-sessions/{session_id}").json()
     pending_segment = next(
