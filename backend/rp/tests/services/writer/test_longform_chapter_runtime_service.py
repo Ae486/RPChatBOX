@@ -212,6 +212,13 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
         turn_id=pending_identity.turn_id,
         status=StoryTurnStatus.POST_WRITE_PENDING,
     )
+    identity_service.update_turn_status(
+        turn_id=pending_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref=pending.artifact_id,
+        selected_output_ref=pending.artifact_id,
+        settlement_reason="test_pending_settled_before_next_writer_turn",
+    )
     stale_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
@@ -239,6 +246,11 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
         pending_segment_artifact_id=pending.artifact_id,
     )
 
+    identity_service.update_turn_status(
+        turn_id=stale_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="test_stale_settled_before_next_writer_turn",
+    )
     review_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
@@ -623,6 +635,11 @@ def test_chapter_transition_ignores_rollback_hidden_pending_pointer_and_adoption
         chapter_workspace_id=chapter.chapter_workspace_id,
         phase=LongformChapterPhase.SEGMENT_REVIEW,
         pending_segment_artifact_id=hidden_pending.artifact_id,
+    )
+    identity_service.update_turn_status(
+        turn_id=hidden_identity.turn_id,
+        status=StoryTurnStatus.FAILED,
+        failure_reason="test_hidden_pending_abandoned_before_rollback",
     )
     review_identity, _ = _resolve_runtime_identity(
         retrieval_session,
