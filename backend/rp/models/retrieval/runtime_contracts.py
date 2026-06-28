@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import (
@@ -242,6 +243,43 @@ class RetrievalUsageLedgerSnapshot(BaseModel):
     usage_generation: int = 0
     usage_material_id: str | None = None
     tool_trace_refs: list[str] = Field(default_factory=list)
+
+
+class RetrievalFailureCategory(str, Enum):
+    """RET-013 normalized taxonomy for a writer-retrieval turn outcome.
+
+    Keeps the three channels distinct so a failure marker is never conflated:
+    a retrieval tool that broke (``retrieval_failure``), a search that succeeded
+    but found nothing usable (``retrieval_insufficiency``, non-raising), and a
+    model/harness completion failure unrelated to the retrieval tools
+    (``model_failure``).
+    """
+
+    RETRIEVAL_FAILURE = "retrieval_failure"
+    RETRIEVAL_INSUFFICIENCY = "retrieval_insufficiency"
+    MODEL_FAILURE = "model_failure"
+
+
+RETRIEVAL_INSUFFICIENCY_REASON_CODE = "runtime_retrieval_no_results"
+
+
+class RetrievalOutcomeClassification(BaseModel):
+    """Deterministic RET-013 classification of a writer-retrieval outcome.
+
+    ``category`` is the normalized taxonomy axis; ``reason_code`` carries the
+    specific sub-reason (provider tool ``error_code`` / harness ``finish_reason``
+    / insufficiency marker) so traceability survives the normalization.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: RetrievalFailureCategory
+    reason_code: str
+
+    @field_validator("reason_code")
+    @classmethod
+    def _normalize_reason_code(cls, value: str, info: ValidationInfo) -> str:
+        return _require_non_blank(value, field_name=info.field_name or "reason_code")
 
 
 class RetrievalUsageRecordPayload(BaseModel):

@@ -15,6 +15,7 @@ from rp.models.story.runtime import LongformChapterPhase
 from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionRequest
 from rp.models.writer.writing_runtime import WritingPacket
 from rp.models.retrieval.records import SourceAsset
+from rp.models.retrieval.runtime_contracts import RetrievalFailureCategory
 from rp.services.retrieval.collection_service import RetrievalCollectionService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
@@ -495,6 +496,9 @@ async def test_writing_worker_execution_service_fails_closed_when_final_output_s
             )
         )
     assert exc_info.value.code == "writer_retrieval_usage_required_before_final_output"
+    # RET-013: the writer skipped the usage protocol; the retrieval tools worked,
+    # so this is a model failure, distinct from a retrieval-tool failure.
+    assert exc_info.value.category is RetrievalFailureCategory.MODEL_FAILURE
 
 
 @pytest.mark.asyncio
