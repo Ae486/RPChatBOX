@@ -21,6 +21,7 @@ from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterialKind,
     RuntimeWorkspaceMaterialLifecycle,
+    RuntimeWorkspaceMaterialVisibility,
 )
 
 from ..memory.trace_read_service import MemoryTraceReadService
@@ -152,7 +153,7 @@ class StoryRuntimeDebugQueryService:
             turn_trace=turn_trace,
             jobs=jobs,
         )
-        retrieval = self._retrieval_summary(turn_trace=turn_trace)
+        retrieval = self._retrieval_summary_with_levels(turn_trace=turn_trace)
         branch_receipts = [
             self._branch_control_receipt_item(item)
             for item in self._list_branch_control_receipts(
@@ -816,6 +817,110 @@ class StoryRuntimeDebugQueryService:
             else list(turn_trace.get("retrieval_usage_refs") or []),
         }
 
+    @classmethod
+    def _retrieval_summary_with_levels(
+        cls, *, turn_trace: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Compose the retrieval inspect payload with both render levels.
+
+        RET-012 splits the retrieval surface into a concise ``normal`` stream
+        and the full ``debug``/detail view. Both are derived from the same
+        turn-trace workspace materials. The flat debug-detail keys stay at the
+        top for backward compatibility (existing consumers read
+        ``retrieval["usage_refs"]`` / ``retrieval["cards"]``), and a caller can
+        request either render level explicitly through ``render_levels``.
+        """
+        retrieval_detail = cls._retrieval_summary(turn_trace=turn_trace)
+        retrieval_normal = cls._retrieval_normal_summary(turn_trace=turn_trace)
+        return {
+            **retrieval_detail,
+            "normal": retrieval_normal,
+            "render_levels": {
+                "normal": retrieval_normal,
+                "debug": retrieval_detail,
+            },
+        }
+
+    @classmethod
+    def _retrieval_normal_summary(
+        cls, *, turn_trace: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Concise RET-012 normal-stream retrieval summary.
+
+        Derives from the same workspace materials as ``_retrieval_summary`` but
+        exposes only readable status: whether reference material was used and
+        whether information gaps remained. It must not carry card ids, query
+        text, usage records, attempt counts, or failure detail. Those stay in
+        the debug/detail render level.
+        """
+        materials = [] if turn_trace is None else list(
+            turn_trace.get("runtime_workspace_materials") or []
+        )
+        material_groups = cls._group_materials_by_kind(materials)
+        cards = material_groups.get(
+            RuntimeWorkspaceMaterialKind.RETRIEVAL_CARD.value,
+            [],
+        )
+        expanded_chunks = material_groups.get(
+            RuntimeWorkspaceMaterialKind.RETRIEVAL_EXPANDED_CHUNK.value,
+            [],
+        )
+        misses = material_groups.get(
+            RuntimeWorkspaceMaterialKind.RETRIEVAL_MISS.value,
+            [],
+        )
+        usage_records = material_groups.get(
+            RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD.value,
+            [],
+        )
+        used_via_usage = any(
+            _string_list((item.get("payload") or {}).get("used_card_short_ids"))
+            for item in usage_records
+        )
+        writer_visible_card = any(
+            str(item.get("visibility") or "").strip()
+            == RuntimeWorkspaceMaterialVisibility.WRITER_VISIBLE.value
+            for item in cards
+        )
+        reference_material_used = bool(used_via_usage or writer_visible_card)
+        gaps_via_usage = any(
+            _is_non_empty_list((item.get("payload") or {}).get("knowledge_gaps"))
+            for item in usage_records
+        )
+        gaps_remained = bool(misses or gaps_via_usage)
+        retrieval_occurred = bool(
+            cards or expanded_chunks or misses or usage_records
+        )
+        return {
+            "render_level": "normal",
+            "retrieval_occurred": retrieval_occurred,
+            "reference_material_used": reference_material_used,
+            "gaps_remained": gaps_remained,
+            "message": cls._retrieval_normal_message(
+                retrieval_occurred=retrieval_occurred,
+                reference_material_used=reference_material_used,
+                gaps_remained=gaps_remained,
+            ),
+        }
+
+    @staticmethod
+    def _retrieval_normal_message(
+        *,
+        retrieval_occurred: bool,
+        reference_material_used: bool,
+        gaps_remained: bool,
+    ) -> str:
+        """Human-readable normal-stream status with no ids/queries/attempts."""
+        if not retrieval_occurred:
+            return "No reference material was retrieved this turn."
+        if reference_material_used and gaps_remained:
+            return "Reference material was used; some information gaps remained."
+        if reference_material_used:
+            return "Reference material was used."
+        if gaps_remained:
+            return "No reference material was used; information gaps remained."
+        return "Reference material was retrieved but not used."
+
     def _runtime_config_summary(
         self,
         *,
@@ -1334,6 +1439,10 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return _unique_non_blank(value)
+
+
+def _is_non_empty_list(value: Any) -> bool:
+    return isinstance(value, list) and len(value) > 0
 
 
 def _datetime_or_none(value) -> str | None:
