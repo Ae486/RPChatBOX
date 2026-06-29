@@ -125,11 +125,6 @@ class _NoopRegressionService:
     ):
         return session, chapter
 
-    async def run_heavy_regression(
-        self, *, session, chapter, model_id, provider_id, runtime_identity=None
-    ):
-        return session, chapter
-
 
 def _build_controller(
     service: StorySessionService,
@@ -579,55 +574,6 @@ async def test_close_current_scene_materializes_searchable_transcript(
     assert result.hits[0].metadata["scene_ref"] == "chapter:1:scene:1"
     assert result.hits[0].metadata["materialization_event"] == "scene_close"
     assert "silver braid oath" in result.hits[0].excerpt_text.lower()
-
-
-@pytest.mark.asyncio
-async def test_complete_chapter_materializes_last_scene_transcript(retrieval_session):
-    story_session_service, session, chapter = _seed_story_runtime(
-        retrieval_session,
-        story_id="story-scene-transcript-complete",
-    )
-    story_session_service.close_current_scene(session_id=session.session_id)
-    story_session_service.create_discussion_entry(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        role="user",
-        content_text="Second-scene whisper about the harbor bell debt.",
-    )
-    story_session_service.create_artifact(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.ACCEPTED,
-        content_text="The harbor bell debt echoed across the wet market stalls.",
-    )
-    turn_domain_service = _build_turn_domain_service(
-        story_session_service,
-        RecallSceneTranscriptIngestionService(retrieval_session),
-    )
-
-    response = await turn_domain_service.complete_chapter(
-        request=LongformTurnRequest(
-            session_id=session.session_id,
-            command_kind=LongformTurnCommandKind.COMPLETE_CHAPTER,
-            model_id="model-scene-transcript-complete",
-        )
-    )
-
-    assert response.current_chapter_index == 2
-    broker = RetrievalBroker(default_story_id=session.story_id)
-    result = await broker.search_recall(
-        MemorySearchRecallInput(
-            query="harbor bell debt wet market stalls",
-            domains=[Domain.CHAPTER],
-            scope="story",
-            top_k=5,
-            filters={"materialization_kinds": ["scene_transcript"]},
-        )
-    )
-
-    assert result.hits
-    assert result.hits[0].metadata["scene_ref"] == "chapter:1:scene:2"
 
 
 @pytest.mark.asyncio

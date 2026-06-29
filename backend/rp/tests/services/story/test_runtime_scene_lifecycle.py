@@ -84,11 +84,6 @@ class _NoopRegressionService:
     ):
         return session, chapter
 
-    async def run_heavy_regression(
-        self, *, session, chapter, model_id, provider_id, runtime_identity=None
-    ):
-        return session, chapter
-
 
 def _build_turn_domain_service(service: StorySessionService) -> StoryTurnDomainService:
     projection_state_service = ProjectionStateService(

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import AsyncIterator, Protocol, cast
 from uuid import uuid4
 
-from models.rp_story_store import RuntimeWorkflowJobRecord
+from models.rp_story_store import RuntimeWorkflowJobRecord, StoryTurnRecord
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.block.consumer import BlockConsumerKey
 from rp.models.proposal.postwrite_runtime_contracts import (
@@ -16,6 +17,12 @@ from rp.models.proposal.postwrite_runtime_contracts import (
 from rp.models.runtime.identity import INTERRUPTED_BY_RESTART, StoryTurnStatus
 from rp.models.runtime.orchestrator_dispatch import OrchestratorPlanProposal
 from rp.models.runtime.reason_codes import SchedulerReasonCode
+from rp.models.runtime.workflow_job import (
+    RuntimeWorkflowJobCategory,
+    RuntimeWorkflowJobCreationMode,
+    RuntimeWorkflowJobKind,
+    RuntimeWorkflowJobStatus,
+)
 from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
@@ -37,7 +44,7 @@ from rp.models.story.runtime import (
     StorySession,
 )
 from rp.models.writer.worker_memory import WorkerSourceRefBundle
-from rp.models.writer.worker_runtime_contracts import WorkerPlanSource
+from rp.models.writer.worker_runtime_contracts import WorkerPlanSource, WorkerResultStatus
 from rp.models.writer.writing_worker_contracts import (
     WritingWorkerExecutionRequest,
     WritingWorkerExecutionResult,
@@ -1276,7 +1283,12 @@ class StoryTurnDomainService:
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
         chapter = self.require_active_branch_current_chapter(request.session_id)
+        bridge_material_id: str | None = None
         if self._longform_chapter_runtime_service is not None:
+            # Fail-closed input gate (A-QB-02): an un-adopted pending draft raises
+            # ``longform_chapter_adoption_required`` here, before any job is created.
+            # Also generates the chapter summary and materializes the branch-scoped
+            # bridge after it (bridge-after-summary) — KEEP path, reused as JOB A.
             prepared_transition = (
                 await self._longform_chapter_runtime_service.prepare_chapter_transition_with_summary(
                     identity=runtime_identity,
@@ -1287,36 +1299,23 @@ class StoryTurnDomainService:
                 )
             )
             chapter = prepared_transition.chapter
-        (
-            updated_session,
-            updated_chapter,
-        ) = await self._regression_service.run_heavy_regression(
+            if prepared_transition.receipt is not None:
+                bridge_material_id = prepared_transition.receipt.bridge_material_ref
+        await self._run_chapter_close_job_graph(
+            identity=runtime_identity,
             session=session,
             chapter=chapter,
-            model_id=request.model_id,
-            provider_id=request.provider_id,
-            runtime_identity=runtime_identity,
+            bridge_material_id=bridge_material_id,
+            request=request,
         )
-        self._materialize_closed_scene_transcript_if_needed(
-            session=updated_session,
-            chapter=updated_chapter,
-            scene_ref=updated_chapter.current_scene_ref,
-            allow_current_scene=True,
-            runtime_identity=runtime_identity,
-            source_refs=self._runtime_turn_source_refs(
-                identity=runtime_identity,
-                session_id=session.session_id,
-                chapter_index=chapter.chapter_index,
-            ),
-        )
-        closed_scene_refs = list(updated_chapter.closed_scene_refs)
-        last_closed_scene_ref = updated_chapter.last_closed_scene_ref
-        if updated_chapter.current_scene_ref:
-            last_closed_scene_ref = updated_chapter.current_scene_ref
+        closed_scene_refs = list(chapter.closed_scene_refs)
+        last_closed_scene_ref = chapter.last_closed_scene_ref
+        if chapter.current_scene_ref:
+            last_closed_scene_ref = chapter.current_scene_ref
             if last_closed_scene_ref not in closed_scene_refs:
                 closed_scene_refs.append(last_closed_scene_ref)
         self._story_session_service.update_chapter_workspace(
-            chapter_workspace_id=updated_chapter.chapter_workspace_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
             phase=LongformChapterPhase.CHAPTER_COMPLETED,
             current_scene_ref=None,
             last_closed_scene_ref=last_closed_scene_ref,
@@ -1330,12 +1329,12 @@ class StoryTurnDomainService:
             chapter_goal=f"Chapter {next_chapter_index}",
         )
         self._projection_state_service.seed_next_chapter(
-            previous_chapter_workspace_id=updated_chapter.chapter_workspace_id,
+            previous_chapter_workspace_id=chapter.chapter_workspace_id,
             next_chapter_workspace_id=next_chapter.chapter_workspace_id,
             next_chapter_index=next_chapter_index,
         )
         self._story_session_service.update_session(
-            session_id=updated_session.session_id,
+            session_id=session.session_id,
             current_chapter_index=next_chapter_index,
             current_phase=LongformChapterPhase.OUTLINE_DRAFTING,
         )
@@ -1351,6 +1350,219 @@ class StoryTurnDomainService:
                 f"Chapter {next_chapter_index} is ready for outline drafting."
             ),
         )
+
+    async def _run_chapter_close_job_graph(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity | None,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        bridge_material_id: str | None,
+        request: LongformTurnRequest,
+    ) -> None:
+        """Register and drive the AUTH-013 chapter-close job graph on the close turn.
+
+        JOB A (chapter summary) ∥ JOB B (tail-flush Core maintenance) + JOB G
+        (scheduler maintenance gate); each terminalized INDIVIDUALLY by its own
+        outcome (never the batch helper), then settlement is re-evaluated so the
+        turn settles only when A, B, G are all terminal (TURN-004). The
+        deterministic chapter-state transition runs afterwards in ``complete_chapter``.
+        """
+
+        workflow_job_service = self._runtime_workflow_job_service
+        identity_service = self._runtime_identity_service
+        if identity is None or workflow_job_service is None or identity_service is None:
+            return
+        turn = identity_service.get_turn(identity.turn_id)
+        if turn is None:
+            return
+        anchor_turn_id = self._chapter_close_anchor_turn_id(chapter=chapter)
+        job_a = workflow_job_service.ensure_job(
+            identity=identity,
+            job_kind=RuntimeWorkflowJobKind.REQUIRED_POST_WRITE_ANALYSIS,
+            job_category=RuntimeWorkflowJobCategory.TURN_FINALIZATION,
+            creation_mode=RuntimeWorkflowJobCreationMode.CREATION_TIME_OBLIGATION,
+            required_for_turn_completion=True,
+            anchor_turn_id=anchor_turn_id,
+            metadata={
+                "chapter_close_slot": "chapter_summary",
+                "command_kind": LongformTurnCommandKind.COMPLETE_CHAPTER.value,
+            },
+        )
+        job_b = workflow_job_service.ensure_job(
+            identity=identity,
+            job_kind=RuntimeWorkflowJobKind.RUNTIME_WORKSPACE_FINALIZE,
+            job_category=RuntimeWorkflowJobCategory.TURN_FINALIZATION,
+            creation_mode=RuntimeWorkflowJobCreationMode.CREATION_TIME_OBLIGATION,
+            required_for_turn_completion=True,
+            anchor_turn_id=anchor_turn_id,
+            metadata={
+                "chapter_close_slot": "tail_flush",
+                "command_kind": LongformTurnCommandKind.COMPLETE_CHAPTER.value,
+            },
+        )
+        gate_job = workflow_job_service.ensure_scheduler_maintenance_gate(
+            identity=identity,
+            scheduler_job_id=f"chapter_close:{identity.turn_id}",
+            anchor_turn_id=identity.turn_id,
+            metadata={"phase": "chapter_close"},
+        )
+        identity_service.update_turn_status(
+            turn_id=identity.turn_id,
+            status=StoryTurnStatus.POST_WRITE_RUNNING,
+        )
+        # JOB A: the summary is produced by prepare_chapter_transition_with_summary and
+        # the branch-scoped bridge is materialized after it; record the bridge material
+        # id into JOB A's result_ref_ids so bridge-after-summary is observable (D-S5-01).
+        workflow_job_service.mark_job_completed(
+            job_id=job_a.job_id,
+            reason="chapter_close_summary_completed",
+            result_ref_ids=[bridge_material_id] if bridge_material_id else (),
+            metadata={"chapter_close_slot": "chapter_summary"},
+        )
+        # JOB B: final Core memory-maintenance run over the chapter tail (S3 path).
+        tail_flush = await self._run_chapter_close_tail_flush(
+            identity=identity,
+            session=session,
+            chapter=chapter,
+            turn=turn,
+            request=request,
+        )
+        if tail_flush.status == RuntimeWorkflowJobStatus.COMPLETED.value:
+            workflow_job_service.mark_job_completed(
+                job_id=job_b.job_id,
+                reason=tail_flush.reason,
+                result_ref_ids=tail_flush.result_ref_ids,
+                trace_refs=tail_flush.trace_refs,
+                metadata={"chapter_close_slot": "tail_flush"},
+            )
+        elif tail_flush.status == RuntimeWorkflowJobStatus.DEFERRED.value:
+            workflow_job_service.mark_job_deferred(
+                job_id=job_b.job_id,
+                reason=tail_flush.reason,
+                metadata={"chapter_close_slot": "tail_flush"},
+            )
+        else:
+            workflow_job_service.mark_job_failed(
+                job_id=job_b.job_id,
+                reason=tail_flush.reason,
+                metadata={"chapter_close_slot": "tail_flush"},
+                last_error=tail_flush.last_error,
+            )
+        # JOB G: turn<->SchedulerJob settlement bridge (WRK-008) completes independently.
+        workflow_job_service.mark_job_completed(
+            job_id=gate_job.job_id,
+            reason="chapter_close_gate_completed",
+            metadata={"phase": "chapter_close"},
+        )
+        self._settle_turn_if_ready(identity=identity)
+
+    async def _run_chapter_close_tail_flush(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        session: StorySession,
+        chapter: ChapterWorkspace,
+        turn: StoryTurnRecord,
+        request: LongformTurnRequest,
+    ) -> _ChapterCloseTailFlushOutcome:
+        """Run the final Core memory-maintenance pass over the chapter tail through
+        the existing post-write spine (worker-side retrieval stays OFF, RET-007).
+
+        Returns the terminal outcome for JOB B: ``completed`` on a clean maintenance
+        run, ``failed`` on a worker/ingestion failure (WRK-011 — keeps settlement
+        blocked), or ``deferred`` when the full-schedule spine is not wired.
+        """
+
+        scheduler = self._post_write_scheduler_service
+        executor = self._worker_execution_service
+        governance = self._post_write_governance_service
+        if scheduler is None or executor is None or governance is None:
+            return _ChapterCloseTailFlushOutcome(
+                status=RuntimeWorkflowJobStatus.DEFERRED.value,
+                reason="chapter_close_tail_flush_services_missing",
+            )
+        try:
+            worker_plan = scheduler.build_worker_plan(identity=identity, proposal=None)
+        except SchedulerDecisionError as exc:
+            return _ChapterCloseTailFlushOutcome(
+                status=RuntimeWorkflowJobStatus.DEFERRED.value,
+                reason=exc.message,
+            )
+        command_kind = self._coerce_turn_command_kind(turn.command_kind)
+        try:
+            execution = await executor.execute_plan(
+                session=session,
+                chapter=chapter,
+                plan=worker_plan,
+                command_kind=command_kind,
+                model_id=str(request.model_id or "chapter_close_tail_flush"),
+                provider_id=request.provider_id,
+                user_prompt=None,
+                orchestrator_plan=self._fallback_post_write_orchestrator_plan(
+                    command_kind
+                ),
+                accepted_segments=self.accepted_segments(chapter),
+                pending_artifact=self.resolve_pending_artifact(
+                    chapter=chapter,
+                    target_artifact_id=None,
+                ),
+            )
+            dispatch_result = await governance.dispatch_worker_results(
+                identity=identity,
+                session=session,
+                chapter=chapter,
+                worker_plan=worker_plan,
+                worker_results=list(execution.worker_results),
+                specialist_bundle=execution.specialist_bundle,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # WRK-011: any tail-flush ingestion failure terminalizes JOB B as failed
+            # (settlement stays blocked) without failing the whole close command.
+            reason = _chapter_close_failure_code(exc)
+            return _ChapterCloseTailFlushOutcome(
+                status=RuntimeWorkflowJobStatus.FAILED.value,
+                reason=reason,
+                last_error={
+                    "code": reason,
+                    "message": str(exc),
+                    "stage": "chapter_close_tail_flush_dispatch",
+                },
+            )
+        failed_results = [
+            result
+            for result in execution.worker_results
+            if result.result_status == WorkerResultStatus.FAILED
+        ]
+        if failed_results:
+            return _ChapterCloseTailFlushOutcome(
+                status=RuntimeWorkflowJobStatus.FAILED.value,
+                reason="chapter_close_tail_flush_worker_failed",
+                last_error={
+                    "code": "chapter_close_tail_flush_worker_failed",
+                    "worker_ids": [result.worker_id for result in failed_results],
+                    "stage": "chapter_close_tail_flush_execute",
+                },
+            )
+        return _ChapterCloseTailFlushOutcome(
+            status=RuntimeWorkflowJobStatus.COMPLETED.value,
+            reason="chapter_close_tail_flush_completed",
+            result_ref_ids=tuple(dispatch_result.selected_worker_result_refs),
+            trace_refs=tuple(dispatch_result.trace_refs),
+        )
+
+    def _chapter_close_anchor_turn_id(
+        self,
+        *,
+        chapter: ChapterWorkspace,
+    ) -> str | None:
+        """WRK-007 anchor = adoption turn of the window's last accepted segment
+        (06 SEAM 2). Falls back to the close turn (ensure_job default) when absent."""
+
+        accepted = self.accepted_segments(chapter)
+        if not accepted:
+            return None
+        return _optional_text(dict(accepted[-1].metadata or {}).get("runtime_turn_id"))
 
     def require_session(self, session_id: str) -> StorySession:
         session = self._story_session_service.get_session(session_id)
@@ -2067,6 +2279,24 @@ class StoryTurnDomainService:
 def _optional_text(value: object) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
+
+
+@dataclass(frozen=True)
+class _ChapterCloseTailFlushOutcome:
+    """Terminal outcome for the chapter-close tail-flush job (JOB B)."""
+
+    status: str
+    reason: str
+    result_ref_ids: tuple[str, ...] = ()
+    trace_refs: tuple[str, ...] = ()
+    last_error: dict[str, object] | None = None
+
+
+def _chapter_close_failure_code(exc: Exception) -> str:
+    explicit_code = getattr(exc, "code", None)
+    if isinstance(explicit_code, str) and explicit_code.strip():
+        return explicit_code.strip()
+    return exc.__class__.__name__
 
 
 _POST_WRITE_TRIGGER_READY_STATUSES: set[str] = {

@@ -59,17 +59,6 @@ class _NoopRegressionService:
     ):
         return session, chapter
 
-    async def run_heavy_regression(
-        self,
-        *,
-        session,
-        chapter,
-        model_id,
-        provider_id,
-        runtime_identity=None,
-    ):
-        return session, chapter
-
 
 class _RecordingChapterBridgeProvider:
     def __init__(self) -> None:

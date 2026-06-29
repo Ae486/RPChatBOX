@@ -105,16 +105,6 @@ class _StaticPlanOrchestrator:
         )
 
 
-class _HeavyRegressionSpecialist:
-    async def analyze(self, **kwargs):
-        return SpecialistResultBundle(
-            foundation_digest=["Found Updated"],
-            current_state_digest=["phase=chapter_completed"],
-            summary_updates=["Hero now distrusts the harbor bellmaster."],
-            recall_summary_text="Chapter one closed with the hero on alert.",
-        )
-
-
 class _LightRegressionSpecialist:
     async def analyze(self, **kwargs):
         return SpecialistResultBundle(
@@ -129,71 +119,6 @@ class _FailIfCharacterLongHistoryIngestionRuns:
         raise AssertionError(
             "light regression must not materialize character long-history recall"
         )
-
-
-@pytest.mark.asyncio
-async def test_heavy_regression_ingests_character_long_history_from_updated_session(
-    retrieval_session,
-    monkeypatch,
-):
-    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
-    accepted_segment = story_session_service.create_artifact(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.ACCEPTED,
-        content_text="The hero kept one hand on the lantern while the market froze.",
-    )
-    story_session_service.commit()
-
-    updated_session = session.model_copy(
-        update={
-            "current_state_json": {
-                **session.current_state_json,
-                "character_state_digest": {
-                    "hero": {"mood": "alert"},
-                    "   ": {"mood": "blank"},
-                    "guide": {},
-                },
-            }
-        }
-    )
-
-    regression_service = LongformRegressionService(
-        story_session_service=story_session_service,
-        orchestrator_service=_StaticPlanOrchestrator(),
-        specialist_service=_HeavyRegressionSpecialist(),
-        proposal_workflow_service=object(),
-        recall_character_long_history_ingestion_service=(
-            RecallCharacterLongHistoryIngestionService(retrieval_session)
-        ),
-    )
-
-    async def fake_apply_bundle(**kwargs):
-        return updated_session, chapter
-
-    monkeypatch.setattr(regression_service, "_apply_bundle", fake_apply_bundle)
-
-    await regression_service.run_heavy_regression(
-        session=session,
-        chapter=chapter,
-        model_id="model-1",
-        provider_id=None,
-    )
-    retrieval_session.commit()
-
-    assets = RetrievalDocumentService(retrieval_session).list_story_assets(
-        session.story_id
-    )
-    assert len(assets) == 1
-    asset = assets[0]
-    assert asset.asset_kind == "character_long_history_summary"
-    assert asset.metadata["character_key"] == "hero"
-    assert asset.metadata["materialization_kind"] == ("character_long_history_summary")
-    assert asset.metadata["accepted_segment_evidence_count"] == 1
-    assert asset.metadata["continuity_note_count"] == 1
-    assert asset.metadata["includes_chapter_summary"] is True
-    assert accepted_segment.artifact_id in asset.metadata["seed_sections"][0]["text"]
 
 
 @pytest.mark.asyncio

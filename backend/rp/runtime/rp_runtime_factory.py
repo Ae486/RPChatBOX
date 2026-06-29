@@ -63,16 +63,6 @@ from rp.services.memory.provenance_read_service import ProvenanceReadService
 from rp.services.proposal.apply_service import ProposalApplyService
 from rp.services.proposal.repository import ProposalRepository
 from rp.services.proposal.workflow_service import ProposalWorkflowService
-from rp.services.recall.character_long_history_ingestion_service import (
-    RecallCharacterLongHistoryIngestionService,
-)
-from rp.services.recall.continuity_note_ingestion_service import (
-    RecallContinuityNoteIngestionService,
-)
-from rp.services.recall.detail_ingestion_service import RecallDetailIngestionService
-from rp.services.recall.retired_foreshadow_ingestion_service import (
-    RecallRetiredForeshadowIngestionService,
-)
 from rp.services.recall.lifecycle_service import RecallLifecycleService
 from rp.services.recall.scene_transcript_ingestion_service import (
     RecallSceneTranscriptIngestionService,
@@ -80,7 +70,6 @@ from rp.services.recall.scene_transcript_ingestion_service import (
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.broker import RetrievalBroker
-from rp.services.recall.summary_ingestion_service import RecallSummaryIngestionService
 from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestService,
@@ -514,20 +503,6 @@ class RpRuntimeFactory:
             proposal_workflow_service=proposal_workflow_service,
             legacy_state_patch_proposal_builder=LegacyStatePatchProposalBuilder(),
             projection_refresh_service=projection_refresh_service,
-            recall_summary_ingestion_service=RecallSummaryIngestionService(
-                self._session
-            ),
-            recall_detail_ingestion_service=RecallDetailIngestionService(self._session),
-            recall_continuity_note_ingestion_service=(
-                RecallContinuityNoteIngestionService(self._session)
-            ),
-            recall_character_long_history_ingestion_service=(
-                RecallCharacterLongHistoryIngestionService(self._session)
-            ),
-            recall_retired_foreshadow_ingestion_service=(
-                RecallRetiredForeshadowIngestionService(self._session)
-            ),
-            mirror_service=authoritative_mirror_service,
         )
         writing_packet_builder = WritingPacketBuilder()
         writing_worker_execution_service = WritingWorkerExecutionService(
