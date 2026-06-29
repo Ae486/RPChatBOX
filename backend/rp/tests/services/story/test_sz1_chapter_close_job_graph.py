@@ -1,10 +1,10 @@
 """S-Z1 oracles — chapter-close job graph (AUTH-013 / TURN-004 / WRK-008 / NUM-012).
 
-Fake-executor driven (HAR-012, no live model): the chapter-summary bridge runs
-through a stubbed ``StoryLlmGateway`` and the tail-flush memory-maintenance spine
-runs through stubbed scheduler/executor/governance doubles. These oracles pin the
-frozen chapter-close contract that ``StoryTurnDomainService.complete_chapter``
-rebuilds on the S2/S3 job ledger:
+Fake-executor driven (HAR-012, no live model): the chapter-summary is produced by a
+stubbed WRITER-ROLE worker (``WritingWorkerExecutionService`` surface, S-Z2) and the
+tail-flush memory-maintenance spine runs through stubbed scheduler/executor/governance
+doubles. These oracles pin the frozen chapter-close contract that
+``StoryTurnDomainService.complete_chapter`` rebuilds on the S2/S3 job ledger:
 
   * D-S5-01  ledger topology A (chapter_summary) ∥ B (tail_flush) + G (gate), all
              ``required_for_turn_completion``; A carries the branch-scoped bridge
@@ -14,6 +14,13 @@ rebuilds on the S2/S3 job ledger:
              complete leaves the turn NOT settled (proves it is B's per-job
              failure, not "everything incomplete", that blocks settlement; guards
              the AMENDMENT-1 per-job terminalization against a batch false-green).
+  * D-S5-04  (S-Z2) JOB A's summary is EXECUTED BY THE WRITER ROLE and dispatched AS
+             JOB A's work — the writer worker is invoked once with a summary packet
+             (retrieval OFF) WHILE JOB A is still PENDING (Option II), and the
+             persisted bridge summary equals the writer worker's output.
+  * D-S5-05  (S-Z2) STRONG falsifiable form — a WRITER-ROLE summary failure fails
+             JOB A WHILE B and G complete, blocking settlement (JOB A analog of
+             D-S5-03; kills the unconditional-complete facade).
   * NUM-012  chapter close creates NO ``recall_materialization`` job and persists
              NO recall seed asset; the reserved enum slot still exists.
 """
@@ -67,15 +74,42 @@ from rp.tests.services._helpers.core_state_dual_write_helpers import (
 # --------------------------------------------------------------------------- #
 # Test doubles (own this file — no live model, deterministic spine).
 # --------------------------------------------------------------------------- #
-class _FakeSummaryGateway:
-    """Stubbed StoryLlmGateway: returns a fixed structured bridge summary."""
+class _FakeWriterRoleWorker:
+    """Writer-role double (``WritingWorkerExecutionService`` surface, S-Z2).
 
-    async def complete_text_with_usage(self, **kwargs):
-        return (
-            '{"summary_text":"Chapter one closed at the river gate.",'
-            '"continuity_notes":[],"open_threads":[]}',
-            {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
+    Returns a fixed structured bridge summary as the *writer-produced* text (no live
+    model), or raises to model a writer-role failure. Optionally probes the live JOB A
+    status at invocation time to prove the summary is driven WITHIN JOB A's open
+    lifecycle (Option II), not by a pre-graph call or a post-hoc label.
+    """
+
+    DEFAULT_SUMMARY_JSON = (
+        '{"summary_text":"Chapter one closed at the river gate.",'
+        '"continuity_notes":[],"open_threads":[]}'
+    )
+
+    def __init__(
+        self,
+        *,
+        summary_json: str | None = None,
+        error: Exception | None = None,
+        job_status_probe=None,
+    ) -> None:
+        self._summary_json = summary_json or self.DEFAULT_SUMMARY_JSON
+        self._error = error
+        self._job_status_probe = job_status_probe
+        self.calls: list[dict[str, object]] = []
+        self.job_a_status_at_call: list[str | None] = []
+
+    async def run(self, *, packet, model_id, provider_id):
+        if self._job_status_probe is not None:
+            self.job_a_status_at_call.append(self._job_status_probe())
+        self.calls.append(
+            {"packet": packet, "model_id": model_id, "provider_id": provider_id}
         )
+        if self._error is not None:
+            raise self._error
+        return self._summary_json
 
 
 class _NoopRegressionService:
@@ -254,7 +288,9 @@ def _build_turn_domain_service(
     *,
     executor: _FakeWorkerExecutionService,
     governance: _FakeGovernanceService,
+    writer_worker: _FakeWriterRoleWorker | None = None,
 ) -> StoryTurnDomainService:
+    writer_worker = writer_worker or _FakeWriterRoleWorker()
     projection_state_service = ProjectionStateService(
         story_session_service=ctx.service,
         adapter=ChapterWorkspaceProjectionAdapter(ctx.service),
@@ -265,7 +301,7 @@ def _build_turn_domain_service(
     chapter_runtime_service = LongformChapterRuntimeService(
         story_session_service=ctx.service,
         chapter_bridge_provider=ChapterBridgeProvider(
-            llm_gateway=_FakeSummaryGateway()
+            writing_worker_execution_service=writer_worker
         ),
         session=ctx.db,
     )
@@ -278,7 +314,7 @@ def _build_turn_domain_service(
         ),
         projection_state_service=projection_state_service,
         writing_packet_builder=WritingPacketBuilder(),
-        writing_worker_execution_service=SimpleNamespace(),
+        writing_worker_execution_service=writer_worker,
         regression_service=_NoopRegressionService(),
         runtime_identity_service=ctx.identity_service,
         runtime_workflow_job_service=ctx.workflow_job_service,
@@ -399,6 +435,157 @@ async def test_d_s5_03_tail_flush_failure_blocks_settlement(retrieval_session):
     )
     assert settlement.eligible is False
     assert job_b.job_id in settlement.blocking_job_ids
+    close_turn = ctx.identity_service.get_turn(ctx.close_identity.turn_id)
+    assert close_turn is not None
+    assert close_turn.status not in {
+        StoryTurnStatus.SETTLED.value,
+        StoryTurnStatus.COMPLETED.value,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# D-S5-04 (S-Z2) — JOB A summary EXECUTED BY THE WRITER ROLE, dispatched AS JOB A.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_d_s5_04_chapter_summary_executed_by_writer_role(retrieval_session):
+    ctx = _seed_chapter_close_ctx(retrieval_session, story_id="sz2-d-s5-04")
+    executor = _FakeWorkerExecutionService(result_status=WorkerResultStatus.COMPLETED)
+    governance = _FakeGovernanceService()
+
+    def _job_a_status_probe() -> str | None:
+        jobs = {
+            job.job_kind: job
+            for job in ctx.workflow_job_service.list_jobs_for_turn(
+                turn_id=ctx.close_identity.turn_id
+            )
+        }
+        job_a = jobs.get(RuntimeWorkflowJobKind.REQUIRED_POST_WRITE_ANALYSIS.value)
+        return job_a.status if job_a is not None else None
+
+    writer_worker = _FakeWriterRoleWorker(job_status_probe=_job_a_status_probe)
+    turn_domain_service = _build_turn_domain_service(
+        ctx,
+        executor=executor,
+        governance=governance,
+        writer_worker=writer_worker,
+    )
+
+    await turn_domain_service.complete_chapter(
+        request=_complete_chapter_request(ctx),
+        runtime_identity=ctx.close_identity,
+    )
+
+    # (1) The summary text was produced BY THE WRITER ROLE — invoked exactly once with
+    #     a summary WritingPacket; retrieval is OFF (no opt-in), so the writer worker
+    #     uses its plain generation path. The old _FakeSummaryGateway seam is gone.
+    assert len(writer_worker.calls) == 1
+    packet = writer_worker.calls[0]["packet"]
+    assert packet.output_kind == "discussion_message"
+    assert packet.operation_mode == "writing"
+    assert packet.metadata["summary_kind"] == "chapter_summary"
+    assert "writer_retrieval_allowed" not in packet.metadata
+    assert packet.session_id == ctx.close_identity.session_id
+    assert writer_worker.calls[0]["model_id"] == "model-sz1-chapter-close"
+
+    # (2) Dispatched AS JOB A's work (Option II): at writer-call time JOB A already
+    #     existed and was still PENDING — the writer ran INSIDE JOB A's open lifecycle,
+    #     not before the graph (Option I) and not skipped (the unconditional label).
+    assert writer_worker.job_a_status_at_call == [
+        RuntimeWorkflowJobStatus.PENDING.value
+    ]
+
+    jobs = _jobs_by_kind(ctx)
+    job_a = jobs[RuntimeWorkflowJobKind.REQUIRED_POST_WRITE_ANALYSIS.value]
+    job_b = jobs[RuntimeWorkflowJobKind.RUNTIME_WORKSPACE_FINALIZE.value]
+    job_g = jobs[RuntimeWorkflowJobKind.SCHEDULER_MAINTENANCE_GATE.value]
+
+    # (3) JOB A terminalized on the real writer outcome: completed + bridge id
+    #     (bridge-after-summary still observable).
+    assert job_a.status == RuntimeWorkflowJobStatus.COMPLETED.value
+    assert any(
+        ref.startswith(f"chapter-bridge:{ctx.close_identity.turn_id}:")
+        for ref in job_a.result_ref_ids_json
+    )
+
+    # (4) The persisted branch bridge summary == the writer worker's output, and the
+    #     provenance tags are the writer-role tags (behavioral proof of the producer).
+    bridge_reader = LongformChapterRuntimeService(
+        story_session_service=ctx.service,
+        session=ctx.db,
+    )
+    bridge = bridge_reader.get_latest_bridge_material_for_branch(
+        story_id=ctx.close_identity.story_id,
+        session_id=ctx.close_identity.session_id,
+        branch_head_id=ctx.close_identity.branch_head_id,
+        source_chapter_index=1,
+        identity=ctx.close_identity,
+    )
+    assert bridge is not None
+    assert bridge.summary_text == "Chapter one closed at the river gate."
+    assert bridge.metadata_json["summary_provider"] == "writer_role_worker"
+    assert bridge.metadata_json["summary_generation_mode"] == "writer_role"
+
+    # (5) Still scheduler-required + scheduler-gated (the writer cannot self-gate):
+    #     all three jobs required; the turn settles only because B and G also completed.
+    assert job_a.required_for_turn_completion is True
+    assert job_b.required_for_turn_completion is True
+    assert job_g.required_for_turn_completion is True
+    assert job_b.status == RuntimeWorkflowJobStatus.COMPLETED.value
+    assert job_g.status == RuntimeWorkflowJobStatus.COMPLETED.value
+    close_turn = ctx.identity_service.get_turn(ctx.close_identity.turn_id)
+    assert close_turn is not None
+    assert close_turn.status == StoryTurnStatus.SETTLED.value
+
+
+# --------------------------------------------------------------------------- #
+# D-S5-05 (S-Z2, STRONG) — writer-role summary failure fails JOB A, blocks settle.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_d_s5_05_writer_role_summary_failure_blocks_settlement(retrieval_session):
+    ctx = _seed_chapter_close_ctx(retrieval_session, story_id="sz2-d-s5-05")
+    executor = _FakeWorkerExecutionService(result_status=WorkerResultStatus.COMPLETED)
+    governance = _FakeGovernanceService()
+    writer_worker = _FakeWriterRoleWorker(
+        error=RuntimeError("injected_writer_role_summary_failure"),
+    )
+    turn_domain_service = _build_turn_domain_service(
+        ctx,
+        executor=executor,
+        governance=governance,
+        writer_worker=writer_worker,
+    )
+
+    await turn_domain_service.complete_chapter(
+        request=_complete_chapter_request(ctx),
+        runtime_identity=ctx.close_identity,
+    )
+
+    # The writer role WAS invoked (it is JOB A's transport) and it raised.
+    assert len(writer_worker.calls) == 1
+
+    jobs = _jobs_by_kind(ctx)
+    job_a = jobs[RuntimeWorkflowJobKind.REQUIRED_POST_WRITE_ANALYSIS.value]
+    job_b = jobs[RuntimeWorkflowJobKind.RUNTIME_WORKSPACE_FINALIZE.value]
+    job_g = jobs[RuntimeWorkflowJobKind.SCHEDULER_MAINTENANCE_GATE.value]
+
+    # STRONG form (JOB A analog of D-S5-03): B and G DO complete; only A fails because
+    # the WRITER ROLE raised — proving JOB A terminalizes on the real writer outcome
+    # (kills the unconditional-complete facade), per-job, no batch helper.
+    assert job_b.status == RuntimeWorkflowJobStatus.COMPLETED.value
+    assert job_g.status == RuntimeWorkflowJobStatus.COMPLETED.value
+    assert job_a.status == RuntimeWorkflowJobStatus.FAILED.value
+    assert job_a.failure_reason == "RuntimeError"
+    # No bridge materialized on writer failure (no false-green).
+    assert not any(
+        ref.startswith("chapter-bridge:") for ref in job_a.result_ref_ids_json
+    )
+
+    # A failed required job is NOT settlement-terminal -> turn never settles.
+    settlement = ctx.workflow_job_service.evaluate_turn_settlement(
+        turn_id=ctx.close_identity.turn_id
+    )
+    assert settlement.eligible is False
+    assert job_a.job_id in settlement.blocking_job_ids
     close_turn = ctx.identity_service.get_turn(ctx.close_identity.turn_id)
     assert close_turn is not None
     assert close_turn.status not in {

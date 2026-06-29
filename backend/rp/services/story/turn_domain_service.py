@@ -53,6 +53,7 @@ from rp.models.writer.writing_runtime import WritingPacket
 from ..runtime.context_orchestration_service import ContextOrchestrationService
 from ..writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from ..writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
+from ..writer.longform_chapter_runtime_service import ResolvedChapterTransition
 from ..writer.longform_orchestrator_service import LongformOrchestratorService
 from ..writer.longform_regression_service import LongformRegressionService
 from ..writer.longform_specialist_service import LongformSpecialistService
@@ -206,6 +207,9 @@ class StoryTurnDomainService:
                     story_session_service=story_session_service,
                     workspace_material_service=(
                         self._runtime_workspace_material_service
+                    ),
+                    writing_worker_execution_service=(
+                        writing_worker_execution_service
                     ),
                     session=resolver_session,
                 )
@@ -1283,29 +1287,25 @@ class StoryTurnDomainService:
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
         chapter = self.require_active_branch_current_chapter(request.session_id)
-        bridge_material_id: str | None = None
+        resolved_transition: ResolvedChapterTransition | None = None
         if self._longform_chapter_runtime_service is not None:
             # Fail-closed input gate (A-QB-02): an un-adopted pending draft raises
-            # ``longform_chapter_adoption_required`` here, before any job is created.
-            # Also generates the chapter summary and materializes the branch-scoped
-            # bridge after it (bridge-after-summary) — KEEP path, reused as JOB A.
-            prepared_transition = (
-                await self._longform_chapter_runtime_service.prepare_chapter_transition_with_summary(
+            # ``longform_chapter_adoption_required`` here, BEFORE any job is created.
+            # Only the deterministic chapter mutation runs pre-graph; the writer-role
+            # summary + bridge are driven INSIDE JOB A (``_run_chapter_close_summary``).
+            resolved_transition = (
+                self._longform_chapter_runtime_service.resolve_chapter_transition_state(
                     identity=runtime_identity,
-                    session=session,
                     chapter=chapter,
-                    model_id=request.model_id,
-                    provider_id=request.provider_id,
                 )
             )
-            chapter = prepared_transition.chapter
-            if prepared_transition.receipt is not None:
-                bridge_material_id = prepared_transition.receipt.bridge_material_ref
+            if resolved_transition is not None:
+                chapter = resolved_transition.chapter
         await self._run_chapter_close_job_graph(
             identity=runtime_identity,
             session=session,
             chapter=chapter,
-            bridge_material_id=bridge_material_id,
+            resolved=resolved_transition,
             request=request,
         )
         closed_scene_refs = list(chapter.closed_scene_refs)
@@ -1357,7 +1357,7 @@ class StoryTurnDomainService:
         identity: MemoryRuntimeIdentity | None,
         session: StorySession,
         chapter: ChapterWorkspace,
-        bridge_material_id: str | None,
+        resolved: ResolvedChapterTransition | None,
         request: LongformTurnRequest,
     ) -> None:
         """Register and drive the AUTH-013 chapter-close job graph on the close turn.
@@ -1411,15 +1411,34 @@ class StoryTurnDomainService:
             turn_id=identity.turn_id,
             status=StoryTurnStatus.POST_WRITE_RUNNING,
         )
-        # JOB A: the summary is produced by prepare_chapter_transition_with_summary and
-        # the branch-scoped bridge is materialized after it; record the bridge material
-        # id into JOB A's result_ref_ids so bridge-after-summary is observable (D-S5-01).
-        workflow_job_service.mark_job_completed(
-            job_id=job_a.job_id,
-            reason="chapter_close_summary_completed",
-            result_ref_ids=[bridge_material_id] if bridge_material_id else (),
-            metadata={"chapter_close_slot": "chapter_summary"},
+        # JOB A: the chapter summary is EXECUTED BY THE WRITER ROLE inside this job's
+        # lifecycle (``_run_chapter_close_summary``), then the branch-scoped bridge is
+        # materialized after it (bridge-after-summary). JOB A terminalizes on that real
+        # writer outcome — per-job (never the batch helper): completed (+ bridge id) on
+        # success, failed on a writer-role failure (settlement then stays blocked).
+        summary_outcome = await self._run_chapter_close_summary(
+            identity=identity,
+            resolved=resolved,
+            request=request,
         )
+        if summary_outcome.status == RuntimeWorkflowJobStatus.COMPLETED.value:
+            workflow_job_service.mark_job_completed(
+                job_id=job_a.job_id,
+                reason=summary_outcome.reason,
+                result_ref_ids=(
+                    [summary_outcome.bridge_material_id]
+                    if summary_outcome.bridge_material_id
+                    else ()
+                ),
+                metadata={"chapter_close_slot": "chapter_summary"},
+            )
+        else:
+            workflow_job_service.mark_job_failed(
+                job_id=job_a.job_id,
+                reason=summary_outcome.reason,
+                metadata={"chapter_close_slot": "chapter_summary"},
+                last_error=summary_outcome.last_error,
+            )
         # JOB B: final Core memory-maintenance run over the chapter tail (S3 path).
         tail_flush = await self._run_chapter_close_tail_flush(
             identity=identity,
@@ -1456,6 +1475,59 @@ class StoryTurnDomainService:
             metadata={"phase": "chapter_close"},
         )
         self._settle_turn_if_ready(identity=identity)
+
+    async def _run_chapter_close_summary(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        resolved: ResolvedChapterTransition | None,
+        request: LongformTurnRequest,
+    ) -> _ChapterCloseSummaryOutcome:
+        """Drive JOB A's summary THROUGH THE WRITER ROLE and materialize the bridge.
+
+        Returns the terminal outcome for JOB A: ``completed`` (+ branch-scoped bridge
+        id) when the writer role produces the summary, or ``failed`` when the writer
+        role raises (no bridge materialized → settlement stays blocked; the JOB A
+        analog of the JOB B tail-flush failure). When no chapter runtime service /
+        resolved transition is wired, JOB A completes deterministically with no bridge.
+        """
+
+        chapter_runtime_service = self._longform_chapter_runtime_service
+        if chapter_runtime_service is None or resolved is None:
+            return _ChapterCloseSummaryOutcome(
+                status=RuntimeWorkflowJobStatus.COMPLETED.value,
+                reason="chapter_close_summary_no_op",
+            )
+        try:
+            prepared = await chapter_runtime_service.summarize_and_materialize_bridge(
+                identity=identity,
+                resolved=resolved,
+                model_id=request.model_id,
+                provider_id=request.provider_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # A writer-role summary failure terminalizes JOB A as failed (settlement
+            # stays blocked) without failing the whole close command — mirrors JOB B.
+            reason = _chapter_close_failure_code(exc)
+            return _ChapterCloseSummaryOutcome(
+                status=RuntimeWorkflowJobStatus.FAILED.value,
+                reason=reason,
+                last_error={
+                    "code": reason,
+                    "message": str(exc),
+                    "stage": "chapter_close_summary_writer_execution",
+                },
+            )
+        bridge_material_id = (
+            prepared.receipt.bridge_material_ref
+            if prepared.receipt is not None
+            else None
+        )
+        return _ChapterCloseSummaryOutcome(
+            status=RuntimeWorkflowJobStatus.COMPLETED.value,
+            reason="chapter_close_summary_completed",
+            bridge_material_id=bridge_material_id,
+        )
 
     async def _run_chapter_close_tail_flush(
         self,
@@ -2289,6 +2361,20 @@ class _ChapterCloseTailFlushOutcome:
     reason: str
     result_ref_ids: tuple[str, ...] = ()
     trace_refs: tuple[str, ...] = ()
+    last_error: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class _ChapterCloseSummaryOutcome:
+    """Terminal outcome for the chapter-close summary job (JOB A).
+
+    ``bridge_material_id`` carries the branch-scoped bridge id on success (recorded
+    into JOB A's ``result_ref_ids`` so bridge-after-summary stays observable, D-S5-01).
+    """
+
+    status: str
+    reason: str
+    bridge_material_id: str | None = None
     last_error: dict[str, object] | None = None
 
 

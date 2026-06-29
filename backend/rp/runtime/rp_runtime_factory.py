@@ -527,6 +527,7 @@ class RpRuntimeFactory:
         longform_chapter_runtime_service = LongformChapterRuntimeService(
             story_session_service=story_session_service,
             workspace_material_service=runtime_workspace_material_service,
+            writing_worker_execution_service=writing_worker_execution_service,
             session=self._session,
         )
         context_orchestration_service = ContextOrchestrationService(

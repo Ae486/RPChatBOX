@@ -39,6 +39,7 @@ from rp.models.story.runtime import (
 from rp.services.story.chapter_bridge_provider import ChapterBridgeProvider
 from rp.services.setup_agent.draft_selection_service import DraftSelectionService
 from .rewrite_candidate_service import RewriteCandidateService
+from .writing_worker_execution_service import WritingWorkerExecutionService
 from rp.services.runtime.read_manifest_service import (
     BranchVisibilityResolver,
     RuntimeReadManifestServiceError,
@@ -71,6 +72,19 @@ class PreparedChapterTransition:
     receipt: LongformChapterTransitionReceipt | None
 
 
+@dataclass(frozen=True)
+class ResolvedChapterTransition:
+    """Chapter-transition state resolved BEFORE the chapter-close job graph.
+
+    Carries the deterministically-mutated chapter (adopt/supersede/advance) plus the
+    opaque resolved ``state`` the in-graph JOB A summary step consumes. The fail-closed
+    A-QB-02 adoption gate has already run by the time an instance exists.
+    """
+
+    chapter: ChapterWorkspace
+    state: dict[str, Any]
+
+
 class LongformChapterRuntimeService:
     """Prepare branch-scoped chapter transition state without redefining story truth."""
 
@@ -82,6 +96,7 @@ class LongformChapterRuntimeService:
         draft_selection_service: DraftSelectionService | None = None,
         rewrite_candidate_service: RewriteCandidateService | None = None,
         chapter_bridge_provider: ChapterBridgeProvider | None = None,
+        writing_worker_execution_service: WritingWorkerExecutionService | None = None,
         session: Session | None = None,
     ) -> None:
         self._story_session_service = story_session_service
@@ -108,7 +123,10 @@ class LongformChapterRuntimeService:
             )
         )
         self._chapter_bridge_provider = (
-            chapter_bridge_provider or ChapterBridgeProvider()
+            chapter_bridge_provider
+            or ChapterBridgeProvider(
+                writing_worker_execution_service=writing_worker_execution_service
+            )
         )
         self._branch_visibility_resolver = (
             BranchVisibilityResolver(session) if session is not None else None
@@ -396,23 +414,52 @@ class LongformChapterRuntimeService:
             receipt=receipt,
         )
 
-    async def prepare_chapter_transition_with_summary(
+    def resolve_chapter_transition_state(
         self,
         *,
         identity: MemoryRuntimeIdentity | None,
-        session: StorySession,
         chapter: ChapterWorkspace,
-        model_id: str,
-        provider_id: str | None,
-    ) -> PreparedChapterTransition:
+    ) -> ResolvedChapterTransition | None:
+        """Run the fail-closed adoption gate (A-QB-02) + deterministic chapter mutation
+        BEFORE the chapter-close job graph.
+
+        Returns ``None`` when there is no runtime identity (no branch-scoped transition
+        to resolve). Raises ``longform_chapter_adoption_required`` for an un-adopted
+        pending draft (``_resolve_transition_state``) — that fail-closed raise still
+        fires before any job is created.
+        """
+
         if identity is None:
-            return PreparedChapterTransition(chapter=chapter, bridge=None, receipt=None)
+            return None
         transition = self._resolve_transition_state(
             identity=identity,
             chapter=chapter,
         )
+        return ResolvedChapterTransition(
+            chapter=transition["chapter"],
+            state=transition,
+        )
+
+    async def summarize_and_materialize_bridge(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        resolved: ResolvedChapterTransition,
+        model_id: str,
+        provider_id: str | None,
+    ) -> PreparedChapterTransition:
+        """Generate the chapter summary THROUGH THE WRITER ROLE and materialize the
+        branch-scoped bridge after it (bridge-after-summary).
+
+        Driven INSIDE the JOB A lifecycle (from ``_run_chapter_close_summary``). A
+        writer-role failure propagates from ``build_bridge_material_with_summary`` so
+        the caller can terminalize JOB A as failed (no bridge materialized).
+        """
+
+        transition = resolved.state
         bridge = await self._chapter_bridge_provider.build_bridge_material_with_summary(
             identity=identity,
+            chapter_workspace_id=transition["chapter"].chapter_workspace_id,
             from_chapter_index=transition["chapter"].chapter_index,
             to_chapter_index=transition["chapter"].chapter_index + 1,
             adopted_output_ref=transition["adopted_output_ref"],

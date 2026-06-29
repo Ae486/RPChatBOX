@@ -99,17 +99,21 @@ class _RecordingChapterBridgeProvider:
         )
 
 
-class _RecordingSummaryGateway:
+class _RecordingWriterRoleWorker:
+    """Writer-role double (``WritingWorkerExecutionService`` surface): records run()
+    calls and returns a fixed structured bridge summary as the writer-produced text."""
+
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    async def complete_text_with_usage(self, **kwargs):
-        self.calls.append(kwargs)
+    async def run(self, *, packet, model_id, provider_id):
+        self.calls.append(
+            {"packet": packet, "model_id": model_id, "provider_id": provider_id}
+        )
         return (
             '{"summary_text":"LLM bridge summary.",'
             '"continuity_notes":["Carry the debt consequence forward."],'
-            '"open_threads":["The ledger remains unsettled."]}',
-            {"prompt_tokens": 11, "completion_tokens": 13, "total_tokens": 24},
+            '"open_threads":["The ledger remains unsettled."]}'
         )
 
 
@@ -890,10 +894,14 @@ async def test_prepare_chapter_transition_with_summary_provider_receives_adopted
         created_from="longform.summary.complete",
         actor="longform.summary.complete",
     )
-    prepared = await service.prepare_chapter_transition_with_summary(
+    resolved = service.resolve_chapter_transition_state(
         identity=completion_identity,
-        session=session,
         chapter=chapter,
+    )
+    assert resolved is not None
+    prepared = await service.summarize_and_materialize_bridge(
+        identity=completion_identity,
+        resolved=resolved,
         model_id="summary-model",
         provider_id="summary-provider",
     )
@@ -906,15 +914,17 @@ async def test_prepare_chapter_transition_with_summary_provider_receives_adopted
     call = provider.calls[-1]
     assert call["accepted_segment_texts"] == ["Beat one accepted.", "Beat two accepted."]
     assert call["covered_beat_ids"] == ["beat_001", "beat_002"]
+    assert call["chapter_workspace_id"] == resolved.chapter.chapter_workspace_id
 
 
 @pytest.mark.asyncio
-async def test_chapter_bridge_provider_uses_model_summary_when_provider_id_is_omitted():
-    gateway = _RecordingSummaryGateway()
-    provider = ChapterBridgeProvider(llm_gateway=gateway)
+async def test_chapter_bridge_provider_uses_writer_role_summary_when_provider_id_is_omitted():
+    writer_worker = _RecordingWriterRoleWorker()
+    provider = ChapterBridgeProvider(writing_worker_execution_service=writer_worker)
 
     bridge = await provider.build_bridge_material_with_summary(
         identity=_identity(),
+        chapter_workspace_id="chapter-workspace-1",
         from_chapter_index=1,
         to_chapter_index=2,
         adopted_output_ref="artifact:accepted-final",
@@ -936,15 +946,25 @@ async def test_chapter_bridge_provider_uses_model_summary_when_provider_id_is_om
         provider_id=None,
     )
 
-    assert len(gateway.calls) == 1
-    assert gateway.calls[0]["model_id"] == "model-story"
-    assert gateway.calls[0]["provider_id"] is None
+    # The summary text was produced by the WRITER ROLE (one run() call); the packet is
+    # a non-user-visible summary packet with retrieval OFF (no opt-in).
+    assert len(writer_worker.calls) == 1
+    assert writer_worker.calls[0]["model_id"] == "model-story"
+    assert writer_worker.calls[0]["provider_id"] is None
+    packet = writer_worker.calls[0]["packet"]
+    assert packet.output_kind == "discussion_message"
+    assert packet.operation_mode == "writing"
+    assert packet.metadata["summary_kind"] == "chapter_summary"
+    assert "writer_retrieval_allowed" not in packet.metadata
+    assert packet.chapter_workspace_id == "chapter-workspace-1"
+
+    # Structured payload + covered beats unchanged; provenance is now the writer-role.
     assert bridge.summary_text == "LLM bridge summary."
     assert bridge.covered_beat_ids == ["beat_001"]
     assert bridge.continuity_notes == ["Carry the debt consequence forward."]
     assert bridge.open_threads == ["The ledger remains unsettled."]
-    assert bridge.metadata_json["summary_provider"] == "story_llm_gateway"
-    assert bridge.metadata_json["summary_generation_mode"] == "async_llm"
+    assert bridge.metadata_json["summary_provider"] == "writer_role_worker"
+    assert bridge.metadata_json["summary_generation_mode"] == "writer_role"
     assert bridge.metadata_json["summary_model_id"] == "model-story"
     assert bridge.metadata_json["summary_provider_id"] is None
 
