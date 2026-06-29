@@ -21,6 +21,13 @@ doubles. These oracles pin the frozen chapter-close contract that
   * D-S5-05  (S-Z2) STRONG falsifiable form — a WRITER-ROLE summary failure fails
              JOB A WHILE B and G complete, blocking settlement (JOB A analog of
              D-S5-03; kills the unconditional-complete facade).
+  * D-S5-06  (AUTH-014) restart recovery for the chapter-close job graph — a
+             leftover-running A ∥ B + G graph (POST_WRITE_RUNNING, no visible
+             output) is finalized by the interrupt seam: A and B (creation-time
+             obligations) move to normal FAILED handling, the gate G stays a
+             non-terminal blocker, and settlement stays blocked — i.e. restart
+             must NOT silently release the required settlement blockers; the
+             interrupt receipt is idempotent.
   * NUM-012  chapter close creates NO ``recall_materialization`` job and persists
              NO recall seed asset; the reserved enum slot still exists.
 """
@@ -33,6 +40,8 @@ import pytest
 
 from rp.models.runtime.identity import StoryTurnStatus
 from rp.models.runtime.workflow_job import (
+    RuntimeWorkflowJobCategory,
+    RuntimeWorkflowJobCreationMode,
     RuntimeWorkflowJobKind,
     RuntimeWorkflowJobStatus,
 )
@@ -629,3 +638,140 @@ async def test_num_012_chapter_close_creates_no_recall(retrieval_session):
         RetrievalDocumentService(retrieval_session).list_story_assets(ctx.session.story_id)
         == []
     )
+
+
+# --------------------------------------------------------------------------- #
+# D-S5-06 (AUTH-014) — restart recovery for the chapter-close job graph must NOT
+#          silently release the required settlement blockers.
+# --------------------------------------------------------------------------- #
+def test_d_s5_06_chapter_close_restart_recovery_blocks_settlement(retrieval_session):
+    ctx = _seed_chapter_close_ctx(retrieval_session, story_id="sz5-d-s5-06")
+
+    # Seed a GENUINE leftover-running chapter-close graph by MIRRORING the
+    # production registration (turn_domain_service.py:1380-1413): JOB A
+    # (chapter_summary) ∥ JOB B (tail_flush) + JOB G (scheduler gate), all
+    # ``required_for_turn_completion``, then POST_WRITE_RUNNING — i.e. the close
+    # turn was mid-graph (no visible output yet) when the process died.
+    anchor_turn_id = ctx.close_identity.turn_id
+    ctx.workflow_job_service.ensure_job(
+        identity=ctx.close_identity,
+        job_kind=RuntimeWorkflowJobKind.REQUIRED_POST_WRITE_ANALYSIS,
+        job_category=RuntimeWorkflowJobCategory.TURN_FINALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.CREATION_TIME_OBLIGATION,
+        required_for_turn_completion=True,
+        anchor_turn_id=anchor_turn_id,
+        metadata={
+            "chapter_close_slot": "chapter_summary",
+            "command_kind": LongformTurnCommandKind.COMPLETE_CHAPTER.value,
+        },
+    )
+    ctx.workflow_job_service.ensure_job(
+        identity=ctx.close_identity,
+        job_kind=RuntimeWorkflowJobKind.RUNTIME_WORKSPACE_FINALIZE,
+        job_category=RuntimeWorkflowJobCategory.TURN_FINALIZATION,
+        creation_mode=RuntimeWorkflowJobCreationMode.CREATION_TIME_OBLIGATION,
+        required_for_turn_completion=True,
+        anchor_turn_id=anchor_turn_id,
+        metadata={
+            "chapter_close_slot": "tail_flush",
+            "command_kind": LongformTurnCommandKind.COMPLETE_CHAPTER.value,
+        },
+    )
+    ctx.workflow_job_service.ensure_scheduler_maintenance_gate(
+        identity=ctx.close_identity,
+        scheduler_job_id=f"chapter_close:{ctx.close_identity.turn_id}",
+        anchor_turn_id=ctx.close_identity.turn_id,
+        metadata={"phase": "chapter_close"},
+    )
+    ctx.identity_service.update_turn_status(
+        turn_id=ctx.close_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_RUNNING,
+    )
+    ctx.service.commit()
+
+    job_a_kind = RuntimeWorkflowJobKind.REQUIRED_POST_WRITE_ANALYSIS.value
+    job_b_kind = RuntimeWorkflowJobKind.RUNTIME_WORKSPACE_FINALIZE.value
+    job_g_kind = RuntimeWorkflowJobKind.SCHEDULER_MAINTENANCE_GATE.value
+
+    # Pre-assert the leftover-running pre-settlement state: all three required
+    # jobs exist and are still non-terminal (PENDING), and the close turn produced
+    # no visible output (so finalize treats it as interrupted, not output-bearing).
+    pre_jobs = _jobs_by_kind(ctx)
+    assert pre_jobs.keys() >= {job_a_kind, job_b_kind, job_g_kind}
+    assert pre_jobs[job_a_kind].status == RuntimeWorkflowJobStatus.PENDING.value
+    assert pre_jobs[job_b_kind].status == RuntimeWorkflowJobStatus.PENDING.value
+    assert pre_jobs[job_g_kind].status == RuntimeWorkflowJobStatus.PENDING.value
+    pre_turn = ctx.identity_service.get_turn(ctx.close_identity.turn_id)
+    assert pre_turn is not None
+    assert pre_turn.visible_output_ref is None
+
+    executor = _FakeWorkerExecutionService(result_status=WorkerResultStatus.COMPLETED)
+    governance = _FakeGovernanceService()
+    turn_domain_service = _build_turn_domain_service(
+        ctx,
+        executor=executor,
+        governance=governance,
+    )
+
+    # Restart recovery: finalize the leftover-running close turn. Call it TWICE —
+    # the second call also proves the interrupt receipt is idempotent (s1b B3).
+    turn_domain_service.finalize_interrupted_turn(
+        turn_id=ctx.close_identity.turn_id,
+        reason="interrupted_by_restart",
+    )
+    turn_domain_service.finalize_interrupted_turn(
+        turn_id=ctx.close_identity.turn_id,
+        reason="interrupted_by_restart",
+    )
+
+    jobs = _jobs_by_kind(ctx)
+    job_a = jobs[job_a_kind]
+    job_b = jobs[job_b_kind]
+    job_g = jobs[job_g_kind]
+
+    # The close turn moved to normal FAILED handling (not silently released).
+    close_turn = ctx.identity_service.get_turn(ctx.close_identity.turn_id)
+    assert close_turn is not None
+    assert close_turn.status == StoryTurnStatus.FAILED.value
+    assert close_turn.failure_reason == "interrupted_by_restart"
+
+    # JOB A and JOB B (the creation-time obligations) move to normal FAILED
+    # handling — the leftover running jobs are NOT abandoned in ``running``.
+    assert job_a.status == RuntimeWorkflowJobStatus.FAILED.value
+    assert job_a.failure_reason == "interrupted_by_restart"
+    assert job_b.status == RuntimeWorkflowJobStatus.FAILED.value
+    assert job_b.failure_reason == "interrupted_by_restart"
+
+    # JOB G (scheduler gate) is not a creation-time obligation kind, so the
+    # interrupt sweep does not move it — and, crucially, it must NOT be silently
+    # completed/deferred to release the gate. It stays a non-terminal blocker.
+    assert job_g.status == RuntimeWorkflowJobStatus.PENDING.value
+    assert job_g.status not in {
+        RuntimeWorkflowJobStatus.COMPLETED.value,
+        RuntimeWorkflowJobStatus.DEFERRED.value,
+    }
+
+    # CORE AUTH-014 GUARD — required settlement blockers were NOT silently
+    # released: FAILED is not a settlement-terminal status and the gate is still
+    # pending, so the turn stays ineligible with all three required jobs blocking.
+    settlement = ctx.workflow_job_service.evaluate_turn_settlement(
+        turn_id=ctx.close_identity.turn_id
+    )
+    assert settlement.eligible is False
+    assert settlement.blocking_job_ids != ()
+    assert job_a.job_id in settlement.blocking_job_ids
+    assert job_b.job_id in settlement.blocking_job_ids
+    assert job_g.job_id in settlement.blocking_job_ids
+
+    # Not silently released to a done state.
+    assert close_turn.status not in {
+        StoryTurnStatus.SETTLED.value,
+        StoryTurnStatus.COMPLETED.value,
+    }
+
+    # Idempotent interrupt receipt: two finalize calls == exactly ONE receipt.
+    receipts = turn_domain_service.list_interrupt_receipts(
+        turn_id=ctx.close_identity.turn_id
+    )
+    assert len(receipts) == 1
+    assert receipts[0].reason == "interrupted_by_restart"
