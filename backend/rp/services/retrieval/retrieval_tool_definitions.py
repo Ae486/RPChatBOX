@@ -27,7 +27,6 @@ WRITER_RETRIEVAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "Use relation for relationship questions with explicit anchors, "
                 "Use semantic for abstract background, rules, or broad context."
             ),
-            "strict": True,
             "parameters": {
                 "type": "object",
                 "additionalProperties": False,
@@ -59,7 +58,6 @@ WRITER_RETRIEVAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": WRITER_RETRIEVAL_EXPAND_TOOL,
             "description": "Expand already returned retrieval cards by short id.",
-            "strict": True,
             "parameters": {
                 "type": "object",
                 "additionalProperties": False,
@@ -80,7 +78,6 @@ WRITER_RETRIEVAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "Record which retrieval cards and expansions were used before final output."
             ),
-            "strict": True,
             "parameters": {
                 "type": "object",
                 "additionalProperties": False,
