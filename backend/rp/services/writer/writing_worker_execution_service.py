@@ -6,7 +6,6 @@ import json
 from typing import AsyncIterator
 
 from models.chat import ChatMessage
-from rp.models.retrieval.runtime_contracts import RetrievalFailureCategory
 from rp.models.writer.worker_memory import WorkerSourceRefBundle
 from rp.services.retrieval.retrieval_failure_classifier import (
     classify_writer_retrieval_outcome,
@@ -110,11 +109,6 @@ class WritingWorkerExecutionService:
                 max_tokens=1600,
             )
             result = await harness.arun(seed_messages=seed_messages)
-            # RET-013: normalize the outcome into a distinct failure category
-            # (retrieval-tool failure vs insufficiency vs model failure) while
-            # keeping the specific sub-reason as the error code. Read-only over
-            # the harness result; the turn-finalization gate is untouched.
-            classification = classify_writer_retrieval_outcome(result)
             if any(
                 tool_result.error_code == WRITER_RETRIEVAL_ATTEMPT_LIMIT_EXCEEDED
                 for tool_result in result.tool_results
@@ -122,25 +116,18 @@ class WritingWorkerExecutionService:
                 raise WriterRetrievalError(
                     WRITER_RETRIEVAL_ATTEMPT_LIMIT_EXCEEDED,
                     str(request.max_retrieval_attempts),
-                    category=(
-                        classification.category
-                        if classification is not None
-                        else RetrievalFailureCategory.RETRIEVAL_FAILURE
-                    ),
                 )
             if not result.succeeded:
                 # Covers the usage-required finalize-guard rejection (finish_reason
                 # carries the usage-guard code) and any other harness failure.
+                # RET-013 keeps the surfaced signal on the normalized reason code
+                # while the classifier remains the internal taxonomy decision point.
+                classification = classify_writer_retrieval_outcome(result)
                 raise WriterRetrievalError(
                     classification.reason_code
                     if classification is not None
                     else (result.finish_reason or "writer_retrieval_failed"),
                     identity.turn_id,
-                    category=(
-                        classification.category
-                        if classification is not None
-                        else RetrievalFailureCategory.MODEL_FAILURE
-                    ),
                 )
             text = result.assistant_text
             usage_metadata = result.usage_metadata

@@ -8,24 +8,19 @@ POS: writer-zone retrieval error contract; relocated from the deleted bounded lo
 from __future__ import annotations
 
 from rp.errors import RPError
-from rp.models.retrieval.runtime_contracts import RetrievalFailureCategory
 
 
 class WriterRetrievalError(RPError, ValueError):
     """Stable writer-retrieval error with a machine-readable code.
 
     ``code`` keeps the specific sub-reason (provider tool error code / harness
-    finish reason); ``category`` carries the RET-013 normalized taxonomy axis so
-    a retrieval-tool failure stays distinguishable from a model failure.
+    finish reason) that production surfaces at the writer retrieval boundary.
     """
 
     def __init__(
         self,
         code: str,
         detail: str,
-        *,
-        category: RetrievalFailureCategory | None = None,
     ):
         self.code = code
-        self.category = category
         super().__init__(f"{code}:{detail}")
