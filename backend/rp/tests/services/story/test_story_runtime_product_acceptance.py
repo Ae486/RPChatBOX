@@ -47,7 +47,7 @@ from rp.models.story.runtime import (
 )
 from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
-from rp.services.setup_agent.draft_selection_service import DraftSelectionService
+from rp.services.writer.draft_selection_service import DraftSelectionService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService

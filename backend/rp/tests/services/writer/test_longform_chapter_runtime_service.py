@@ -27,7 +27,7 @@ from rp.services.runtime.context_orchestration_service import (
     ContextOrchestrationService,
 )
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
-from rp.services.setup_agent.draft_selection_service import DraftSelectionService
+from rp.services.writer.draft_selection_service import DraftSelectionService
 from rp.services.writer.longform_chapter_runtime_service import (
     LongformChapterRuntimeService,
     LongformChapterRuntimeServiceError,
