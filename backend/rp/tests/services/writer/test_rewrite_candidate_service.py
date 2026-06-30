@@ -1,16 +1,11 @@
-"""Focused tests for R4 rewrite candidates and paragraph patch composition."""
+"""Focused tests for R4 full rewrite candidates."""
 
 from __future__ import annotations
 
 import pytest
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
-from rp.models.core_state.revision_overlay_contracts import (
-    ParagraphRewritePatch,
-    ReplacementBlock,
-    RewriteCandidateRecord,
-    RevisionAnchorRef,
-)
+from rp.models.core_state.revision_overlay_contracts import RewriteCandidateRecord
 from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
@@ -86,128 +81,6 @@ def test_full_rewrite_candidate_is_saved_without_auto_adoption(retrieval_session
     assert materials[0].payload["selected_output_ref"] is None
     assert materials[0].payload["adopted_output_ref"] is None
     assert materials[0].metadata["source_of_truth"] is False
-
-
-def test_paragraph_rewrite_candidate_requires_patch_and_replaces_target_only(
-    retrieval_session,
-):
-    identity = _identity(turn_id="turn-r4-paragraph")
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r4:paragraph",
-    )
-    overlay = overlay_service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
-    comment = overlay_service.add_comment(
-        identity=identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[1].block_id),
-        instruction_text="Make the second paragraph more vivid.",
-    )
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_paragraph_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        target_block_ids=[draft.blocks[1].block_id],
-        comment_refs=[comment.comment_id],
-        tracked_change_refs=[],
-    )
-    candidate_service = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    )
-
-    with pytest.raises(RewriteCandidateServiceError) as missing_exc:
-        candidate_service.create_paragraph_rewrite_candidate(
-            identity=identity,
-            rewrite_request=request,
-            replacement_blocks=[],
-        )
-    assert missing_exc.value.code == "revision_replacement_blocks_required"
-
-    candidate = candidate_service.create_paragraph_rewrite_candidate(
-        identity=identity,
-        rewrite_request=request,
-        replacement_blocks=[
-            ReplacementBlock(
-                block_id=draft.blocks[1].block_id,
-                replacement_text="Mira moved on beneath the bell's iron answer.",
-                order=draft.blocks[1].order,
-            )
-        ],
-        writer_result=_writer_result(
-            identity=identity,
-            output_text="Patch-shaped output is carried in metadata.",
-        ),
-    )
-
-    assert candidate.rewrite_scope == "paragraph"
-    assert candidate.full_output_text is None
-    assert candidate.target_block_ids == [draft.blocks[1].block_id]
-    assert candidate.paragraph_patch is not None
-    assert candidate.paragraph_patch.replacement_blocks[0].replacement_text == (
-        "Mira moved on beneath the bell's iron answer."
-    )
-    assert candidate.candidate_draft_text == (
-        "The storm arrived at dusk.\n\n"
-        "Mira moved on beneath the bell's iron answer.\n\n"
-        "The bell tower answered."
-    )
-    assert candidate.touched_comment_ids == [comment.comment_id]
-    assert candidate.selected_output_ref is None
-    assert candidate.adopted_output_ref is None
-    assert candidate.canonical_truth is False
-
-    inspection = overlay_service.inspect_overlay(
-        identity=identity,
-        overlay_id=overlay.overlay_id,
-    )
-    assert inspection.comments[0].status == "active"
-
-
-def test_paragraph_rewrite_candidate_rejects_replacements_outside_target(
-    retrieval_session,
-):
-    identity = _identity(turn_id="turn-r4-target-mismatch")
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r4:target-mismatch",
-    )
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_paragraph_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        target_block_ids=[draft.blocks[0].block_id],
-        comment_refs=[],
-        tracked_change_refs=[],
-    )
-    candidate_service = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    )
-
-    with pytest.raises(RewriteCandidateServiceError) as exc:
-        candidate_service.create_paragraph_rewrite_candidate(
-            identity=identity,
-            rewrite_request=request,
-            replacement_blocks=[
-                ReplacementBlock(
-                    block_id=draft.blocks[1].block_id,
-                    replacement_text="Wrong target.",
-                    order=draft.blocks[1].order,
-                )
-            ],
-        )
-    assert exc.value.code == "revision_replacement_block_target_mismatch"
 
 
 def test_candidate_list_is_isolated_by_full_runtime_identity(retrieval_session):
@@ -321,34 +194,6 @@ def test_candidate_dtos_use_factory_defaults_not_shared_mutable_state():
     assert second.touched_comment_ids == []
     assert second.metadata_json == {}
 
-    first_patch = ParagraphRewritePatch(
-        draft_ref="draft-1",
-        target_block_ids=["block-1"],
-        replacement_blocks=[
-            ReplacementBlock(
-                block_id="block-1",
-                replacement_text="Replacement.",
-                order=0,
-            )
-        ],
-    )
-    second_patch = ParagraphRewritePatch(
-        draft_ref="draft-1",
-        target_block_ids=["block-2"],
-        replacement_blocks=[
-            ReplacementBlock(
-                block_id="block-2",
-                replacement_text="Other.",
-                order=1,
-            )
-        ],
-    )
-    first_patch.touched_comment_ids.append("comment-1")
-    first_patch.metadata_json["marker"] = "first"
-
-    assert second_patch.touched_comment_ids == []
-    assert second_patch.metadata_json == {}
-
 
 def _record_draft(
     service: RevisionOverlayService,
@@ -368,15 +213,6 @@ def _record_draft(
         source_format="markdown",
     )
     return service.record_draft_document(identity=identity, draft_document=draft)
-
-
-def _anchor(block_id: str) -> RevisionAnchorRef:
-    return RevisionAnchorRef(
-        anchor_scope="single_block",
-        block_ids=[block_id],
-        start_offset=0,
-        end_offset=5,
-    )
 
 
 def _writer_result(

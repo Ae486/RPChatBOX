@@ -233,22 +233,6 @@ class TrackedChangeRecord(BaseModel):
         return _optional_non_blank(value, field_name=info.field_name or "value")
 
 
-class ReplacementBlock(BaseModel):
-    """Patch-shaped paragraph rewrite block placeholder for later composer slices."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    block_id: str
-    replacement_text: str
-    order: int = Field(ge=0)
-    metadata_json: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("block_id", "replacement_text")
-    @classmethod
-    def _require_required_text(cls, value: str, info: ValidationInfo) -> str:
-        return _require_non_blank(value, field_name=info.field_name or "value")
-
-
 class RewriteRequest(BaseModel):
     """Canonical rewrite request issued by the rewrite request builder."""
 
@@ -259,10 +243,8 @@ class RewriteRequest(BaseModel):
     turn_id: str
     draft_ref: str
     draft_document_id: str
-    rewrite_scope: Literal["full", "paragraph"]
+    rewrite_scope: Literal["full"]
     global_instruction: str | None = None
-    target_block_ids: list[str] = Field(default_factory=list)
-    target_range_ref: dict[str, int] | None = None
     comment_refs: list[str] = Field(default_factory=list)
     tracked_change_refs: list[str] = Field(default_factory=list)
     include_full_draft_text: bool = False
@@ -294,7 +276,7 @@ class RewriteRequest(BaseModel):
             return None
         return _optional_non_blank(value, field_name=info.field_name or "value")
 
-    @field_validator("comment_refs", "tracked_change_refs", "target_block_ids")
+    @field_validator("comment_refs", "tracked_change_refs")
     @classmethod
     def _normalize_ref_list(
         cls,
@@ -313,44 +295,11 @@ class RewriteRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_rewrite_contract(self) -> "RewriteRequest":
-        if self.rewrite_scope == "full":
-            if self.target_block_ids:
-                raise ValueError("full rewrite does not accept target_block_ids")
-            if self.global_instruction is not None and self.include_full_draft_text:
-                raise ValueError("full rewrite with global_instruction must omit full draft text")
-            if self.global_instruction is not None and self.full_draft_text is not None:
-                raise ValueError("full rewrite with global_instruction must omit full_draft_text")
-        if self.rewrite_scope == "paragraph":
-            if not self.target_block_ids:
-                raise ValueError("paragraph rewrite requires target_block_ids")
-            if self.full_draft_text is None:
-                raise ValueError("paragraph rewrite requires full_draft_text")
+        if self.global_instruction is not None and self.include_full_draft_text:
+            raise ValueError("full rewrite with global_instruction must omit full draft text")
+        if self.global_instruction is not None and self.full_draft_text is not None:
+            raise ValueError("full rewrite with global_instruction must omit full_draft_text")
         return self
-
-
-class ParagraphRewritePatch(BaseModel):
-    """Placeholder paragraph patch contract for the later composer slice."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    draft_ref: str
-    target_block_ids: list[str]
-    replacement_blocks: list[ReplacementBlock] = Field(default_factory=list)
-    touched_comment_ids: list[str] = Field(default_factory=list)
-    metadata_json: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("draft_ref")
-    @classmethod
-    def _require_draft_ref(cls, value: str) -> str:
-        return _require_non_blank(value, field_name="draft_ref")
-
-    @field_validator("target_block_ids", "touched_comment_ids")
-    @classmethod
-    def _normalize_ref_list(cls, value: list[str], info: ValidationInfo) -> list[str]:
-        return [
-            _require_non_blank(item, field_name=info.field_name or "ref")
-            for item in value
-        ]
 
 
 class RewriteCandidateRecord(BaseModel):
@@ -365,12 +314,10 @@ class RewriteCandidateRecord(BaseModel):
     draft_ref: str
     draft_document_id: str
     rewrite_request_id: str
-    rewrite_scope: Literal["full", "paragraph"]
+    rewrite_scope: Literal["full"]
     status: RewriteCandidateStatus = "active"
     full_output_text: str | None = None
     candidate_draft_text: str | None = None
-    paragraph_patch: ParagraphRewritePatch | None = None
-    target_block_ids: list[str] = Field(default_factory=list)
     touched_comment_ids: list[str] = Field(default_factory=list)
     touched_tracked_change_ids: list[str] = Field(default_factory=list)
     source_ref_ids: list[str] = Field(default_factory=list)
@@ -410,7 +357,6 @@ class RewriteCandidateRecord(BaseModel):
         return _optional_non_blank(value, field_name=info.field_name or "value")
 
     @field_validator(
-        "target_block_ids",
         "touched_comment_ids",
         "touched_tracked_change_ids",
         "source_ref_ids",
@@ -430,20 +376,8 @@ class RewriteCandidateRecord(BaseModel):
             raise ValueError("rewrite candidate must not set adopted_output_ref")
         if self.canonical_truth:
             raise ValueError("rewrite candidate must not be canonical truth")
-        if self.rewrite_scope == "full":
-            if self.full_output_text is None:
-                raise ValueError("full rewrite candidate requires full_output_text")
-            if self.paragraph_patch is not None or self.target_block_ids:
-                raise ValueError("full rewrite candidate must not carry paragraph patch")
-        if self.rewrite_scope == "paragraph":
-            if self.paragraph_patch is None:
-                raise ValueError("paragraph rewrite candidate requires paragraph_patch")
-            if not self.target_block_ids:
-                raise ValueError("paragraph rewrite candidate requires target_block_ids")
-            if self.candidate_draft_text is None:
-                raise ValueError(
-                    "paragraph rewrite candidate requires candidate_draft_text"
-                )
+        if self.full_output_text is None:
+            raise ValueError("full rewrite candidate requires full_output_text")
         return self
 
 

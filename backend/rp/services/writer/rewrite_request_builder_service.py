@@ -115,88 +115,6 @@ class RewriteRequestBuilderService:
                     draft=draft,
                     comments=comments,
                     tracked_changes=tracked_changes,
-                    target_block_ids=[],
-                ),
-            },
-        )
-
-    def build_paragraph_rewrite_request(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        draft_ref: str,
-        target_block_ids: list[str],
-        comment_refs: list[str],
-        tracked_change_refs: list[str],
-        global_instruction: str | None = None,
-    ) -> RewriteRequest:
-        draft = self._require_draft(identity=identity, draft_ref=draft_ref)
-        normalized_target_block_ids = _normalize_ref_list(
-            target_block_ids,
-            field_name="target_block_ids",
-        )
-        if not normalized_target_block_ids:
-            raise RewriteRequestBuilderServiceError(
-                "revision_target_blocks_required",
-                draft_ref,
-            )
-        target_blocks = self._require_contiguous_target_blocks(
-            draft=draft,
-            target_block_ids=normalized_target_block_ids,
-        )
-        comments, tracked_changes = self._resolve_revision_records(
-            identity=identity,
-            draft=draft,
-            comment_refs=comment_refs,
-            tracked_change_refs=tracked_change_refs,
-        )
-        self._require_records_within_target_scope(
-            draft=draft,
-            target_block_ids=normalized_target_block_ids,
-            comments=comments,
-            tracked_changes=tracked_changes,
-        )
-        return RewriteRequest(
-            request_id=f"rewrite_request_{uuid4().hex}",
-            session_id=identity.session_id,
-            turn_id=identity.turn_id,
-            draft_ref=draft.draft_ref,
-            draft_document_id=draft.draft_document_id,
-            rewrite_scope="paragraph",
-            global_instruction=_normalize_optional_text(global_instruction),
-            target_block_ids=normalized_target_block_ids,
-            target_range_ref=_target_range_ref(target_blocks),
-            comment_refs=[comment.comment_id for comment in comments],
-            tracked_change_refs=[
-                tracked_change.tracked_change_id
-                for tracked_change in tracked_changes
-            ],
-            include_full_draft_text=True,
-            full_draft_text=_draft_text_from_blocks(draft.blocks),
-            anchor_refs=[
-                *[comment.anchor_ref for comment in comments],
-                *[tracked_change.anchor_ref for tracked_change in tracked_changes],
-            ],
-            comments=comments,
-            tracked_changes=tracked_changes,
-            metadata_json={
-                "payload_version": "rewrite-request.v1",
-                "request_owner": "rp_runtime",
-                **_identity_metadata(identity),
-                "writer_operation_mode": "rewrite",
-                "rewrite_scope": "paragraph",
-                "include_full_draft_text": True,
-                "expected_writer_output_shape": "paragraph_rewrite_patch",
-                "replacement_blocks_required": True,
-                "candidate_output_ref": None,
-                "adopted_output_ref": None,
-                "selection_receipt_id": None,
-                "canonical_truth": False,
-                "source_ref_ids": _source_ref_ids(
-                    draft=draft,
-                    comments=comments,
-                    tracked_changes=tracked_changes,
-                    target_block_ids=normalized_target_block_ids,
                 ),
             },
         )
@@ -220,18 +138,11 @@ class RewriteRequestBuilderService:
             ),
             comments=rewrite_request.comments,
             tracked_changes=rewrite_request.tracked_changes,
-            target_block_ids=rewrite_request.target_block_ids,
         )
         metadata_json = {
             "draft_ref": rewrite_request.draft_ref,
             "draft_document_id": rewrite_request.draft_document_id,
             "rewrite_scope": rewrite_request.rewrite_scope,
-            "target_block_ids": list(rewrite_request.target_block_ids),
-            "target_range_ref": (
-                dict(rewrite_request.target_range_ref)
-                if rewrite_request.target_range_ref is not None
-                else None
-            ),
             "comments": [
                 comment.model_dump(mode="json")
                 for comment in rewrite_request.comments
@@ -248,11 +159,7 @@ class RewriteRequestBuilderService:
             "instruction_text": rewrite_request.global_instruction,
             "include_full_draft_text": rewrite_request.include_full_draft_text,
             "source_ref_ids": source_ref_ids,
-            "expected_writer_output_shape": (
-                "paragraph_rewrite_patch"
-                if rewrite_request.rewrite_scope == "paragraph"
-                else "full_rewrite_candidate"
-            ),
+            "expected_writer_output_shape": "full_rewrite_candidate",
             "candidate_output_ref": None,
             "adopted_output_ref": None,
             "canonical_truth": False,
@@ -364,64 +271,6 @@ class RewriteRequestBuilderService:
             tracked_changes.append(tracked_change)
         return comments, tracked_changes
 
-    @staticmethod
-    def _require_contiguous_target_blocks(
-        *,
-        draft: DraftDocumentRecord,
-        target_block_ids: list[str],
-    ) -> list[DraftDocumentBlock]:
-        blocks_by_id = {block.block_id: block for block in draft.blocks}
-        missing = [
-            block_id
-            for block_id in target_block_ids
-            if block_id not in blocks_by_id
-        ]
-        if missing:
-            raise RewriteRequestBuilderServiceError(
-                "revision_anchor_block_not_found",
-                ",".join(missing),
-            )
-        target_blocks = [blocks_by_id[block_id] for block_id in target_block_ids]
-        orders = sorted(block.order for block in target_blocks)
-        if orders != list(range(orders[0], orders[-1] + 1)):
-            raise RewriteRequestBuilderServiceError(
-                "revision_batch_paragraph_rewrite_unsupported",
-                ",".join(target_block_ids),
-            )
-        return sorted(target_blocks, key=lambda block: block.order)
-
-    @staticmethod
-    def _require_records_within_target_scope(
-        *,
-        draft: DraftDocumentRecord,
-        target_block_ids: list[str],
-        comments: list[RevisionCommentRecord],
-        tracked_changes: list[TrackedChangeRecord],
-    ) -> None:
-        target_id_set = set(target_block_ids)
-        all_block_ids = {block.block_id for block in draft.blocks}
-        for record_id, anchor_ref in [
-            *[
-                (comment.comment_id, comment.anchor_ref)
-                for comment in comments
-            ],
-            *[
-                (tracked_change.tracked_change_id, tracked_change.anchor_ref)
-                for tracked_change in tracked_changes
-            ],
-        ]:
-            anchor_block_ids = set(anchor_ref.block_ids)
-            is_whole_draft_context = (
-                anchor_ref.metadata_json.get("rewrite_context_scope")
-                == "whole_draft"
-                or anchor_block_ids == all_block_ids
-            )
-            if not anchor_block_ids <= target_id_set and not is_whole_draft_context:
-                raise RewriteRequestBuilderServiceError(
-                    "revision_comment_draft_mismatch",
-                    record_id,
-                )
-
 
 def identity_created_at_placeholder():
     from datetime import datetime, timezone
@@ -470,16 +319,6 @@ def _require_request_identity(
             )
 
 
-def _target_range_ref(blocks: list[DraftDocumentBlock]) -> dict[str, int] | None:
-    ranges = [block.source_range for block in blocks if block.source_range is not None]
-    if not ranges:
-        return None
-    return {
-        "start": min(item["start"] for item in ranges),
-        "end": max(item["end"] for item in ranges),
-    }
-
-
 def _draft_text_from_blocks(blocks: list[DraftDocumentBlock]) -> str:
     return "\n\n".join(block.text for block in sorted(blocks, key=lambda item: item.order))
 
@@ -489,11 +328,9 @@ def _source_ref_ids(
     draft: DraftDocumentRecord,
     comments: list[RevisionCommentRecord],
     tracked_changes: list[TrackedChangeRecord],
-    target_block_ids: list[str],
 ) -> list[str]:
     refs = [
         f"draft_document:{draft.draft_document_id}",
-        *[f"draft_block:{block_id}" for block_id in target_block_ids],
         *[f"revision_comment:{comment.comment_id}" for comment in comments],
         *[
             f"tracked_change:{tracked_change.tracked_change_id}"
@@ -510,8 +347,6 @@ def _section_items(rewrite_request: RewriteRequest) -> list[str]:
     ]
     if rewrite_request.global_instruction is not None:
         items.append(f"global_instruction: {rewrite_request.global_instruction}")
-    if rewrite_request.target_block_ids:
-        items.append("target_block_ids: " + ", ".join(rewrite_request.target_block_ids))
     for comment in rewrite_request.comments:
         items.append(
             f"comment {comment.comment_id}: {comment.instruction_text}"
@@ -526,8 +361,6 @@ def _section_items(rewrite_request: RewriteRequest) -> list[str]:
         if tracked_change.suggested_text:
             change_parts.append(f"suggested={tracked_change.suggested_text}")
         items.append("; ".join(change_parts))
-    if rewrite_request.rewrite_scope == "paragraph":
-        items.append("writer_output_required: replacement_blocks")
     return items
 
 

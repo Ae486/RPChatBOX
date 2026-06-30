@@ -8,7 +8,6 @@ from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.core_state.revision_overlay_contracts import (
     LongformDraftAdoptionReceipt,
     LongformDraftSelectionReceipt,
-    ReplacementBlock,
     RevisionAnchorRef,
 )
 from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
@@ -70,11 +69,11 @@ def test_multiple_candidates_require_active_selection_or_explicit_ref(
         draft_ref="draft:r5:multiple",
         output_text="First candidate.",
     )
-    second = _create_paragraph_candidate(
+    second = _create_full_candidate(
         retrieval_session,
         identity=identity,
         draft_ref="draft:r5:multiple",
-        replacement_text="The middle paragraph changed.",
+        output_text="Second candidate.",
     )
     service = DraftSelectionService(session=retrieval_session)
 
@@ -428,44 +427,6 @@ def _create_full_candidate(
         writer_result=_writer_result(
             identity=identity,
             output_text=output_text,
-        ),
-    )
-
-
-def _create_paragraph_candidate(
-    retrieval_session,
-    *,
-    identity: MemoryRuntimeIdentity,
-    draft_ref: str,
-    replacement_text: str,
-):
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _ensure_draft(overlay_service, identity=identity, draft_ref=draft_ref)
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_paragraph_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        target_block_ids=[draft.blocks[1].block_id],
-        comment_refs=[],
-        tracked_change_refs=[],
-    )
-    return RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    ).create_paragraph_rewrite_candidate(
-        identity=identity,
-        rewrite_request=request,
-        replacement_blocks=[
-            ReplacementBlock(
-                block_id=draft.blocks[1].block_id,
-                replacement_text=replacement_text,
-                order=draft.blocks[1].order,
-            )
-        ],
-        writer_result=_writer_result(
-            identity=identity,
-            output_text="Patch-shaped writer result.",
         ),
     )
 

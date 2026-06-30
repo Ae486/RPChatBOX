@@ -125,106 +125,6 @@ def test_full_rewrite_with_global_instruction_excludes_old_draft_text(
     assert required_exc.value.code == "revision_full_rewrite_old_text_required"
 
 
-def test_paragraph_rewrite_requires_one_contiguous_target_scope(
-    retrieval_session,
-):
-    identity = _identity(turn_id="turn-paragraph-target")
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r3:paragraph-target",
-    )
-    overlay = overlay_service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
-    comment = overlay_service.add_comment(
-        identity=identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[1].block_id),
-        instruction_text="Sharpen this paragraph.",
-    )
-    builder = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    )
-
-    request = builder.build_paragraph_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        target_block_ids=[draft.blocks[1].block_id],
-        comment_refs=[comment.comment_id],
-        tracked_change_refs=[],
-        global_instruction="Keep the focus local.",
-    )
-
-    assert request.rewrite_scope == "paragraph"
-    assert request.target_block_ids == [draft.blocks[1].block_id]
-    assert request.include_full_draft_text is True
-    assert request.full_draft_text == _expected_full_draft_text()
-    assert request.metadata_json["expected_writer_output_shape"] == (
-        "paragraph_rewrite_patch"
-    )
-    assert request.metadata_json["replacement_blocks_required"] is True
-    assert request.metadata_json["candidate_output_ref"] is None
-    assert request.metadata_json["adopted_output_ref"] is None
-
-    with pytest.raises(RewriteRequestBuilderServiceError) as target_exc:
-        builder.build_paragraph_rewrite_request(
-            identity=identity,
-            draft_ref=draft.draft_ref,
-            target_block_ids=[],
-            comment_refs=[],
-            tracked_change_refs=[],
-        )
-    assert target_exc.value.code == "revision_target_blocks_required"
-
-    with pytest.raises(RewriteRequestBuilderServiceError) as batch_exc:
-        builder.build_paragraph_rewrite_request(
-            identity=identity,
-            draft_ref=draft.draft_ref,
-            target_block_ids=[draft.blocks[0].block_id, draft.blocks[2].block_id],
-            comment_refs=[],
-            tracked_change_refs=[],
-        )
-    assert batch_exc.value.code == "revision_batch_paragraph_rewrite_unsupported"
-
-
-def test_paragraph_rewrite_rejects_comment_outside_target_scope(retrieval_session):
-    identity = _identity(turn_id="turn-paragraph-comment-scope")
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r3:paragraph-comment-scope",
-    )
-    overlay = overlay_service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
-    comment = overlay_service.add_comment(
-        identity=identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[2].block_id),
-        instruction_text="This comment is outside the requested paragraph.",
-    )
-    builder = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    )
-
-    with pytest.raises(RewriteRequestBuilderServiceError) as exc:
-        builder.build_paragraph_rewrite_request(
-            identity=identity,
-            draft_ref=draft.draft_ref,
-            target_block_ids=[draft.blocks[0].block_id],
-            comment_refs=[comment.comment_id],
-            tracked_change_refs=[],
-        )
-    assert exc.value.code == "revision_comment_draft_mismatch"
-
-
 def test_deleted_comment_does_not_enter_future_rewrite_packet(retrieval_session):
     identity = _identity(turn_id="turn-deleted-comment")
     overlay_service = RevisionOverlayService(session=retrieval_session)
@@ -289,10 +189,10 @@ def test_review_overlay_sections_map_into_writing_packet_without_top_level_drift
     builder = RewriteRequestBuilderService(
         revision_overlay_service=overlay_service,
     )
-    request = builder.build_paragraph_rewrite_request(
+    request = builder.build_full_rewrite_request(
         identity=identity,
         draft_ref=draft.draft_ref,
-        target_block_ids=[draft.blocks[0].block_id],
+        global_instruction=None,
         comment_refs=[comment.comment_id],
         tracked_change_refs=[],
     )
@@ -306,7 +206,7 @@ def test_review_overlay_sections_map_into_writing_packet_without_top_level_drift
         chapter=_chapter_workspace(identity),
         plan=OrchestratorPlan(
             output_kind=StoryArtifactKind.STORY_SEGMENT,
-            writer_instruction="Rewrite the target paragraph only.",
+            writer_instruction="Rewrite the full chapter draft.",
         ),
         runtime_identity=identity,
         operation_mode="rewrite",
@@ -314,7 +214,7 @@ def test_review_overlay_sections_map_into_writing_packet_without_top_level_drift
             {"label": "core_view", "items": ["Core view summary."]},
         ],
         runtime_writer_hints=[],
-        user_instruction="Rewrite the target paragraph only.",
+        user_instruction="Rewrite the full chapter draft.",
         review_overlay_sections=review_sections,
     )
 
@@ -323,10 +223,10 @@ def test_review_overlay_sections_map_into_writing_packet_without_top_level_drift
     section = packet.review_overlay_sections[0]
     assert section.label == "review_overlay"
     assert section.source_kind == "review_overlay_rewrite_request"
-    assert section.metadata_json["rewrite_scope"] == "paragraph"
+    assert section.metadata_json["rewrite_scope"] == "full"
     assert section.metadata_json["include_full_draft_text"] is True
     assert section.metadata_json["expected_writer_output_shape"] == (
-        "paragraph_rewrite_patch"
+        "full_rewrite_candidate"
     )
     assert (
         section.metadata_json["anchor_refs"][0]["superdoc_anchor_id"]
