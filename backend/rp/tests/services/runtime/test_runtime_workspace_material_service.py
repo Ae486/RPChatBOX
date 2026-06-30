@@ -54,6 +54,7 @@ def test_material_kind_and_lifecycle_enums_match_spec():
         "post_write_trace",
         "packet_ref",
         "token_usage_metadata",
+        "retrieval_usage_ledger",
     }
     assert {state.value for state in RuntimeWorkspaceMaterialLifecycle} == {
         "active",
