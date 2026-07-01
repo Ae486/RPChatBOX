@@ -1190,6 +1190,16 @@ class StoryTurnDomainService:
             status=StoryArtifactStatus.ACCEPTED,
             metadata=accepted_metadata,
         )
+        if (
+            self._longform_chapter_runtime_service is not None
+            and runtime_identity is not None
+        ):
+            # REV-023: marking ACCEPTED and authoring the adoption receipt are one
+            # action on the single 甲套 write gate (atomic before the commit below).
+            self._longform_chapter_runtime_service.record_accept_pending_segment_adoption_receipt(
+                identity=runtime_identity,
+                accepted_artifact_id=accepted.artifact_id,
+            )
         visible_artifact_ids = {
             item.artifact_id
             for item in self._story_session_service.build_chapter_snapshot(

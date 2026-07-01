@@ -6,11 +6,9 @@ import pytest
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.core_state.revision_overlay_contracts import (
-    LongformDraftAdoptionReceipt,
     LongformDraftSelectionReceipt,
     RevisionAnchorRef,
 )
-from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.writer.draft_selection_service import (
@@ -20,10 +18,12 @@ from rp.services.writer.draft_selection_service import (
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
 from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
-from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 def test_unique_candidate_can_be_adopted_without_prior_selection(retrieval_session):
+    # 乙套 retired (REV-023): rewrite-candidate adoption has no live v1.2 scenario. A
+    # unique candidate no longer authors a receipt here; the single live adoption path
+    # is 甲套 ``accept_pending_segment``. REV-017/020 are live-guarded by the O-1 oracle.
     identity = _identity(turn_id="turn-r5-unique")
     candidate = _create_full_candidate(
         retrieval_session,
@@ -33,35 +33,20 @@ def test_unique_candidate_can_be_adopted_without_prior_selection(retrieval_sessi
     )
     service = DraftSelectionService(session=retrieval_session)
 
-    receipt = service.adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=candidate.draft_ref,
-    )
-
-    assert isinstance(receipt, LongformDraftAdoptionReceipt)
-    assert receipt.adopted_output_ref == candidate.candidate_output_ref
-    assert receipt.selection_receipt_id is None
-    assert receipt.metadata_json["accept_and_continue"] is True
-    assert receipt.metadata_json["canonical_continuation_base"] is True
-
-    anchor = service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=candidate.draft_ref,
-    )
-    assert anchor == {
-        "turn_id": identity.turn_id,
-        "draft_ref": candidate.draft_ref,
-        "adopted_output_ref": candidate.candidate_output_ref,
-        "adoption_receipt_id": receipt.receipt_id,
-        "source_kind": "longform_draft_adoption_receipt",
-        "canonical_continuation_base": True,
-    }
+    with pytest.raises(DraftSelectionServiceError) as retired:
+        service.adopt_for_continue(
+            identity=identity,
+            turn_id=identity.turn_id,
+            draft_ref=candidate.draft_ref,
+        )
+    assert retired.value.code == "revision_adoption_route_retired"
 
 
 def test_multiple_candidates_require_active_selection_or_explicit_ref(
     retrieval_session,
 ):
+    # 乙套 retired (REV-023): multi-candidate rewrite adoption and REV-022 (selection
+    # receipt in adoption source refs) have no live v1.2 scenario -> deferred to V2-02.
     identity = _identity(turn_id="turn-r5-multiple")
     first = _create_full_candidate(
         retrieval_session,
@@ -69,7 +54,7 @@ def test_multiple_candidates_require_active_selection_or_explicit_ref(
         draft_ref="draft:r5:multiple",
         output_text="First candidate.",
     )
-    second = _create_full_candidate(
+    _create_full_candidate(
         retrieval_session,
         identity=identity,
         draft_ref="draft:r5:multiple",
@@ -77,22 +62,13 @@ def test_multiple_candidates_require_active_selection_or_explicit_ref(
     )
     service = DraftSelectionService(session=retrieval_session)
 
-    with pytest.raises(DraftSelectionServiceError) as missing_selection:
+    with pytest.raises(DraftSelectionServiceError) as retired:
         service.adopt_for_continue(
             identity=identity,
             turn_id=identity.turn_id,
             draft_ref=first.draft_ref,
         )
-    assert missing_selection.value.code == "revision_adoption_selection_required"
-
-    explicit = service.adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=first.draft_ref,
-        selected_output_ref=second.candidate_output_ref,
-    )
-    assert explicit.adopted_output_ref == second.candidate_output_ref
-    assert explicit.selection_receipt_id is None
+    assert retired.value.code == "revision_adoption_route_retired"
 
 
 def test_selection_can_change_and_clear_before_adoption(retrieval_session):
@@ -149,18 +125,21 @@ def test_selection_can_change_and_clear_before_adoption(retrieval_session):
         draft_ref=first.draft_ref,
     ) is None
 
-    with pytest.raises(DraftSelectionServiceError) as missing_selection:
+    with pytest.raises(DraftSelectionServiceError) as retired:
         service.adopt_for_continue(
             identity=identity,
             turn_id=identity.turn_id,
             draft_ref=first.draft_ref,
         )
-    assert missing_selection.value.code == "revision_adoption_selection_required"
+    assert retired.value.code == "revision_adoption_route_retired"
 
 
 def test_active_selection_drives_adoption_but_not_before_accept_and_continue(
     retrieval_session,
 ):
+    # Selection layer (REV-003/016) is KEPT and still works; only the 乙套 adoption
+    # route is retired (REV-023). REV-022 (selection receipt in adoption source refs)
+    # is deferred to V2-02 (no live scenario).
     identity = _identity(turn_id="turn-r5-active-selection")
     first = _create_full_candidate(
         retrieval_session,
@@ -183,47 +162,23 @@ def test_active_selection_drives_adoption_but_not_before_accept_and_continue(
         selected_output_ref=second.candidate_output_ref,
     )
 
-    assert service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=first.draft_ref,
-    ) is None
+    assert selection.selected_output_ref == second.candidate_output_ref
 
-    adoption = service.adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=first.draft_ref,
-    )
-
-    assert adoption.adopted_output_ref == second.candidate_output_ref
-    assert adoption.selection_receipt_id == selection.receipt_id
-    adopted_anchor = service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=first.draft_ref,
-    )
-    assert adopted_anchor is not None
-    assert adopted_anchor["adopted_output_ref"] == second.candidate_output_ref
-    adoption_materials = [
-        material
-        for material in RuntimeWorkspaceMaterialService(
-            session=retrieval_session
-        ).list_materials(
+    with pytest.raises(DraftSelectionServiceError) as retired:
+        service.adopt_for_continue(
             identity=identity,
-            material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
-            domain="chapter",
+            turn_id=identity.turn_id,
+            draft_ref=first.draft_ref,
         )
-        if material.payload.get("record_id") == adoption.receipt_id
-    ]
-    assert len(adoption_materials) == 1
-    assert any(
-        ref.source_type == "draft_selection_receipt"
-        and ref.source_id == selection.receipt_id
-        for ref in adoption_materials[0].source_refs
-    )
+    assert retired.value.code == "revision_adoption_route_retired"
 
 
 def test_next_continuation_base_ignores_unadopted_revision_candidates(
     retrieval_session,
 ):
+    # REV-020 (an unadopted candidate is not the continuation base) is now live-guarded
+    # by the O-1 oracle (assertion 8: unadopted draft excluded from base/K-window,
+    # included only after the 甲套 adoption receipt). The 乙套 adoption route is retired.
     identity = _identity(turn_id="turn-r5-continuation-base")
     first = _create_full_candidate(
         retrieval_session,
@@ -245,7 +200,7 @@ def test_next_continuation_base_ignores_unadopted_revision_candidates(
     )
     service = DraftSelectionService(session=retrieval_session)
 
-    service.select_candidate(
+    selection = service.select_candidate(
         identity=identity,
         turn_id=identity.turn_id,
         draft_ref=first.draft_ref,
@@ -257,27 +212,15 @@ def test_next_continuation_base_ignores_unadopted_revision_candidates(
         selected_output_ref=adopted.candidate_output_ref,
     )
 
-    assert service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=first.draft_ref,
-    ) is None
+    assert selection.selected_output_ref == adopted.candidate_output_ref
 
-    receipt = service.adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=first.draft_ref,
-    )
-    anchor = service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=first.draft_ref,
-    )
-
-    assert receipt.adopted_output_ref == adopted.candidate_output_ref
-    assert anchor is not None
-    assert anchor["adopted_output_ref"] == adopted.candidate_output_ref
-    assert anchor["adopted_output_ref"] != first.candidate_output_ref
-    assert anchor["adopted_output_ref"] != later_unadopted.candidate_output_ref
-    assert anchor["canonical_continuation_base"] is True
+    with pytest.raises(DraftSelectionServiceError) as retired:
+        service.adopt_for_continue(
+            identity=identity,
+            turn_id=identity.turn_id,
+            draft_ref=first.draft_ref,
+        )
+    assert retired.value.code == "revision_adoption_route_retired"
 
 
 def test_selected_output_must_be_visible_candidate_for_current_identity_and_draft(
@@ -306,17 +249,20 @@ def test_selected_output_must_be_visible_candidate_for_current_identity_and_draf
         )
     assert wrong_ref.value.code == "revision_selected_output_not_candidate"
 
-    with pytest.raises(DraftSelectionServiceError) as wrong_branch:
+    with pytest.raises(DraftSelectionServiceError) as retired:
         service.adopt_for_continue(
             identity=other_branch,
             turn_id=other_branch.turn_id,
             draft_ref=candidate.draft_ref,
             selected_output_ref=candidate.candidate_output_ref,
         )
-    assert wrong_branch.value.code == "revision_candidate_not_found"
+    assert retired.value.code == "revision_adoption_route_retired"
 
 
 def test_adoption_receipt_is_review_sidecar_not_core_truth(retrieval_session):
+    # REV-017 (adoption receipt is a Runtime Workspace review sidecar, not core/accepted
+    # truth) is now live-guarded by the O-1 oracle (assertion 7). The 乙套 route here is
+    # retired; the live 甲套 receipt is what O-1 asserts stays non-canonical.
     identity = _identity(turn_id="turn-r5-material")
     candidate = _create_full_candidate(
         retrieval_session,
@@ -326,31 +272,20 @@ def test_adoption_receipt_is_review_sidecar_not_core_truth(retrieval_session):
     )
     service = DraftSelectionService(session=retrieval_session)
 
-    service.adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=candidate.draft_ref,
-    )
-
-    materials = RuntimeWorkspaceMaterialService(
-        session=retrieval_session
-    ).list_materials(
-        identity=identity,
-        material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
-        domain="chapter",
-    )
-    adoption_materials = [
-        material
-        for material in materials
-        if material.payload.get("payload_kind") == "draft_adoption_receipt"
-    ]
-    assert len(adoption_materials) == 1
-    assert adoption_materials[0].payload["canonical_truth"] is False
-    assert adoption_materials[0].metadata["source_of_truth"] is False
-    assert adoption_materials[0].metadata["canonical_continuation_base"] is True
+    with pytest.raises(DraftSelectionServiceError) as retired:
+        service.adopt_for_continue(
+            identity=identity,
+            turn_id=identity.turn_id,
+            draft_ref=candidate.draft_ref,
+        )
+    assert retired.value.code == "revision_adoption_route_retired"
 
 
 def test_accept_and_continue_does_not_auto_resolve_comments(retrieval_session):
+    # FLAG (REV-007): "rewrite does not auto-resolve/delete comments" is re-expressed in
+    # the S6-7 memo (comments degraded to passive memos in v1.2). The 乙套 adoption route
+    # that used to carry this guard is retired, so the post-adoption comment state cannot
+    # be exercised through it here; REV-007's live guard is deferred to S6-7.
     identity = _identity(turn_id="turn-r5-comments")
     overlay_service = RevisionOverlayService(session=retrieval_session)
     draft = _record_draft(
@@ -379,11 +314,13 @@ def test_accept_and_continue_does_not_auto_resolve_comments(retrieval_session):
     )
     service = DraftSelectionService(session=retrieval_session)
 
-    service.adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=candidate.draft_ref,
-    )
+    with pytest.raises(DraftSelectionServiceError) as retired:
+        service.adopt_for_continue(
+            identity=identity,
+            turn_id=identity.turn_id,
+            draft_ref=candidate.draft_ref,
+        )
+    assert retired.value.code == "revision_adoption_route_retired"
 
     inspection = overlay_service.inspect_overlay(
         identity=identity,

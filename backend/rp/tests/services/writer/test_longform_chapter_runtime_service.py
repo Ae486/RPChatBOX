@@ -26,16 +26,12 @@ from rp.services.projection.chapter_workspace_adapter import (
 from rp.services.runtime.context_orchestration_service import (
     ContextOrchestrationService,
 )
-from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.writer.draft_selection_service import DraftSelectionService
 from rp.services.writer.longform_chapter_runtime_service import (
     LongformChapterRuntimeService,
     LongformChapterRuntimeServiceError,
 )
 from rp.services.projection.state_service import ProjectionStateService
-from rp.services.core_state.revision_overlay_service import RevisionOverlayService
-from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
-from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.story.session_service import StorySessionService
@@ -175,44 +171,17 @@ def test_accept_outline_normalizes_structured_outline_and_initializes_progress(
     assert progress.covered_beat_ids == []
 
 
-def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridge(
+@pytest.mark.asyncio
+async def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridge(
     retrieval_session,
 ):
+    # v1.2 re-home: adoption happens at the 甲套 ``accept_pending_segment`` gate, which
+    # writes the H1 receipt and clears the pending pointer (REV-023 single writer). So
+    # chapter-close takes the else-branch and reads that receipt (H2a) — not the retired
+    # 乙套 rewrite-candidate route.
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
-    pending_identity, identity_service = _resolve_runtime_identity(
-        retrieval_session,
-        session_id=session.session_id,
-        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
-        created_from="longform.transition.pending",
-        actor="longform.transition.pending",
-    )
-    pending = story_session_service.create_artifact(
-        session_id=session.session_id,
-        chapter_workspace_id=chapter.chapter_workspace_id,
-        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
-        status=StoryArtifactStatus.DRAFT,
-        content_text="Original pending draft.",
-        metadata=_artifact_runtime_metadata(
-            story_id=pending_identity.story_id,
-            session_id=pending_identity.session_id,
-            branch_head_id=pending_identity.branch_head_id,
-            turn_id=pending_identity.turn_id,
-            runtime_profile_snapshot_id=pending_identity.runtime_profile_snapshot_id,
-        ),
-    )
-    identity_service.update_turn_status(
-        turn_id=pending_identity.turn_id,
-        status=StoryTurnStatus.POST_WRITE_PENDING,
-    )
-    identity_service.update_turn_status(
-        turn_id=pending_identity.turn_id,
-        status=StoryTurnStatus.SETTLED,
-        visible_output_ref=pending.artifact_id,
-        selected_output_ref=pending.artifact_id,
-        settlement_reason="test_pending_settled_before_next_writer_turn",
-    )
-    stale_identity, _ = _resolve_runtime_identity(
+    stale_identity, identity_service = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
         command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
@@ -233,30 +202,66 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
             runtime_profile_snapshot_id=stale_identity.runtime_profile_snapshot_id,
         ),
     )
-    chapter = story_session_service.update_chapter_workspace(
+    identity_service.update_turn_status(
+        turn_id=stale_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref=stale.artifact_id,
+        selected_output_ref=stale.artifact_id,
+        settlement_reason="test_stale_settled_before_accept",
+    )
+    pending_identity, _ = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="longform.transition.pending",
+        actor="longform.transition.pending",
+    )
+    pending = story_session_service.create_artifact(
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+        status=StoryArtifactStatus.DRAFT,
+        content_text="Adopted rewritten chapter ending.",
+        metadata=_artifact_runtime_metadata(
+            story_id=pending_identity.story_id,
+            session_id=pending_identity.session_id,
+            branch_head_id=pending_identity.branch_head_id,
+            turn_id=pending_identity.turn_id,
+            runtime_profile_snapshot_id=pending_identity.runtime_profile_snapshot_id,
+        ),
+    )
+    identity_service.update_turn_status(
+        turn_id=pending_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+        visible_output_ref=pending.artifact_id,
+        selected_output_ref=pending.artifact_id,
+    )
+    story_session_service.update_chapter_workspace(
         chapter_workspace_id=chapter.chapter_workspace_id,
         phase=LongformChapterPhase.SEGMENT_REVIEW,
         pending_segment_artifact_id=pending.artifact_id,
     )
-
-    identity_service.update_turn_status(
-        turn_id=stale_identity.turn_id,
-        status=StoryTurnStatus.SETTLED,
-        settlement_reason="test_stale_settled_before_next_writer_turn",
-    )
-    review_identity, _ = _resolve_runtime_identity(
+    accept_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
-        command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
-        created_from="longform.transition.review",
-        actor="longform.transition.review",
+        command_kind=LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+        created_from="longform.transition.accept",
+        actor="longform.transition.accept",
     )
-    candidate = _create_adopted_candidate(
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
         retrieval_session,
-        identity=review_identity,
-        draft_ref=f"artifact:{pending.artifact_id}",
-        output_text="Adopted rewritten chapter ending.",
     )
+    await turn_domain_service.accept_pending_segment(
+        request=LongformTurnRequest(
+            session_id=session.session_id,
+            command_kind=LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+            model_id="model-longform-chapter",
+            target_artifact_id=pending.artifact_id,
+        ),
+        runtime_identity=accept_identity,
+    )
+    chapter = story_session_service.get_chapter_workspace(chapter.chapter_workspace_id)
 
     service = LongformChapterRuntimeService(
         story_session_service=story_session_service,
@@ -286,7 +291,7 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
     assert prepared.chapter.pending_segment_artifact_id is None
     assert pending.artifact_id in prepared.chapter.accepted_segment_ids
     assert prepared.receipt is not None
-    assert prepared.receipt.adopted_output_ref == candidate.candidate_output_ref
+    assert prepared.receipt.adopted_output_ref == pending.artifact_id
     assert prepared.receipt.metadata_json["bridge_source"] == "draft_adoption_receipt"
 
     bridge = service.get_latest_bridge_material_for_branch(
@@ -296,7 +301,7 @@ def test_prepare_chapter_transition_promotes_adopted_candidate_and_records_bridg
         source_chapter_index=1,
     )
     assert bridge is not None
-    assert bridge.adopted_output_ref == candidate.candidate_output_ref
+    assert bridge.adopted_output_ref == pending.artifact_id
     assert bridge.accepted_outline_ref == "outline-accepted"
     assert bridge.chapter_goal_ref == f"chapter_goal:{chapter.chapter_workspace_id}"
     assert bridge.summary_text == "Adopted rewritten chapter ending."
@@ -641,11 +646,14 @@ def test_chapter_transition_ignores_rollback_hidden_pending_pointer_and_adoption
         created_from="longform.transition.hidden_review",
         actor="longform.transition.hidden_review",
     )
-    hidden_candidate = _create_adopted_candidate(
+    # FLAG: the hidden pending must stay a DRAFT with a *dangling* adoption receipt so
+    # the test proves chapter-close ignores it after rollback. A real 甲套
+    # ``accept_pending_segment`` would mark it ACCEPTED, so the receipt is seeded directly
+    # through the single H1 writer (REV-023) without accepting the artifact.
+    _record_adoption_receipt(
         retrieval_session,
         identity=review_identity,
-        draft_ref=f"artifact:{hidden_pending.artifact_id}",
-        output_text="Hidden adoption must not be used.",
+        accepted_artifact_id=hidden_pending.artifact_id,
     )
     identity_service.rollback_to_turn(
         session_id=session.session_id,
@@ -674,7 +682,7 @@ def test_chapter_transition_ignores_rollback_hidden_pending_pointer_and_adoption
     assert prepared.receipt is not None
     assert prepared.receipt.metadata_json["bridge_source"] == "accepted_segment_adapter"
     assert prepared.receipt.adopted_output_ref == target.artifact_id
-    assert prepared.receipt.adopted_output_ref != hidden_candidate.candidate_output_ref
+    assert prepared.receipt.adopted_output_ref != hidden_pending.artifact_id
     assert prepared.chapter.pending_segment_artifact_id is None
     assert hidden_after is not None
     assert hidden_after.status == StoryArtifactStatus.DRAFT
@@ -1147,79 +1155,20 @@ def _accept_outline(
     service.commit()
 
 
-def _create_adopted_candidate(
+def _record_adoption_receipt(
     retrieval_session,
     *,
     identity: MemoryRuntimeIdentity,
-    draft_ref: str,
-    output_text: str,
+    accepted_artifact_id: str,
 ):
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
+    # Seed the H1 adoption receipt through the single live writer (REV-023), keyed to the
+    # accepted artifact id. Used to plant a receipt that chapter-close either reads
+    # (else-branch H2a) or must ignore after a rollback.
+    return DraftSelectionService(
+        session=retrieval_session
+    ).record_accepted_artifact_adoption_receipt(
         identity=identity,
-        draft_ref=draft_ref,
-    )
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_full_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        global_instruction="Rewrite this ending decisively.",
-        comment_refs=[],
-        tracked_change_refs=[],
-    )
-    candidate = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    ).create_full_rewrite_candidate(
-        identity=identity,
-        rewrite_request=request,
-        writer_result=_writer_result(identity=identity, output_text=output_text),
-    )
-    DraftSelectionService(session=retrieval_session).adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=draft.draft_ref,
-    )
-    return candidate
-
-
-def _record_draft(
-    service: RevisionOverlayService,
-    *,
-    identity: MemoryRuntimeIdentity,
-    draft_ref: str,
-):
-    draft = DraftMaterializationService().materialize_draft(
-        identity=identity,
-        draft_ref=draft_ref,
-        source_output_ref=draft_ref.replace("artifact:", ""),
-        output_text=(
-            "The storm arrived at dusk.\n\n"
-            "Mira reached the bell tower.\n\n"
-            "The debt was still unpaid."
-        ),
-        source_format="markdown",
-    )
-    return service.record_draft_document(identity=identity, draft_document=draft)
-
-
-def _writer_result(
-    *,
-    identity: MemoryRuntimeIdentity,
-    output_text: str,
-):
-    from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
-
-    return WritingWorkerExecutionResult(
-        request_id=f"writer-request:{identity.turn_id}",
-        packet_id=f"packet:{identity.turn_id}",
-        turn_id=identity.turn_id,
-        operation_mode="rewrite",
-        output_text=output_text,
-        output_kind="story_segment",
-        result_status="completed",
+        accepted_artifact_id=accepted_artifact_id,
     )
 
 

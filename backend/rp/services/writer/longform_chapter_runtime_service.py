@@ -24,6 +24,7 @@ from rp.models.writer.longform_chapter_contracts import (
     LongformStructuredOutline,
 )
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
+from rp.models.core_state.revision_overlay_contracts import LongformDraftAdoptionReceipt
 from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterial,
     RuntimeWorkspaceMaterialKind,
@@ -546,6 +547,33 @@ class LongformChapterRuntimeService:
             reason="chapter_transition_adopted_visible_output",
         )
 
+    def record_accept_pending_segment_adoption_receipt(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        accepted_artifact_id: str,
+    ) -> LongformDraftAdoptionReceipt:
+        """H1 writer pass-through keeping the story->writer chain one-way (REV-023)."""
+        return self._draft_selection_service.record_accepted_artifact_adoption_receipt(
+            identity=identity,
+            accepted_artifact_id=accepted_artifact_id,
+        )
+
+    def get_latest_accepted_segment_adoption_receipt(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        branch_head_id: str,
+        accepted_artifact_id: str,
+    ) -> LongformDraftAdoptionReceipt | None:
+        return self._draft_selection_service.get_latest_adoption_receipt_for_branch(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            draft_ref=f"artifact:{accepted_artifact_id}",
+        )
+
     def _resolve_transition_state(
         self,
         *,
@@ -623,8 +651,24 @@ class LongformChapterRuntimeService:
             if latest_accepted is not None:
                 adopted_output_ref = latest_accepted.artifact_id
                 adopted_output_text = latest_accepted.content_text
-                adoption_source = "accepted_segment_adapter"
-                source_refs = [latest_accepted.artifact_id]
+                adoption = self._draft_selection_service.get_latest_adoption_receipt_for_branch(
+                    story_id=identity.story_id,
+                    session_id=identity.session_id,
+                    branch_head_id=identity.branch_head_id,
+                    draft_ref=f"artifact:{latest_accepted.artifact_id}",
+                )
+                if adoption is not None:
+                    adoption_source = "draft_adoption_receipt"
+                    source_refs = [
+                        adoption.receipt_id,
+                        adoption.adopted_output_ref,
+                        latest_accepted.artifact_id,
+                    ]
+                else:
+                    # Degrade for receipt-less legacy/test segments not authored by the
+                    # 甲套 accept gate; production accepts always carry an H1 receipt.
+                    adoption_source = "accepted_segment_adapter"
+                    source_refs = [latest_accepted.artifact_id]
         progress = self.effective_outline_progress(
             chapter=updated_chapter,
             identity=identity,

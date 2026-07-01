@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from uuid import uuid4
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
+from rp.models.core_state.revision_overlay_contracts import LongformDraftAdoptionReceipt
 from rp.models.runtime.mode_extension_contracts import (
     packet_sidecar_material_kinds_for_slot,
 )
@@ -469,6 +470,25 @@ class ContextOrchestrationService:
             }
         ]
 
+    def _latest_accepted_segment_adoption_receipt(
+        self,
+        *,
+        session: StorySession,
+        identity: MemoryRuntimeIdentity | None,
+        branch_head_id: str,
+        accepted_artifact_id: str,
+    ) -> LongformDraftAdoptionReceipt | None:
+        if self._longform_chapter_runtime_service is None or not branch_head_id:
+            return None
+        story_id = identity.story_id if identity is not None else session.story_id
+        session_id = identity.session_id if identity is not None else session.session_id
+        return self._longform_chapter_runtime_service.get_latest_accepted_segment_adoption_receipt(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            accepted_artifact_id=accepted_artifact_id,
+        )
+
     def _build_longform_chapter_progress_sections(
         self,
         *,
@@ -506,9 +526,19 @@ class ContextOrchestrationService:
             if structured_outline is None
             else structured_outline.beat_by_id(outline_progress.current_beat_id)
         )
+        adoption_receipt_id: str | None = None
         source_ref_ids: list[str] = []
         if latest_segment is not None:
             source_ref_ids.append(latest_segment.artifact_id)
+            adoption_receipt = self._latest_accepted_segment_adoption_receipt(
+                session=session,
+                identity=identity,
+                branch_head_id=branch_head_id,
+                accepted_artifact_id=latest_segment.artifact_id,
+            )
+            if adoption_receipt is not None:
+                adoption_receipt_id = adoption_receipt.receipt_id
+                source_ref_ids.append(adoption_receipt.receipt_id)
         if accepted_outline_ref is not None:
             source_ref_ids.append(accepted_outline_ref)
         source_ref_ids.extend(
@@ -587,6 +617,7 @@ class ContextOrchestrationService:
                     "latest_accepted_segment_id": (
                         None if latest_segment is None else latest_segment.artifact_id
                     ),
+                    "adoption_receipt_id": adoption_receipt_id,
                     "accepted_outline_ref": accepted_outline_ref,
                     "current_beat_id": outline_progress.current_beat_id,
                     "covered_beat_ids": list(outline_progress.covered_beat_ids),

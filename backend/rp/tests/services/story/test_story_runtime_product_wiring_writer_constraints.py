@@ -106,7 +106,7 @@ async def test_rewrite_pending_segment_real_packet_includes_review_overlay_and_p
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
-    draft_identity, _ = _resolve_runtime_identity(
+    draft_identity, identity_service = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
         command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
@@ -132,6 +132,13 @@ async def test_rewrite_pending_segment_real_packet_includes_review_overlay_and_p
         phase=LongformChapterPhase.SEGMENT_REVIEW,
         pending_segment_artifact_id=pending.artifact_id,
     )
+    # TURN-012: a rewrite (writer-prose) turn is only admissible once the prior
+    # write turn is terminal; settle it before staging the rewrite intake.
+    identity_service.update_turn_status(
+        turn_id=draft_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+    )
+    retrieval_session.commit()
     overlay_service = RevisionOverlayService(session=retrieval_session)
     draft = _record_draft(
         overlay_service,
@@ -230,7 +237,7 @@ def test_rewrite_pending_segment_fails_closed_when_active_constraints_exist_but_
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     _accept_outline(story_session_service, session, chapter)
-    draft_identity, _ = _resolve_runtime_identity(
+    draft_identity, identity_service = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
         command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
@@ -299,6 +306,14 @@ def test_rewrite_pending_segment_fails_closed_when_active_constraints_exist_but_
             removed += 1
     retrieval_session.commit()
     assert removed == 1
+
+    # TURN-012: a rewrite (writer-prose) turn is only admissible once the prior
+    # write turn is terminal; settle it before staging the rewrite intake.
+    identity_service.update_turn_status(
+        turn_id=draft_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+    )
+    retrieval_session.commit()
 
     rewrite_identity, _ = _resolve_runtime_identity(
         retrieval_session,
@@ -446,6 +461,13 @@ def test_write_next_segment_chapter_progress_uses_active_branch_visible_segments
         created_from="s1.writer_constraints.rollback_target",
         actor="s1.writer_constraints.rollback_target",
     )
+    # TURN-012: the next writer-prose turn is only admissible once the prior
+    # write turn is terminal; settle it before staging the next write intake.
+    identity_service.update_turn_status(
+        turn_id=target_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+    )
+    retrieval_session.commit()
     hidden_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
@@ -1031,6 +1053,13 @@ def test_active_branch_story_segments_ignore_legacy_accepted_list_pollution(
         created_from="s1.single_path.first",
         actor="s1.single_path.first",
     )
+    # TURN-012: the next writer-prose turn is only admissible once the prior
+    # write turn is terminal; settle it before staging the next write intake.
+    identity_service.update_turn_status(
+        turn_id=first_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+    )
+    retrieval_session.commit()
     second_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
@@ -1146,6 +1175,13 @@ def test_active_branch_story_segments_do_not_need_legacy_accepted_list(
         created_from="s1.single_path.empty_list_first",
         actor="s1.single_path.empty_list_first",
     )
+    # TURN-012: the next writer-prose turn is only admissible once the prior
+    # write turn is terminal; settle it before staging the next write intake.
+    identity_service.update_turn_status(
+        turn_id=first_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+    )
+    retrieval_session.commit()
     second_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
@@ -1584,6 +1620,13 @@ async def test_rewrite_and_adoption_progress_only_moves_after_accept_pending_seg
         accepted_segment_ids=[accepted.artifact_id],
         pending_segment_artifact_id=pending.artifact_id,
     )
+    # TURN-012: a rewrite (writer-prose) turn is only admissible once the prior
+    # write turn is terminal; settle it before staging the rewrite intake.
+    identity_service.update_turn_status(
+        turn_id=pending_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+    )
+    retrieval_session.commit()
     rewrite_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,

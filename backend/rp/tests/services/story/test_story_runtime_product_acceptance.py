@@ -28,9 +28,6 @@ from rp.models.core_state.revision_overlay_contracts import (
 )
 from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
 from rp.models.runtime.identity import StoryTurnStatus
-from rp.models.runtime.workspace_material import (
-    RuntimeWorkspaceMaterialKind,
-)
 from rp.models.runtime.workflow_job import (
     RuntimeWorkflowJobCategory,
     RuntimeWorkflowJobCreationMode,
@@ -40,6 +37,7 @@ from rp.models.setup_agent.workspace import StoryMode
 from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
+    LongformTurnRequest,
     OrchestratorPlan,
     SpecialistResultBundle,
     StoryArtifactKind,
@@ -47,7 +45,10 @@ from rp.models.story.runtime import (
 )
 from rp.services.story.archival_evolution_service import ArchivalEvolutionService
 from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
-from rp.services.writer.draft_selection_service import DraftSelectionService
+from rp.services.writer.draft_selection_service import (
+    DraftSelectionService,
+    DraftSelectionServiceError,
+)
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
@@ -72,6 +73,7 @@ from rp.tests.services.story.test_archival_evolution_service import (
 from rp.tests.services.writer.test_longform_chapter_runtime_service import (
     _accept_outline,
     _build_context_orchestration_service,
+    _build_turn_domain_service,
     _identity as _longform_identity,
     _seed_story_runtime as _seed_longform_story_runtime,
     _segment_plan,
@@ -227,11 +229,11 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
     assert rewrite_request.tracked_change_refs == [tracked_change.tracked_change_id]
     assert unadopted_candidate.selected_output_ref is None
     assert adopted_candidate.selected_output_ref is None
-    assert selection_service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-    ) is None
 
+    # Selection layer (REV-003) is KEPT and still resolves the active candidate; the 乙套
+    # adoption route is retired (REV-023). REV-022 (selection receipt in adoption source
+    # refs) and multi-candidate rewrite adoption are deferred to V2-02 (no live scenario);
+    # the single live adoption path is 甲套 ``accept_pending_segment``.
     selection = selection_service.select_candidate(
         identity=identity,
         turn_id=identity.turn_id,
@@ -244,80 +246,65 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
     )
 
     assert selection.selected_output_ref == adopted_candidate.candidate_output_ref
-    assert selection_service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-    ) is None
 
-    adoption = selection_service.adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=draft.draft_ref,
-    )
-    anchor = selection_service.adopted_output_anchor_for_next_turn(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-    )
-    adoption_material = _review_material_by_record_id(
-        retrieval_session,
-        identity=identity,
-        record_id=adoption.receipt_id,
-    )
+    with pytest.raises(DraftSelectionServiceError) as retired:
+        selection_service.adopt_for_continue(
+            identity=identity,
+            turn_id=identity.turn_id,
+            draft_ref=draft.draft_ref,
+        )
+    assert retired.value.code == "revision_adoption_route_retired"
+
     artifact_after_rewrite = story_session_service.get_artifact(pending.artifact_id)
-
-    assert adoption.metadata_json["accept_and_continue"] is True
-    assert adoption.metadata_json["canonical_continuation_base"] is True
-    assert adoption.selection_receipt_id == selection.receipt_id
-    assert anchor is not None
-    assert anchor["adopted_output_ref"] == adopted_candidate.candidate_output_ref
-    assert anchor["adopted_output_ref"] != unadopted_candidate.candidate_output_ref
-    assert anchor["source_kind"] == "longform_draft_adoption_receipt"
-    assert any(
-        ref.source_type == "draft_selection_receipt"
-        and ref.source_id == selection.receipt_id
-        for ref in adoption_material.source_refs
-    )
     assert artifact_after_rewrite is not None
     assert artifact_after_rewrite.content_text == "Original draft before review."
 
 
-def test_q1_chapter_completion_promotes_adopted_candidate_into_branch_bridge(
+@pytest.mark.asyncio
+async def test_q1_chapter_completion_promotes_adopted_candidate_into_branch_bridge(
     retrieval_session,
 ):
     story_session_service, session, chapter = _seed_longform_story_runtime(
         retrieval_session
     )
     _accept_outline(story_session_service, session, chapter)
-    pending, _, _ = seed_runtime_visible_story_segment(
+    pending, _, identity_service = seed_runtime_visible_story_segment(
         retrieval_session,
         story_session_service,
         session=session,
         chapter=chapter,
         branch_head_id="branch-q1-main",
         scene_ref=chapter.current_scene_ref,
-        content_text="Pending draft that must wait for adoption.",
+        content_text="Adopted chapter ending for bridge continuity.",
         status=StoryArtifactStatus.DRAFT,
         set_pending_on_chapter=True,
         created_from="q1.chapter_transition.pending",
         actor="q1.chapter_transition.pending",
     )
+    # v1.2 re-home: accept the pending through the 甲套 gate (writes the H1 receipt +
+    # clears the pending pointer, REV-023), so chapter-close reads it via the else-branch.
+    accept_identity = identity_service.resolve_runtime_entry_identity(
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT.value,
+        actor="q1.chapter_transition.accept",
+        requested_branch_head_id="branch-q1-main",
+    )
+    await _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    ).accept_pending_segment(
+        request=LongformTurnRequest(
+            session_id=session.session_id,
+            command_kind=LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+            model_id="q1-model",
+            target_artifact_id=pending.artifact_id,
+        ),
+        runtime_identity=accept_identity,
+    )
     chapter = story_session_service.get_chapter_workspace(
         chapter.chapter_workspace_id
     )
     assert chapter is not None
-    review_identity = _longform_identity(
-        story_id=session.story_id,
-        session_id=session.session_id,
-        branch_head_id="branch-q1-main",
-        turn_id="turn-q1-review",
-        runtime_profile_snapshot_id="snapshot-q1-review",
-    )
-    _create_adopted_product_candidate(
-        retrieval_session,
-        identity=review_identity,
-        draft_ref=f"artifact:{pending.artifact_id}",
-        output_text="Adopted chapter ending for bridge continuity.",
-    )
     chapter_runtime_service = LongformChapterRuntimeService(
         story_session_service=story_session_service,
         session=retrieval_session,
@@ -807,64 +794,6 @@ def _writer_result(
         output_kind="story_segment",
         result_status="completed",
     )
-
-
-def _review_material_by_record_id(
-    retrieval_session,
-    *,
-    identity: MemoryRuntimeIdentity,
-    record_id: str,
-):
-    materials = RuntimeWorkspaceMaterialService(
-        session=retrieval_session
-    ).list_materials(
-        identity=identity,
-        material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
-        domain=Domain.CHAPTER.value,
-    )
-    for material in materials:
-        if material.payload.get("record_id") == record_id:
-            return material
-    raise AssertionError(f"Review material not found: {record_id}")
-
-
-def _create_adopted_product_candidate(
-    retrieval_session,
-    *,
-    identity: MemoryRuntimeIdentity,
-    draft_ref: str,
-    output_text: str,
-):
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_product_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref=draft_ref,
-        source_output_ref=draft_ref.replace("artifact:", ""),
-    )
-    rewrite_request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_full_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        global_instruction="Adopt this chapter ending.",
-        comment_refs=[],
-        tracked_change_refs=[],
-    )
-    candidate = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    ).create_full_rewrite_candidate(
-        identity=identity,
-        rewrite_request=rewrite_request,
-        writer_result=_writer_result(identity=identity, output_text=output_text),
-    )
-    DraftSelectionService(session=retrieval_session).adopt_for_continue(
-        identity=identity,
-        turn_id=identity.turn_id,
-        draft_ref=draft.draft_ref,
-    )
-    return candidate
 
 
 async def _search_archival(

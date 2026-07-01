@@ -152,63 +152,47 @@ class DraftSelectionService:
         selected_output_ref: str | None = None,
         draft_ref: str | None = None,
     ) -> LongformDraftAdoptionReceipt:
-        self._require_turn(identity=identity, turn_id=turn_id)
-        candidates = self._list_candidates(identity=identity, draft_ref=draft_ref)
-        if not candidates:
-            raise DraftSelectionServiceError(
-                "revision_candidate_not_found",
-                _optional_detail(draft_ref) or identity.turn_id,
-            )
-        candidate_refs = [candidate.candidate_output_ref for candidate in candidates]
-        resolved_draft_ref = self._resolve_draft_ref(
-            candidates=candidates,
-            draft_ref=draft_ref,
+        # REV-023: adoption authoring is unified on the live ``accept_pending_segment``
+        # gate (甲套). This rewrite-candidate route is retired; it never authors a
+        # receipt. The symbol is kept so imports/future callers fail loudly instead of
+        # silently writing a second adoption record.
+        raise DraftSelectionServiceError(
+            "revision_adoption_route_retired",
+            identity.turn_id,
         )
-        normalized_selected_ref = (
-            None
-            if selected_output_ref is None
-            else _require_non_blank(
-                selected_output_ref,
-                field_name="selected_output_ref",
-            )
+
+    def record_accepted_artifact_adoption_receipt(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        accepted_artifact_id: str,
+    ) -> LongformDraftAdoptionReceipt:
+        """Single writer of ``LongformDraftAdoptionReceipt`` (REV-023).
+
+        The accepted artifact is the canonical truth; the receipt is the adoption
+        record + continuation-base pointer. Refs are raw ``artifact_id`` so the
+        chapter-close/next-turn readers resolve them via ``get_artifact``.
+        """
+        artifact_id = _require_non_blank(
+            accepted_artifact_id,
+            field_name="accepted_artifact_id",
         )
-        selection_receipt_id: str | None = None
-        if normalized_selected_ref is None and len(candidate_refs) == 1:
-            adopted_ref = candidate_refs[0]
-        elif normalized_selected_ref is not None:
-            adopted_ref = normalized_selected_ref
-        else:
-            active = self.get_active_selection(
-                identity=identity,
-                draft_ref=resolved_draft_ref,
-            )
-            if active is None:
-                raise DraftSelectionServiceError(
-                    "revision_adoption_selection_required",
-                    identity.turn_id,
-                )
-            adopted_ref = active.selected_output_ref
-            selection_receipt_id = active.receipt_id
-        if adopted_ref not in candidate_refs:
-            raise DraftSelectionServiceError(
-                "revision_selected_output_not_candidate",
-                adopted_ref,
-            )
         now = _utcnow()
         receipt = LongformDraftAdoptionReceipt(
             receipt_id=f"draft_adoption_{uuid4().hex}",
             turn_id=identity.turn_id,
-            draft_ref=resolved_draft_ref,
-            candidate_output_refs=candidate_refs,
-            adopted_output_ref=adopted_ref,
+            draft_ref=f"artifact:{artifact_id}",
+            candidate_output_refs=[artifact_id],
+            adopted_output_ref=artifact_id,
             adopted_at=now,
-            selection_receipt_id=selection_receipt_id,
+            selection_receipt_id=None,
             metadata_json={
                 "payload_version": DRAFT_ADOPTION_PAYLOAD_VERSION,
                 "adoption_state": "committed",
                 "accept_and_continue": True,
-                "next_turn_adopted_output_ref": adopted_ref,
+                "next_turn_adopted_output_ref": artifact_id,
                 "canonical_continuation_base": True,
+                "adopted_artifact_id": artifact_id,
                 "runtime_truth_owner": "rp_runtime",
                 "superdoc_truth_owner": False,
                 "core_state_truth": False,
@@ -441,28 +425,12 @@ class DraftSelectionService:
         receipt: LongformDraftAdoptionReceipt,
     ) -> None:
         source_refs = [
-            _candidate_source_ref(
+            _adopted_output_source_ref(
                 receipt_id=receipt.receipt_id,
-                candidate_output_ref=candidate_output_ref,
-                source_type="rewrite_candidate",
+                adopted_output_ref=adopted_output_ref,
             )
-            for candidate_output_ref in receipt.candidate_output_refs
+            for adopted_output_ref in receipt.candidate_output_refs
         ]
-        if receipt.selection_receipt_id is not None:
-            source_refs.append(
-                MemorySourceRef(
-                    source_type="draft_selection_receipt",
-                    source_id=receipt.selection_receipt_id,
-                    layer="runtime_workspace",
-                    domain=_DRAFT_SELECTION_DOMAIN,
-                    block_id="chapter.runtime_workspace",
-                    entry_id=receipt.receipt_id,
-                    metadata={
-                        "selection_receipt_id": receipt.selection_receipt_id,
-                        "receipt_id": receipt.receipt_id,
-                    },
-                )
-            )
         self._workspace_material_service.record_material(
             self._receipt_material(
                 identity=identity,
@@ -589,6 +557,25 @@ def _candidate_source_ref(
     )
 
 
+def _adopted_output_source_ref(
+    *,
+    receipt_id: str,
+    adopted_output_ref: str,
+) -> MemorySourceRef:
+    return MemorySourceRef(
+        source_type="adopted_output",
+        source_id=adopted_output_ref,
+        layer="runtime_workspace",
+        domain=_DRAFT_SELECTION_DOMAIN,
+        block_id="chapter.runtime_workspace",
+        entry_id=receipt_id,
+        metadata={
+            "adopted_output_ref": adopted_output_ref,
+            "receipt_id": receipt_id,
+        },
+    )
+
+
 def _selection_sort_key(receipt: LongformDraftSelectionReceipt) -> datetime:
     return receipt.cleared_at or receipt.selected_at
 
@@ -607,11 +594,6 @@ def _normalize_optional_text(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
-
-
-def _optional_detail(value: str | None) -> str | None:
-    normalized = _normalize_optional_text(value)
-    return normalized
 
 
 def _require_non_blank(value: str, *, field_name: str) -> str:
