@@ -109,6 +109,7 @@ def create_db_and_tables() -> None:
         TurnInterruptReceiptRecord,
         ensure_story_store_compatible_schema,
     )
+    from models.rp_assistant_store import AssistantSessionRecord
 
     _ = (
         ConversationAttachmentRecord,
@@ -165,6 +166,7 @@ def create_db_and_tables() -> None:
         MemoryWorkerDescriptorRecord,
         MemoryBlockTemplateDescriptorRecord,
         MemoryModeProfileRecord,
+        AssistantSessionRecord,
     )
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
