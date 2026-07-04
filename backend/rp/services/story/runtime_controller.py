@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from models.rp_assistant_store import AssistantSessionRecord
 from rp.errors import RPError
 from rp.models.block.view import BlockSource, RpBlockView
 from rp.models.proposal.core_mutation import DirectCoreEditRequest
@@ -48,6 +49,10 @@ from rp.models.story.brainstorm import (
     BrainstormSessionStartRequest,
     BrainstormSummarizeRequest,
 )
+from rp.models.writer.writing_assistant_contracts import (
+    WritingAssistantGenerateRequest,
+    WritingAssistantGenerationResult,
+)
 from ..memory.inspection_read_service import MemoryInspectionReadService
 from ..memory.inspection_service import MemoryInspectionService
 from ..projection.read_service import ProjectionReadService
@@ -70,6 +75,10 @@ from .block_mutation_service import (
     StoryBlockMutationService,
 )
 from .brainstorm_service import StoryBrainstormService
+from ..writer.writing_assistant_service import (
+    WritingAssistantService,
+    WritingAssistantServiceError,
+)
 from .block_consumer_state_service import StoryBlockConsumerStateService
 from .activation_service import StoryActivationService
 from .session_service import StorySessionService
@@ -108,6 +117,7 @@ class StoryRuntimeController:
         draft_materialization_service: DraftMaterializationService | None = None,
         revision_overlay_service: RevisionOverlayService | None = None,
         story_brainstorm_service: StoryBrainstormService | None = None,
+        writing_assistant_service: WritingAssistantService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._story_activation_service = story_activation_service
@@ -130,6 +140,7 @@ class StoryRuntimeController:
         self._draft_materialization_service = draft_materialization_service
         self._revision_overlay_service = revision_overlay_service
         self._story_brainstorm_service = story_brainstorm_service
+        self._writing_assistant_service = writing_assistant_service
 
     def activate_workspace(self, *, workspace_id: str) -> StoryActivationResult:
         return self._story_activation_service.activate_workspace(
@@ -1059,6 +1070,76 @@ class StoryRuntimeController:
         self._story_session_service.commit()
         return result
 
+    async def generate_writing_assistant(
+        self,
+        *,
+        session_id: str,
+        request: WritingAssistantGenerateRequest,
+    ) -> WritingAssistantGenerationResult:
+        session = self._require_session(session_id)
+        if request.identity.session_id != session.session_id:
+            raise ValueError("assistant_identity_session_mismatch")
+        if request.identity.story_id != session.story_id:
+            raise ValueError("assistant_identity_story_mismatch")
+        result = await self._require_writing_assistant_service().generate(
+            identity=request.identity,
+            chapter_workspace_id=request.chapter_workspace_id,
+            mode=request.mode,
+            user_requirements=request.user_requirements,
+            selection_text=request.selection_text,
+            assistant_session_id=request.assistant_session_id,
+            session_title=request.session_title,
+            model_id=request.model_id,
+            provider_id=request.provider_id,
+        )
+        self._story_session_service.commit()
+        return result
+
+    def list_writing_assistant_sessions(
+        self,
+        *,
+        session_id: str,
+    ) -> list[AssistantSessionRecord]:
+        session = self._require_session(session_id)
+        return self._require_writing_assistant_service().list_sessions(
+            session.story_id
+        )
+
+    def read_writing_assistant_session(
+        self,
+        *,
+        session_id: str,
+        assistant_session_id: str,
+    ) -> AssistantSessionRecord:
+        session = self._require_session(session_id)
+        record = self._require_writing_assistant_service().load_session(
+            assistant_session_id
+        )
+        if record is None or record.story_id != session.story_id:
+            raise WritingAssistantServiceError(
+                "assistant_session_not_found",
+                assistant_session_id,
+            )
+        return record
+
+    def delete_writing_assistant_session(
+        self,
+        *,
+        session_id: str,
+        assistant_session_id: str,
+    ) -> bool:
+        session = self._require_session(session_id)
+        service = self._require_writing_assistant_service()
+        record = service.load_session(assistant_session_id)
+        if record is None or record.story_id != session.story_id:
+            raise WritingAssistantServiceError(
+                "assistant_session_not_found",
+                assistant_session_id,
+            )
+        deleted = service.delete_session(assistant_session_id)
+        self._story_session_service.commit()
+        return deleted
+
     def apply_memory_block_proposal(
         self,
         *,
@@ -1262,6 +1343,11 @@ class StoryRuntimeController:
         if self._story_brainstorm_service is None:
             raise RuntimeError("story_brainstorm_service_not_configured")
         return self._story_brainstorm_service
+
+    def _require_writing_assistant_service(self) -> WritingAssistantService:
+        if self._writing_assistant_service is None:
+            raise RuntimeError("writing_assistant_service_not_configured")
+        return self._writing_assistant_service
 
     def _require_story_runtime_identity_service(self) -> StoryRuntimeIdentityService:
         if self._story_runtime_identity_service is None:

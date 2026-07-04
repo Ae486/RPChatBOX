@@ -31,6 +31,9 @@ from rp.models.story.brainstorm import (
 )
 from rp.models.story.runtime import ChapterWorkspaceSnapshot
 from rp.models.story.runtime import LongformTurnRequest
+from rp.models.writer.writing_assistant_contracts import (
+    WritingAssistantGenerateRequest,
+)
 from rp.services.runtime.config_control_service import (
     RuntimeConfigControlServiceError,
 )
@@ -48,6 +51,9 @@ from rp.services.story.runtime_controller import (
     StoryRuntimeController,
 )
 from rp.services.story.brainstorm_service import StoryBrainstormServiceError
+from rp.services.writer.writing_assistant_service import (
+    WritingAssistantServiceError,
+)
 from rp.services.story.runtime_debug_query_service import (
     StoryRuntimeDebugQueryServiceError,
 )
@@ -241,6 +247,23 @@ def _brainstorm_invalid(exc: Exception) -> HTTPException:
         "brainstorm_session_not_found",
         "brainstorm_batch_not_found",
         "brainstorm_item_not_found",
+    } else 400
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "message": str(exc),
+                "code": error_code,
+            }
+        },
+    )
+
+
+def _assistant_invalid(exc: Exception) -> HTTPException:
+    error_code = getattr(exc, "code", None) or "writing_assistant_invalid"
+    status_code = 404 if error_code in {
+        "story_session_not_found",
+        "assistant_session_not_found",
     } else 400
     return HTTPException(
         status_code=status_code,
@@ -1102,6 +1125,83 @@ async def submit_story_brainstorm_batch(
         raise _brainstorm_invalid(exc) from exc
 
 
+@router.post("/api/rp/story-sessions/{session_id}/assistant/generate")
+async def generate_story_writing_assistant(
+    session_id: str,
+    payload: WritingAssistantGenerateRequest,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        result = await controller.generate_writing_assistant(
+            session_id=session_id,
+            request=payload,
+        )
+        return {
+            "session_id": session_id,
+            "result": result.model_dump(mode="json"),
+        }
+    except (WritingAssistantServiceError, RuntimeError, ValueError) as exc:
+        raise _assistant_invalid(exc) from exc
+
+
+@router.get("/api/rp/story-sessions/{session_id}/assistant/sessions")
+async def list_story_writing_assistant_sessions(
+    session_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        records = controller.list_writing_assistant_sessions(session_id=session_id)
+        return {
+            "session_id": session_id,
+            "sessions": [_assistant_session_summary(record) for record in records],
+        }
+    except (WritingAssistantServiceError, RuntimeError, ValueError) as exc:
+        raise _assistant_invalid(exc) from exc
+
+
+@router.get(
+    "/api/rp/story-sessions/{session_id}/assistant/sessions/{assistant_session_id}"
+)
+async def get_story_writing_assistant_session(
+    session_id: str,
+    assistant_session_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        record = controller.read_writing_assistant_session(
+            session_id=session_id,
+            assistant_session_id=assistant_session_id,
+        )
+        return {
+            "session_id": session_id,
+            "assistant_session": _assistant_session_detail(record),
+        }
+    except (WritingAssistantServiceError, RuntimeError, ValueError) as exc:
+        raise _assistant_invalid(exc) from exc
+
+
+@router.delete(
+    "/api/rp/story-sessions/{session_id}/assistant/sessions/{assistant_session_id}"
+)
+async def delete_story_writing_assistant_session(
+    session_id: str,
+    assistant_session_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        deleted = controller.delete_writing_assistant_session(
+            session_id=session_id,
+            assistant_session_id=assistant_session_id,
+        )
+        return {
+            "session_id": session_id,
+            "assistant_session_id": assistant_session_id,
+            "deleted": deleted,
+        }
+    except (WritingAssistantServiceError, RuntimeError, ValueError) as exc:
+        raise _assistant_invalid(exc) from exc
+
+
 @router.post("/api/rp/story-sessions/{session_id}/memory/core/direct-edit")
 async def direct_edit_story_core_memory(
     session_id: str,
@@ -1305,6 +1405,25 @@ def _brainstorm_session_response(*, session_id: str, session) -> dict[str, objec
             "submit_batch",
         ],
     }
+
+
+def _assistant_session_summary(record) -> dict[str, object]:
+    # REV-028: the list surface exposes metadata only; message bodies
+    # (messages_json) never leave the detail read.
+    return {
+        "assistant_session_id": record.assistant_session_id,
+        "story_id": record.story_id,
+        "title": record.title,
+        "message_count": len(record.messages_json),
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+    }
+
+
+def _assistant_session_detail(record) -> dict[str, object]:
+    detail = _assistant_session_summary(record)
+    detail["messages"] = list(record.messages_json)
+    return detail
 
 
 def _unique_memory_action_refs(values: list[str]) -> list[str]:

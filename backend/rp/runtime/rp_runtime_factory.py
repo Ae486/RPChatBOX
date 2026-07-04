@@ -132,6 +132,7 @@ from rp.services.writer.worker_memory_service import WorkerMemoryService
 from rp.services.writer.worker_registry_service import WorkerRegistryService
 from rp.services.writer.worker_scheduler_service import WorkerSchedulerService
 from rp.services.writer.writing_packet_builder import WritingPacketBuilder
+from rp.services.writer.writing_assistant_service import WritingAssistantService
 from rp.services.writer.writing_worker_execution_service import WritingWorkerExecutionService
 from rp.tools.setup_tool_provider import SetupToolProvider
 from rp.tools.setup_scoped_mcp_manager import SetupScopedMcpManager
@@ -748,6 +749,10 @@ class RpRuntimeFactory:
             worker_memory_service=WorkerMemoryService(session=self._session),
             core_state_as_of_resolver=core_state_as_of_resolver,
         )
+        writing_assistant_service = WritingAssistantService(
+            session=self._session,
+            writing_worker_execution_service=WritingWorkerExecutionService(),
+        )
         return MaintenanceGuardedStoryRuntimeController(
             runtime_maintenance_guard_service=StoryRuntimeMaintenanceGuardService(
                 RuntimeMaintenanceLockService(self._session)
@@ -779,6 +784,7 @@ class RpRuntimeFactory:
                 session=self._session,
             ),
             story_brainstorm_service=story_brainstorm_service,
+            writing_assistant_service=writing_assistant_service,
         )
 
     def build_story_graph_runner(self) -> StoryGraphRunner:

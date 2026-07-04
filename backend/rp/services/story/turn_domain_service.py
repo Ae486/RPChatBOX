@@ -572,23 +572,10 @@ class StoryTurnDomainService:
         resolved_runtime_identity = (
             runtime_identity or self._runtime_identity_by_session.get(session_id)
         )
+        # S6-4 (REV-024): rewrite is a light local edit; the review-overlay heavy
+        # chain is bypassed here, so no overlay sections are assembled and the
+        # downstream packet degrades to a no-active-constraints rewrite packet.
         review_overlay_sections: list[dict[str, object]] | None = None
-        if command_kind == LongformTurnCommandKind.REWRITE_PENDING_SEGMENT:
-            if resolved_runtime_identity is None:
-                raise ValueError(
-                    "Runtime identity is required for rewrite packet constraint assembly"
-                )
-            rewrite_constraints = (
-                self._rewrite_packet_constraint_service.build_review_overlay_sections(
-                    identity=resolved_runtime_identity,
-                    session=session,
-                    chapter=chapter,
-                    target_artifact_id=target_artifact_id,
-                )
-            )
-            review_overlay_sections = list(
-                rewrite_constraints.review_overlay_sections
-            )
         packet = self._context_orchestration_service.build_writing_packet(
             session=session,
             chapter=chapter,

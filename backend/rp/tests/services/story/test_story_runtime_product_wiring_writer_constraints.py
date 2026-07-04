@@ -6,9 +6,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from sqlmodel import select
 
-from models.rp_memory_store import MemoryProposalRecord, RuntimeWorkspaceMaterialRecord
+from models.rp_memory_store import MemoryProposalRecord
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime.identity import StoryTurnStatus
@@ -22,16 +21,11 @@ from rp.models.story.runtime import (
     StoryArtifactStatus,
 )
 from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockService
-from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.story.maintenance_guard_service import (
     StoryRuntimeMaintenanceGuardService,
 )
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
-from rp.services.core_state.revision_overlay_service import RevisionOverlayService
-from rp.services.writer.rewrite_request_builder_service import (
-    RewriteRequestBuilderServiceError,
-)
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.story.runtime_identity_service import StoryRuntimeIdentityService
 from rp.services.writer.writing_worker_execution_service import (
@@ -101,7 +95,7 @@ class _RecordingStoryLlmGateway:
 
 
 @pytest.mark.asyncio
-async def test_rewrite_pending_segment_real_packet_includes_review_overlay_and_prompt_constraints(
+async def test_rewrite_pending_segment_light_packet_bypasses_review_overlay(
     retrieval_session,
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
@@ -139,33 +133,6 @@ async def test_rewrite_pending_segment_real_packet_includes_review_overlay_and_p
         status=StoryTurnStatus.SETTLED,
     )
     retrieval_session.commit()
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=draft_identity,
-        draft_ref=f"artifact:{pending.artifact_id}",
-        source_output_ref=pending.artifact_id,
-    )
-    overlay = overlay_service.create_or_update_overlay(
-        identity=draft_identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
-    comment = overlay_service.add_comment(
-        identity=draft_identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
-        selected_excerpt=draft.blocks[0].selected_excerpt,
-        instruction_text="Make the bell-tower debt explicit before continuing.",
-    )
-    tracked_change = overlay_service.add_tracked_change(
-        identity=draft_identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[1].block_id),
-        change_kind="replace",
-        original_text=draft.blocks[1].selected_excerpt,
-        suggested_text="Mira turned back toward the bell tower.",
-    )
     rewrite_identity, _ = _resolve_runtime_identity(
         retrieval_session,
         session_id=session.session_id,
@@ -191,28 +158,19 @@ async def test_rewrite_pending_segment_real_packet_includes_review_overlay_and_p
         target_artifact_id=pending.artifact_id,
     )
 
+    # REV-024: the light rewrite path bypasses the review-overlay heavy chain, so
+    # the packet stays a first-class rewrite packet but carries no overlay
+    # sections and records the no-active-constraints source.
     assert packet.operation_mode == "rewrite"
+    assert packet.review_overlay_sections == []
+    assert (
+        packet.metadata["revision_constraint_source"]
+        == "no_active_review_constraints"
+    )
+    assert packet.metadata["review_overlay_section_count"] == 0
     assert packet.metadata["target_artifact_id"] == pending.artifact_id
     assert packet.metadata["rewrite_scope"] == "full"
-    assert packet.metadata["revision_constraint_source"] == "active_review_overlay"
-    assert packet.metadata["review_overlay_section_count"] == 1
-    assert len(packet.review_overlay_sections) == 1
-    review_section = packet.review_overlay_sections[0]
-    assert review_section.label == "review_overlay"
-    assert review_section.source_kind == "review_overlay_rewrite_request"
-    assert review_section.metadata_json["comments"][0]["comment_id"] == comment.comment_id
-    assert (
-        review_section.metadata_json["tracked_changes"][0]["tracked_change_id"]
-        == tracked_change.tracked_change_id
-    )
-    assert any(
-        "Make the bell-tower debt explicit before continuing." in item
-        for item in review_section.items
-    )
-    assert any(
-        "Mira turned back toward the bell tower." in item
-        for item in review_section.items
-    )
+    assert packet.metadata["mandatory_rewrite_instruction"] is None
 
     gateway = _RecordingStoryLlmGateway("Rewrite completed.")
     writer_service = WritingWorkerExecutionService(llm_gateway=gateway)
@@ -226,13 +184,15 @@ async def test_rewrite_pending_segment_real_packet_includes_review_overlay_and_p
     )
     user_prompt = gateway.calls[0]["messages"][1].content
 
-    assert "review_overlay:" in user_prompt
-    assert "Make the bell-tower debt explicit before continuing." in user_prompt
-    assert "Mira turned back toward the bell tower." in user_prompt
-    assert "Apply every listed review constraint exactly." in user_prompt
+    # The writer prompt still exposes the plan instruction and specialist hints;
+    # the overlay block and mandatory-rewrite banner disappear once bypassed.
+    assert "user_instruction:\nRewrite the pending segment." in user_prompt
+    assert "Keep the local cause-and-effect explicit." in user_prompt
+    assert "review_overlay:" not in user_prompt
+    assert "Apply every listed review constraint exactly." not in user_prompt
 
 
-def test_rewrite_pending_segment_fails_closed_when_active_constraints_exist_but_draft_sidecar_is_missing(
+def test_rewrite_pending_segment_light_packet_needs_no_materialized_draft(
     retrieval_session,
 ):
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
@@ -249,7 +209,7 @@ def test_rewrite_pending_segment_fails_closed_when_active_constraints_exist_but_
         chapter_workspace_id=chapter.chapter_workspace_id,
         artifact_kind=StoryArtifactKind.STORY_SEGMENT,
         status=StoryArtifactStatus.DRAFT,
-        content_text="Draft whose materialized document will disappear.",
+        content_text="Draft with no materialized revision document.",
         metadata=_artifact_runtime_metadata(
             story_id=draft_identity.story_id,
             session_id=draft_identity.session_id,
@@ -263,50 +223,6 @@ def test_rewrite_pending_segment_fails_closed_when_active_constraints_exist_but_
         phase=LongformChapterPhase.SEGMENT_REVIEW,
         pending_segment_artifact_id=pending.artifact_id,
     )
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=draft_identity,
-        draft_ref=f"artifact:{pending.artifact_id}",
-        source_output_ref=pending.artifact_id,
-    )
-    overlay = overlay_service.create_or_update_overlay(
-        identity=draft_identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
-    overlay_service.add_comment(
-        identity=draft_identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
-        instruction_text="This active comment must block a generic rewrite fallback.",
-        selected_excerpt=draft.blocks[0].selected_excerpt,
-    )
-    removed = 0
-    records = retrieval_session.exec(
-        select(RuntimeWorkspaceMaterialRecord).where(
-            RuntimeWorkspaceMaterialRecord.story_id == draft_identity.story_id,
-            RuntimeWorkspaceMaterialRecord.session_id == draft_identity.session_id,
-            RuntimeWorkspaceMaterialRecord.branch_head_id
-            == draft_identity.branch_head_id,
-            RuntimeWorkspaceMaterialRecord.turn_id == draft_identity.turn_id,
-            RuntimeWorkspaceMaterialRecord.runtime_profile_snapshot_id
-            == draft_identity.runtime_profile_snapshot_id,
-        )
-    ).all()
-    for record in records:
-        payload = record.payload_json
-        record_body = payload.get("record")
-        if (
-            payload.get("payload_kind") == "draft_document"
-            and isinstance(record_body, dict)
-            and record_body.get("draft_ref") == draft.draft_ref
-        ):
-            retrieval_session.delete(record)
-            removed += 1
-    retrieval_session.commit()
-    assert removed == 1
-
     # TURN-012: a rewrite (writer-prose) turn is only admissible once the prior
     # write turn is terminal; settle it before staging the rewrite intake.
     identity_service.update_turn_status(
@@ -319,28 +235,35 @@ def test_rewrite_pending_segment_fails_closed_when_active_constraints_exist_but_
         retrieval_session,
         session_id=session.session_id,
         command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
-        created_from="s1.writer_constraints.rewrite_fail_closed",
-        actor="s1.writer_constraints.rewrite_fail_closed",
+        created_from="s1.writer_constraints.rewrite_no_draft",
+        actor="s1.writer_constraints.rewrite_no_draft",
     )
     turn_domain_service = _build_turn_domain_service(
         story_session_service,
         retrieval_session,
     )
 
-    with pytest.raises(RewriteRequestBuilderServiceError) as exc_info:
-        turn_domain_service.build_packet(
-            session_id=session.session_id,
-            plan=OrchestratorPlan(
-                output_kind=StoryArtifactKind.STORY_SEGMENT,
-                writer_instruction="Rewrite the pending segment.",
-            ),
-            specialist_bundle=SpecialistResultBundle(writer_hints=["Do not drift."]),
-            command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
-            runtime_identity=rewrite_identity,
-            target_artifact_id=pending.artifact_id,
-        )
+    # No materialized draft or overlay exists for the pending segment. The light
+    # rewrite path no longer depends on the review-overlay chain, so packet
+    # assembly succeeds and degrades to a no-active-constraints rewrite packet.
+    packet = turn_domain_service.build_packet(
+        session_id=session.session_id,
+        plan=OrchestratorPlan(
+            output_kind=StoryArtifactKind.STORY_SEGMENT,
+            writer_instruction="Rewrite the pending segment.",
+        ),
+        specialist_bundle=SpecialistResultBundle(writer_hints=["Do not drift."]),
+        command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
+        runtime_identity=rewrite_identity,
+        target_artifact_id=pending.artifact_id,
+    )
 
-    assert exc_info.value.code == "revision_draft_not_visible"
+    assert packet.operation_mode == "rewrite"
+    assert packet.review_overlay_sections == []
+    assert (
+        packet.metadata["revision_constraint_source"]
+        == "no_active_review_constraints"
+    )
 
 
 @pytest.mark.asyncio
@@ -1715,33 +1638,6 @@ async def test_rewrite_and_adoption_progress_only_moves_after_accept_pending_seg
     assert after_accept is not None
     assert after_accept.current_beat_id is None
     assert after_accept.covered_beat_ids == ["beat_001", "beat_002"]
-
-
-def _record_draft(
-    service: RevisionOverlayService,
-    *,
-    identity: MemoryRuntimeIdentity,
-    draft_ref: str,
-    source_output_ref: str,
-):
-    draft = DraftMaterializationService().materialize_draft(
-        identity=identity,
-        draft_ref=draft_ref,
-        source_output_ref=source_output_ref,
-        output_text=(
-            "The storm arrived at dusk.\n\n"
-            "Mira reached the bell tower.\n\n"
-            "The debt was still unpaid."
-        ),
-        source_format="markdown",
-    )
-    return service.record_draft_document(identity=identity, draft_document=draft)
-
-
-def _anchor(block_id: str):
-    from rp.models.core_state.revision_overlay_contracts import RevisionAnchorRef
-
-    return RevisionAnchorRef(anchor_scope="single_block", block_ids=[block_id])
 
 
 def _resolve_runtime_identity(

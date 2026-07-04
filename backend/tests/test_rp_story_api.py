@@ -13,6 +13,7 @@ from sqlmodel import Session as SqlSession
 from api.rp_story import _story_controller
 from config import get_settings
 from models.rp_story_store import BranchHeadRecord, StorySessionRecord, StoryTurnRecord
+from models.rp_assistant_store import AssistantSessionRecord
 from rp.graphs.story_graph_runner import StoryGraphRunner
 from rp.models.story.archival_evolution import ArchivalEvolutionRequest
 from rp.models.proposal.core_mutation import (
@@ -20,6 +21,9 @@ from rp.models.proposal.core_mutation import (
     CoreMutationEnvelope,
 )
 from rp.models.writer.longform_chapter_contracts import ChapterBridgeMaterial
+from rp.models.writer.writing_assistant_contracts import (
+    WritingAssistantGenerationResult,
+)
 from rp.models.shared.dsl import Domain, Layer, ObjectRef
 from rp.models.memory.contract_registry import (
     MemoryChangeEvent,
@@ -89,6 +93,9 @@ from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFaca
 from rp.services.story.session_service import StorySessionService
 from rp.services.story.state_apply_service import StoryStateApplyService
 from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
+from rp.services.writer.writing_assistant_service import (
+    WritingAssistantServiceError,
+)
 from services.database import get_engine
 
 
@@ -4829,3 +4836,232 @@ def test_story_memory_routes_do_not_fall_back_to_story_latest_session(
     assert provenance.status_code == 200
     assert versions.json()["current_ref"] == "narrative_progress.current@2"
     assert provenance.json()["proposal_refs"]
+
+
+def test_story_writing_assistant_routes_map_payload_and_errors(client):
+    now = datetime.now(timezone.utc)
+    identity = {
+        "story_id": "story-api-assistant",
+        "session_id": "session-api-assistant",
+        "branch_head_id": "branch-api-assistant",
+        "turn_id": "turn-api-assistant",
+        "runtime_profile_snapshot_id": "snapshot-api-assistant",
+    }
+
+    def _record() -> AssistantSessionRecord:
+        return AssistantSessionRecord(
+            assistant_session_id="assistant_session_api1",
+            story_id="story-api-assistant",
+            title="Draft helper",
+            messages_json=[
+                {"role": "user", "mode": "continue", "text": "go on"},
+                {"role": "assistant", "mode": "continue", "text": "He walked on."},
+            ],
+            created_at=now,
+            updated_at=now,
+        )
+
+    class _FakeAssistantController:
+        async def generate_writing_assistant(self, *, session_id, request):
+            assert session_id == "session-api-assistant"
+            assert request.mode == "continue"
+            assert request.chapter_workspace_id == "workspace-api-assistant"
+            assert request.identity.story_id == "story-api-assistant"
+            return WritingAssistantGenerationResult(
+                assistant_session_id="assistant_session_api1",
+                mode="continue",
+                generated_text="He walked on.",
+                candidate_ref=None,
+                request_id="assistant-writer:req",
+                packet_id="assistant-packet:pkt",
+            )
+
+        def list_writing_assistant_sessions(self, *, session_id):
+            assert session_id == "session-api-assistant"
+            return [_record()]
+
+        def read_writing_assistant_session(self, *, session_id, assistant_session_id):
+            assert session_id == "session-api-assistant"
+            assert assistant_session_id == "assistant_session_api1"
+            return _record()
+
+        def delete_writing_assistant_session(
+            self, *, session_id, assistant_session_id
+        ):
+            assert session_id == "session-api-assistant"
+            assert assistant_session_id == "assistant_session_api1"
+            return True
+
+    controller = _FakeAssistantController()
+    client.app.dependency_overrides[_story_controller] = lambda: controller
+    try:
+        generate_response = client.post(
+            "/api/rp/story-sessions/session-api-assistant/assistant/generate",
+            json={
+                "identity": identity,
+                "chapter_workspace_id": "workspace-api-assistant",
+                "mode": "continue",
+                "user_requirements": "keep the pace",
+                "model_id": "test-model",
+                "provider_id": "test-provider",
+            },
+        )
+        list_response = client.get(
+            "/api/rp/story-sessions/session-api-assistant/assistant/sessions",
+        )
+        detail_response = client.get(
+            "/api/rp/story-sessions/session-api-assistant"
+            "/assistant/sessions/assistant_session_api1",
+        )
+        delete_response = client.delete(
+            "/api/rp/story-sessions/session-api-assistant"
+            "/assistant/sessions/assistant_session_api1",
+        )
+    finally:
+        client.app.dependency_overrides.pop(_story_controller, None)
+
+    assert generate_response.status_code == 200
+    generate_payload = generate_response.json()
+    assert generate_payload["session_id"] == "session-api-assistant"
+    assert generate_payload["result"]["assistant_session_id"] == (
+        "assistant_session_api1"
+    )
+    assert generate_payload["result"]["mode"] == "continue"
+    assert generate_payload["result"]["generated_text"] == "He walked on."
+    assert generate_payload["result"]["candidate_ref"] is None
+
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    summary = list_payload["sessions"][0]
+    assert summary["assistant_session_id"] == "assistant_session_api1"
+    assert summary["title"] == "Draft helper"
+    assert summary["message_count"] == 2
+    # REV-028: the list surface exposes metadata only, never message bodies.
+    assert "messages" not in summary
+    assert "messages_json" not in summary
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()["assistant_session"]
+    assert detail["message_count"] == 2
+    assert [message["role"] for message in detail["messages"]] == [
+        "user",
+        "assistant",
+    ]
+    assert detail["messages"][1]["text"] == "He walked on."
+
+    assert delete_response.status_code == 200
+    delete_payload = delete_response.json()
+    assert delete_payload["assistant_session_id"] == "assistant_session_api1"
+    assert delete_payload["deleted"] is True
+
+    class _ErrorAssistantController:
+        def read_writing_assistant_session(self, *, session_id, assistant_session_id):
+            raise WritingAssistantServiceError(
+                "assistant_session_not_found", assistant_session_id
+            )
+
+        async def generate_writing_assistant(self, *, session_id, request):
+            raise ValueError("assistant_identity_story_mismatch")
+
+    error_controller = _ErrorAssistantController()
+    client.app.dependency_overrides[_story_controller] = lambda: error_controller
+    try:
+        not_found = client.get(
+            "/api/rp/story-sessions/session-api-assistant/assistant/sessions/missing",
+        )
+        mismatch = client.post(
+            "/api/rp/story-sessions/session-api-assistant/assistant/generate",
+            json={
+                "identity": identity,
+                "chapter_workspace_id": "workspace-api-assistant",
+                "mode": "continue",
+                "model_id": "test-model",
+            },
+        )
+    finally:
+        client.app.dependency_overrides.pop(_story_controller, None)
+
+    assert not_found.status_code == 404
+    assert not_found.json()["detail"]["error"]["code"] == "assistant_session_not_found"
+    # A code-less ValueError maps to the generic 400 code (brainstorm parity).
+    assert mismatch.status_code == 400
+    mismatch_error = mismatch.json()["detail"]["error"]
+    assert mismatch_error["code"] == "writing_assistant_invalid"
+    assert mismatch_error["message"] == "assistant_identity_story_mismatch"
+
+
+def test_story_writing_assistant_real_controller_crud_flow(client, monkeypatch):
+    client.put("/api/providers/provider-story", json=_provider_payload())
+    client.put(
+        "/api/providers/provider-story/models/model-story",
+        json=_model_payload(),
+    )
+    seeded = _seed_formal_memory_block_session()
+    identity = _seed_memory_inspection_identity(seeded["session_id"])
+    monkeypatch.setattr(
+        "rp.services.story.llm_gateway.get_litellm_service",
+        lambda: _MockStoryLLMService(),
+    )
+
+    # Continue mode needs no selection; the mock writer returns fallback text
+    # and records no rewrite candidate (candidate_ref stays None).
+    generate_response = client.post(
+        f"/api/rp/story-sessions/{seeded['session_id']}/assistant/generate",
+        json={
+            "identity": identity,
+            "chapter_workspace_id": "workspace-api-block-read",
+            "mode": "continue",
+            "user_requirements": "continue the scene",
+            "model_id": "model-story",
+        },
+    )
+    assert generate_response.status_code == 200
+    generated = generate_response.json()["result"]
+    assistant_session_id = generated["assistant_session_id"]
+    assert generated["mode"] == "continue"
+    assert generated["generated_text"] == "Writer fallback output."
+    assert generated["candidate_ref"] is None
+
+    list_response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/assistant/sessions",
+    )
+    assert list_response.status_code == 200
+    sessions = list_response.json()["sessions"]
+    assert len(sessions) == 1
+    assert sessions[0]["assistant_session_id"] == assistant_session_id
+    assert sessions[0]["message_count"] == 2
+    # REV-028: no message bodies on the list surface.
+    assert "messages" not in sessions[0]
+
+    detail_response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/assistant/sessions/{assistant_session_id}",
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()["assistant_session"]
+    assert [message["role"] for message in detail["messages"]] == [
+        "user",
+        "assistant",
+    ]
+    assert detail["messages"][1]["text"] == "Writer fallback output."
+
+    delete_response = client.delete(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/assistant/sessions/{assistant_session_id}",
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted"] is True
+
+    empty_response = client.get(
+        f"/api/rp/story-sessions/{seeded['session_id']}/assistant/sessions",
+    )
+    assert empty_response.status_code == 200
+    assert empty_response.json()["sessions"] == []
+
+    missing_delete = client.delete(
+        f"/api/rp/story-sessions/{seeded['session_id']}/assistant/sessions/nope",
+    )
+    assert missing_delete.status_code == 404
+    assert missing_delete.json()["detail"]["error"]["code"] == (
+        "assistant_session_not_found"
+    )

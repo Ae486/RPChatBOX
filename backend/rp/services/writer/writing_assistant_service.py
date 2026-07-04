@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from sqlmodel import Session
 
+from models.rp_assistant_store import AssistantSessionRecord
 from rp.errors import RPError
 from rp.models.core_state.revision_overlay_contracts import RewriteRequest
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
@@ -200,6 +201,17 @@ class WritingAssistantService:
             request_id=result.request_id,
             packet_id=result.packet_id,
         )
+
+    def list_sessions(self, story_id: str) -> list[AssistantSessionRecord]:
+        return self._assistant_sessions.list_sessions(story_id)
+
+    def load_session(
+        self, assistant_session_id: str
+    ) -> AssistantSessionRecord | None:
+        return self._assistant_sessions.load_session(assistant_session_id)
+
+    def delete_session(self, assistant_session_id: str) -> bool:
+        return self._assistant_sessions.delete_session(assistant_session_id)
 
     def _build_packet(
         self,
