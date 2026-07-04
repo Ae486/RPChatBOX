@@ -70,10 +70,7 @@ from rp.models.setup_agent.workspace import StoryMode
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
 from rp.services.runtime.maintenance_lock_service import (
-    RuntimeMaintenanceLockCause,
-    RuntimeMaintenanceLockError,
     RuntimeMaintenanceLockService,
-    RuntimeMaintenanceOperation,
 )
 from rp.services.memory.change_event_service import MemoryChangeEventService
 from rp.services.proposal.apply_service import ProposalApplyService
@@ -520,6 +517,126 @@ def _seed_revision_review_session() -> dict[str, str]:
             "turn_id": identity.turn_id,
             "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
         }
+
+
+def _seed_reopen_segment_session() -> dict[str, str]:
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        story_session = story_session_service.create_session(
+            story_id="story-api-reopen",
+            source_workspace_id="workspace-api-reopen",
+            mode="longform",
+            runtime_story_config={},
+            writer_contract={},
+            current_state_json={},
+            initial_phase=LongformChapterPhase.SEGMENT_DRAFTING,
+        )
+        chapter = story_session_service.create_chapter_workspace(
+            session_id=story_session.session_id,
+            chapter_index=1,
+            phase=LongformChapterPhase.SEGMENT_DRAFTING,
+            builder_snapshot_json={},
+        )
+        snapshot = RuntimeProfileSnapshotService(db_session).ensure_active_snapshot(
+            session_id=story_session.session_id,
+            created_from="test.api.reopen",
+        )
+        refreshed_session = story_session_service.get_session(story_session.session_id)
+        if refreshed_session is None:
+            raise AssertionError("Seeded story session was not persisted")
+        artifact = story_session_service.create_artifact(
+            session_id=refreshed_session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+            status=StoryArtifactStatus.ACCEPTED,
+            content_text="Accepted prose to re-open.",
+            metadata={
+                "command_kind": LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+                "runtime_story_id": refreshed_session.story_id,
+                "runtime_session_id": refreshed_session.session_id,
+                "runtime_branch_head_id": refreshed_session.active_branch_head_id,
+                "runtime_turn_id": "turn-api-reopen",
+                "runtime_profile_snapshot_id": snapshot.runtime_profile_snapshot_id,
+                "target_beat_id": "beat_001",
+            },
+            revision=1,
+        )
+        db_session.commit()
+        return {
+            "session_id": refreshed_session.session_id,
+            "artifact_id": artifact.artifact_id,
+            "chapter_workspace_id": chapter.chapter_workspace_id,
+        }
+
+
+def _reopen_chapter_state(chapter_workspace_id: str):
+    with SqlSession(get_engine()) as db_session:
+        return StorySessionService(db_session).get_chapter_workspace(
+            chapter_workspace_id
+        )
+
+
+def test_reopen_segment_route_mints_pending_draft(client):
+    seeded = _seed_reopen_segment_session()
+    response = client.post(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/segments/{seeded['artifact_id']}/reopen"
+    )
+    assert response.status_code == 200
+    chapter = _reopen_chapter_state(seeded["chapter_workspace_id"])
+    assert chapter.pending_segment_artifact_id is not None
+    assert chapter.pending_segment_artifact_id != seeded["artifact_id"]
+    assert chapter.phase == LongformChapterPhase.SEGMENT_REVIEW
+
+
+def test_reopen_segment_route_rejects_non_accepted(client):
+    seeded = _seed_revision_review_session()
+    response = client.post(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/segments/{seeded['artifact_id']}/reopen"
+    )
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]["error"]["code"] == "segment_reopen_status_invalid"
+    )
+
+
+def test_reopen_segment_route_not_found(client):
+    seeded = _seed_reopen_segment_session()
+    response = client.post(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        "/segments/missing-artifact/reopen"
+    )
+    assert response.status_code == 404
+
+
+def test_cancel_reopen_route_clears_pending_slot(client):
+    seeded = _seed_reopen_segment_session()
+    reopen = client.post(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/segments/{seeded['artifact_id']}/reopen"
+    )
+    assert reopen.status_code == 200
+    draft_id = _reopen_chapter_state(
+        seeded["chapter_workspace_id"]
+    ).pending_segment_artifact_id
+    cancel = client.post(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/segments/{draft_id}/cancel-reopen"
+    )
+    assert cancel.status_code == 200
+    chapter = _reopen_chapter_state(seeded["chapter_workspace_id"])
+    assert chapter.pending_segment_artifact_id is None
+    assert chapter.phase == LongformChapterPhase.SEGMENT_DRAFTING
+
+
+def test_readopt_segment_route_not_found(client):
+    seeded = _seed_reopen_segment_session()
+    response = client.post(
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        "/segments/missing-artifact/readopt"
+    )
+    assert response.status_code == 404
 
 
 def test_revision_review_surface_returns_degraded_draft_document(client):
@@ -4010,7 +4127,9 @@ def test_story_memory_action_routes_return_refreshable_receipts(client):
     } <= set(archival_payload["action_metadata"]["affected_refs"])
 
 
-def test_story_memory_action_route_maps_maintenance_lock_to_409(client):
+def test_story_memory_action_route_is_not_maintenance_gated(client):
+    # Lock v2 (REV-006 rev 2): memory action routes no longer map a maintenance lock
+    # to 409. The controller runs the edit and the route returns the success payload.
     identity = {
         "story_id": "story-api-maintenance-lock",
         "session_id": "session-api-maintenance-lock",
@@ -4019,26 +4138,11 @@ def test_story_memory_action_route_maps_maintenance_lock_to_409(client):
         "runtime_profile_snapshot_id": "snapshot-api-maintenance-lock",
     }
 
-    class _LockedMemoryActionController:
+    class _MemoryActionController:
         async def direct_edit_core_memory(self, *, session_id: str, payload):
             assert session_id == identity["session_id"]
             assert payload.identity.turn_id == identity["turn_id"]
-            raise RuntimeMaintenanceLockError(
-                operation=RuntimeMaintenanceOperation.CORE_MEMORY_EDIT,
-                causes=[
-                    RuntimeMaintenanceLockCause(
-                        reason_code="maintenance_in_progress",
-                        source_kind="proposal",
-                        source_id="proposal-api-maintenance-lock",
-                        story_id=identity["story_id"],
-                        session_id=identity["session_id"],
-                        branch_head_id=identity["branch_head_id"],
-                        turn_id=identity["turn_id"],
-                        status="review_required",
-                        metadata={"policy_decision": "review_required"},
-                    )
-                ],
-            )
+            return {"proposal_id": "proposal-api-not-gated", "revision_after": {}}
 
     base_ref = {
         "object_id": "chapter.current",
@@ -4049,7 +4153,7 @@ def test_story_memory_action_route_maps_maintenance_lock_to_409(client):
         "revision": 1,
     }
     client.app.dependency_overrides[_story_controller] = (
-        lambda: _LockedMemoryActionController()
+        lambda: _MemoryActionController()
     )
     try:
         response = client.post(
@@ -4066,22 +4170,22 @@ def test_story_memory_action_route_maps_maintenance_lock_to_409(client):
                     {
                         "kind": "patch_fields",
                         "target_ref": base_ref,
-                        "field_patch": {"title": "Blocked API Edit"},
+                        "field_patch": {"title": "Edit During Maintenance"},
                     }
                 ],
                 "base_refs": [base_ref],
-                "reason": "blocked by maintenance",
+                "reason": "edit during maintenance",
             },
         )
     finally:
         client.app.dependency_overrides.pop(_story_controller, None)
 
-    assert response.status_code == 409
-    error = response.json()["detail"]["error"]
-    assert error["code"] == "maintenance_in_progress"
-    assert error["operation"] == "core_memory_edit"
-    assert error["causes"][0]["source_id"] == "proposal-api-maintenance-lock"
-    assert error["causes"][0]["status"] == "review_required"
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action_metadata"]["action"] == "direct_core_edit"
+    assert "proposal-api-not-gated" in set(
+        payload["action_metadata"]["affected_refs"]
+    )
 
 
 def test_story_brainstorm_routes_return_stage_w_batch_receipts(client):

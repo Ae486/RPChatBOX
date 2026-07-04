@@ -2081,6 +2081,17 @@ async def test_story_turn_domain_service_rewrite_preserves_prior_draft_until_acc
         pending_artifact_id=None,
     )
 
+    # The write turn must terminalize before the rewrite intake resolves (S1-core
+    # single-active-turn guard); production settles it through post-write before the
+    # user issues a rewrite, so the unit fixture settles it directly.
+    identity_service.update_turn_status(
+        turn_id=first_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref=first_response.artifact_id,
+        selected_output_ref=first_response.artifact_id,
+        settlement_reason="test_rewrite_prior_write_settled",
+    )
+
     rewrite_identity = identity_service.resolve_runtime_entry_identity(
         session_id=session.session_id,
         command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT.value,

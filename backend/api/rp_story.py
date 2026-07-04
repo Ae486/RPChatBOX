@@ -37,7 +37,6 @@ from rp.models.writer.writing_assistant_contracts import (
 from rp.services.runtime.config_control_service import (
     RuntimeConfigControlServiceError,
 )
-from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockError
 from rp.services.story.runtime_identity_service import (
     StoryRuntimeIdentityServiceError,
 )
@@ -83,6 +82,11 @@ class StoryBranchCreateRequest(BaseModel):
 
 class StoryRollbackRequest(BaseModel):
     target_turn_id: str = Field(min_length=1)
+
+
+class SegmentReadoptRequest(BaseModel):
+    model_id: str | None = None
+    provider_id: str | None = None
 
 
 def _story_controller(
@@ -326,34 +330,6 @@ def _runtime_config_invalid(exc: Exception) -> HTTPException:
     )
 
 
-def _runtime_maintenance_lock_error(exc: RuntimeMaintenanceLockError) -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={
-            "error": {
-                "message": str(exc),
-                "code": exc.code,
-                "operation": exc.operation,
-                "causes": [
-                    {
-                        "reason_code": cause.reason_code,
-                        "source_kind": cause.source_kind,
-                        "source_id": cause.source_id,
-                        "story_id": cause.story_id,
-                        "session_id": cause.session_id,
-                        "branch_head_id": cause.branch_head_id,
-                        "turn_id": cause.turn_id,
-                        "status": cause.status,
-                        "operation": cause.operation,
-                        "metadata": dict(cause.metadata),
-                    }
-                    for cause in exc.causes
-                ],
-            }
-        },
-    )
-
-
 def _branch_control_payload(*, snapshot: ChapterWorkspaceSnapshot, receipt: dict) -> dict:
     return {
         "data": {
@@ -462,8 +438,6 @@ async def create_story_branch(
                 "surface": "segment_action_menu",
             },
         )
-    except RuntimeMaintenanceLockError as exc:
-        raise _runtime_maintenance_lock_error(exc) from exc
     except StoryRuntimeIdentityServiceError as exc:
         raise _story_branch_control_invalid(exc) from exc
     return _branch_control_payload(
@@ -488,8 +462,6 @@ async def switch_story_branch(
                 "surface": "branch_panel",
             },
         )
-    except RuntimeMaintenanceLockError as exc:
-        raise _runtime_maintenance_lock_error(exc) from exc
     except StoryRuntimeIdentityServiceError as exc:
         raise _story_branch_control_invalid(exc) from exc
     return _branch_control_payload(
@@ -538,8 +510,6 @@ async def rollback_story_branch(
                 "surface": "segment_action_menu",
             },
         )
-    except RuntimeMaintenanceLockError as exc:
-        raise _runtime_maintenance_lock_error(exc) from exc
     except StoryRuntimeIdentityServiceError as exc:
         raise _story_branch_control_invalid(exc) from exc
     return _branch_control_payload(
@@ -625,6 +595,60 @@ async def update_revision_review_draft(
             session_id=session_id,
             artifact_id=artifact_id,
             content_text=payload.content_text,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+    return _snapshot_payload(snapshot)
+
+
+@router.post("/api/rp/story-sessions/{session_id}/segments/{artifact_id}/reopen")
+async def reopen_story_segment(
+    session_id: str,
+    artifact_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        snapshot = await controller.reopen_accepted_segment(
+            session_id=session_id,
+            artifact_id=artifact_id,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+    return _snapshot_payload(snapshot)
+
+
+@router.post("/api/rp/story-sessions/{session_id}/segments/{artifact_id}/readopt")
+async def readopt_story_segment(
+    session_id: str,
+    artifact_id: str,
+    payload: SegmentReadoptRequest | None = None,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    request = payload or SegmentReadoptRequest()
+    try:
+        snapshot = await controller.re_adopt_pending_segment(
+            session_id=session_id,
+            target_artifact_id=artifact_id,
+            model_id=request.model_id,
+            provider_id=request.provider_id,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _revision_review_invalid(exc) from exc
+    return _snapshot_payload(snapshot)
+
+
+@router.post(
+    "/api/rp/story-sessions/{session_id}/segments/{artifact_id}/cancel-reopen"
+)
+async def cancel_story_segment_reopen(
+    session_id: str,
+    artifact_id: str,
+    controller: StoryRuntimeController = Depends(_story_controller),
+):
+    try:
+        snapshot = controller.cancel_reopen(
+            session_id=session_id,
+            target_artifact_id=artifact_id,
         )
     except (RuntimeError, ValueError) as exc:
         raise _revision_review_invalid(exc) from exc
@@ -1198,8 +1222,6 @@ async def direct_edit_story_core_memory(
                 str(item.get("proposal_id") or ""),
             ],
         )
-    except RuntimeMaintenanceLockError as exc:
-        raise _runtime_maintenance_lock_error(exc) from exc
     except ValueError as exc:
         if str(exc).startswith("StorySession not found:"):
             raise HTTPException(
@@ -1285,8 +1307,6 @@ async def evolve_story_archival_memory(
                 *list(item.get("event_ids") or []),
             ],
         )
-    except RuntimeMaintenanceLockError as exc:
-        raise _runtime_maintenance_lock_error(exc) from exc
     except ValueError as exc:
         if str(exc).startswith("StorySession not found:"):
             raise HTTPException(

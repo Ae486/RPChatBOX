@@ -78,7 +78,10 @@ from ..writer.writing_assistant_service import (
 from .block_consumer_state_service import StoryBlockConsumerStateService
 from .activation_service import StoryActivationService
 from .session_service import StorySessionService
+from .turn_domain_service import StoryTurnDomainService
 from ..memory.version_history_read_service import VersionHistoryReadService
+from ..proposal.repository import ProposalRepository
+from ..runtime.maintenance_lock_service import RuntimeMaintenanceLockService
 
 
 class MemoryBlockHistoryUnsupportedError(RPError, RuntimeError):
@@ -113,6 +116,9 @@ class StoryRuntimeController:
         revision_overlay_service: RevisionOverlayService | None = None,
         story_brainstorm_service: StoryBrainstormService | None = None,
         writing_assistant_service: WritingAssistantService | None = None,
+        story_turn_domain_service: StoryTurnDomainService | None = None,
+        maintenance_lock_service: RuntimeMaintenanceLockService | None = None,
+        proposal_repository: ProposalRepository | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._story_activation_service = story_activation_service
@@ -135,6 +141,9 @@ class StoryRuntimeController:
         self._revision_overlay_service = revision_overlay_service
         self._story_brainstorm_service = story_brainstorm_service
         self._writing_assistant_service = writing_assistant_service
+        self._story_turn_domain_service = story_turn_domain_service
+        self._maintenance_lock_service = maintenance_lock_service
+        self._proposal_repository = proposal_repository
 
     def activate_workspace(self, *, workspace_id: str) -> StoryActivationResult:
         return self._story_activation_service.activate_workspace(
@@ -306,6 +315,12 @@ class StoryRuntimeController:
             actor=actor,
             metadata=metadata,
         )
+        session = self._require_session(session_id)
+        self._cancel_branch_maintenance_proposals_after_rollback(
+            story_id=session.story_id,
+            session_id=session_id,
+            branch_head_id=receipt.branch_head_id,
+        )
         self._story_session_service.commit()
         session = self._require_session(session_id)
         snapshot = self._story_session_service.build_chapter_snapshot(
@@ -385,6 +400,46 @@ class StoryRuntimeController:
         return self._story_session_service.build_chapter_snapshot(
             session_id=session_id,
             chapter_index=session.current_chapter_index,
+        )
+
+    async def reopen_accepted_segment(
+        self,
+        *,
+        session_id: str,
+        artifact_id: str,
+    ) -> ChapterWorkspaceSnapshot:
+        """REV-025 re-open delegate (no maintenance lock under v2)."""
+        return await self._require_story_turn_domain_service().reopen_accepted_segment(
+            session_id=session_id,
+            artifact_id=artifact_id,
+        )
+
+    async def re_adopt_pending_segment(
+        self,
+        *,
+        session_id: str,
+        target_artifact_id: str | None = None,
+        model_id: str | None = None,
+        provider_id: str | None = None,
+    ) -> ChapterWorkspaceSnapshot:
+        """REV-023/REV-025 re-adopt delegate onto the single accept gate."""
+        return await self._require_story_turn_domain_service().re_adopt_pending_segment(
+            session_id=session_id,
+            target_artifact_id=target_artifact_id,
+            model_id=model_id,
+            provider_id=provider_id,
+        )
+
+    def cancel_reopen(
+        self,
+        *,
+        session_id: str,
+        target_artifact_id: str | None = None,
+    ) -> ChapterWorkspaceSnapshot:
+        """A2 re-open discard delegate."""
+        return self._require_story_turn_domain_service().cancel_reopen(
+            session_id=session_id,
+            target_artifact_id=target_artifact_id,
         )
 
     def add_revision_comment(
@@ -804,6 +859,14 @@ class StoryRuntimeController:
         block_id: str,
         payload: DirectCoreEditRequest,
     ) -> dict | None:
+        # Identity-mismatch validation moved down from the retired maintenance-guard
+        # wrapper (lock v2, ruling A4): keep it on the base so the block direct-edit
+        # entry stays guarded now that the guard subclass is gone.
+        session = self._require_session(session_id)
+        if payload.identity.session_id != session.session_id:
+            raise ValueError("memory_block_direct_edit_identity_session_mismatch")
+        if payload.identity.story_id != session.story_id:
+            raise ValueError("memory_block_direct_edit_identity_story_mismatch")
         if self._story_block_mutation_service is None:
             raise RuntimeError("story_block_mutation_service_not_configured")
         receipt = await self._story_block_mutation_service.direct_edit_block(
@@ -1282,6 +1345,38 @@ class StoryRuntimeController:
         if self._story_runtime_identity_service is None:
             raise RuntimeError("story_runtime_identity_service_not_configured")
         return self._story_runtime_identity_service
+
+    def _require_story_turn_domain_service(self) -> StoryTurnDomainService:
+        if self._story_turn_domain_service is None:
+            raise RuntimeError("story_turn_domain_service_not_configured")
+        return self._story_turn_domain_service
+
+    def _cancel_branch_maintenance_proposals_after_rollback(
+        self,
+        *,
+        story_id: str,
+        session_id: str,
+        branch_head_id: str,
+    ) -> None:
+        """Lock v2 hygiene (ruling H): a rollback cancels the branch's non-terminal
+        maintenance proposals so they do not permanently hold the maintenance-
+        exclusion slot (which would defer maintenance forever). No-op unless both the
+        lock read model and the proposal repository are wired."""
+        if self._maintenance_lock_service is None or self._proposal_repository is None:
+            return
+        state = self._maintenance_lock_service.evaluate(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+        )
+        for cause in state.causes:
+            if cause.source_kind != "proposal":
+                continue
+            self._proposal_repository.update_proposal_status(
+                cause.source_id,
+                status="cancelled",
+                error_message="rolled_back",
+            )
 
     @staticmethod
     def _degraded_draft_document(*, overlay: ReviewOverlayRecord) -> dict[str, Any]:

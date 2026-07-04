@@ -11,7 +11,6 @@ from models.rp_memory_store import MemoryProposalRecord
 from rp.graphs.story_graph_nodes import StoryGraphNodes
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.runtime.identity import StoryTurnStatus
-from rp.models.runtime.reason_codes import SchedulerReasonCode
 from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
@@ -21,9 +20,6 @@ from rp.models.story.runtime import (
     StoryArtifactStatus,
 )
 from rp.services.runtime.maintenance_lock_service import RuntimeMaintenanceLockService
-from rp.services.story.maintenance_guard_service import (
-    StoryRuntimeMaintenanceGuardService,
-)
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeService
 from rp.services.writer.longform_chapter_runtime_service import LongformChapterRuntimeServiceError
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
@@ -792,36 +788,34 @@ def test_child_branch_can_write_next_segment_when_main_pending_is_hidden(
 
 
 @pytest.mark.parametrize(
-    ("command_kind", "phase", "operation"),
+    ("command_kind", "phase"),
     [
         (
             LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
             LongformChapterPhase.SEGMENT_DRAFTING,
-            "story_progression",
         ),
         (
             LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
             LongformChapterPhase.SEGMENT_REVIEW,
-            "story_progression",
         ),
         (
             LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
             LongformChapterPhase.SEGMENT_REVIEW,
-            "rewrite",
         ),
         (
             LongformTurnCommandKind.COMPLETE_CHAPTER,
             LongformChapterPhase.SEGMENT_DRAFTING,
-            "chapter_complete",
         ),
     ],
 )
-def test_story_graph_validation_rejects_locked_current_branch_commands(
+def test_story_graph_validation_allows_commands_during_maintenance(
     retrieval_session,
     command_kind: LongformTurnCommandKind,
     phase: LongformChapterPhase,
-    operation: str,
 ):
+    # Lock v2 (REV-006 rev 2): validate_command keeps phase validation but no longer
+    # carries a maintenance-lock branch, so phase-valid commands pass even while a
+    # branch-scoped maintenance proposal is in flight.
     story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
     story_session_service.update_chapter_workspace(
         chapter_workspace_id=chapter.chapter_workspace_id,
@@ -836,13 +830,20 @@ def test_story_graph_validation_rejects_locked_current_branch_commands(
         actor=f"s3e.locked.{command_kind.value}",
     )
     _seed_review_required_proposal(retrieval_session, identity=runtime_identity)
+    assert (
+        RuntimeMaintenanceLockService(retrieval_session)
+        .evaluate(
+            story_id=runtime_identity.story_id,
+            session_id=runtime_identity.session_id,
+            branch_head_id=runtime_identity.branch_head_id,
+        )
+        .active
+        is True
+    )
     graph_nodes = StoryGraphNodes(
         domain_service=_build_turn_domain_service(
             story_session_service,
             retrieval_session,
-        ),
-        maintenance_guard_service=StoryRuntimeMaintenanceGuardService(
-            RuntimeMaintenanceLockService(retrieval_session)
         ),
     )
 
@@ -854,9 +855,7 @@ def test_story_graph_validation_rejects_locked_current_branch_commands(
         }
     )
 
-    assert result["status"] == "failed"
-    assert result["error"]["code"] == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
-    assert result["error"]["operation"] == operation
+    assert result["status"] == "command_validated"
     _identity_service.update_turn_status(
         turn_id=runtime_identity.turn_id,
         status=StoryTurnStatus.FAILED,

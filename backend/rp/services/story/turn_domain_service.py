@@ -31,6 +31,7 @@ from rp.models.runtime.workspace_material import (
 )
 from rp.models.story.runtime import (
     ChapterWorkspace,
+    ChapterWorkspaceSnapshot,
     LongformChapterPhase,
     LongformTurnCommandKind,
     LongformTurnRequest,
@@ -83,6 +84,7 @@ from ..runtime.workflow_job_service import (
     RuntimeWorkflowJobService,
     TurnSettlementEvaluation,
 )
+from ..runtime.maintenance_lock_service import RuntimeMaintenanceLockService
 from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 from .runtime_adapter_service import StoryRuntimeAdapterService
 from ..writer.worker_execution_service import WorkerExecutionService
@@ -119,6 +121,19 @@ class StoryTurnDomainService:
     """Own longform turn domain logic independent of graph/controller shell."""
 
     _DEFAULT_BRANCH_NAME = "main"
+
+    # REV-025 re-open copies the origin-turn identity block + beat pointer so the
+    # minted draft is snapshot-visible and the re-adopt gate can rebind it.
+    _REOPEN_COPIED_METADATA_KEYS: frozenset[str] = frozenset(
+        {
+            "runtime_story_id",
+            "runtime_session_id",
+            "runtime_branch_head_id",
+            "runtime_turn_id",
+            "runtime_profile_snapshot_id",
+            "target_beat_id",
+        }
+    )
 
     def __init__(
         self,
@@ -249,6 +264,11 @@ class StoryTurnDomainService:
                 if resolver_session is not None
                 else None
             )
+        )
+        self._maintenance_lock_service = (
+            RuntimeMaintenanceLockService(resolver_session)
+            if resolver_session is not None
+            else None
         )
         self._post_write_scheduler_service = post_write_scheduler_service
         self._post_write_governance_service = post_write_governance_service
@@ -757,6 +777,15 @@ class StoryTurnDomainService:
                 reason="post_write_full_schedule_not_triggered",
                 trigger_context_payload=trigger_context.model_dump(mode="json"),
             )
+        if self._branch_maintenance_active_excluding_turn(identity=runtime_identity):
+            # REV-006 rev2: another maintenance run holds the branch — this user turn
+            # completes normally, maintenance defers (minimal) rather than double-running.
+            return self._run_minimal_post_write(
+                identity=runtime_identity,
+                jobs=jobs,
+                reason=SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value,
+                trigger_context_payload=trigger_context.model_dump(mode="json"),
+            )
         self._runtime_identity_service.update_turn_status(
             turn_id=runtime_identity.turn_id,
             status=StoryTurnStatus.POST_WRITE_RUNNING,
@@ -809,6 +838,17 @@ class StoryTurnDomainService:
                     )
                 raise
         command_kind = self._coerce_turn_command_kind(turn.command_kind)
+        frozen_accepted_segments = self._resolve_accepted_segment_snapshot(
+            snapshot=next(
+                (
+                    job.metadata_json.get("accepted_segment_snapshot")
+                    for job in jobs
+                    if isinstance(job.metadata_json, dict)
+                    and job.metadata_json.get("accepted_segment_snapshot") is not None
+                ),
+                None,
+            ),
+        )
         execution = await self._worker_execution_service.execute_plan(
             session=session,
             chapter=chapter,
@@ -821,7 +861,11 @@ class StoryTurnDomainService:
                 orchestrator_plan
                 or self._fallback_post_write_orchestrator_plan(command_kind)
             ),
-            accepted_segments=self.accepted_segments(chapter),
+            accepted_segments=(
+                frozen_accepted_segments
+                if frozen_accepted_segments is not None
+                else self.accepted_segments(chapter)
+            ),
             pending_artifact=self.resolve_pending_artifact(
                 chapter=chapter,
                 target_artifact_id=None,
@@ -1126,9 +1170,17 @@ class StoryTurnDomainService:
         *,
         request: LongformTurnRequest,
         runtime_identity: MemoryRuntimeIdentity | None = None,
+        readopt: bool = False,
     ) -> LongformTurnResponse:
         session = self.require_session(request.session_id)
-        chapter = self.require_active_branch_current_chapter(request.session_id)
+        if readopt:
+            chapter = self._require_readopt_chapter(
+                session_id=request.session_id,
+                target_artifact_id=request.target_artifact_id,
+            )
+        else:
+            chapter = self.require_active_branch_current_chapter(request.session_id)
+        is_completed_chapter = chapter.phase == LongformChapterPhase.CHAPTER_COMPLETED
         artifact = self.resolve_pending_artifact(
             chapter=chapter,
             target_artifact_id=request.target_artifact_id,
@@ -1139,6 +1191,18 @@ class StoryTurnDomainService:
             artifact=artifact,
             patch=request.story_segment_metadata_patch,
         )
+        if readopt:
+            # REV-025 re-adopt: supersede the same-scene old ACCEPTED revision BEFORE
+            # the beat precheck so the covered-beat recompute frees the target beat
+            # (ordering is load-bearing); record re-adopt provenance on the artifact.
+            self._supersede_reopen_source_segment(
+                chapter=chapter,
+                new_artifact=artifact,
+            )
+            accepted_metadata["readopt_source"] = (
+                str(dict(artifact.metadata or {}).get("reopen_source_artifact_id") or "")
+                or "manual_reopen"
+            )
         if self._longform_chapter_runtime_service is not None:
             progress_before = self._longform_chapter_runtime_service.effective_outline_progress(
                 chapter=chapter,
@@ -1214,7 +1278,11 @@ class StoryTurnDomainService:
         ]
         updated_chapter = self._story_session_service.update_chapter_workspace(
             chapter_workspace_id=chapter.chapter_workspace_id,
-            phase=LongformChapterPhase.SEGMENT_DRAFTING,
+            phase=(
+                chapter.phase
+                if is_completed_chapter
+                else LongformChapterPhase.SEGMENT_DRAFTING
+            ),
             pending_segment_artifact_id=None,
         ).model_copy(
             update={"accepted_segment_ids": accepted_segment_ids}
@@ -1226,32 +1294,37 @@ class StoryTurnDomainService:
                 chapter_after_accept=updated_chapter,
                 accepted_artifact=accepted,
             )
-        updated_session = self._story_session_service.update_session(
-            session_id=session.session_id,
-            current_phase=LongformChapterPhase.SEGMENT_DRAFTING,
-        )
-        (
-            updated_session,
-            updated_chapter,
-        ) = await self._regression_service.run_light_regression(
-            session=updated_session,
-            chapter=updated_chapter,
-            accepted_artifact=accepted,
-            model_id=request.model_id,
-            provider_id=request.provider_id,
-            runtime_identity=runtime_identity,
-        )
-        self._materialize_closed_scene_transcript_if_needed(
-            session=updated_session,
-            chapter=updated_chapter,
-            scene_ref=accepted.scene_ref,
-            runtime_identity=runtime_identity,
-            source_refs=self._runtime_turn_source_refs(
-                identity=runtime_identity,
+        updated_session = session
+        if not is_completed_chapter:
+            # REV-025: a completed-chapter re-adopt keeps CHAPTER_COMPLETED, leaves
+            # session.current_phase untouched, and skips the light-regression /
+            # transcript maintenance tail (manual memory catch-up per裁定 D).
+            updated_session = self._story_session_service.update_session(
                 session_id=session.session_id,
-                chapter_index=chapter.chapter_index,
-            ),
-        )
+                current_phase=LongformChapterPhase.SEGMENT_DRAFTING,
+            )
+            (
+                updated_session,
+                updated_chapter,
+            ) = await self._regression_service.run_light_regression(
+                session=updated_session,
+                chapter=updated_chapter,
+                accepted_artifact=accepted,
+                model_id=request.model_id,
+                provider_id=request.provider_id,
+                runtime_identity=runtime_identity,
+            )
+            self._materialize_closed_scene_transcript_if_needed(
+                session=updated_session,
+                chapter=updated_chapter,
+                scene_ref=accepted.scene_ref,
+                runtime_identity=runtime_identity,
+                source_refs=self._runtime_turn_source_refs(
+                    identity=runtime_identity,
+                    session_id=session.session_id,
+                    chapter_index=chapter.chapter_index,
+                ),
+            )
         self._story_session_service.commit()
         return LongformTurnResponse(
             session_id=session.session_id,
@@ -1262,6 +1335,231 @@ class StoryTurnDomainService:
             assistant_text="Accepted segment and refreshed chapter runtime state.",
             artifact_id=accepted.artifact_id,
             artifact_kind=accepted.artifact_kind,
+        )
+
+    async def reopen_accepted_segment(
+        self,
+        *,
+        session_id: str,
+        artifact_id: str,
+    ) -> ChapterWorkspaceSnapshot:
+        """REV-025 re-open: mint an editable revision+1 DRAFT from an ACCEPTED segment.
+
+        A completed chapter keeps CHAPTER_COMPLETED (no maintenance re-fire); an active
+        chapter moves to SEGMENT_REVIEW to block WRITE_NEXT until re-adoption. Single
+        pending slot: a re-open is rejected while a pending draft already exists.
+        """
+        session = self.require_session(session_id)
+        source = self._story_session_service.get_artifact(artifact_id)
+        if source is None:
+            raise ValueError(f"StoryArtifact not found: {artifact_id}")
+        if source.artifact_kind != StoryArtifactKind.STORY_SEGMENT:
+            raise ValueError(f"segment_reopen_kind_invalid:{artifact_id}")
+        if source.status != StoryArtifactStatus.ACCEPTED:
+            raise ValueError(f"segment_reopen_status_invalid:{artifact_id}")
+        chapter = self._story_session_service.get_chapter_workspace(
+            source.chapter_workspace_id
+        )
+        if chapter is None:
+            raise ValueError(f"Current ChapterWorkspace not found: {session_id}")
+        if chapter.pending_segment_artifact_id:
+            raise ValueError(
+                f"segment_reopen_pending_exists:{chapter.pending_segment_artifact_id}"
+            )
+        reopen_metadata: dict[str, object] = {
+            key: value
+            for key, value in dict(source.metadata or {}).items()
+            if key in self._REOPEN_COPIED_METADATA_KEYS
+        }
+        reopen_metadata["manual_reopen"] = True
+        reopen_metadata["reopen_source_artifact_id"] = source.artifact_id
+        draft = self._story_session_service.create_artifact(
+            session_id=session.session_id,
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            artifact_kind=StoryArtifactKind.STORY_SEGMENT,
+            status=StoryArtifactStatus.DRAFT,
+            content_text=source.content_text,
+            metadata=reopen_metadata,
+            revision=source.revision + 1,
+            scene_ref=source.scene_ref,
+        )
+        self._story_session_service.update_chapter_workspace(
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            phase=(
+                chapter.phase
+                if chapter.phase == LongformChapterPhase.CHAPTER_COMPLETED
+                else LongformChapterPhase.SEGMENT_REVIEW
+            ),
+            pending_segment_artifact_id=draft.artifact_id,
+        )
+        self._story_session_service.commit()
+        return self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=chapter.chapter_index,
+        )
+
+    async def re_adopt_pending_segment(
+        self,
+        *,
+        session_id: str,
+        target_artifact_id: str | None = None,
+        model_id: str | None = None,
+        provider_id: str | None = None,
+    ) -> ChapterWorkspaceSnapshot:
+        """REV-023/REV-025 re-adopt: run the reopened draft through the single accept
+        gate. The origin-turn identity is derived from metadata copied at re-open."""
+        self.require_session(session_id)
+        pending = self._resolve_readopt_pending_artifact(
+            session_id=session_id,
+            target_artifact_id=target_artifact_id,
+        )
+        runtime_identity = self._readopt_identity_from_artifact(pending)
+        await self.accept_pending_segment(
+            request=LongformTurnRequest(
+                session_id=session_id,
+                command_kind=LongformTurnCommandKind.ACCEPT_PENDING_SEGMENT,
+                model_id=str(model_id or "segment_readopt"),
+                provider_id=provider_id,
+                target_artifact_id=pending.artifact_id,
+            ),
+            runtime_identity=runtime_identity,
+            readopt=True,
+        )
+        chapter = self._story_session_service.get_chapter_workspace(
+            pending.chapter_workspace_id
+        )
+        chapter_index = (
+            chapter.chapter_index
+            if chapter is not None
+            else self.require_session(session_id).current_chapter_index
+        )
+        return self._story_session_service.build_chapter_snapshot(
+            session_id=session_id,
+            chapter_index=chapter_index,
+        )
+
+    def cancel_reopen(
+        self,
+        *,
+        session_id: str,
+        target_artifact_id: str | None = None,
+    ) -> ChapterWorkspaceSnapshot:
+        """A2: discard a reopened pending draft without re-adopting it.
+
+        Supersedes the discarded draft, clears the pending slot, and restores an
+        active chapter to SEGMENT_DRAFTING; a completed chapter only clears the slot.
+        Only reopened drafts (``manual_reopen``) are cancellable here.
+        """
+        session = self.require_session(session_id)
+        pending = self._resolve_readopt_pending_artifact(
+            session_id=session_id,
+            target_artifact_id=target_artifact_id,
+        )
+        if not dict(pending.metadata or {}).get("manual_reopen"):
+            raise ValueError(f"segment_reopen_cancel_not_reopened:{pending.artifact_id}")
+        chapter = self._story_session_service.get_chapter_workspace(
+            pending.chapter_workspace_id
+        )
+        if chapter is None:
+            raise ValueError(f"Current ChapterWorkspace not found: {session_id}")
+        if chapter.pending_segment_artifact_id != pending.artifact_id:
+            raise ValueError(
+                f"segment_reopen_cancel_not_pending:{pending.artifact_id}"
+            )
+        self._story_session_service.update_artifact(
+            artifact_id=pending.artifact_id,
+            status=StoryArtifactStatus.SUPERSEDED,
+        )
+        self._story_session_service.update_chapter_workspace(
+            chapter_workspace_id=chapter.chapter_workspace_id,
+            phase=(
+                chapter.phase
+                if chapter.phase == LongformChapterPhase.CHAPTER_COMPLETED
+                else LongformChapterPhase.SEGMENT_DRAFTING
+            ),
+            pending_segment_artifact_id=None,
+        )
+        self._story_session_service.commit()
+        return self._story_session_service.build_chapter_snapshot(
+            session_id=session.session_id,
+            chapter_index=chapter.chapter_index,
+        )
+
+    def _require_readopt_chapter(
+        self,
+        *,
+        session_id: str,
+        target_artifact_id: str | None,
+    ) -> ChapterWorkspace:
+        artifact_id = str(target_artifact_id or "").strip()
+        if not artifact_id:
+            raise ValueError("No pending segment available to accept")
+        artifact = self._story_session_service.get_artifact(artifact_id)
+        if artifact is None:
+            raise ValueError(f"StoryArtifact not found: {artifact_id}")
+        chapter = self._story_session_service.get_chapter_workspace(
+            artifact.chapter_workspace_id
+        )
+        if chapter is None:
+            raise ValueError(f"Current ChapterWorkspace not found: {session_id}")
+        return chapter
+
+    def _resolve_readopt_pending_artifact(
+        self,
+        *,
+        session_id: str,
+        target_artifact_id: str | None,
+    ) -> StoryArtifact:
+        artifact_id = str(target_artifact_id or "").strip()
+        if not artifact_id:
+            chapter = self.require_active_branch_current_chapter(session_id)
+            artifact_id = str(chapter.pending_segment_artifact_id or "").strip()
+        if not artifact_id:
+            raise ValueError("No pending segment available to accept")
+        artifact = self._story_session_service.get_artifact(artifact_id)
+        if artifact is None:
+            raise ValueError(f"StoryArtifact not found: {artifact_id}")
+        return artifact
+
+    def _supersede_reopen_source_segment(
+        self,
+        *,
+        chapter: ChapterWorkspace,
+        new_artifact: StoryArtifact,
+    ) -> None:
+        source_id = str(
+            dict(new_artifact.metadata or {}).get("reopen_source_artifact_id") or ""
+        ).strip()
+        if not source_id:
+            return
+        source = self._story_session_service.get_artifact(source_id)
+        if source is None or source.status != StoryArtifactStatus.ACCEPTED:
+            return
+        self._story_session_service.update_artifact(
+            artifact_id=source_id,
+            status=StoryArtifactStatus.SUPERSEDED,
+        )
+
+    @staticmethod
+    def _readopt_identity_from_artifact(
+        artifact: StoryArtifact,
+    ) -> MemoryRuntimeIdentity:
+        metadata = dict(artifact.metadata or {})
+        story_id = str(metadata.get("runtime_story_id") or "").strip()
+        session_id = str(metadata.get("runtime_session_id") or "").strip()
+        branch_head_id = str(metadata.get("runtime_branch_head_id") or "").strip()
+        turn_id = str(metadata.get("runtime_turn_id") or "").strip()
+        snapshot_id = str(metadata.get("runtime_profile_snapshot_id") or "").strip()
+        if not (story_id and session_id and branch_head_id and turn_id and snapshot_id):
+            raise ValueError(
+                f"segment_readopt_origin_identity_missing:{artifact.artifact_id}"
+            )
+        return MemoryRuntimeIdentity(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            runtime_profile_snapshot_id=snapshot_id,
         )
 
     async def complete_chapter(
@@ -1362,6 +1660,10 @@ class StoryTurnDomainService:
         if turn is None:
             return
         anchor_turn_id = self._chapter_close_anchor_turn_id(chapter=chapter)
+        accepted_segment_snapshot = self._freeze_accepted_segment_snapshot(
+            chapter=chapter,
+            captured_turn_id=identity.turn_id,
+        )
         job_a = workflow_job_service.ensure_job(
             identity=identity,
             job_kind=RuntimeWorkflowJobKind.REQUIRED_POST_WRITE_ANALYSIS,
@@ -1372,6 +1674,7 @@ class StoryTurnDomainService:
             metadata={
                 "chapter_close_slot": "chapter_summary",
                 "command_kind": LongformTurnCommandKind.COMPLETE_CHAPTER.value,
+                "accepted_segment_snapshot": accepted_segment_snapshot,
             },
         )
         job_b = workflow_job_service.ensure_job(
@@ -1384,6 +1687,7 @@ class StoryTurnDomainService:
             metadata={
                 "chapter_close_slot": "tail_flush",
                 "command_kind": LongformTurnCommandKind.COMPLETE_CHAPTER.value,
+                "accepted_segment_snapshot": accepted_segment_snapshot,
             },
         )
         gate_job = workflow_job_service.ensure_scheduler_maintenance_gate(
@@ -1431,6 +1735,9 @@ class StoryTurnDomainService:
             chapter=chapter,
             turn=turn,
             request=request,
+            frozen_accepted_segments=self._resolve_accepted_segment_snapshot(
+                snapshot=(job_b.metadata_json or {}).get("accepted_segment_snapshot"),
+            ),
         )
         if tail_flush.status == RuntimeWorkflowJobStatus.COMPLETED.value:
             workflow_job_service.mark_job_completed(
@@ -1522,6 +1829,7 @@ class StoryTurnDomainService:
         chapter: ChapterWorkspace,
         turn: StoryTurnRecord,
         request: LongformTurnRequest,
+        frozen_accepted_segments: list[StoryArtifact] | None = None,
     ) -> _ChapterCloseTailFlushOutcome:
         """Run the final Core memory-maintenance pass over the chapter tail through
         the existing post-write spine (worker-side retrieval stays OFF, RET-007).
@@ -1538,6 +1846,13 @@ class StoryTurnDomainService:
             return _ChapterCloseTailFlushOutcome(
                 status=RuntimeWorkflowJobStatus.DEFERRED.value,
                 reason="chapter_close_tail_flush_services_missing",
+            )
+        if self._branch_maintenance_active_excluding_turn(identity=identity):
+            # REV-006 rev2: defer the chapter-tail maintenance while another run holds
+            # the branch; the close turn still settles on the deferred JOB B.
+            return _ChapterCloseTailFlushOutcome(
+                status=RuntimeWorkflowJobStatus.DEFERRED.value,
+                reason=SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value,
             )
         try:
             worker_plan = scheduler.build_worker_plan(identity=identity, proposal=None)
@@ -1559,7 +1874,11 @@ class StoryTurnDomainService:
                 orchestrator_plan=self._fallback_post_write_orchestrator_plan(
                     command_kind
                 ),
-                accepted_segments=self.accepted_segments(chapter),
+                accepted_segments=(
+                    frozen_accepted_segments
+                    if frozen_accepted_segments is not None
+                    else self.accepted_segments(chapter)
+                ),
                 pending_artifact=self.resolve_pending_artifact(
                     chapter=chapter,
                     target_artifact_id=None,
@@ -1650,6 +1969,77 @@ class StoryTurnDomainService:
             chapter_index=chapter.chapter_index,
             chapter=chapter,
         )
+
+    def _freeze_accepted_segment_snapshot(
+        self,
+        *,
+        chapter: ChapterWorkspace,
+        captured_turn_id: str | None,
+    ) -> dict[str, object]:
+        """REV-006 trigger-time snapshot: freeze accepted-segment {id, revision} refs.
+
+        Accepted rows are append-only per revision (no in-place edit of ACCEPTED
+        content_text), so id+revision resolves to the trigger-moment text even if a
+        later re-adopt supersedes the row inside the maintenance window.
+        """
+        return {
+            "refs": [
+                {"artifact_id": segment.artifact_id, "revision": segment.revision}
+                for segment in self.accepted_segments(chapter)
+            ],
+            "anchor": {
+                "chapter_workspace_id": chapter.chapter_workspace_id,
+                "captured_turn_id": captured_turn_id,
+            },
+        }
+
+    def _resolve_accepted_segment_snapshot(
+        self,
+        *,
+        snapshot: object,
+    ) -> list[StoryArtifact] | None:
+        """Resolve a frozen snapshot to rows by id+revision (never status-filtered).
+
+        Returns ``None`` when no snapshot was captured (callers fall back to the live
+        read); a present-but-empty snapshot resolves to ``[]`` (zero frozen refs).
+        """
+        if not isinstance(snapshot, dict):
+            return None
+        raw_refs = snapshot.get("refs")
+        if not isinstance(raw_refs, list):
+            return None
+        resolved: list[StoryArtifact] = []
+        for ref in raw_refs:
+            if not isinstance(ref, dict):
+                continue
+            artifact_id = str(ref.get("artifact_id") or "").strip()
+            if not artifact_id:
+                continue
+            artifact = self._story_session_service.get_artifact(artifact_id)
+            if artifact is None:
+                continue
+            expected_revision = ref.get("revision")
+            if expected_revision is not None and artifact.revision != expected_revision:
+                continue
+            resolved.append(artifact)
+        return resolved
+
+    def _branch_maintenance_active_excluding_turn(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+    ) -> bool:
+        """REV-006 rev2 maintenance mutual-exclusion: True when another maintenance
+        run is in flight on this branch (a non-terminal job/proposal from a different
+        turn). This turn's own obligations are excluded so it never defers itself."""
+        if self._maintenance_lock_service is None:
+            return False
+        state = self._maintenance_lock_service.evaluate(
+            story_id=identity.story_id,
+            session_id=identity.session_id,
+            branch_head_id=identity.branch_head_id,
+        )
+        return any(cause.turn_id != identity.turn_id for cause in state.causes)
 
     def resolve_pending_artifact(
         self,
@@ -2042,6 +2432,10 @@ class StoryTurnDomainService:
                 identity=runtime_identity,
                 artifact=artifact,
                 finalized_result=finalized_result,
+                accepted_segment_snapshot=self._freeze_accepted_segment_snapshot(
+                    chapter=chapter,
+                    captured_turn_id=runtime_identity.turn_id,
+                ),
             )
 
         next_chapter = self._story_session_service.update_chapter_workspace(
@@ -2073,6 +2467,7 @@ class StoryTurnDomainService:
         identity: MemoryRuntimeIdentity,
         artifact: StoryArtifact,
         finalized_result: WritingWorkerExecutionResult,
+        accepted_segment_snapshot: dict[str, object] | None = None,
     ) -> None:
         workflow_job_service = self._runtime_workflow_job_service
         if workflow_job_service is None:
@@ -2091,17 +2486,20 @@ class StoryTurnDomainService:
             for ref in finalized_result.trace_refs
             if str(ref or "").strip()
         ]
+        obligation_metadata: dict[str, object] = {
+            "artifact_id": artifact.artifact_id,
+            "artifact_kind": artifact.artifact_kind.value,
+            "visible_output_ref": finalized_result.visible_output_ref,
+            "selected_output_ref": finalized_result.selected_output_ref,
+            "candidate_output_ref": finalized_result.candidate_output_ref,
+        }
+        if accepted_segment_snapshot is not None:
+            obligation_metadata["accepted_segment_snapshot"] = accepted_segment_snapshot
         workflow_job_service.ensure_creation_time_obligations(
             identity=identity,
             source_ref_ids=source_ref_ids,
             trace_refs=trace_refs,
-            metadata={
-                "artifact_id": artifact.artifact_id,
-                "artifact_kind": artifact.artifact_kind.value,
-                "visible_output_ref": finalized_result.visible_output_ref,
-                "selected_output_ref": finalized_result.selected_output_ref,
-                "candidate_output_ref": finalized_result.candidate_output_ref,
-            },
+            metadata=obligation_metadata,
         )
         if self._runtime_identity_service is None:
             return

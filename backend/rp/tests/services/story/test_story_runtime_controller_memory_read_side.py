@@ -76,9 +76,7 @@ from rp.services.retrieval.document_service import RetrievalDocumentService
 from rp.services.retrieval.ingestion_service import RetrievalIngestionService
 from rp.services.runtime.config_control_service import RuntimeConfigControlService
 from rp.services.runtime.maintenance_lock_service import (
-    RuntimeMaintenanceLockError,
     RuntimeMaintenanceLockService,
-    RuntimeMaintenanceOperation,
 )
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
@@ -96,12 +94,6 @@ from rp.services.story.block_mutation_service import (
 from rp.services.story.runtime_controller import (
     MemoryBlockHistoryUnsupportedError,
     StoryRuntimeController,
-)
-from rp.services.story.maintenance_guard_service import (
-    StoryRuntimeMaintenanceGuardService,
-)
-from rp.services.story.maintenance_guarded_runtime_controller import (
-    MaintenanceGuardedStoryRuntimeController,
 )
 from rp.services.story.runtime_debug_query_service import StoryRuntimeDebugQueryService
 from rp.services.story.session_core_state_adapter import StorySessionCoreStateAdapter
@@ -353,17 +345,13 @@ def _build_controller(
         memory_trace_read_service=MemoryTraceReadService(session=retrieval_session),
         runtime_workflow_job_service=RuntimeWorkflowJobService(retrieval_session),
     )
-    controller_type = (
-        MaintenanceGuardedStoryRuntimeController
-        if runtime_maintenance_lock_service is not None
-        else StoryRuntimeController
-    )
     controller_kwargs: dict[str, Any] = {}
     if runtime_maintenance_lock_service is not None:
-        controller_kwargs["runtime_maintenance_guard_service"] = (
-            StoryRuntimeMaintenanceGuardService(runtime_maintenance_lock_service)
-        )
-    return controller_type(
+        # Lock v2: the lock is a read model only; the controller consumes it for
+        # rollback proposal hygiene, never to gate user operations.
+        controller_kwargs["maintenance_lock_service"] = runtime_maintenance_lock_service
+        controller_kwargs["proposal_repository"] = repository
+    return StoryRuntimeController(
         story_session_service=story_session_service,
         story_activation_service=cast(Any, SimpleNamespace()),
         version_history_read_service=version_history_read_service,
@@ -374,6 +362,12 @@ def _build_controller(
         story_block_mutation_service=block_mutation_service,
         runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
             retrieval_session
+        ),
+        story_runtime_identity_service=StoryRuntimeIdentityService(
+            retrieval_session,
+            runtime_profile_snapshot_service=RuntimeProfileSnapshotService(
+                retrieval_session
+            ),
         ),
         story_runtime_debug_query_service=debug_query_service,
         story_runtime_migration_service=StoryRuntimeMigrationService(
@@ -430,7 +424,17 @@ def _seed_review_required_proposal(
     return proposal
 
 
-def test_story_runtime_controller_blocks_branch_controls_when_locked(
+def _assert_not_maintenance_blocked(exc: Exception | None) -> None:
+    # Lock v2 (REV-006 rev 2): user operations are never gated by maintenance. An op
+    # may still raise its own domain error under partial seeding, but it must never be
+    # short-circuited by a "maintenance in progress" block.
+    if exc is None:
+        return
+    assert "maintenance_in_progress" not in str(exc), exc
+    assert getattr(exc, "code", None) != "maintenance_in_progress"
+
+
+def test_story_runtime_controller_allows_branch_controls_during_maintenance(
     retrieval_session,
 ):
     session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
@@ -439,42 +443,57 @@ def test_story_runtime_controller_blocks_branch_controls_when_locked(
         retrieval_session,
         session_id=session.session_id,
     )
+    # The branch origin must be a settled turn (single-active-turn lifecycle,
+    # unrelated to maintenance); the seeded proposal keeps maintenance active
+    # independently of turn status.
+    StoryRuntimeIdentityService(retrieval_session).update_turn_status(
+        turn_id=runtime_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref="artifact:s3e-branch-origin",
+        selected_output_ref="artifact:s3e-branch-origin",
+        settlement_reason="test_branch_origin_settled",
+    )
     _seed_review_required_proposal(retrieval_session, identity=runtime_identity)
+    lock_service = RuntimeMaintenanceLockService(retrieval_session)
+    # Precondition: maintenance IS active on the branch (visible read model).
+    assert (
+        lock_service.evaluate(
+            story_id=runtime_identity.story_id,
+            session_id=runtime_identity.session_id,
+            branch_head_id=runtime_identity.branch_head_id,
+        ).active
+        is True
+    )
     controller = _build_controller(
         retrieval_session,
         story_session_service,
         repository,
-        runtime_maintenance_lock_service=RuntimeMaintenanceLockService(
-            retrieval_session
-        ),
+        runtime_maintenance_lock_service=lock_service,
     )
 
-    cases = [
-        (
-            controller.create_branch_from_turn,
-            {"origin_turn_id": runtime_identity.turn_id},
-            RuntimeMaintenanceOperation.BRANCH_CREATE,
-        ),
-        (
-            controller.switch_branch,
-            {"branch_head_id": "branch:s3e-other"},
-            RuntimeMaintenanceOperation.BRANCH_SWITCH,
-        ),
-        (
-            controller.rollback_to_turn,
-            {"target_turn_id": runtime_identity.turn_id},
-            RuntimeMaintenanceOperation.ROLLBACK,
-        ),
-    ]
-    for method, kwargs, operation in cases:
-        with pytest.raises(RuntimeMaintenanceLockError) as exc_info:
+    # create_branch_from_turn fully succeeds despite active maintenance (放行).
+    _snapshot, receipt = controller.create_branch_from_turn(
+        session_id=session.session_id,
+        origin_turn_id=runtime_identity.turn_id,
+    )
+    assert receipt.branch_head_id
+
+    # switch/rollback are likewise not maintenance-gated (they may raise their own
+    # domain errors under partial seeding, but never a maintenance block).
+    for method, kwargs in (
+        (controller.switch_branch, {"branch_head_id": "branch:s3e-other"}),
+        (controller.rollback_to_turn, {"target_turn_id": runtime_identity.turn_id}),
+    ):
+        raised: Exception | None = None
+        try:
             method(session_id=session.session_id, **kwargs)
-        assert exc_info.value.code == "maintenance_in_progress"
-        assert exc_info.value.operation == operation.value
+        except Exception as exc:  # noqa: BLE001
+            raised = exc
+        _assert_not_maintenance_blocked(raised)
 
 
 @pytest.mark.asyncio
-async def test_story_runtime_controller_blocks_memory_mutations_when_locked(
+async def test_story_runtime_controller_allows_memory_mutations_during_maintenance(
     retrieval_session,
 ):
     session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
@@ -508,7 +527,7 @@ async def test_story_runtime_controller_blocks_memory_mutations_when_locked(
                     "domain_path": "chapter.current",
                     "revision": 1,
                 },
-                "field_patch": {"title": "Blocked Direct Edit"},
+                "field_patch": {"title": "Edit During Maintenance"},
             }
         ],
         base_refs=[
@@ -521,17 +540,17 @@ async def test_story_runtime_controller_blocks_memory_mutations_when_locked(
                 "revision": 1,
             }
         ],
-        reason="blocked by maintenance",
+        reason="edit during maintenance",
     )
-    with pytest.raises(RuntimeMaintenanceLockError) as direct_exc:
+    direct_raised: Exception | None = None
+    try:
         await controller.direct_edit_core_memory(
             session_id=session.session_id,
             payload=direct_edit_request,
         )
-    assert (
-        direct_exc.value.operation
-        == RuntimeMaintenanceOperation.CORE_MEMORY_EDIT.value
-    )
+    except Exception as exc:  # noqa: BLE001
+        direct_raised = exc
+    _assert_not_maintenance_blocked(direct_raised)
 
     archival_request = ArchivalEvolutionRequest(
         identity=runtime_identity,
@@ -540,21 +559,21 @@ async def test_story_runtime_controller_blocks_memory_mutations_when_locked(
         expected_source_version=1,
         replacement_sections=[
             {
-                "text": "Blocked archival replacement.",
+                "text": "Archival replacement during maintenance.",
                 "metadata": {"domain": Domain.WORLD_RULE.value},
             }
         ],
-        reason="blocked by maintenance",
+        reason="edit during maintenance",
     )
-    with pytest.raises(RuntimeMaintenanceLockError) as archival_exc:
+    archival_raised: Exception | None = None
+    try:
         controller.evolve_archival_memory(
             session_id=session.session_id,
             request=archival_request,
         )
-    assert (
-        archival_exc.value.operation
-        == RuntimeMaintenanceOperation.STORY_EVOLUTION_OR_ARCHIVAL_EDIT.value
-    )
+    except Exception as exc:  # noqa: BLE001
+        archival_raised = exc
+    _assert_not_maintenance_blocked(archival_raised)
 
 
 def _utcnow() -> datetime:

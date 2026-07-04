@@ -101,10 +101,6 @@ from rp.services.story.block_prompt_render_service import (
     StoryBlockPromptRenderService,
 )
 from rp.services.story.brainstorm_service import StoryBrainstormService
-from rp.services.story.maintenance_guard_service import StoryRuntimeMaintenanceGuardService
-from rp.services.story.maintenance_guarded_runtime_controller import (
-    MaintenanceGuardedStoryRuntimeController,
-)
 from rp.services.story.runtime_controller import StoryRuntimeController
 from rp.services.story.runtime_debug_query_service import (
     StoryRuntimeDebugQueryService,
@@ -752,10 +748,7 @@ class RpRuntimeFactory:
             session=self._session,
             writing_worker_execution_service=WritingWorkerExecutionService(),
         )
-        return MaintenanceGuardedStoryRuntimeController(
-            runtime_maintenance_guard_service=StoryRuntimeMaintenanceGuardService(
-                RuntimeMaintenanceLockService(self._session)
-            ),
+        return StoryRuntimeController(
             story_session_service=story_session_service,
             story_activation_service=story_activation_service,
             version_history_read_service=version_history_read_service,
@@ -783,14 +776,14 @@ class RpRuntimeFactory:
             ),
             story_brainstorm_service=story_brainstorm_service,
             writing_assistant_service=writing_assistant_service,
+            story_turn_domain_service=self.build_story_turn_domain_service(),
+            maintenance_lock_service=RuntimeMaintenanceLockService(self._session),
+            proposal_repository=proposal_repository,
         )
 
     def build_story_graph_runner(self) -> StoryGraphRunner:
         return StoryGraphRunner(
             nodes=StoryGraphNodes(
                 domain_service=self.build_story_turn_domain_service(),
-                maintenance_guard_service=StoryRuntimeMaintenanceGuardService(
-                    RuntimeMaintenanceLockService(self._session)
-                ),
             ),
         )

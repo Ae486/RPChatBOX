@@ -6,9 +6,7 @@ from models.rp_memory_store import MemoryProposalRecord
 from rp.models.runtime.reason_codes import SchedulerReasonCode
 from rp.models.runtime.workflow_job import RuntimeWorkflowJobStatus
 from rp.services.runtime.maintenance_lock_service import (
-    RuntimeMaintenanceLockError,
     RuntimeMaintenanceLockService,
-    RuntimeMaintenanceOperation,
 )
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.tests.helpers.runtime_seed import seed_runtime_identity
@@ -17,6 +15,9 @@ from rp.tests.helpers.runtime_seed import seed_runtime_identity
 def test_review_required_s3_proposal_activates_current_branch_lock(
     retrieval_session,
 ):
+    # Lock v2 (REV-006 rev 2): a review_required proposal still surfaces as a
+    # branch-scoped "maintenance in progress" read-model cause (visibility), but it
+    # no longer GATES any user operation — the operation-decision API is retired.
     identity = seed_runtime_identity(retrieval_session, story_id="s3d-proposal-lock")
     _seed_proposal(retrieval_session, identity=identity, status="review_required")
 
@@ -33,25 +34,6 @@ def test_review_required_s3_proposal_activates_current_branch_lock(
     assert state.causes[0].source_kind == "proposal"
     assert state.causes[0].status == "review_required"
     assert state.causes[0].branch_head_id == identity.branch_head_id
-
-    blocked = service.check_operation(
-        story_id=identity.story_id,
-        session_id=identity.session_id,
-        branch_head_id=identity.branch_head_id,
-        operation=RuntimeMaintenanceOperation.CORE_MEMORY_EDIT,
-    )
-    assert blocked.allowed is False
-    assert blocked.reason_code == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
-    assert blocked.causes[0].operation == RuntimeMaintenanceOperation.CORE_MEMORY_EDIT
-
-    allowed = service.check_operation(
-        story_id=identity.story_id,
-        session_id=identity.session_id,
-        branch_head_id=identity.branch_head_id,
-        operation=RuntimeMaintenanceOperation.INSPECT_DEBUG,
-    )
-    assert allowed.allowed is True
-    assert allowed.causes == state.causes
 
 
 @pytest.mark.parametrize(
@@ -195,80 +177,25 @@ def test_terminal_required_job_statuses_clear_current_branch_lock(
     assert state.causes == ()
 
 
-def test_w5a_lock_operation_matrix(retrieval_session):
+def test_lock_v2_read_model_has_no_operation_gating(retrieval_session):
+    # Centerpiece inversion (REV-006 rev 2): the operation block/allow matrix is
+    # retired. A maintenance-active branch is still OBSERVABLE via ``evaluate``, but
+    # the service exposes no operation-decision surface that could block a user op.
     identity = seed_runtime_identity(retrieval_session, story_id="s3d-operation-matrix")
     _seed_proposal(retrieval_session, identity=identity, status="review_required")
     service = RuntimeMaintenanceLockService(retrieval_session)
 
-    blocked_operations = [
-        RuntimeMaintenanceOperation.CORE_MEMORY_EDIT,
-        RuntimeMaintenanceOperation.PROJECTION_EDIT,
-        RuntimeMaintenanceOperation.MANUAL_ACCEPTED_PROSE_EDIT,
-        RuntimeMaintenanceOperation.STORY_PROGRESSION,
-        RuntimeMaintenanceOperation.ROLLBACK,
-        RuntimeMaintenanceOperation.BRANCH_SWITCH,
-        RuntimeMaintenanceOperation.BRANCH_CREATE,
-        RuntimeMaintenanceOperation.REWRITE,
-        RuntimeMaintenanceOperation.REGENERATE,
-        RuntimeMaintenanceOperation.CHAPTER_COMPLETE,
-        RuntimeMaintenanceOperation.STORY_EVOLUTION_OR_ARCHIVAL_EDIT,
-    ]
-    for operation in blocked_operations:
-        decision = service.check_operation(
-            story_id=identity.story_id,
-            session_id=identity.session_id,
-            branch_head_id=identity.branch_head_id,
-            operation=operation,
-        )
-        assert decision.allowed is False, operation.value
-        assert decision.reason_code == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
-
-    allowed_operations = [
-        RuntimeMaintenanceOperation.INSPECT_DEBUG,
-        RuntimeMaintenanceOperation.PROPOSAL_ACCEPT,
-        RuntimeMaintenanceOperation.PROPOSAL_REJECT,
-        RuntimeMaintenanceOperation.PROPOSAL_DISCARD,
-        RuntimeMaintenanceOperation.PROPOSAL_EDIT,
-        RuntimeMaintenanceOperation.FAILED_WORKER_RETRY,
-        RuntimeMaintenanceOperation.RUNTIME_CONFIG_EDIT,
-    ]
-    for operation in allowed_operations:
-        decision = service.require_allowed(
-            story_id=identity.story_id,
-            session_id=identity.session_id,
-            branch_head_id=identity.branch_head_id,
-            operation=operation,
-        )
-        assert decision.allowed is True, operation.value
-
-    with pytest.raises(RuntimeMaintenanceLockError) as exc_info:
-        service.require_allowed(
-            story_id=identity.story_id,
-            session_id=identity.session_id,
-            branch_head_id=identity.branch_head_id,
-            operation=RuntimeMaintenanceOperation.STORY_PROGRESSION,
-        )
-    assert exc_info.value.code == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
-    assert exc_info.value.operation == RuntimeMaintenanceOperation.STORY_PROGRESSION
-
-
-def test_unknown_operation_is_rejected_as_input_error(retrieval_session):
-    identity = seed_runtime_identity(
-        retrieval_session,
-        story_id="s3d-unknown-operation",
+    state = service.evaluate(
+        story_id=identity.story_id,
+        session_id=identity.session_id,
+        branch_head_id=identity.branch_head_id,
     )
-    service = RuntimeMaintenanceLockService(retrieval_session)
+    assert state.active is True
+    assert state.reason_code == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
 
-    with pytest.raises(
-        ValueError,
-        match="runtime_maintenance_operation_unknown:not_a_runtime_operation",
-    ):
-        service.check_operation(
-            story_id=identity.story_id,
-            session_id=identity.session_id,
-            branch_head_id=identity.branch_head_id,
-            operation="not_a_runtime_operation",
-        )
+    # The retired gating surface must not come back.
+    assert not hasattr(service, "check_operation")
+    assert not hasattr(service, "require_allowed")
 
 
 def test_failed_stale_base_proposal_status_clears_lock_but_stays_visible(

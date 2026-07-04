@@ -1,70 +1,23 @@
-"""Deterministic current-branch maintenance lock read model."""
+"""Deterministic current-branch maintenance lock read model.
+
+Lock v2 (REV-006 rev 2): the lock no longer blocks user operations. It survives
+only as (1) a branch-scoped maintenance-exclusion read model — consulted by the
+post-write trigger so a second maintenance run defers while another is in flight
+on the same branch — and (2) the state visibility surface for debug/read models.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Any, Iterable
+from typing import Any
 
 from sqlmodel import Session, select
 
 from models.rp_memory_store import MemoryProposalRecord
 from models.rp_story_store import RuntimeWorkflowJobRecord
-from rp.errors import RPError
 from rp.models.runtime.reason_codes import SchedulerReasonCode
 from rp.models.runtime.workflow_job import RuntimeWorkflowJobStatus
 
-
-class RuntimeMaintenanceOperation(StrEnum):
-    """Operation families guarded by the W5-A/S3 maintenance lock."""
-
-    CORE_MEMORY_EDIT = "core_memory_edit"
-    PROJECTION_EDIT = "projection_edit"
-    MANUAL_ACCEPTED_PROSE_EDIT = "manual_accepted_prose_edit"
-    STORY_PROGRESSION = "story_progression"
-    ROLLBACK = "rollback"
-    BRANCH_SWITCH = "branch_switch"
-    BRANCH_CREATE = "branch_create"
-    REWRITE = "rewrite"
-    REGENERATE = "regenerate"
-    CHAPTER_COMPLETE = "chapter_complete"
-    STORY_EVOLUTION_OR_ARCHIVAL_EDIT = "story_evolution_or_archival_edit"
-    INSPECT_DEBUG = "inspect_debug"
-    PROPOSAL_ACCEPT = "proposal_accept"
-    PROPOSAL_REJECT = "proposal_reject"
-    PROPOSAL_DISCARD = "proposal_discard"
-    PROPOSAL_EDIT = "proposal_edit"
-    FAILED_WORKER_RETRY = "failed_worker_retry"
-    RUNTIME_CONFIG_EDIT = "runtime_config_edit"
-
-
-BLOCKED_DURING_MAINTENANCE: frozenset[RuntimeMaintenanceOperation] = frozenset(
-    {
-        RuntimeMaintenanceOperation.CORE_MEMORY_EDIT,
-        RuntimeMaintenanceOperation.PROJECTION_EDIT,
-        RuntimeMaintenanceOperation.MANUAL_ACCEPTED_PROSE_EDIT,
-        RuntimeMaintenanceOperation.STORY_PROGRESSION,
-        RuntimeMaintenanceOperation.ROLLBACK,
-        RuntimeMaintenanceOperation.BRANCH_SWITCH,
-        RuntimeMaintenanceOperation.BRANCH_CREATE,
-        RuntimeMaintenanceOperation.REWRITE,
-        RuntimeMaintenanceOperation.REGENERATE,
-        RuntimeMaintenanceOperation.CHAPTER_COMPLETE,
-        RuntimeMaintenanceOperation.STORY_EVOLUTION_OR_ARCHIVAL_EDIT,
-    }
-)
-
-ALLOWED_DURING_MAINTENANCE: frozenset[RuntimeMaintenanceOperation] = frozenset(
-    {
-        RuntimeMaintenanceOperation.INSPECT_DEBUG,
-        RuntimeMaintenanceOperation.PROPOSAL_ACCEPT,
-        RuntimeMaintenanceOperation.PROPOSAL_REJECT,
-        RuntimeMaintenanceOperation.PROPOSAL_DISCARD,
-        RuntimeMaintenanceOperation.PROPOSAL_EDIT,
-        RuntimeMaintenanceOperation.FAILED_WORKER_RETRY,
-        RuntimeMaintenanceOperation.RUNTIME_CONFIG_EDIT,
-    }
-)
 
 _JOB_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {
@@ -88,24 +41,9 @@ _PROPOSAL_TERMINAL_STATUSES: frozenset[str] = frozenset(
 )
 
 
-class RuntimeMaintenanceLockError(RPError, ValueError):
-    """Stable lock rejection with the central scheduler reason code."""
-
-    def __init__(
-        self,
-        *,
-        operation: RuntimeMaintenanceOperation,
-        causes: Iterable["RuntimeMaintenanceLockCause"],
-    ) -> None:
-        self.code = SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
-        self.operation = operation.value
-        self.causes = tuple(causes)
-        super().__init__(f"{self.code}:{operation.value}")
-
-
 @dataclass(frozen=True)
 class RuntimeMaintenanceLockCause:
-    """One persisted state row that currently keeps maintenance locked."""
+    """One persisted state row that currently keeps maintenance active."""
 
     reason_code: str
     source_kind: str
@@ -121,22 +59,12 @@ class RuntimeMaintenanceLockCause:
 
 @dataclass(frozen=True)
 class RuntimeMaintenanceLockState:
-    """Current lock state for one story/session/branch."""
+    """Current maintenance-exclusion state for one story/session/branch."""
 
     story_id: str
     session_id: str
     branch_head_id: str
     active: bool
-    reason_code: str | None
-    causes: tuple[RuntimeMaintenanceLockCause, ...]
-
-
-@dataclass(frozen=True)
-class RuntimeMaintenanceLockDecision:
-    """Operation-level allow/block decision under the current lock state."""
-
-    operation: RuntimeMaintenanceOperation
-    allowed: bool
     reason_code: str | None
     causes: tuple[RuntimeMaintenanceLockCause, ...]
 
@@ -181,66 +109,6 @@ class RuntimeMaintenanceLockService:
             ),
             causes=causes,
         )
-
-    def check_operation(
-        self,
-        *,
-        story_id: str,
-        session_id: str,
-        branch_head_id: str,
-        operation: RuntimeMaintenanceOperation | str,
-    ) -> RuntimeMaintenanceLockDecision:
-        normalized_operation = _coerce_operation(operation)
-        state = self.evaluate(
-            story_id=story_id,
-            session_id=session_id,
-            branch_head_id=branch_head_id,
-        )
-        if not state.active or normalized_operation in ALLOWED_DURING_MAINTENANCE:
-            return RuntimeMaintenanceLockDecision(
-                operation=normalized_operation,
-                allowed=True,
-                reason_code=None,
-                causes=state.causes,
-            )
-        if normalized_operation in BLOCKED_DURING_MAINTENANCE:
-            causes = tuple(
-                cause_with_operation(cause, normalized_operation)
-                for cause in state.causes
-            )
-            return RuntimeMaintenanceLockDecision(
-                operation=normalized_operation,
-                allowed=False,
-                reason_code=SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value,
-                causes=causes,
-            )
-        return RuntimeMaintenanceLockDecision(
-            operation=normalized_operation,
-            allowed=False,
-            reason_code=SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value,
-            causes=state.causes,
-        )
-
-    def require_allowed(
-        self,
-        *,
-        story_id: str,
-        session_id: str,
-        branch_head_id: str,
-        operation: RuntimeMaintenanceOperation | str,
-    ) -> RuntimeMaintenanceLockDecision:
-        decision = self.check_operation(
-            story_id=story_id,
-            session_id=session_id,
-            branch_head_id=branch_head_id,
-            operation=operation,
-        )
-        if not decision.allowed:
-            raise RuntimeMaintenanceLockError(
-                operation=decision.operation,
-                causes=decision.causes,
-            )
-        return decision
 
     def _workflow_job_causes(
         self,
@@ -327,24 +195,6 @@ class RuntimeMaintenanceLockService:
         return tuple(causes)
 
 
-def cause_with_operation(
-    cause: RuntimeMaintenanceLockCause,
-    operation: RuntimeMaintenanceOperation,
-) -> RuntimeMaintenanceLockCause:
-    return RuntimeMaintenanceLockCause(
-        reason_code=cause.reason_code,
-        source_kind=cause.source_kind,
-        source_id=cause.source_id,
-        story_id=cause.story_id,
-        session_id=cause.session_id,
-        branch_head_id=cause.branch_head_id,
-        status=cause.status,
-        turn_id=cause.turn_id,
-        operation=operation.value,
-        metadata=dict(cause.metadata),
-    )
-
-
 def _proposal_branch_head_id(proposal: MemoryProposalRecord) -> str | None:
     identity = _proposal_identity(proposal)
     if not isinstance(identity, dict):
@@ -367,20 +217,6 @@ def _proposal_identity(proposal: MemoryProposalRecord) -> dict[str, Any] | None:
         return None
     identity = metadata.get("identity")
     return identity if isinstance(identity, dict) else None
-
-
-def _coerce_operation(
-    operation: RuntimeMaintenanceOperation | str,
-) -> RuntimeMaintenanceOperation:
-    if isinstance(operation, RuntimeMaintenanceOperation):
-        return operation
-    normalized = str(operation or "").strip()
-    try:
-        return RuntimeMaintenanceOperation(normalized)
-    except ValueError as exc:
-        raise ValueError(
-            f"runtime_maintenance_operation_unknown:{normalized}"
-        ) from exc
 
 
 def _require_text(value: str, *, field_name: str) -> str:
