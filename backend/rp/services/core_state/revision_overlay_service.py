@@ -1,4 +1,4 @@
-"""Persist review overlay comments and tracked changes as Runtime Workspace sidecars."""
+"""Persist light review overlay comments as Runtime Workspace sidecars."""
 
 from __future__ import annotations
 
@@ -10,14 +10,11 @@ from sqlmodel import Session
 from rp.errors import RPError
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.core_state.revision_overlay_contracts import (
-    DraftDocumentRecord,
     ReviewOverlayInspectionRecord,
     ReviewOverlayMode,
     ReviewOverlayRecord,
-    RevisionAnchorRef,
     RevisionCommentRecord,
     RevisionCommentStatus,
-    RevisionTrackedChangeKind,
     TrackedChangeRecord,
 )
 from rp.models.runtime.workspace_material import (
@@ -56,62 +53,17 @@ class RevisionOverlayService:
             else RuntimeWorkspaceMaterialService(session=session)
         )
 
-    def record_draft_document(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        draft_document: DraftDocumentRecord,
-    ) -> DraftDocumentRecord:
-        self._require_same_turn(identity=identity, turn_id=draft_document.turn_id)
-        existing = self._latest_material_for_record(
-            identity=identity,
-            payload_kind="draft_document",
-            record_id=draft_document.draft_document_id,
-        )
-        if (
-            existing is not None
-            and existing.payload.get("payload_kind") == "draft_document"
-        ):
-            return DraftDocumentRecord.model_validate(existing.payload.get("record"))
-        material = self._material_for_record(
-            identity=identity,
-            record_id=draft_document.draft_document_id,
-            payload_kind="draft_document",
-            record=draft_document.model_dump(mode="json"),
-            domain_path="chapter.revision_overlay.draft_document",
-            created_by="revision_overlay.draft_materialization",
-            source_refs=[
-                MemorySourceRef(
-                    source_type="writer_output_ref",
-                    source_id=draft_document.source_output_ref,
-                    layer="runtime_workspace",
-                    domain=_REVIEW_OVERLAY_DOMAIN,
-                    block_id="chapter.runtime_workspace",
-                    entry_id=draft_document.draft_document_id,
-                    metadata={
-                        "draft_ref": draft_document.draft_ref,
-                        "draft_document_id": draft_document.draft_document_id,
-                    },
-                )
-            ],
-        )
-        self._workspace_material_service.record_material(material)
-        return draft_document
-
     def create_or_update_overlay(
         self,
         *,
         identity: MemoryRuntimeIdentity,
-        draft_document_id: str,
+        draft_ref: str,
         mode: ReviewOverlayMode,
     ) -> ReviewOverlayRecord:
-        draft_document = self._require_draft_document(
+        normalized_draft_ref = _require_non_blank(draft_ref, field_name="draft_ref")
+        existing = self.find_overlay_for_draft_ref(
             identity=identity,
-            draft_document_id=draft_document_id,
-        )
-        existing = self._find_overlay_for_draft(
-            identity=identity,
-            draft_document_id=draft_document_id,
+            draft_ref=normalized_draft_ref,
         )
         if existing is not None and existing.mode == mode:
             return existing
@@ -130,8 +82,8 @@ class RevisionOverlayService:
             overlay = ReviewOverlayRecord(
                 overlay_id=f"review_overlay_{uuid4().hex}",
                 turn_id=identity.turn_id,
-                draft_ref=draft_document.draft_ref,
-                draft_document_id=draft_document.draft_document_id,
+                draft_ref=normalized_draft_ref,
+                draft_document_id=_light_draft_document_id(normalized_draft_ref),
                 mode=mode,
                 metadata_json={
                     "payload_version": REVISION_OVERLAY_PAYLOAD_VERSION,
@@ -155,25 +107,29 @@ class RevisionOverlayService:
         *,
         identity: MemoryRuntimeIdentity,
         overlay_id: str,
-        anchor_ref: RevisionAnchorRef,
         instruction_text: str,
-        selected_excerpt: str | None = None,
+        selected_excerpt: str,
+        superdoc_anchor_id: str | None = None,
     ) -> RevisionCommentRecord:
         overlay = self._require_overlay(identity=identity, overlay_id=overlay_id)
-        self._validate_anchor(identity=identity, overlay=overlay, anchor_ref=anchor_ref)
+        normalized_excerpt = _require_non_blank(
+            selected_excerpt,
+            field_name="selected_excerpt",
+        )
         comment = RevisionCommentRecord(
             comment_id=f"revision_comment_{uuid4().hex}",
             turn_id=identity.turn_id,
             draft_ref=overlay.draft_ref,
             overlay_id=overlay.overlay_id,
-            anchor_ref=anchor_ref,
-            selected_excerpt=selected_excerpt,
+            anchor_ref=None,
+            selected_excerpt=normalized_excerpt,
             instruction_text=instruction_text,
             metadata_json={
                 "payload_version": REVISION_OVERLAY_PAYLOAD_VERSION,
                 "draft_document_id": overlay.draft_document_id,
                 "runtime_truth_owner": "rp_runtime",
                 "superdoc_truth_owner": False,
+                "superdoc_anchor_id": superdoc_anchor_id,
             },
         )
         updated_overlay = overlay.model_copy(
@@ -182,46 +138,6 @@ class RevisionOverlayService:
         self._record_comment(identity=identity, comment=comment)
         self._record_overlay(identity=identity, overlay=updated_overlay)
         return comment
-
-    def add_tracked_change(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        overlay_id: str,
-        anchor_ref: RevisionAnchorRef,
-        change_kind: RevisionTrackedChangeKind,
-        original_text: str | None = None,
-        suggested_text: str | None = None,
-    ) -> TrackedChangeRecord:
-        overlay = self._require_overlay(identity=identity, overlay_id=overlay_id)
-        self._validate_anchor(identity=identity, overlay=overlay, anchor_ref=anchor_ref)
-        tracked_change = TrackedChangeRecord(
-            tracked_change_id=f"tracked_change_{uuid4().hex}",
-            turn_id=identity.turn_id,
-            draft_ref=overlay.draft_ref,
-            overlay_id=overlay.overlay_id,
-            anchor_ref=anchor_ref,
-            change_kind=change_kind,
-            original_text=original_text,
-            suggested_text=suggested_text,
-            metadata_json={
-                "payload_version": REVISION_OVERLAY_PAYLOAD_VERSION,
-                "draft_document_id": overlay.draft_document_id,
-                "runtime_truth_owner": "rp_runtime",
-                "superdoc_truth_owner": False,
-            },
-        )
-        updated_overlay = overlay.model_copy(
-            update={
-                "tracked_change_refs": [
-                    *overlay.tracked_change_refs,
-                    tracked_change.tracked_change_id,
-                ]
-            }
-        )
-        self._record_tracked_change(identity=identity, tracked_change=tracked_change)
-        self._record_overlay(identity=identity, overlay=updated_overlay)
-        return tracked_change
 
     def resolve_comment(
         self,
@@ -262,31 +178,16 @@ class RevisionOverlayService:
             )
             if comment is not None
         ]
-        tracked_changes = [
-            tracked_change
-            for tracked_change in (
-                self._get_tracked_change(
-                    identity=identity,
-                    tracked_change_id=tracked_change_id,
-                )
-                for tracked_change_id in overlay.tracked_change_refs
-            )
-            if tracked_change is not None
-        ]
         return ReviewOverlayInspectionRecord(
             overlay=overlay,
             comments=comments,
-            tracked_changes=tracked_changes,
+            tracked_changes=[],
             active_comment_refs=[
                 comment.comment_id
                 for comment in comments
                 if comment.status == "active"
             ],
-            active_tracked_change_refs=[
-                tracked_change.tracked_change_id
-                for tracked_change in tracked_changes
-                if tracked_change.status == "active"
-            ],
+            active_tracked_change_refs=[],
             material_refs=self._material_refs_for_overlay(
                 identity=identity,
                 overlay=overlay,
@@ -296,41 +197,6 @@ class RevisionOverlayService:
                 "runtime_truth_owner": "rp_runtime",
                 "superdoc_truth_owner": False,
             },
-        )
-
-    def get_draft_document(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        draft_document_id: str,
-    ) -> DraftDocumentRecord:
-        return self._require_draft_document(
-            identity=identity,
-            draft_document_id=draft_document_id,
-        )
-
-    def find_draft_document_by_ref(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        draft_ref: str,
-    ) -> DraftDocumentRecord | None:
-        normalized_draft_ref = _require_non_blank(draft_ref, field_name="draft_ref")
-        draft_documents = [
-            DraftDocumentRecord.model_validate(material.payload.get("record"))
-            for material in self._list_revision_materials(identity=identity)
-            if material.payload.get("payload_kind") == "draft_document"
-        ]
-        matches = [
-            draft
-            for draft in draft_documents
-            if draft.draft_ref == normalized_draft_ref
-        ]
-        if not matches:
-            return None
-        return max(
-            matches,
-            key=lambda draft: draft.created_at,
         )
 
     def find_overlay_for_draft_ref(
@@ -435,36 +301,6 @@ class RevisionOverlayService:
             )
         )
 
-    def _record_tracked_change(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        tracked_change: TrackedChangeRecord,
-    ) -> None:
-        self._record_or_replace_material(
-            self._material_for_record(
-                identity=identity,
-                record_id=tracked_change.tracked_change_id,
-                payload_kind="tracked_change",
-                record=tracked_change.model_dump(mode="json"),
-                domain_path="chapter.revision_overlay.tracked_change",
-                created_by="revision_overlay.tracked_change",
-                source_refs=[
-                    MemorySourceRef(
-                        source_type="review_overlay",
-                        source_id=tracked_change.overlay_id,
-                        layer="runtime_workspace",
-                        domain=_REVIEW_OVERLAY_DOMAIN,
-                        block_id="chapter.runtime_workspace",
-                        entry_id=tracked_change.tracked_change_id,
-                        metadata={
-                            "tracked_change_id": tracked_change.tracked_change_id
-                        },
-                    )
-                ],
-            )
-        )
-
     def _record_or_replace_material(self, material: RuntimeWorkspaceMaterial) -> None:
         self._workspace_material_service.record_material(material)
 
@@ -510,26 +346,6 @@ class RevisionOverlayService:
                 "canonical_truth": False,
             },
         )
-
-    def _require_draft_document(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        draft_document_id: str,
-    ) -> DraftDocumentRecord:
-        material = self._latest_material_for_record(
-            identity=identity,
-            payload_kind="draft_document",
-            record_id=draft_document_id,
-        )
-        if material is None or material.payload.get("payload_kind") != "draft_document":
-            raise RevisionOverlayServiceError(
-                "revision_draft_not_visible",
-                draft_document_id,
-            )
-        draft = DraftDocumentRecord.model_validate(material.payload.get("record"))
-        self._require_same_turn(identity=identity, turn_id=draft.turn_id)
-        return draft
 
     def _require_overlay(
         self,
@@ -596,52 +412,6 @@ class RevisionOverlayService:
         if material.lifecycle == RuntimeWorkspaceMaterialLifecycle.INVALIDATED:
             return None
         return TrackedChangeRecord.model_validate(material.payload.get("record"))
-
-    def _find_overlay_for_draft(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        draft_document_id: str,
-    ) -> ReviewOverlayRecord | None:
-        for overlay in self.list_overlays(identity=identity):
-            if overlay.draft_document_id == draft_document_id:
-                return overlay
-        return None
-
-    def _validate_anchor(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        overlay: ReviewOverlayRecord,
-        anchor_ref: RevisionAnchorRef,
-    ) -> None:
-        draft = self._require_draft_document(
-            identity=identity,
-            draft_document_id=overlay.draft_document_id,
-        )
-        if draft.draft_ref != overlay.draft_ref:
-            raise RevisionOverlayServiceError(
-                "revision_comment_draft_mismatch",
-                overlay.overlay_id,
-            )
-        block_ids = {block.block_id for block in draft.blocks}
-        missing_blocks = [
-            block_id for block_id in anchor_ref.block_ids if block_id not in block_ids
-        ]
-        if missing_blocks:
-            raise RevisionOverlayServiceError(
-                "revision_anchor_block_not_found",
-                ",".join(missing_blocks),
-            )
-        block_text_by_id = {block.block_id: block.text for block in draft.blocks}
-        for block_id in anchor_ref.block_ids:
-            text_length = len(block_text_by_id[block_id])
-            for offset in [anchor_ref.start_offset, anchor_ref.end_offset]:
-                if offset is not None and offset > text_length:
-                    raise RevisionOverlayServiceError(
-                        "revision_anchor_offset_out_of_bounds",
-                        block_id,
-                    )
 
     def _material_refs_for_overlay(
         self,
@@ -768,6 +538,12 @@ class RevisionOverlayService:
     ) -> None:
         if identity.turn_id != turn_id:
             raise RevisionOverlayServiceError("revision_turn_mismatch", turn_id)
+
+
+def _light_draft_document_id(draft_ref: str) -> str:
+    """Synthetic draft-document id for the light review surface (no materialization)."""
+    _, separator, suffix = draft_ref.partition(":")
+    return f"light_draft:{suffix if separator else draft_ref}"
 
 
 def _record_key(

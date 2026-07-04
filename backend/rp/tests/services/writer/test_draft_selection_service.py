@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.core_state.revision_overlay_contracts import (
     LongformDraftSelectionReceipt,
-    RevisionAnchorRef,
+    RewriteRequest,
 )
 from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
-from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.writer.draft_selection_service import (
     DraftSelectionService,
     DraftSelectionServiceError,
 )
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
-from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 
 
 def test_unique_candidate_can_be_adopted_without_prior_selection(retrieval_session):
@@ -288,28 +288,22 @@ def test_accept_and_continue_does_not_auto_resolve_comments(retrieval_session):
     # be exercised through it here; REV-007's live guard is deferred to S6-7.
     identity = _identity(turn_id="turn-r5-comments")
     overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r5:comments",
-    )
     overlay = overlay_service.create_or_update_overlay(
         identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
+        draft_ref="artifact:r5:comments",
+        mode="viewing",
     )
     comment = overlay_service.add_comment(
         identity=identity,
         overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
         instruction_text="Keep this comment active after adoption.",
+        selected_excerpt="The storm arrived at dusk.",
     )
     candidate = _create_full_candidate(
         retrieval_session,
         identity=identity,
-        draft_ref=draft.draft_ref,
+        draft_ref=overlay.draft_ref,
         output_text="Candidate with unresolved comment.",
-        overlay_service=overlay_service,
         comment_refs=[comment.comment_id],
     )
     service = DraftSelectionService(session=retrieval_session)
@@ -335,28 +329,14 @@ def _create_full_candidate(
     identity: MemoryRuntimeIdentity,
     draft_ref: str,
     output_text: str,
-    overlay_service: RevisionOverlayService | None = None,
     comment_refs: list[str] | None = None,
 ):
-    resolved_overlay_service = overlay_service or RevisionOverlayService(
-        session=retrieval_session
-    )
-    draft = _ensure_draft(
-        resolved_overlay_service,
-        identity=identity,
+    request = _rewrite_request(
+        identity,
         draft_ref=draft_ref,
-    )
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=resolved_overlay_service,
-    ).build_full_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        global_instruction="Rewrite this candidate.",
         comment_refs=comment_refs or [],
-        tracked_change_refs=[],
     )
     return RewriteCandidateService(
-        revision_overlay_service=resolved_overlay_service,
         session=retrieval_session,
     ).create_full_rewrite_candidate(
         identity=identity,
@@ -368,47 +348,30 @@ def _create_full_candidate(
     )
 
 
-def _ensure_draft(
-    service: RevisionOverlayService,
-    *,
+def _rewrite_request(
     identity: MemoryRuntimeIdentity,
-    draft_ref: str,
-):
-    existing = service.find_draft_document_by_ref(
-        identity=identity,
-        draft_ref=draft_ref,
-    )
-    if existing is not None:
-        return existing
-    return _record_draft(service, identity=identity, draft_ref=draft_ref)
-
-
-def _record_draft(
-    service: RevisionOverlayService,
     *,
-    identity: MemoryRuntimeIdentity,
     draft_ref: str,
-):
-    draft = DraftMaterializationService().materialize_draft(
-        identity=identity,
+    comment_refs: list[str] | None = None,
+) -> RewriteRequest:
+    # Mirrors writing_assistant_service._record_rewrite_candidate: no materialized
+    # draft; the request carries runtime identity metadata for the candidate gate.
+    return RewriteRequest(
+        request_id=f"rewrite_request_{uuid4().hex[:12]}",
+        session_id=identity.session_id,
+        turn_id=identity.turn_id,
         draft_ref=draft_ref,
-        source_output_ref=f"artifact:{identity.turn_id}",
-        output_text=(
-            "The storm arrived at dusk.\n\n"
-            "Mira kept walking.\n\n"
-            "The bell tower answered."
-        ),
-        source_format="markdown",
-    )
-    return service.record_draft_document(identity=identity, draft_document=draft)
-
-
-def _anchor(block_id: str) -> RevisionAnchorRef:
-    return RevisionAnchorRef(
-        anchor_scope="single_block",
-        block_ids=[block_id],
-        start_offset=0,
-        end_offset=5,
+        draft_document_id=f"light_draft:{uuid4().hex[:12]}",
+        rewrite_scope="full",
+        global_instruction="Rewrite this candidate.",
+        comment_refs=comment_refs or [],
+        metadata_json={
+            "story_id": identity.story_id,
+            "session_id": identity.session_id,
+            "branch_head_id": identity.branch_head_id,
+            "turn_id": identity.turn_id,
+            "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+        },
     )
 
 

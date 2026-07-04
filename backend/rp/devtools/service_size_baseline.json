@@ -403,13 +403,6 @@
     },
     {
       "kind": "function",
-      "path": "setup_agent/draft_materialization_service.py",
-      "symbol": "_parse_markdown",
-      "lines": 126,
-      "reason": "Grandfathered by T8 initial service-size baseline; future domain-specific refactor owns decomposition."
-    },
-    {
-      "kind": "function",
       "path": "setup_agent/runtime_controller.py",
       "symbol": "SetupRuntimeController.run_activation_check",
       "lines": 197,

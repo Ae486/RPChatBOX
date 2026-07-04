@@ -24,7 +24,7 @@ DraftDocumentBlockKind = Literal[
     "unknown",
 ]
 DraftDocumentSourceFormat = Literal["markdown", "plain_text"]
-ReviewOverlayMode = Literal["viewing", "editing", "suggesting"]
+ReviewOverlayMode = Literal["viewing", "editing"]
 ReviewOverlayStatus = Literal["active", "resolved", "stale", "archived"]
 RevisionAnchorScope = Literal["inline", "single_block", "multi_block"]
 RevisionCommentStatus = Literal["active", "resolved", "deleted"]
@@ -180,7 +180,7 @@ class RevisionCommentRecord(BaseModel):
     turn_id: str
     draft_ref: str
     overlay_id: str
-    anchor_ref: RevisionAnchorRef
+    anchor_ref: RevisionAnchorRef | None = None
     selected_excerpt: str | None = None
     instruction_text: str
     status: RevisionCommentStatus = "active"

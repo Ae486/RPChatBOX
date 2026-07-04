@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,7 +25,7 @@ from rp.models.runtime.mode_extension_contracts import (
     RuleStateCardMaterial,
 )
 from rp.models.core_state.revision_overlay_contracts import (
-    RevisionAnchorRef,
+    RewriteRequest,
 )
 from rp.models.runtime.config_contracts import RuntimeConfigPatchRequest
 from rp.models.runtime.identity import StoryTurnStatus
@@ -44,7 +45,6 @@ from rp.models.story.runtime import (
     StoryArtifactStatus,
 )
 from rp.services.story.archival_evolution_service import ArchivalEvolutionService
-from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.writer.draft_selection_service import (
     DraftSelectionService,
     DraftSelectionServiceError,
@@ -53,7 +53,6 @@ from rp.services.writer.longform_chapter_runtime_service import LongformChapterR
 from rp.services.retrieval.broker import RetrievalBroker
 from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import RewriteCandidateService
-from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime.config_control_service import RuntimeConfigControlService
 from rp.services.runtime.profile_snapshot_service import RuntimeProfileSnapshotService
 from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
@@ -166,43 +165,24 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
         pending_segment_artifact_id=pending.artifact_id,
     )
     overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_product_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref=f"artifact:{pending.artifact_id}",
-        source_output_ref=pending.artifact_id,
-    )
     overlay = overlay_service.create_or_update_overlay(
         identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
+        draft_ref=f"artifact:{pending.artifact_id}",
+        mode="viewing",
     )
     comment = overlay_service.add_comment(
         identity=identity,
         overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
-        selected_excerpt=draft.blocks[0].selected_excerpt,
         instruction_text="Make the bell-tower debt explicit before continuing.",
+        selected_excerpt="The bell tower answered.",
     )
-    tracked_change = overlay_service.add_tracked_change(
-        identity=identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[1].block_id),
-        change_kind="replace",
-        original_text=draft.blocks[1].selected_excerpt,
-        suggested_text="Mira turned back toward the bell tower.",
-    )
-    rewrite_request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_full_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
+    rewrite_request = _rewrite_request(
+        identity,
+        draft_ref=overlay.draft_ref,
         global_instruction="Rewrite from the accepted review overlay.",
         comment_refs=[comment.comment_id],
-        tracked_change_refs=[tracked_change.tracked_change_id],
     )
     unadopted_candidate = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
         session=retrieval_session,
     ).create_full_rewrite_candidate(
         identity=identity,
@@ -213,7 +193,6 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
         ),
     )
     adopted_candidate = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
         session=retrieval_session,
     ).create_full_rewrite_candidate(
         identity=identity,
@@ -226,7 +205,7 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
     selection_service = DraftSelectionService(session=retrieval_session)
 
     assert rewrite_request.comment_refs == [comment.comment_id]
-    assert rewrite_request.tracked_change_refs == [tracked_change.tracked_change_id]
+    assert rewrite_request.tracked_change_refs == []
     assert unadopted_candidate.selected_output_ref is None
     assert adopted_candidate.selected_output_ref is None
 
@@ -237,7 +216,7 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
     selection = selection_service.select_candidate(
         identity=identity,
         turn_id=identity.turn_id,
-        draft_ref=draft.draft_ref,
+        draft_ref=overlay.draft_ref,
         candidate_output_refs=[
             unadopted_candidate.candidate_output_ref,
             adopted_candidate.candidate_output_ref,
@@ -251,7 +230,7 @@ def test_q1_longform_review_rewrite_adopt_continue_keeps_adoption_explicit(
         selection_service.adopt_for_continue(
             identity=identity,
             turn_id=identity.turn_id,
-            draft_ref=draft.draft_ref,
+            draft_ref=overlay.draft_ref,
         )
     assert retired.value.code == "revision_adoption_route_retired"
 
@@ -747,36 +726,31 @@ def _resolve_identity(
     )
 
 
-def _record_product_draft(
-    overlay_service: RevisionOverlayService,
-    *,
+def _rewrite_request(
     identity: MemoryRuntimeIdentity,
+    *,
     draft_ref: str,
-    source_output_ref: str,
-):
-    draft = DraftMaterializationService().materialize_draft(
-        identity=identity,
+    global_instruction: str | None = None,
+    comment_refs: list[str] | None = None,
+) -> RewriteRequest:
+    # Mirrors writing_assistant_service._record_rewrite_candidate: no materialized
+    # draft; the request carries runtime identity metadata for the candidate gate.
+    return RewriteRequest(
+        request_id=f"rewrite_request_{uuid4().hex[:12]}",
+        session_id=identity.session_id,
+        turn_id=identity.turn_id,
         draft_ref=draft_ref,
-        source_output_ref=source_output_ref,
-        output_text=(
-            "The storm arrived at dusk.\n\n"
-            "Mira kept walking.\n\n"
-            "The bell tower answered."
-        ),
-        source_format="markdown",
-    )
-    return overlay_service.record_draft_document(
-        identity=identity,
-        draft_document=draft,
-    )
-
-
-def _anchor(block_id: str) -> RevisionAnchorRef:
-    return RevisionAnchorRef(
-        anchor_scope="single_block",
-        block_ids=[block_id],
-        start_offset=0,
-        end_offset=5,
+        draft_document_id=f"light_draft:{uuid4().hex[:12]}",
+        rewrite_scope="full",
+        global_instruction=global_instruction,
+        comment_refs=comment_refs or [],
+        metadata_json={
+            "story_id": identity.story_id,
+            "session_id": identity.session_id,
+            "branch_head_id": identity.branch_head_id,
+            "turn_id": identity.turn_id,
+            "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+        },
     )
 
 

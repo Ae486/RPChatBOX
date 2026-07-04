@@ -72,7 +72,6 @@ from ..retrieval.writer_usage_guard_service import (
     WriterRetrievalUsageGuardService,
     WriterRetrievalUsageGuardServiceError,
 )
-from ..writer.rewrite_packet_constraint_service import RewritePacketConstraintService
 from .block_consumer_state_service import StoryBlockConsumerStateService
 from .runtime_identity_service import StoryRuntimeIdentityService
 from .runtime_workspace_facade import StoryRuntimeWorkspaceFacade
@@ -150,7 +149,6 @@ class StoryTurnDomainService:
         orchestrator_dispatch_provider: OrchestratorDispatchProvider | None = None,
         story_runtime_adapter_service: StoryRuntimeAdapterService | None = None,
         longform_chapter_runtime_service: LongformChapterRuntimeService | None = None,
-        rewrite_packet_constraint_service: RewritePacketConstraintService | None = None,
     ) -> None:
         self._story_session_service = story_session_service
         self._orchestrator_service = orchestrator_service
@@ -257,16 +255,6 @@ class StoryTurnDomainService:
         self._orchestrator_dispatch_provider = orchestrator_dispatch_provider
         self._story_runtime_adapter_service = (
             story_runtime_adapter_service or StoryRuntimeAdapterService()
-        )
-        rewrite_session = resolver_session or getattr(
-            story_session_service, "_session", None
-        )
-        self._rewrite_packet_constraint_service = (
-            rewrite_packet_constraint_service
-            or RewritePacketConstraintService(
-                story_session_service=story_session_service,
-                session=rewrite_session,
-            )
         )
 
     def prepare_generation_inputs(

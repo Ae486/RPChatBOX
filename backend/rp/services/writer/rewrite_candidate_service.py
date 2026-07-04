@@ -13,7 +13,6 @@ from models.rp_memory_store import RuntimeWorkspaceMaterialRecord
 from rp.errors import RPError
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity, MemorySourceRef
 from rp.models.core_state.revision_overlay_contracts import (
-    DraftDocumentRecord,
     RewriteCandidateRecord,
     RewriteRequest,
 )
@@ -24,7 +23,6 @@ from rp.models.runtime.workspace_material import (
     RuntimeWorkspaceMaterialVisibility,
 )
 from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
-from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
@@ -46,7 +44,6 @@ class RewriteCandidateService:
     def __init__(
         self,
         *,
-        revision_overlay_service: RevisionOverlayService | None = None,
         workspace_material_service: RuntimeWorkspaceMaterialService | None = None,
         session: Session | None = None,
     ) -> None:
@@ -55,14 +52,6 @@ class RewriteCandidateService:
             workspace_material_service
             if workspace_material_service is not None
             else RuntimeWorkspaceMaterialService(session=session)
-        )
-        self._revision_overlay_service = (
-            revision_overlay_service
-            if revision_overlay_service is not None
-            else RevisionOverlayService(
-                workspace_material_service=self._workspace_material_service,
-                session=session,
-            )
         )
 
     def create_full_rewrite_candidate(
@@ -272,28 +261,6 @@ class RewriteCandidateService:
                 "revision_rewrite_visible_output_forbidden",
                 writer_result.visible_output_ref,
             )
-
-    def _require_draft(
-        self,
-        *,
-        identity: MemoryRuntimeIdentity,
-        rewrite_request: RewriteRequest,
-    ) -> DraftDocumentRecord:
-        draft = self._revision_overlay_service.find_draft_document_by_ref(
-            identity=identity,
-            draft_ref=rewrite_request.draft_ref,
-        )
-        if draft is None:
-            raise RewriteCandidateServiceError(
-                "revision_draft_not_visible",
-                rewrite_request.draft_ref,
-            )
-        if draft.draft_document_id != rewrite_request.draft_document_id:
-            raise RewriteCandidateServiceError(
-                "revision_draft_document_mismatch",
-                rewrite_request.draft_document_id,
-            )
-        return draft
 
     def _build_candidate(
         self,

@@ -36,7 +36,6 @@ from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.runtime.context_orchestration_service import ContextOrchestrationService
 from rp.services.runtime.structured_output_runner import StoryStructuredOutputRunner
-from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.core_state.legacy_state_patch_proposal_builder import (
     LegacyStatePatchProposalBuilder,
 )
@@ -778,7 +777,6 @@ class RpRuntimeFactory:
             runtime_config_control_service=RuntimeConfigControlService(self._session),
             story_runtime_debug_query_service=story_runtime_debug_query_service,
             story_runtime_migration_service=story_runtime_migration_service,
-            draft_materialization_service=DraftMaterializationService(),
             revision_overlay_service=RevisionOverlayService(
                 workspace_material_service=runtime_workspace_material_service,
                 session=self._session,

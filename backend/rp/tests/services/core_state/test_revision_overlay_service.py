@@ -1,19 +1,16 @@
-"""Focused tests for R2 review overlay persistence and inspection."""
+"""Focused tests for R2 light review overlay persistence and inspection."""
 
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 from sqlmodel import Session
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
 from rp.models.core_state.revision_overlay_contracts import (
     ReviewOverlayRecord,
-    RevisionAnchorRef,
     RevisionCommentRecord,
 )
 from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
-from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
 from rp.services.core_state.revision_overlay_service import (
     RevisionOverlayService,
     RevisionOverlayServiceError,
@@ -25,27 +22,13 @@ from services.database import get_engine
 def test_overlay_persists_under_exact_identity_and_inspects_later(retrieval_session):
     identity = _identity()
     service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(service, identity=identity, draft_ref="draft:r2:persist")
+    overlay = _ensure_overlay(service, identity=identity, draft_ref="artifact:r2:persist")
 
-    overlay = service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
     comment = service.add_comment(
         identity=identity,
         overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
         instruction_text="Make the opening less abrupt.",
-        selected_excerpt=draft.blocks[0].selected_excerpt,
-    )
-    tracked_change = service.add_tracked_change(
-        identity=identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
-        change_kind="replace",
-        original_text="The storm arrived at dusk.",
-        suggested_text="The storm reached the valley at dusk.",
+        selected_excerpt="The storm arrived at dusk.",
     )
     retrieval_session.commit()
 
@@ -57,73 +40,42 @@ def test_overlay_persists_under_exact_identity_and_inspects_later(retrieval_sess
         )
 
     assert inspection.overlay.overlay_id == overlay.overlay_id
-    assert inspection.overlay.draft_document_id == draft.draft_document_id
+    assert inspection.overlay.draft_document_id == overlay.draft_document_id
     assert inspection.overlay.comment_refs == [comment.comment_id]
-    assert inspection.overlay.tracked_change_refs == [tracked_change.tracked_change_id]
     assert inspection.comments == [comment]
-    assert inspection.tracked_changes == [tracked_change]
     assert inspection.active_comment_refs == [comment.comment_id]
-    assert inspection.active_tracked_change_refs == [tracked_change.tracked_change_id]
+    assert inspection.tracked_changes == []
+    assert inspection.active_tracked_change_refs == []
     assert inspection.metadata_json["read_only"] is True
 
 
-def test_comment_and_tracked_change_reject_anchors_outside_current_draft(
-    retrieval_session,
-):
+def test_comment_requires_selected_excerpt_light_anchor(retrieval_session):
+    # Ruling A: the excerpt is the sole comment anchor; block anchors are retired.
     identity = _identity(turn_id="turn-anchor")
     service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(service, identity=identity, draft_ref="draft:r2:anchor")
-    overlay = service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
-    missing_anchor = _anchor("draftblk_missing")
+    overlay = _ensure_overlay(service, identity=identity, draft_ref="artifact:r2:anchor")
 
-    with pytest.raises(RevisionOverlayServiceError) as comment_exc:
+    with pytest.raises(ValueError):
         service.add_comment(
             identity=identity,
             overlay_id=overlay.overlay_id,
-            anchor_ref=missing_anchor,
-            instruction_text="Point at a missing paragraph.",
+            instruction_text="Missing the required excerpt anchor.",
+            selected_excerpt="   ",
         )
-    assert comment_exc.value.code == "revision_anchor_block_not_found"
-
-    with pytest.raises(RevisionOverlayServiceError) as tracked_exc:
-        service.add_tracked_change(
-            identity=identity,
-            overlay_id=overlay.overlay_id,
-            anchor_ref=missing_anchor,
-            change_kind="delete",
-            original_text="Missing.",
-        )
-    assert tracked_exc.value.code == "revision_anchor_block_not_found"
 
 
-def test_suggesting_creates_review_sidecars_without_truth_or_rewrite_refs(
+def test_light_comment_creates_review_sidecars_without_truth_or_rewrite_refs(
     retrieval_session,
 ):
-    identity = _identity(turn_id="turn-suggesting")
+    identity = _identity(turn_id="turn-sidecar")
     service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(service, identity=identity, draft_ref="draft:r2:suggest")
-    overlay = service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
-    )
+    overlay = _ensure_overlay(service, identity=identity, draft_ref="artifact:r2:sidecar")
 
     service.add_comment(
         identity=identity,
         overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
         instruction_text="Tighten this sentence.",
-    )
-    service.add_tracked_change(
-        identity=identity,
-        overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
-        change_kind="insert",
-        suggested_text="A lantern flickered nearby.",
+        selected_excerpt="The storm arrived at dusk.",
     )
 
     materials = RuntimeWorkspaceMaterialService(
@@ -134,11 +86,10 @@ def test_suggesting_creates_review_sidecars_without_truth_or_rewrite_refs(
         domain="chapter",
     )
 
+    # No draft_document (materialization retired) and no tracked_change sidecars.
     assert {material.payload["payload_kind"] for material in materials} == {
-        "draft_document",
         "review_overlay",
         "revision_comment",
-        "tracked_change",
     }
     for material in materials:
         assert material.metadata["source_of_truth"] is False
@@ -150,16 +101,13 @@ def test_suggesting_creates_review_sidecars_without_truth_or_rewrite_refs(
         assert material.payload["rewrite_instruction_ref"] is None
 
 
-def test_editing_overlay_does_not_create_llm_rewrite_instruction(
-    retrieval_session,
-):
+def test_editing_overlay_does_not_create_llm_rewrite_instruction(retrieval_session):
     identity = _identity(turn_id="turn-editing")
     service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(service, identity=identity, draft_ref="draft:r2:editing")
-
-    overlay = service.create_or_update_overlay(
+    overlay = _ensure_overlay(
+        service,
         identity=identity,
-        draft_document_id=draft.draft_document_id,
+        draft_ref="artifact:r2:editing",
         mode="editing",
     )
     inspection = service.inspect_overlay(
@@ -174,24 +122,26 @@ def test_editing_overlay_does_not_create_llm_rewrite_instruction(
     assert inspection.overlay.metadata_json["rewrite_instruction_ref"] is None
 
 
+def test_suggesting_mode_is_unsupported(retrieval_session):
+    identity = _identity(turn_id="turn-suggesting")
+    service = RevisionOverlayService(session=retrieval_session)
+
+    with pytest.raises(ValueError):
+        service.create_or_update_overlay(
+            identity=identity,
+            draft_ref="artifact:r2:suggesting",
+            mode="suggesting",
+        )
+
+
 def test_same_draft_and_mode_ensure_is_idempotent(retrieval_session):
     identity = _identity(turn_id="turn-idempotent")
     service = RevisionOverlayService(session=retrieval_session)
-    draft = DraftMaterializationService().materialize_draft(
-        identity=identity,
-        draft_ref="draft:r2:idempotent",
-        source_output_ref="artifact:turn-idempotent",
-        output_text="The storm arrived at dusk.\n\nMira kept walking.",
-        source_format="markdown",
-    )
+    draft_ref = "artifact:r2:idempotent"
 
-    first_draft = service.record_draft_document(
-        identity=identity,
-        draft_document=draft,
-    )
     first_overlay = service.create_or_update_overlay(
         identity=identity,
-        draft_document_id=first_draft.draft_document_id,
+        draft_ref=draft_ref,
         mode="viewing",
     )
     material_service = RuntimeWorkspaceMaterialService(session=retrieval_session)
@@ -204,27 +154,24 @@ def test_same_draft_and_mode_ensure_is_idempotent(retrieval_session):
         )
     }
 
-    second_draft = service.record_draft_document(
-        identity=identity,
-        draft_document=draft,
-    )
     second_overlay = service.create_or_update_overlay(
         identity=identity,
-        draft_document_id=draft.draft_document_id,
+        draft_ref=draft_ref,
         mode="viewing",
     )
-    later_material_ids = {
-        material.material_id
-        for material in material_service.list_materials(
-            identity=identity,
-            material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
-            domain="chapter",
-        )
-    }
+    later_materials = material_service.list_materials(
+        identity=identity,
+        material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
+        domain="chapter",
+    )
+    later_material_ids = {material.material_id for material in later_materials}
 
-    assert second_draft == first_draft
     assert second_overlay == first_overlay
     assert later_material_ids == initial_material_ids
+    # The light surface never materializes a draft document to satisfy idempotency.
+    assert {material.payload["payload_kind"] for material in later_materials} == {
+        "review_overlay"
+    }
 
 
 def test_resolve_and_delete_comment_lifecycle_keeps_debug_tombstone(
@@ -232,17 +179,14 @@ def test_resolve_and_delete_comment_lifecycle_keeps_debug_tombstone(
 ):
     identity = _identity(turn_id="turn-lifecycle")
     service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(service, identity=identity, draft_ref="draft:r2:lifecycle")
-    overlay = service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
+    overlay = _ensure_overlay(
+        service, identity=identity, draft_ref="artifact:r2:lifecycle"
     )
     comment = service.add_comment(
         identity=identity,
         overlay_id=overlay.overlay_id,
-        anchor_ref=_anchor(draft.blocks[0].block_id),
         instruction_text="Resolve then delete this.",
+        selected_excerpt="The storm arrived at dusk.",
     )
 
     resolved = service.resolve_comment(identity=identity, comment_id=comment.comment_id)
@@ -262,34 +206,37 @@ def test_resolve_and_delete_comment_lifecycle_keeps_debug_tombstone(
 def test_superdoc_id_stays_adapter_metadata_not_runtime_truth_id(retrieval_session):
     identity = _identity(turn_id="turn-superdoc")
     service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(service, identity=identity, draft_ref="draft:r2:superdoc")
-    overlay = service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
+    overlay = _ensure_overlay(
+        service, identity=identity, draft_ref="artifact:r2:superdoc"
     )
     superdoc_anchor_id = "superdoc-comment-anchor-1"
 
     comment = service.add_comment(
         identity=identity,
         overlay_id=overlay.overlay_id,
-        anchor_ref=RevisionAnchorRef(
-            anchor_scope="single_block",
-            block_ids=[draft.blocks[0].block_id],
-            superdoc_anchor_id=superdoc_anchor_id,
-        ),
         instruction_text="Adapter metadata only.",
+        selected_excerpt="The storm arrived at dusk.",
+        superdoc_anchor_id=superdoc_anchor_id,
     )
     inspection = service.inspect_overlay(
         identity=identity,
         overlay_id=overlay.overlay_id,
     )
 
-    assert comment.anchor_ref.superdoc_anchor_id == superdoc_anchor_id
+    # Editor id is stored as adapter metadata and never promoted into runtime ids.
+    assert comment.metadata_json["superdoc_anchor_id"] == superdoc_anchor_id
     assert superdoc_anchor_id not in comment.comment_id
     assert superdoc_anchor_id not in overlay.overlay_id
+    assert superdoc_anchor_id not in identity.story_id
+    assert superdoc_anchor_id not in identity.session_id
+    assert superdoc_anchor_id not in identity.branch_head_id
+    assert superdoc_anchor_id not in identity.turn_id
+    assert superdoc_anchor_id not in identity.runtime_profile_snapshot_id
     assert all(superdoc_anchor_id not in ref for ref in inspection.material_refs)
-    assert inspection.comments[0].anchor_ref.superdoc_anchor_id == superdoc_anchor_id
+    assert (
+        inspection.comments[0].metadata_json["superdoc_anchor_id"]
+        == superdoc_anchor_id
+    )
 
 
 def test_overlay_reads_are_isolated_by_full_runtime_identity(retrieval_session):
@@ -299,11 +246,8 @@ def test_overlay_reads_are_isolated_by_full_runtime_identity(retrieval_session):
         branch_head_id="branch-other",
     )
     service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(service, identity=identity, draft_ref="draft:r2:isolation")
-    overlay = service.create_or_update_overlay(
-        identity=identity,
-        draft_document_id=draft.draft_document_id,
-        mode="suggesting",
+    overlay = _ensure_overlay(
+        service, identity=identity, draft_ref="artifact:r2:isolation"
     )
 
     assert service.list_overlays(identity=identity) == [overlay]
@@ -316,41 +260,13 @@ def test_overlay_reads_are_isolated_by_full_runtime_identity(retrieval_session):
     assert exc.value.code == "revision_overlay_not_found"
 
 
-def test_same_draft_document_id_can_materialize_on_different_branches(
-    retrieval_session,
-):
-    identity = _identity(turn_id="turn-same-draft")
-    other_branch_identity = _identity(
-        turn_id="turn-same-draft",
-        branch_head_id="branch-other",
-    )
-    service = RevisionOverlayService(session=retrieval_session)
-
-    first = _record_draft(service, identity=identity, draft_ref="draft:r2:same")
-    second = _record_draft(
-        service,
-        identity=other_branch_identity,
-        draft_ref="draft:r2:same",
-    )
-
-    assert first.draft_document_id == second.draft_document_id
-    assert service.find_draft_document_by_ref(
-        identity=identity,
-        draft_ref="draft:r2:same",
-    ) == first
-    assert service.find_draft_document_by_ref(
-        identity=other_branch_identity,
-        draft_ref="draft:r2:same",
-    ) == second
-
-
 def test_revision_overlay_dtos_use_factory_defaults_not_shared_mutable_state():
     first = ReviewOverlayRecord(
         overlay_id="overlay-1",
         turn_id="turn-1",
         draft_ref="draft-1",
         draft_document_id="doc-1",
-        mode="suggesting",
+        mode="editing",
     )
     second = ReviewOverlayRecord(
         overlay_id="overlay-2",
@@ -370,7 +286,7 @@ def test_revision_overlay_dtos_use_factory_defaults_not_shared_mutable_state():
         turn_id="turn-1",
         draft_ref="draft-1",
         overlay_id="overlay-1",
-        anchor_ref=_anchor("block-1"),
+        selected_excerpt="Keep separate.",
         instruction_text="Keep separate.",
     )
     second_comment = RevisionCommentRecord(
@@ -378,55 +294,27 @@ def test_revision_overlay_dtos_use_factory_defaults_not_shared_mutable_state():
         turn_id="turn-1",
         draft_ref="draft-1",
         overlay_id="overlay-1",
-        anchor_ref=_anchor("block-1"),
+        selected_excerpt="Also separate.",
         instruction_text="Also separate.",
     )
     first_comment.metadata_json["marker"] = "first"
 
     assert second_comment.metadata_json == {}
+    assert first_comment.anchor_ref is None
+    assert second_comment.anchor_ref is None
 
 
-def test_anchor_contract_rejects_empty_or_invalid_inline_shape():
-    with pytest.raises(ValidationError):
-        RevisionAnchorRef(anchor_scope="single_block", block_ids=[])
-
-    with pytest.raises(ValidationError, match="exactly one"):
-        RevisionAnchorRef(
-            anchor_scope="inline",
-            block_ids=["block-1", "block-2"],
-        )
-
-    with pytest.raises(ValidationError, match="end_offset"):
-        RevisionAnchorRef(
-            anchor_scope="single_block",
-            block_ids=["block-1"],
-            start_offset=10,
-            end_offset=1,
-        )
-
-
-def _record_draft(
+def _ensure_overlay(
     service: RevisionOverlayService,
     *,
     identity: MemoryRuntimeIdentity,
     draft_ref: str,
-):
-    draft = DraftMaterializationService().materialize_draft(
+    mode: str = "viewing",
+) -> ReviewOverlayRecord:
+    return service.create_or_update_overlay(
         identity=identity,
         draft_ref=draft_ref,
-        source_output_ref=f"artifact:{identity.turn_id}",
-        output_text="The storm arrived at dusk.\n\nMira kept walking.",
-        source_format="markdown",
-    )
-    return service.record_draft_document(identity=identity, draft_document=draft)
-
-
-def _anchor(block_id: str) -> RevisionAnchorRef:
-    return RevisionAnchorRef(
-        anchor_scope="single_block",
-        block_ids=[block_id],
-        start_offset=0,
-        end_offset=5,
+        mode=mode,
     )
 
 

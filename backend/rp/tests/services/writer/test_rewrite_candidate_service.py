@@ -2,43 +2,32 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from rp.models.memory.contract_registry import MemoryRuntimeIdentity
-from rp.models.core_state.revision_overlay_contracts import RewriteCandidateRecord
+from rp.models.core_state.revision_overlay_contracts import (
+    RewriteCandidateRecord,
+    RewriteRequest,
+)
 from rp.models.runtime.workspace_material import RuntimeWorkspaceMaterialKind
 from rp.models.writer.writing_worker_contracts import WritingWorkerExecutionResult
-from rp.services.setup_agent.draft_materialization_service import DraftMaterializationService
-from rp.services.core_state.revision_overlay_service import RevisionOverlayService
 from rp.services.writer.rewrite_candidate_service import (
     RewriteCandidateService,
     RewriteCandidateServiceError,
 )
-from rp.services.writer.rewrite_request_builder_service import RewriteRequestBuilderService
 from rp.services.runtime.workspace_material_service import RuntimeWorkspaceMaterialService
 
 
 def test_full_rewrite_candidate_is_saved_without_auto_adoption(retrieval_session):
     identity = _identity(turn_id="turn-r4-full")
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r4:full",
-    )
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_full_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
+    request = _rewrite_request(
+        identity,
+        draft_ref="artifact:r4:full",
         global_instruction="Rewrite with quieter tension.",
-        comment_refs=[],
-        tracked_change_refs=[],
     )
-    candidate_service = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    )
+    candidate_service = RewriteCandidateService(session=retrieval_session)
 
     candidate = candidate_service.create_full_rewrite_candidate(
         identity=identity,
@@ -89,25 +78,8 @@ def test_candidate_list_is_isolated_by_full_runtime_identity(retrieval_session):
         turn_id="turn-r4-isolation",
         branch_head_id="branch-other",
     )
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r4:isolation",
-    )
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_full_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        global_instruction=None,
-        comment_refs=[],
-        tracked_change_refs=[],
-    )
-    candidate_service = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    )
+    request = _rewrite_request(identity, draft_ref="artifact:r4:isolation")
+    candidate_service = RewriteCandidateService(session=retrieval_session)
     candidate = candidate_service.create_full_rewrite_candidate(
         identity=identity,
         rewrite_request=request,
@@ -124,30 +96,8 @@ def test_candidate_creation_rejects_cross_branch_request_reuse(retrieval_session
         turn_id="turn-r4-request-identity",
         branch_head_id="branch-r4-other",
     )
-    overlay_service = RevisionOverlayService(session=retrieval_session)
-    draft = _record_draft(
-        overlay_service,
-        identity=identity,
-        draft_ref="draft:r4:request-identity",
-    )
-    _record_draft(
-        overlay_service,
-        identity=other_branch_identity,
-        draft_ref=draft.draft_ref,
-    )
-    request = RewriteRequestBuilderService(
-        revision_overlay_service=overlay_service,
-    ).build_full_rewrite_request(
-        identity=identity,
-        draft_ref=draft.draft_ref,
-        global_instruction=None,
-        comment_refs=[],
-        tracked_change_refs=[],
-    )
-    candidate_service = RewriteCandidateService(
-        revision_overlay_service=overlay_service,
-        session=retrieval_session,
-    )
+    request = _rewrite_request(identity, draft_ref="artifact:r4:request-identity")
+    candidate_service = RewriteCandidateService(session=retrieval_session)
 
     with pytest.raises(RewriteCandidateServiceError) as exc:
         candidate_service.create_full_rewrite_candidate(
@@ -195,24 +145,30 @@ def test_candidate_dtos_use_factory_defaults_not_shared_mutable_state():
     assert second.metadata_json == {}
 
 
-def _record_draft(
-    service: RevisionOverlayService,
-    *,
+def _rewrite_request(
     identity: MemoryRuntimeIdentity,
+    *,
     draft_ref: str,
-):
-    draft = DraftMaterializationService().materialize_draft(
-        identity=identity,
+    global_instruction: str | None = None,
+) -> RewriteRequest:
+    # Mirrors writing_assistant_service._record_rewrite_candidate: no materialized
+    # draft; the request carries runtime identity metadata for the candidate gate.
+    return RewriteRequest(
+        request_id=f"rewrite_request_{uuid4().hex[:12]}",
+        session_id=identity.session_id,
+        turn_id=identity.turn_id,
         draft_ref=draft_ref,
-        source_output_ref=f"artifact:{identity.turn_id}",
-        output_text=(
-            "The storm arrived at dusk.\n\n"
-            "Mira kept walking.\n\n"
-            "The bell tower answered."
-        ),
-        source_format="markdown",
+        draft_document_id=f"light_draft:{uuid4().hex[:12]}",
+        rewrite_scope="full",
+        global_instruction=global_instruction,
+        metadata_json={
+            "story_id": identity.story_id,
+            "session_id": identity.session_id,
+            "branch_head_id": identity.branch_head_id,
+            "turn_id": identity.turn_id,
+            "runtime_profile_snapshot_id": identity.runtime_profile_snapshot_id,
+        },
     )
-    return service.record_draft_document(identity=identity, draft_document=draft)
 
 
 def _writer_result(

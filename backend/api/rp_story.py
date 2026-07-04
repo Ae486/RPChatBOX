@@ -68,18 +68,12 @@ class RevisionDraftUpdateRequest(BaseModel):
 
 
 class RevisionCommentCreateRequest(BaseModel):
-    block_id: str = Field(min_length=1)
     instruction_text: str = Field(min_length=1)
-    selected_excerpt: str | None = None
+    selected_excerpt: str = Field(min_length=1)
+    block_id: str | None = None
     start_offset: int | None = Field(default=None, ge=0)
     end_offset: int | None = Field(default=None, ge=0)
     superdoc_anchor_id: str | None = None
-
-
-class RevisionTrackedChangeCreateRequest(BaseModel):
-    block_id: str = Field(min_length=1)
-    original_text: str | None = None
-    suggested_text: str | None = None
 
 
 class StoryBranchCreateRequest(BaseModel):
@@ -656,27 +650,6 @@ async def create_revision_review_comment(
             start_offset=payload.start_offset,
             end_offset=payload.end_offset,
             superdoc_anchor_id=payload.superdoc_anchor_id,
-        )
-    except (RuntimeError, ValueError) as exc:
-        raise _revision_review_invalid(exc) from exc
-
-
-@router.post(
-    "/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}/tracked-changes"
-)
-async def create_revision_review_tracked_change(
-    session_id: str,
-    artifact_id: str,
-    payload: RevisionTrackedChangeCreateRequest,
-    controller: StoryRuntimeController = Depends(_story_controller),
-):
-    try:
-        return controller.add_revision_tracked_change(
-            session_id=session_id,
-            artifact_id=artifact_id,
-            block_id=payload.block_id,
-            original_text=payload.original_text,
-            suggested_text=payload.suggested_text,
         )
     except (RuntimeError, ValueError) as exc:
         raise _revision_review_invalid(exc) from exc

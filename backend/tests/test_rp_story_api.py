@@ -522,47 +522,87 @@ def _seed_revision_review_session() -> dict[str, str]:
         }
 
 
-def test_revision_review_api_anchors_controls_to_draft_blocks_and_sidecars(client):
+def test_revision_review_surface_returns_degraded_draft_document(client):
     seeded = _seed_revision_review_session()
     session_id = seeded["session_id"]
     artifact_id = seeded["artifact_id"]
     route = f"/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}"
 
-    surface = client.get(route, params={"mode": "suggesting"})
+    surface = client.get(route, params={"mode": "viewing"})
     assert surface.status_code == 200
-    surface_payload = surface.json()
-    assert surface_payload["canonical_truth"] is False
-    assert surface_payload["runtime_truth_owner"] == "rp_runtime"
-    block_id = surface_payload["draft_document"]["blocks"][0]["block_id"]
+    payload = surface.json()
+    assert payload["canonical_truth"] is False
+    assert payload["runtime_truth_owner"] == "rp_runtime"
+    assert payload["draft_text"] == "The storm arrived at dusk.\n\nMira kept walking."
+    # Materialization is retired (S6-3.5): draft_document is an empty compatible shape.
+    draft_document = payload["draft_document"]
+    assert draft_document["blocks"] == []
+    for key in (
+        "draft_document_id",
+        "turn_id",
+        "draft_ref",
+        "source_output_ref",
+        "source_format",
+        "materialization_version",
+        "metadata_json",
+    ):
+        assert key in draft_document
+    assert payload["tracked_changes"] == []
+    assert payload["active_tracked_change_refs"] == []
+
+
+def test_revision_review_rejects_suggesting_mode(client):
+    seeded = _seed_revision_review_session()
+    route = (
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/revision-review/{seeded['artifact_id']}"
+    )
+
+    rejected = client.get(route, params={"mode": "suggesting"})
+    assert rejected.status_code == 400
+    assert (
+        rejected.json()["detail"]["error"]["code"]
+        == "revision_overlay_mode_unsupported"
+    )
+
+
+def test_revision_review_tracked_changes_endpoint_is_retired(client):
+    seeded = _seed_revision_review_session()
+    route = (
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/revision-review/{seeded['artifact_id']}"
+    )
+
+    retired = client.post(
+        f"{route}/tracked-changes",
+        json={"block_id": "any-block", "suggested_text": "x"},
+    )
+    assert retired.status_code == 404
+
+
+def test_revision_review_comment_lifecycle_uses_light_excerpt_anchor(client):
+    seeded = _seed_revision_review_session()
+    session_id = seeded["session_id"]
+    artifact_id = seeded["artifact_id"]
+    route = f"/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}"
 
     commented = client.post(
         f"{route}/comments",
         json={
-            "block_id": block_id,
             "instruction_text": "Make this opening less abrupt.",
             "selected_excerpt": "The storm arrived at dusk.",
+            "superdoc_anchor_id": "superdoc-anchor-1",
         },
     )
     assert commented.status_code == 200
     comment_payload = commented.json()
     comment = comment_payload["comments"][0]
-    assert comment["anchor_ref"]["block_ids"] == [block_id]
+    assert comment["anchor_ref"] is None
+    assert comment["selected_excerpt"] == "The storm arrived at dusk."
     assert comment["status"] == "active"
+    # Editor id is preserved as adapter metadata, not promoted into runtime identity.
+    assert comment["metadata_json"]["superdoc_anchor_id"] == "superdoc-anchor-1"
     assert comment_payload["active_comment_refs"] == [comment["comment_id"]]
-
-    tracked = client.post(
-        f"{route}/tracked-changes",
-        json={
-            "block_id": block_id,
-            "original_text": "The storm arrived at dusk.",
-            "suggested_text": "The storm reached the valley at dusk.",
-        },
-    )
-    assert tracked.status_code == 200
-    tracked_payload = tracked.json()
-    tracked_change = tracked_payload["tracked_changes"][0]
-    assert tracked_change["anchor_ref"]["block_ids"] == [block_id]
-    assert tracked_change["status"] == "active"
 
     resolved = client.post(f"{route}/comments/{comment['comment_id']}/resolve")
     assert resolved.status_code == 200
@@ -573,6 +613,36 @@ def test_revision_review_api_anchors_controls_to_draft_blocks_and_sidecars(clien
     deleted_payload = deleted.json()
     assert deleted_payload["comments"][0]["status"] == "deleted"
     assert deleted_payload["active_comment_refs"] == []
+
+
+def test_revision_review_comment_requires_selected_excerpt(client):
+    seeded = _seed_revision_review_session()
+    route = (
+        f"/api/rp/story-sessions/{seeded['session_id']}"
+        f"/revision-review/{seeded['artifact_id']}"
+    )
+
+    missing = client.post(
+        f"{route}/comments",
+        json={"instruction_text": "No excerpt provided."},
+    )
+    assert missing.status_code == 422
+
+
+def test_revision_review_comment_sidecars_are_review_only_non_truth(client):
+    seeded = _seed_revision_review_session()
+    session_id = seeded["session_id"]
+    artifact_id = seeded["artifact_id"]
+    route = f"/api/rp/story-sessions/{session_id}/revision-review/{artifact_id}"
+
+    commented = client.post(
+        f"{route}/comments",
+        json={
+            "instruction_text": "Make this opening less abrupt.",
+            "selected_excerpt": "The storm arrived at dusk.",
+        },
+    )
+    assert commented.status_code == 200
 
     identity = MemoryRuntimeIdentity(
         story_id=seeded["story_id"],
@@ -590,14 +660,14 @@ def test_revision_review_api_anchors_controls_to_draft_blocks_and_sidecars(clien
             domain=Domain.CHAPTER.value,
         )
     payload_kinds = {material.payload.get("payload_kind") for material in materials}
-    assert {
-        "draft_document",
-        "review_overlay",
-        "revision_comment",
-        "tracked_change",
-    } <= payload_kinds
+    # Light surface writes only overlay + comment sidecars, all non-truth.
+    assert {"review_overlay", "revision_comment"} <= payload_kinds
+    assert "draft_document" not in payload_kinds
+    assert "tracked_change" not in payload_kinds
     assert "draft_adoption_receipt" not in payload_kinds
     assert "rewrite_candidate" not in payload_kinds
+    for material in materials:
+        assert material.payload["canonical_truth"] is False
 
 
 def _authoritative_block_patch_payload(*, title: str, domain: str = "chapter") -> dict:
