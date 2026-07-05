@@ -1353,6 +1353,8 @@ class StoryTurnDomainService:
         source = self._story_session_service.get_artifact(artifact_id)
         if source is None:
             raise ValueError(f"StoryArtifact not found: {artifact_id}")
+        if source.session_id != session.session_id:
+            raise ValueError(f"segment_reopen_session_mismatch:{artifact_id}")
         if source.artifact_kind != StoryArtifactKind.STORY_SEGMENT:
             raise ValueError(f"segment_reopen_kind_invalid:{artifact_id}")
         if source.status != StoryArtifactStatus.ACCEPTED:
@@ -1519,6 +1521,8 @@ class StoryTurnDomainService:
         artifact = self._story_session_service.get_artifact(artifact_id)
         if artifact is None:
             raise ValueError(f"StoryArtifact not found: {artifact_id}")
+        if artifact.session_id != session_id:
+            raise ValueError(f"segment_reopen_session_mismatch:{artifact_id}")
         return artifact
 
     def _supersede_reopen_source_segment(
@@ -2322,6 +2326,11 @@ class StoryTurnDomainService:
             artifact_metadata.update(
                 specialist_bundle.story_segment_metadata.to_artifact_metadata()
             )
+            if pending_artifact is not None:
+                pending_meta = dict(pending_artifact.metadata or {})
+                for reopen_key in ("manual_reopen", "reopen_source_artifact_id"):
+                    if reopen_key in pending_meta:
+                        artifact_metadata[reopen_key] = pending_meta[reopen_key]
         artifact = self._story_session_service.create_artifact(
             session_id=session.session_id,
             chapter_workspace_id=chapter.chapter_workspace_id,

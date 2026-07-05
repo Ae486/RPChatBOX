@@ -21,6 +21,7 @@ from rp.models.runtime.identity import StoryTurnStatus
 from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
+    LongformTurnRequest,
     StoryArtifactStatus,
 )
 from rp.tests.services.story.test_story_runtime_product_wiring_writer_constraints import (
@@ -30,8 +31,11 @@ from rp.tests.services.story.test_story_runtime_product_wiring_writer_constraint
 )
 from rp.tests.services.writer.test_longform_chapter_runtime_service import (
     _accept_outline,
+    _build_context_orchestration_service,
     _build_turn_domain_service,
     _seed_story_runtime,
+    _segment_plan,
+    _specialist_bundle,
 )
 
 
@@ -328,3 +332,215 @@ def test_maintenance_mutual_exclusion_same_scope(retrieval_session):
         )
         is False
     )
+
+
+async def _reopen_rewrite_tail(
+    turn_domain_service,
+    story_session_service,
+    retrieval_session,
+    *,
+    session,
+    chapter,
+    source_artifact_id,
+    rewritten_text,
+    created_from,
+):
+    """Re-open an ACCEPTED tail then drive a REWRITE_PENDING_SEGMENT persist over the
+    reopened draft, returning the rewrite artifact_id.
+
+    This exercises the real ``persist_generated_artifact`` path (the seam where S6-5 C1
+    lives): the REWRITE branch rebuilds ``artifact_metadata`` from scratch, so the reopen
+    provenance (``manual_reopen`` / ``reopen_source_artifact_id``) must be carried forward
+    rather than dropped.
+    """
+    await turn_domain_service.reopen_accepted_segment(
+        session_id=session.session_id,
+        artifact_id=source_artifact_id,
+    )
+    draft_id = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    ).pending_segment_artifact_id
+    assert draft_id is not None
+    rewrite_identity, identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
+        created_from=created_from,
+        actor=created_from,
+    )
+    orchestration = _build_context_orchestration_service(
+        story_session_service,
+        retrieval_session,
+        chapter_runtime_service=turn_domain_service._longform_chapter_runtime_service,
+    )
+    packet = orchestration.build_writing_packet(
+        session=session,
+        chapter=story_session_service.get_chapter_workspace(
+            chapter.chapter_workspace_id
+        ),
+        plan=_segment_plan(),
+        specialist_bundle=_specialist_bundle(),
+        runtime_identity=rewrite_identity,
+    )
+    response = turn_domain_service.persist_generated_artifact(
+        request=LongformTurnRequest(
+            session_id=session.session_id,
+            command_kind=LongformTurnCommandKind.REWRITE_PENDING_SEGMENT,
+            model_id="s65fix_rewrite",
+            target_artifact_id=draft_id,
+        ),
+        packet=packet,
+        plan=_segment_plan(),
+        text=rewritten_text,
+        specialist_bundle=_specialist_bundle(),
+        pending_artifact_id=draft_id,
+    )
+    # Terminalize the rewrite writer turn so the next cycle's resolve and the cycle-2
+    # re_adopt run cleanly under the S1-core single-active-turn invariant.
+    identity_service.update_turn_status(
+        turn_id=rewrite_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason=f"s65fix_rewrite_settled:{created_from}",
+    )
+    return response.artifact_id
+
+
+@pytest.mark.asyncio
+async def test_reopen_and_readopt_reject_cross_session_target(retrieval_session):
+    """S6-5 B1: re-open / re-adopt must fail closed when the target artifact belongs to a
+    different session, and must not mutate the victim session's state.
+
+    Both entrypoints share the guard: ``reopen_accepted_segment`` (1a) and the
+    ``_resolve_readopt_pending_artifact`` resolver behind ``re_adopt_pending_segment`` /
+    ``cancel_reopen`` (1b).
+    """
+    story_session_service, victim, chapter, _seg1, seg2 = _seed_two_accepted_segments(
+        retrieval_session
+    )
+    # A separate caller session on the same story; only the session_id differs, which is
+    # exactly the cross-session case the guard must catch.
+    _caller_service, caller, _caller_chapter = _seed_story_runtime(retrieval_session)
+    assert caller.session_id != victim.session_id
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    )
+
+    chapter_before = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    )
+    assert chapter_before.pending_segment_artifact_id is None
+
+    # 1a: reopen guard on the tail owned by the victim session.
+    with pytest.raises(ValueError, match="segment_reopen_session_mismatch"):
+        await turn_domain_service.reopen_accepted_segment(
+            session_id=caller.session_id,
+            artifact_id=seg2.artifact_id,
+        )
+    # 1b: shared resolver guard (drives the re_adopt entrypoint).
+    with pytest.raises(ValueError, match="segment_reopen_session_mismatch"):
+        await turn_domain_service.re_adopt_pending_segment(
+            session_id=caller.session_id,
+            target_artifact_id=seg2.artifact_id,
+        )
+
+    # Zero state change on the victim: tail stays ACCEPTED, no pending slot opened, and
+    # the phase is untouched.
+    assert (
+        story_session_service.get_artifact(seg2.artifact_id).status
+        == StoryArtifactStatus.ACCEPTED
+    )
+    chapter_after = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    )
+    assert chapter_after.pending_segment_artifact_id is None
+    assert chapter_after.phase == chapter_before.phase
+
+
+@pytest.mark.asyncio
+async def test_rewrite_preserves_reopen_metadata_no_double_accepted(retrieval_session):
+    """S6-5 C1: a REWRITE over a reopened draft must carry the reopen provenance forward.
+
+    (a) the rewritten draft keeps ``manual_reopen`` + ``reopen_source_artifact_id``;
+    (b) re-adopting the rewrite supersedes the old ACCEPTED tail (no double-ACCEPTED);
+    (c) ``cancel_reopen`` still recognizes the rewritten draft as reopened.
+    """
+    story_session_service, session, chapter, seg1, seg2 = _seed_two_accepted_segments(
+        retrieval_session
+    )
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    )
+
+    # --- Cycle 1: reopen tail -> rewrite -> cancel_reopen (covers (a) + (c)). ---
+    rewrite_a = await _reopen_rewrite_tail(
+        turn_domain_service,
+        story_session_service,
+        retrieval_session,
+        session=session,
+        chapter=chapter,
+        source_artifact_id=seg2.artifact_id,
+        rewritten_text="Beat two rewritten (cancel path).",
+        created_from="s65fix.rewrite.cancel",
+    )
+    # (a) the rewrite rebuild kept the reopen provenance instead of dropping it.
+    rewrite_a_meta = dict(story_session_service.get_artifact(rewrite_a).metadata or {})
+    assert rewrite_a_meta.get("manual_reopen") is True
+    assert rewrite_a_meta.get("reopen_source_artifact_id") == seg2.artifact_id
+    # (c) cancel_reopen recognizes the rewritten draft (would raise
+    # ``segment_reopen_cancel_not_reopened`` if manual_reopen had been dropped).
+    turn_domain_service.cancel_reopen(
+        session_id=session.session_id,
+        target_artifact_id=rewrite_a,
+    )
+    assert (
+        story_session_service.get_artifact(rewrite_a).status
+        == StoryArtifactStatus.SUPERSEDED
+    )
+    cancelled_chapter = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    )
+    assert cancelled_chapter.pending_segment_artifact_id is None
+    # cancel must NOT supersede the reopen source; the tail stays ACCEPTED.
+    assert (
+        story_session_service.get_artifact(seg2.artifact_id).status
+        == StoryArtifactStatus.ACCEPTED
+    )
+    assert _accepted_ids(turn_domain_service, story_session_service, chapter) == [
+        seg1.artifact_id,
+        seg2.artifact_id,
+    ]
+
+    # --- Cycle 2: reopen tail -> rewrite -> re_adopt (covers (b)). ---
+    rewrite_b = await _reopen_rewrite_tail(
+        turn_domain_service,
+        story_session_service,
+        retrieval_session,
+        session=session,
+        chapter=chapter,
+        source_artifact_id=seg2.artifact_id,
+        rewritten_text="Beat two rewritten (readopt path).",
+        created_from="s65fix.rewrite.readopt",
+    )
+    assert (
+        dict(story_session_service.get_artifact(rewrite_b).metadata or {}).get(
+            "reopen_source_artifact_id"
+        )
+        == seg2.artifact_id
+    )
+    await turn_domain_service.re_adopt_pending_segment(
+        session_id=session.session_id,
+        target_artifact_id=rewrite_b,
+    )
+    # (b) old ACCEPTED superseded; rewrite is the single ACCEPTED tail (no double-accept).
+    assert (
+        story_session_service.get_artifact(seg2.artifact_id).status
+        == StoryArtifactStatus.SUPERSEDED
+    )
+    assert (
+        story_session_service.get_artifact(rewrite_b).status
+        == StoryArtifactStatus.ACCEPTED
+    )
+    accepted_after = _accepted_ids(turn_domain_service, story_session_service, chapter)
+    assert accepted_after == [seg1.artifact_id, rewrite_b]
