@@ -284,7 +284,7 @@ class DraftSelectionService:
             .where(RuntimeWorkspaceMaterialRecord.branch_head_id == branch_head_id)
             .where(
                 RuntimeWorkspaceMaterialRecord.material_kind
-                == RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY.value
+                == RuntimeWorkspaceMaterialKind.ADOPTION_RECEIPT.value
             )
             .order_by(RuntimeWorkspaceMaterialRecord.created_at.asc())
             .order_by(RuntimeWorkspaceMaterialRecord.material_id.asc())
@@ -393,6 +393,7 @@ class DraftSelectionService:
             self._receipt_material(
                 identity=identity,
                 material_id=f"draft_selection_{receipt.receipt_id}",
+                material_kind=RuntimeWorkspaceMaterialKind.SELECTION_RECEIPT,
                 payload_version=DRAFT_SELECTION_PAYLOAD_VERSION,
                 payload_kind="draft_selection_receipt",
                 record_id=receipt.receipt_id,
@@ -435,6 +436,7 @@ class DraftSelectionService:
             self._receipt_material(
                 identity=identity,
                 material_id=f"draft_adoption_{receipt.receipt_id}",
+                material_kind=RuntimeWorkspaceMaterialKind.ADOPTION_RECEIPT,
                 payload_version=DRAFT_ADOPTION_PAYLOAD_VERSION,
                 payload_kind="draft_adoption_receipt",
                 record_id=receipt.receipt_id,
@@ -457,6 +459,7 @@ class DraftSelectionService:
         *,
         identity: MemoryRuntimeIdentity,
         material_id: str,
+        material_kind: RuntimeWorkspaceMaterialKind,
         payload_version: str,
         payload_kind: str,
         record_id: str,
@@ -467,7 +470,7 @@ class DraftSelectionService:
     ) -> RuntimeWorkspaceMaterial:
         return RuntimeWorkspaceMaterial(
             material_id=material_id,
-            material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
+            material_kind=material_kind,
             identity=identity,
             domain=_DRAFT_SELECTION_DOMAIN,
             domain_path=f"chapter.revision_overlay.{payload_kind}",
@@ -504,7 +507,7 @@ class DraftSelectionService:
             material
             for material in self._workspace_material_service.list_materials(
                 identity=identity,
-                material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
+                material_kind=RuntimeWorkspaceMaterialKind.SELECTION_RECEIPT,
                 domain=_DRAFT_SELECTION_DOMAIN,
                 lifecycle=RuntimeWorkspaceMaterialLifecycle.ACTIVE,
             )
@@ -520,7 +523,7 @@ class DraftSelectionService:
             material
             for material in self._workspace_material_service.list_materials(
                 identity=identity,
-                material_kind=RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY,
+                material_kind=RuntimeWorkspaceMaterialKind.ADOPTION_RECEIPT,
                 domain=_DRAFT_SELECTION_DOMAIN,
                 lifecycle=RuntimeWorkspaceMaterialLifecycle.ACTIVE,
             )

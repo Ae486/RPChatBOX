@@ -56,6 +56,9 @@ class RuntimeWorkspaceMaterialKind(StrEnum):
     PACKET_REF = "packet_ref"
     TOKEN_USAGE_METADATA = "token_usage_metadata"
     RETRIEVAL_USAGE_LEDGER = "retrieval_usage_ledger"
+    SELECTION_RECEIPT = "selection_receipt"
+    ADOPTION_RECEIPT = "adoption_receipt"
+    REWRITE_CANDIDATE = "rewrite_candidate"
 
 
 class RuntimeWorkspaceMaterialLifecycle(StrEnum):

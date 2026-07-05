@@ -781,6 +781,10 @@ class StoryRuntimeDebugQueryService:
                 RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE.value,
                 [],
             ),
+            "rewrite_candidate_materials": material_groups.get(
+                RuntimeWorkspaceMaterialKind.REWRITE_CANDIDATE.value,
+                [],
+            ),
             "post_write_traces": material_groups.get(
                 RuntimeWorkspaceMaterialKind.POST_WRITE_TRACE.value,
                 [],

@@ -156,7 +156,7 @@ class RewriteCandidateService:
             .where(RuntimeWorkspaceMaterialRecord.branch_head_id == branch_head_id)
             .where(
                 RuntimeWorkspaceMaterialRecord.material_kind
-                == RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE.value
+                == RuntimeWorkspaceMaterialKind.REWRITE_CANDIDATE.value
             )
             .order_by(RuntimeWorkspaceMaterialRecord.created_at.asc())
             .order_by(RuntimeWorkspaceMaterialRecord.material_id.asc())
@@ -333,7 +333,7 @@ class RewriteCandidateService:
         self._workspace_material_service.record_material(
             RuntimeWorkspaceMaterial(
                 material_id=f"rewrite_candidate_{candidate.candidate_id}",
-                material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
+                material_kind=RuntimeWorkspaceMaterialKind.REWRITE_CANDIDATE,
                 identity=identity,
                 domain=_REWRITE_CANDIDATE_DOMAIN,
                 domain_path="chapter.revision_overlay.rewrite_candidate",
@@ -371,7 +371,7 @@ class RewriteCandidateService:
             material
             for material in self._workspace_material_service.list_materials(
                 identity=identity,
-                material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
+                material_kind=RuntimeWorkspaceMaterialKind.REWRITE_CANDIDATE,
                 domain=_REWRITE_CANDIDATE_DOMAIN,
                 lifecycle=RuntimeWorkspaceMaterialLifecycle.ACTIVE,
             )

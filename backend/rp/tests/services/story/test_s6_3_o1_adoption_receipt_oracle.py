@@ -11,7 +11,7 @@ S6 v1.2 adoption contract as the LIVE guard that lets the retired 乙套 tests g
   * REV-004  the next writer turn and chapter close read the adopted draft FROM the
              adoption receipt (receipt_id in continuation source_ref_ids + bridge refs),
              not a merely-selected UI candidate.
-  * REV-017  the receipt is a REVIEW_OVERLAY runtime sidecar, never Core/accepted truth.
+  * REV-017  the receipt is an ADOPTION_RECEIPT runtime sidecar, never Core/accepted truth.
   * REV-020  an unadopted draft is not the continuation base; the adopted draft is.
 """
 
@@ -213,10 +213,10 @@ async def test_s6_3_o1_single_accept_adoption_receipt_is_the_one_live_truth_poin
     assert resolved_adopted is not None
     assert resolved_adopted.status == StoryArtifactStatus.ACCEPTED
 
-    # (7) REV-017: the receipt is a REVIEW_OVERLAY sidecar, never Core/accepted truth.
+    # (7) REV-017: the receipt is an ADOPTION_RECEIPT sidecar, never Core/accepted truth.
     assert (
         receipt_records[0].material_kind
-        == RuntimeWorkspaceMaterialKind.REVIEW_OVERLAY.value
+        == RuntimeWorkspaceMaterialKind.ADOPTION_RECEIPT.value
     )
     assert receipt.metadata_json["runtime_truth_owner"] == "rp_runtime"
     assert receipt.metadata_json["core_state_truth"] is False

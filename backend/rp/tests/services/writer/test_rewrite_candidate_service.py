@@ -61,7 +61,7 @@ def test_full_rewrite_candidate_is_saved_without_auto_adoption(retrieval_session
         session=retrieval_session
     ).list_materials(
         identity=identity,
-        material_kind=RuntimeWorkspaceMaterialKind.WORKER_CANDIDATE,
+        material_kind=RuntimeWorkspaceMaterialKind.REWRITE_CANDIDATE,
         domain="chapter",
     )
     assert len(materials) == 1
