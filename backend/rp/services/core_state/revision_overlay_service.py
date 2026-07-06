@@ -13,6 +13,7 @@ from rp.models.core_state.revision_overlay_contracts import (
     ReviewOverlayInspectionRecord,
     ReviewOverlayMode,
     ReviewOverlayRecord,
+    RevisionCommentFollowState,
     RevisionCommentRecord,
     RevisionCommentStatus,
     TrackedChangeRecord,
@@ -162,6 +163,86 @@ class RevisionOverlayService:
             comment_id=comment_id,
             status="deleted",
         )
+
+    def carry_comments_to_revision(
+        self,
+        *,
+        identity: MemoryRuntimeIdentity,
+        old_draft_ref: str,
+        new_draft_ref: str,
+        new_content_text: str,
+    ) -> list[RevisionCommentRecord]:
+        """Carry active comments from the old draft overlay onto a new revision.
+
+        Carried comments become passive memos (REV-007改): each keeps its
+        excerpt and instruction but mints a fresh ``comment_id`` under the new
+        overlay (F2 — never re-points the old row, so the superseded artifact's
+        review surface and tombstone history stay intact). ``follow_state`` is
+        resolved best-effort by ``selected_excerpt`` plaintext substring search
+        over ``new_content_text`` (A-b — never anchor_ref/hash); a missing
+        excerpt has no anchor to follow and is marked ``stale``.
+        """
+        old_overlay = self.find_overlay_for_draft_ref(
+            identity=identity,
+            draft_ref=_require_non_blank(old_draft_ref, field_name="old_draft_ref"),
+        )
+        if old_overlay is None:
+            return []
+        source_comments = [
+            comment
+            for comment in (
+                self._get_comment(identity=identity, comment_id=comment_id)
+                for comment_id in old_overlay.comment_refs
+            )
+            if comment is not None and comment.status == "active"
+        ]
+        if not source_comments:
+            return []
+        new_overlay = self.create_or_update_overlay(
+            identity=identity,
+            draft_ref=new_draft_ref,
+            mode="viewing",
+        )
+        carried: list[RevisionCommentRecord] = []
+        comment_refs = list(new_overlay.comment_refs)
+        for source in source_comments:
+            follow_state: RevisionCommentFollowState = (
+                "following"
+                if source.selected_excerpt
+                and source.selected_excerpt in new_content_text
+                else "stale"
+            )
+            carried_comment = RevisionCommentRecord(
+                comment_id=f"revision_comment_{uuid4().hex}",
+                turn_id=identity.turn_id,
+                draft_ref=new_overlay.draft_ref,
+                overlay_id=new_overlay.overlay_id,
+                anchor_ref=None,
+                selected_excerpt=source.selected_excerpt,
+                instruction_text=source.instruction_text,
+                status="active",
+                follow_state=follow_state,
+                created_by=source.created_by,
+                metadata_json={
+                    "payload_version": REVISION_OVERLAY_PAYLOAD_VERSION,
+                    "draft_document_id": new_overlay.draft_document_id,
+                    "runtime_truth_owner": "rp_runtime",
+                    "superdoc_truth_owner": False,
+                    "superdoc_anchor_id": source.metadata_json.get(
+                        "superdoc_anchor_id"
+                    ),
+                    "carried_from_comment_id": source.comment_id,
+                    "carried_from_draft_ref": old_overlay.draft_ref,
+                },
+            )
+            self._record_comment(identity=identity, comment=carried_comment)
+            comment_refs.append(carried_comment.comment_id)
+            carried.append(carried_comment)
+        updated_overlay = new_overlay.model_copy(
+            update={"comment_refs": comment_refs}
+        )
+        self._record_overlay(identity=identity, overlay=updated_overlay)
+        return carried
 
     def inspect_overlay(
         self,

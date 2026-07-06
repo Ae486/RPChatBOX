@@ -263,7 +263,9 @@ class ProposalReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proposal_id: str
-    status: Literal["pending", "applied", "review_required", "failed"] = "pending"
+    status: Literal[
+        "pending", "applied", "review_required", "failed", "cancelled"
+    ] = "pending"
     mode: str
     domain: Domain
     domain_path: str | None = None

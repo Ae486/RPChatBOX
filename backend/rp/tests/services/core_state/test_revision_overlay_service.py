@@ -71,12 +71,14 @@ def test_light_comment_creates_review_sidecars_without_truth_or_rewrite_refs(
     service = RevisionOverlayService(session=retrieval_session)
     overlay = _ensure_overlay(service, identity=identity, draft_ref="artifact:r2:sidecar")
 
-    service.add_comment(
+    comment = service.add_comment(
         identity=identity,
         overlay_id=overlay.overlay_id,
         instruction_text="Tighten this sentence.",
         selected_excerpt="The storm arrived at dusk.",
     )
+    # A freshly authored comment is a following memo (REV-007改 follow axis).
+    assert comment.follow_state == "following"
 
     materials = RuntimeWorkspaceMaterialService(
         session=retrieval_session
@@ -99,6 +101,8 @@ def test_light_comment_creates_review_sidecars_without_truth_or_rewrite_refs(
         assert material.payload["canonical_truth"] is False
         assert material.payload["rewrite_request_ref"] is None
         assert material.payload["rewrite_instruction_ref"] is None
+        if material.payload["payload_kind"] == "revision_comment":
+            assert material.payload["record"]["follow_state"] == "following"
 
 
 def test_editing_overlay_does_not_create_llm_rewrite_instruction(retrieval_session):

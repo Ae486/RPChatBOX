@@ -408,6 +408,148 @@ async def test_proposal_workflow_rejects_stale_base_ref_before_mutation(
 
 
 @pytest.mark.asyncio
+async def test_apply_atomicity_rejects_stale_base_after_unblocked_user_edit(
+    retrieval_session,
+):
+    """Apply atomicity: a pending review_required maintenance proposal captured at base
+    revision N must be REJECTED (not silently applied over) once a lock-v2-unblocked user
+    Core edit has advanced the same authoritative object to N+1.
+
+    REV-006 rev2 leaves user Core edits ungated during maintenance, so a maintenance
+    proposal can go stale between review and apply; ``ProposalApplyService`` must fail it
+    with ``phase_e_apply_base_revision_conflict`` rather than clobbering the user's edit.
+
+    The user edit is represented as a user-direct-edit-origin NOTIFY_APPLY Core mutation
+    through the same apply kernel that ``direct_edit_core_memory`` bottoms out in
+    (``direct_core_edit`` -> block mutation -> apply); the apply-atomicity path under test
+    is identical.
+    """
+    session, chapter = _seed_story_runtime(retrieval_session)
+    story_session_service, repository, workflow = _build_workflow(retrieval_session)
+
+    # (1) Maintenance proposal captured at base revision N=1, held for review (pending).
+    maintenance_receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id="story-1",
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "Maintenance Chapter"},
+                }
+            ],
+            base_refs=[
+                {
+                    "object_id": "chapter.current",
+                    "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                    "domain": Domain.CHAPTER,
+                    "domain_path": "chapter.current",
+                    "scope": "story",
+                    "revision": 1,
+                }
+            ],
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="post_write_worker|worker=longform_memory_worker",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.REVIEW_REQUIRED,
+        ),
+    )
+    assert maintenance_receipt.status == "review_required"
+
+    # (2) A lock-v2-unblocked user Core edit advances chapter.current to revision N+1=2.
+    user_edit_receipt = await workflow.submit_and_route(
+        ProposalSubmitInput(
+            story_id="story-1",
+            mode="longform",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                    },
+                    "field_patch": {"title": "User Direct Edit"},
+                }
+            ],
+        ),
+        session_id=session.session_id,
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        submit_source="user_direct_edit",
+        policy=PostWriteMaintenancePolicy(
+            preset_id="test",
+            fallback_decision=PolicyDecision.NOTIFY_APPLY,
+        ),
+    )
+    assert user_edit_receipt.status == "applied"
+    assert (
+        story_session_service.get_session(session.session_id).current_state_json[
+            "chapter_digest"
+        ]["title"]
+        == "User Direct Edit"
+    )
+
+    # (3) Applying the now-stale maintenance proposal is rejected on the base check
+    # (fires before any authoritative mutation — no silent overwrite).
+    mirror_service = AuthoritativeCompatibilityMirrorService(
+        story_session_service=story_session_service
+    )
+    apply_service = ProposalApplyService(
+        story_session_service=story_session_service,
+        proposal_repository=repository,
+        story_state_apply_service=StoryStateApplyService(),
+        core_state_dual_write_service=(
+            build_seeded_core_state_dual_write_service_from_story_service(
+                story_session_service,
+                story_id="story-1",
+            )
+        ),
+        authoritative_compatibility_mirror_service=mirror_service,
+        core_state_as_of_resolver=CoreStateAsOfResolver(
+            session=retrieval_session,
+            repository=CoreStateStoreRepository(retrieval_session),
+            mirror_service=mirror_service,
+        ),
+    )
+    with pytest.raises(ValueError, match="phase_e_apply_base_revision_conflict"):
+        apply_service.apply_proposal(maintenance_receipt.proposal_id)
+
+    # The stale maintenance proposal fails with the conflict trace and writes no receipt.
+    stale_record = repository.get_proposal_record(maintenance_receipt.proposal_id)
+    assert stale_record is not None
+    assert stale_record.status == "failed"
+    assert stale_record.error_message is not None
+    assert stale_record.error_message.startswith(
+        "phase_e_apply_base_revision_conflict"
+    )
+    assert (
+        repository.list_apply_receipts_for_proposal(maintenance_receipt.proposal_id)
+        == []
+    )
+    # The user's edit is preserved — the maintenance apply did NOT overwrite it.
+    assert (
+        story_session_service.get_session(session.session_id).current_state_json[
+            "chapter_digest"
+        ]["title"]
+        == "User Direct Edit"
+    )
+
+
+@pytest.mark.asyncio
 async def test_proposal_workflow_rejects_base_ref_without_revision(
     retrieval_session,
 ):

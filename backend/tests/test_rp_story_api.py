@@ -89,6 +89,7 @@ from rp.services.story.runtime_identity_service import StoryRuntimeIdentityServi
 from rp.services.story.runtime_workspace_facade import StoryRuntimeWorkspaceFacade
 from rp.services.story.session_service import StorySessionService
 from rp.services.story.state_apply_service import StoryStateApplyService
+from rp.services.writer.draft_selection_service import DraftSelectionService
 from rp.services.writer.worker_execution_service import WorkerExecutionOutcome
 from rp.services.writer.writing_assistant_service import (
     WritingAssistantServiceError,
@@ -519,7 +520,9 @@ def _seed_revision_review_session() -> dict[str, str]:
         }
 
 
-def _seed_reopen_segment_session() -> dict[str, str]:
+def _seed_reopen_segment_session(
+    *, real_settled_turn: bool = False
+) -> dict[str, str]:
     with SqlSession(get_engine()) as db_session:
         story_session_service = StorySessionService(db_session)
         story_session = story_session_service.create_session(
@@ -537,13 +540,36 @@ def _seed_reopen_segment_session() -> dict[str, str]:
             phase=LongformChapterPhase.SEGMENT_DRAFTING,
             builder_snapshot_json={},
         )
-        snapshot = RuntimeProfileSnapshotService(db_session).ensure_active_snapshot(
+        snapshot_service = RuntimeProfileSnapshotService(db_session)
+        snapshot = snapshot_service.ensure_active_snapshot(
             session_id=story_session.session_id,
             created_from="test.api.reopen",
         )
         refreshed_session = story_session_service.get_session(story_session.session_id)
         if refreshed_session is None:
             raise AssertionError("Seeded story session was not persisted")
+        # B4/C2(e): the readopt happy-path drives accept_pending_segment, which settles
+        # the segment's origin turn via settle_adopted_output_turn_if_visible ->
+        # _require_turn_record. That needs a REAL settled turn (a fake turn_id 400s at
+        # readopt). Reopen-only callers keep the lighter fake-turn seed.
+        identity_service = StoryRuntimeIdentityService(
+            db_session,
+            runtime_profile_snapshot_service=snapshot_service,
+        )
+        if real_settled_turn:
+            identity = identity_service.resolve_runtime_entry_identity(
+                session_id=refreshed_session.session_id,
+                command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
+                actor="api.reopen_test",
+                requested_runtime_profile_snapshot_id=(
+                    snapshot.runtime_profile_snapshot_id
+                ),
+            )
+            runtime_turn_id = identity.turn_id
+            runtime_branch_head_id = identity.branch_head_id
+        else:
+            runtime_turn_id = "turn-api-reopen"
+            runtime_branch_head_id = refreshed_session.active_branch_head_id
         artifact = story_session_service.create_artifact(
             session_id=refreshed_session.session_id,
             chapter_workspace_id=chapter.chapter_workspace_id,
@@ -554,13 +580,21 @@ def _seed_reopen_segment_session() -> dict[str, str]:
                 "command_kind": LongformTurnCommandKind.WRITE_NEXT_SEGMENT.value,
                 "runtime_story_id": refreshed_session.story_id,
                 "runtime_session_id": refreshed_session.session_id,
-                "runtime_branch_head_id": refreshed_session.active_branch_head_id,
-                "runtime_turn_id": "turn-api-reopen",
+                "runtime_branch_head_id": runtime_branch_head_id,
+                "runtime_turn_id": runtime_turn_id,
                 "runtime_profile_snapshot_id": snapshot.runtime_profile_snapshot_id,
                 "target_beat_id": "beat_001",
             },
             revision=1,
         )
+        if real_settled_turn:
+            identity_service.update_turn_status(
+                turn_id=runtime_turn_id,
+                status=StoryTurnStatus.SETTLED,
+                visible_output_ref=artifact.artifact_id,
+                selected_output_ref=artifact.artifact_id,
+                settlement_reason="test_api_reopen_settled_segment",
+            )
         db_session.commit()
         return {
             "session_id": refreshed_session.session_id,
@@ -637,6 +671,53 @@ def test_readopt_segment_route_not_found(client):
         "/segments/missing-artifact/readopt"
     )
     assert response.status_code == 404
+
+
+def test_readopt_segment_route_readopts_pending_draft(client):
+    # S6-5 C2(e): api readopt happy-path — reopen mints the pending draft, readopt runs
+    # it through the single accept gate so the re-edited revision becomes the ACCEPTED
+    # tail while the prior ACCEPTED row is superseded (REV-025), with an adoption receipt
+    # keyed on the re-adopted artifact.
+    seeded = _seed_reopen_segment_session(real_settled_turn=True)
+    session_id = seeded["session_id"]
+    original_id = seeded["artifact_id"]
+
+    reopen = client.post(
+        f"/api/rp/story-sessions/{session_id}/segments/{original_id}/reopen"
+    )
+    assert reopen.status_code == 200
+    draft_id = _reopen_chapter_state(
+        seeded["chapter_workspace_id"]
+    ).pending_segment_artifact_id
+    assert draft_id is not None and draft_id != original_id
+
+    readopt = client.post(
+        f"/api/rp/story-sessions/{session_id}/segments/{draft_id}/readopt"
+    )
+    assert readopt.status_code == 200
+    snapshot = readopt.json()
+    # The pending slot is cleared once the reopened draft is re-adopted.
+    assert snapshot["chapter"]["pending_segment_artifact_id"] is None
+
+    with SqlSession(get_engine()) as db_session:
+        story_session_service = StorySessionService(db_session)
+        new_tail = story_session_service.get_artifact(draft_id)
+        old_tail = story_session_service.get_artifact(original_id)
+        # New revision adopted; prior ACCEPTED superseded (no double-accept).
+        assert new_tail.status == StoryArtifactStatus.ACCEPTED
+        assert new_tail.revision == old_tail.revision + 1
+        assert old_tail.status == StoryArtifactStatus.SUPERSEDED
+        # Adoption receipt exists and is keyed on the re-adopted artifact.
+        receipt = DraftSelectionService(
+            session=db_session
+        ).get_latest_adoption_receipt_for_branch(
+            story_id=new_tail.metadata["runtime_story_id"],
+            session_id=session_id,
+            branch_head_id=new_tail.metadata["runtime_branch_head_id"],
+            draft_ref=f"artifact:{draft_id}",
+        )
+        assert receipt is not None
+        assert receipt.draft_ref == f"artifact:{draft_id}"
 
 
 def test_revision_review_surface_returns_degraded_draft_document(client):
@@ -717,6 +798,7 @@ def test_revision_review_comment_lifecycle_uses_light_excerpt_anchor(client):
     assert comment["anchor_ref"] is None
     assert comment["selected_excerpt"] == "The storm arrived at dusk."
     assert comment["status"] == "active"
+    assert comment["follow_state"] == "following"
     # Editor id is preserved as adapter metadata, not promoted into runtime identity.
     assert comment["metadata_json"]["superdoc_anchor_id"] == "superdoc-anchor-1"
     assert comment_payload["active_comment_refs"] == [comment["comment_id"]]

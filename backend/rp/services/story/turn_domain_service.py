@@ -86,6 +86,7 @@ from ..runtime.workflow_job_service import (
 )
 from ..runtime.maintenance_lock_service import RuntimeMaintenanceLockService
 from ..runtime.workspace_material_service import RuntimeWorkspaceMaterialService
+from ..core_state.revision_overlay_service import RevisionOverlayService
 from .runtime_adapter_service import StoryRuntimeAdapterService
 from ..writer.worker_execution_service import WorkerExecutionService
 from ..writer.worker_scheduler_service import (
@@ -1394,6 +1395,7 @@ class StoryTurnDomainService:
             ),
             pending_segment_artifact_id=draft.artifact_id,
         )
+        self._carry_reopen_memos(source=source, draft=draft)
         self._story_session_service.commit()
         return self._story_session_service.build_chapter_snapshot(
             session_id=session.session_id,
@@ -1564,6 +1566,61 @@ class StoryTurnDomainService:
             branch_head_id=branch_head_id,
             turn_id=turn_id,
             runtime_profile_snapshot_id=snapshot_id,
+        )
+
+    @staticmethod
+    def _try_revision_identity_from_artifact(
+        artifact: StoryArtifact,
+    ) -> MemoryRuntimeIdentity | None:
+        """Best-effort runtime identity from artifact metadata (F3 try-derive).
+
+        Unlike ``_readopt_identity_from_artifact`` this never raises: a legacy or
+        hand-planted artifact with incomplete ``runtime_*`` metadata yields None,
+        so reopen stays available and the memo carry becomes a no-op.
+        """
+        metadata = dict(artifact.metadata or {})
+        story_id = str(metadata.get("runtime_story_id") or "").strip()
+        session_id = str(metadata.get("runtime_session_id") or "").strip()
+        branch_head_id = str(metadata.get("runtime_branch_head_id") or "").strip()
+        turn_id = str(metadata.get("runtime_turn_id") or "").strip()
+        snapshot_id = str(metadata.get("runtime_profile_snapshot_id") or "").strip()
+        if not (story_id and session_id and branch_head_id and turn_id and snapshot_id):
+            return None
+        return MemoryRuntimeIdentity(
+            story_id=story_id,
+            session_id=session_id,
+            branch_head_id=branch_head_id,
+            turn_id=turn_id,
+            runtime_profile_snapshot_id=snapshot_id,
+        )
+
+    def _carry_reopen_memos(
+        self,
+        *,
+        source: StoryArtifact,
+        draft: StoryArtifact,
+    ) -> None:
+        """S6-7/REV-007改: carry active comments from the reopened source segment
+        onto the new revision draft as passive memos.
+
+        The carry reuses the turn-domain workspace material service so it rides
+        the same reopen transaction (A-e); the source identity is try-derived and
+        skipped when incomplete (F3). Comments only exist on artifacts whose
+        identity is derivable, so a skip drops no memo.
+        """
+        if self._runtime_workspace_material_service is None:
+            return
+        identity = self._try_revision_identity_from_artifact(source)
+        if identity is None:
+            return
+        overlay_service = RevisionOverlayService(
+            workspace_material_service=self._runtime_workspace_material_service,
+        )
+        overlay_service.carry_comments_to_revision(
+            identity=identity,
+            old_draft_ref=f"artifact:{source.artifact_id}",
+            new_draft_ref=f"artifact:{draft.artifact_id}",
+            new_content_text=draft.content_text,
         )
 
     async def complete_chapter(

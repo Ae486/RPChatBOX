@@ -13,16 +13,33 @@ These pin the frozen invariants introduced by S6-5:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any, cast
+
 import pytest
 from sqlmodel import select
 
+from models.rp_memory_store import MemoryProposalRecord
 from models.rp_story_store import RuntimeWorkflowJobRecord
 from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.reason_codes import SchedulerReasonCode
+from rp.models.runtime.workspace_material import (
+    RuntimeWorkspaceMaterial,
+    RuntimeWorkspaceMaterialKind,
+)
 from rp.models.story.runtime import (
     LongformChapterPhase,
     LongformTurnCommandKind,
     LongformTurnRequest,
     StoryArtifactStatus,
+)
+from rp.services.proposal.post_write_scheduler_service import PostWriteSchedulerService
+from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
+from rp.services.runtime.workspace_material_service import (
+    RuntimeWorkspaceMaterialService,
+)
+from rp.tests.services.projection.test_projection_builder_services import (
+    _build_turn_domain_service as _build_post_write_turn_domain_service,
 )
 from rp.tests.services.story.test_story_runtime_product_wiring_writer_constraints import (
     _create_settled_story_segment,
@@ -334,6 +351,102 @@ def test_maintenance_mutual_exclusion_same_scope(retrieval_session):
     )
 
 
+@pytest.mark.asyncio
+async def test_trigger_post_write_defers_when_branch_maintenance_in_flight(
+    retrieval_session,
+):
+    # REV-006 rev2 wiring pin: the predicate above is only load-bearing because
+    # ``trigger_post_write`` consults it (turn_domain_service.py:781) before running the
+    # full maintenance schedule. This drives the REAL post-write entrypoint end to end so
+    # that deleting that consult line reds the suite: turn B would otherwise run the full
+    # schedule instead of deferring to the minimal path.
+    story_session_service, session, chapter = _seed_story_runtime(retrieval_session)
+    _accept_outline(story_session_service, session, chapter)
+
+    # Turn A holds an in-flight branch-scoped maintenance cause (review_required
+    # proposal). Its writer turn settles first so turn B's intake can resolve under the
+    # S1-core single-active-turn guard; the proposal stays a live cause on the branch.
+    turn_a_identity, turn_a_identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="s65.trigger.turn_a",
+        actor="s65.trigger.turn_a",
+    )
+    _seed_review_required_proposal(retrieval_session, identity=turn_a_identity)
+    turn_a_identity_service.update_turn_status(
+        turn_id=turn_a_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        settlement_reason="s65_trigger_turn_a_settled",
+    )
+
+    # Turn B is the current user turn reaching post-write. Mark its writer output
+    # finalized (POST_WRITE_PENDING is trigger-ready) and record a retrieval-usage
+    # material so ``should_run_full_schedule`` is TRUE — i.e. absent the maintenance
+    # defer, turn B WOULD run the full schedule.
+    turn_b_identity, turn_b_identity_service = _resolve_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+        command_kind=LongformTurnCommandKind.WRITE_NEXT_SEGMENT,
+        created_from="s65.trigger.turn_b",
+        actor="s65.trigger.turn_b",
+    )
+    turn_b_identity_service.update_turn_status(
+        turn_id=turn_b_identity.turn_id,
+        status=StoryTurnStatus.POST_WRITE_PENDING,
+    )
+    material_service = RuntimeWorkspaceMaterialService(session=retrieval_session)
+    material_service.record_material(
+        RuntimeWorkspaceMaterial(
+            material_id="retrieval-usage-s65-trigger",
+            material_kind=RuntimeWorkspaceMaterialKind.RETRIEVAL_USAGE_RECORD,
+            identity=turn_b_identity,
+            domain="chapter",
+            domain_path="chapter.runtime.retrieval.usage",
+            payload={
+                "used_card_material_ids": ["retrieval-card-s65-trigger"],
+                "knowledge_gaps": [],
+            },
+            visibility="runtime_private",
+            created_by="test",
+        )
+    )
+    retrieval_session.commit()
+
+    workflow_job_service = RuntimeWorkflowJobService(retrieval_session)
+    # Full-schedule spine wired non-None (the guard at :751 requires all three). Only the
+    # scheduler is exercised before the :781 defer returns — the worker/governance legs
+    # stay off the deferred path.
+    post_write_scheduler_service = PostWriteSchedulerService(
+        worker_scheduler_service=SimpleNamespace(),
+        runtime_workspace_material_service=material_service,
+    )
+    turn_domain_service = _build_post_write_turn_domain_service(
+        story_session_service,
+        runtime_identity_service=turn_b_identity_service,
+        runtime_workspace_material_service=material_service,
+        runtime_workflow_job_service=workflow_job_service,
+        worker_execution_service=SimpleNamespace(),
+        post_write_scheduler_service=post_write_scheduler_service,
+        post_write_governance_service=SimpleNamespace(),
+    )
+
+    trigger_result = await turn_domain_service.trigger_post_write(
+        runtime_identity=turn_b_identity,
+        model_id="model",
+    )
+
+    # Deferred to the minimal path FOR maintenance mutual-exclusion (not for a missing
+    # service or an un-triggered schedule — those carry different reasons, so this
+    # assertion only holds if :781 genuinely fired).
+    assert trigger_result["run_kind"] == "minimal_only"
+    metadata = cast(dict[str, Any], trigger_result["metadata_json"])
+    assert (
+        metadata["deferred_reason"]
+        == SchedulerReasonCode.MAINTENANCE_IN_PROGRESS.value
+    )
+
+
 async def _reopen_rewrite_tail(
     turn_domain_service,
     story_session_service,
@@ -544,3 +657,111 @@ async def test_rewrite_preserves_reopen_metadata_no_double_accepted(retrieval_se
     )
     accepted_after = _accepted_ids(turn_domain_service, story_session_service, chapter)
     assert accepted_after == [seg1.artifact_id, rewrite_b]
+
+
+@pytest.mark.asyncio
+async def test_completed_chapter_readopt_keeps_phase_and_skips_maintenance(
+    retrieval_session,
+):
+    """REV-025 裁定 D: a completed-chapter re-open -> edit -> re-adopt runs the full
+    edit cycle over an already-closed chapter WITHOUT re-firing the maintenance spine.
+
+    Pins the whole path: the chapter stays CHAPTER_COMPLETED, ``session.current_phase``
+    is left untouched (no SEGMENT_DRAFTING regression tail), the old ACCEPTED tail is
+    superseded by the re-adopted revision (single tail, fresh receipt), and the re-adopt
+    creates zero new maintenance jobs and zero new proposals.
+
+    The edit uses the draft-first content seam (not a REWRITE persist): a REWRITE persist
+    unconditionally flips the chapter to SEGMENT_REVIEW (persist_generated_artifact sets
+    next_phase=SEGMENT_REVIEW for any STORY_SEGMENT), which would move the chapter OFF
+    CHAPTER_COMPLETED before re-adopt and thus never exercise the completed-chapter path.
+    """
+    story_session_service, session, chapter, seg1, seg2 = _seed_two_accepted_segments(
+        retrieval_session
+    )
+    story_session_service.update_chapter_workspace(
+        chapter_workspace_id=chapter.chapter_workspace_id,
+        phase=LongformChapterPhase.CHAPTER_COMPLETED,
+    )
+    story_session_service.commit()
+    turn_domain_service = _build_turn_domain_service(
+        story_session_service,
+        retrieval_session,
+    )
+    session_phase_before = story_session_service.get_session(
+        session.session_id
+    ).current_phase
+
+    # Re-open the closed-chapter tail: keeps CHAPTER_COMPLETED and mints the pending
+    # revision+1 DRAFT.
+    await turn_domain_service.reopen_accepted_segment(
+        session_id=session.session_id,
+        artifact_id=seg2.artifact_id,
+    )
+    draft_id = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    ).pending_segment_artifact_id
+    assert draft_id is not None and draft_id != seg2.artifact_id
+    # Edit on the draft-first content seam — a manual edit leaves the closed chapter
+    # untouched (the re-open already kept it CHAPTER_COMPLETED).
+    story_session_service.update_artifact(
+        artifact_id=draft_id,
+        content_text="Beat two rewritten (completed-chapter re-adopt).",
+    )
+    story_session_service.commit()
+    assert (
+        story_session_service.get_chapter_workspace(chapter.chapter_workspace_id).phase
+        == LongformChapterPhase.CHAPTER_COMPLETED
+    )
+
+    # Isolate the re-adopt on the still-completed chapter: it must fire no maintenance.
+    jobs_before = len(retrieval_session.exec(select(RuntimeWorkflowJobRecord)).all())
+    proposals_before = len(retrieval_session.exec(select(MemoryProposalRecord)).all())
+
+    await turn_domain_service.re_adopt_pending_segment(
+        session_id=session.session_id,
+        target_artifact_id=draft_id,
+    )
+
+    # Phase pinned to CHAPTER_COMPLETED; the pending slot clears; session.current_phase
+    # is untouched (no SEGMENT_DRAFTING flip / light-regression tail on a closed chapter).
+    readopted_chapter = story_session_service.get_chapter_workspace(
+        chapter.chapter_workspace_id
+    )
+    assert readopted_chapter.phase == LongformChapterPhase.CHAPTER_COMPLETED
+    assert readopted_chapter.pending_segment_artifact_id is None
+    assert (
+        story_session_service.get_session(session.session_id).current_phase
+        == session_phase_before
+    )
+
+    # Old ACCEPTED tail superseded; the re-adopted revision is the single ACCEPTED tail.
+    assert (
+        story_session_service.get_artifact(seg2.artifact_id).status
+        == StoryArtifactStatus.SUPERSEDED
+    )
+    new_tail = story_session_service.get_artifact(draft_id)
+    assert new_tail.status == StoryArtifactStatus.ACCEPTED
+    assert _accepted_ids(turn_domain_service, story_session_service, chapter) == [
+        seg1.artifact_id,
+        draft_id,
+    ]
+
+    # A fresh adoption receipt is minted for the re-adopted artifact (same accept gate).
+    receipt = turn_domain_service._longform_chapter_runtime_service.get_latest_accepted_segment_adoption_receipt(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        branch_head_id=new_tail.metadata["runtime_branch_head_id"],
+        accepted_artifact_id=draft_id,
+    )
+    assert receipt is not None
+
+    # REV-025: zero new maintenance jobs and zero new proposals from the re-adopt.
+    assert (
+        len(retrieval_session.exec(select(RuntimeWorkflowJobRecord)).all())
+        == jobs_before
+    )
+    assert (
+        len(retrieval_session.exec(select(MemoryProposalRecord)).all())
+        == proposals_before
+    )

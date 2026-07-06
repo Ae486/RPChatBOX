@@ -28,6 +28,7 @@ ReviewOverlayMode = Literal["viewing", "editing"]
 ReviewOverlayStatus = Literal["active", "resolved", "stale", "archived"]
 RevisionAnchorScope = Literal["inline", "single_block", "multi_block"]
 RevisionCommentStatus = Literal["active", "resolved", "deleted"]
+RevisionCommentFollowState = Literal["following", "stale"]
 RevisionTrackedChangeKind = Literal["insert", "delete", "replace"]
 RevisionTrackedChangeStatus = Literal["active", "accepted", "rejected", "deleted"]
 RevisionRecordActor = Literal["user", "system"]
@@ -184,6 +185,7 @@ class RevisionCommentRecord(BaseModel):
     selected_excerpt: str | None = None
     instruction_text: str
     status: RevisionCommentStatus = "active"
+    follow_state: RevisionCommentFollowState = "following"
     created_by: RevisionRecordActor = "user"
     metadata_json: dict[str, Any] = Field(default_factory=dict)
 

@@ -52,7 +52,7 @@ from rp.models.story.runtime import (
     StoryArtifactKind,
     StoryArtifactStatus,
 )
-from rp.models.runtime.identity import StoryTurnStatus
+from rp.models.runtime.identity import BranchControlKind, StoryTurnStatus
 from rp.services.projection.builder_context_service import (
     BuilderProjectionContextService,
 )
@@ -63,7 +63,9 @@ from rp.services.story.archival_evolution_service import ArchivalEvolutionServic
 from rp.services.core_state.store_repository import CoreStateStoreRepository
 from rp.services.core_state.as_of_resolver import CoreStateAsOfResolver
 from rp.services.memory.inspection_read_service import MemoryInspectionReadService
+from rp.services.memory.inspection_service import MemoryInspectionService
 from rp.services.memory.change_event_service import MemoryChangeEventService
+from rp.services.recall.lifecycle_service import RecallLifecycleService
 from rp.services.proposal.post_write_apply_handler import PostWriteApplyHandler
 from rp.services.projection.state_service import ProjectionStateService
 from rp.services.proposal.apply_service import ProposalApplyService
@@ -83,7 +85,10 @@ from rp.services.runtime.workflow_job_service import RuntimeWorkflowJobService
 from rp.services.runtime.workspace_material_service import (
     RuntimeWorkspaceMaterialService,
 )
-from rp.services.runtime.read_manifest_service import RuntimeReadManifestService
+from rp.services.runtime.read_manifest_service import (
+    BranchVisibilityResolver,
+    RuntimeReadManifestService,
+)
 from rp.services.memory.rp_block_read_service import RpBlockReadService
 from rp.services.setup_agent.workspace_service import SetupWorkspaceService
 from rp.services.story.activation_service import StoryActivationService
@@ -263,6 +268,7 @@ def _build_controller(
     repository: ProposalRepository,
     *,
     inject_core_state_resolver: bool = False,
+    wire_memory_inspection_service: bool = False,
     runtime_maintenance_lock_service: RuntimeMaintenanceLockService | None = None,
 ):
     core_state_adapter = StorySessionCoreStateAdapter(story_session_service)
@@ -351,6 +357,23 @@ def _build_controller(
         # rollback proposal hygiene, never to gate user operations.
         controller_kwargs["maintenance_lock_service"] = runtime_maintenance_lock_service
         controller_kwargs["proposal_repository"] = repository
+    if wire_memory_inspection_service:
+        # Wire the full MemoryInspectionService so direct_edit_core_memory /
+        # evolve_archival_memory actually route to governed mutation / evolution
+        # (mirrors rp_runtime_factory) instead of raising "not configured". This
+        # lets maintenance-mutations legs assert real applied/evolution receipts.
+        controller_kwargs["memory_inspection_service"] = MemoryInspectionService(
+            memory_inspection_read_service=memory_inspection_read_service,
+            rp_block_read_service=rp_block_read_service,
+            story_block_mutation_service=block_mutation_service,
+            branch_visibility_resolver=BranchVisibilityResolver(retrieval_session),
+            runtime_workspace_material_service=RuntimeWorkspaceMaterialService(
+                session=retrieval_session
+            ),
+            retrieval_document_service=RetrievalDocumentService(retrieval_session),
+            recall_lifecycle_service=RecallLifecycleService(retrieval_session),
+            archival_evolution_service=ArchivalEvolutionService(retrieval_session),
+        )
     return StoryRuntimeController(
         story_session_service=story_session_service,
         story_activation_service=cast(Any, SimpleNamespace()),
@@ -424,16 +447,6 @@ def _seed_review_required_proposal(
     return proposal
 
 
-def _assert_not_maintenance_blocked(exc: Exception | None) -> None:
-    # Lock v2 (REV-006 rev 2): user operations are never gated by maintenance. An op
-    # may still raise its own domain error under partial seeding, but it must never be
-    # short-circuited by a "maintenance in progress" block.
-    if exc is None:
-        return
-    assert "maintenance_in_progress" not in str(exc), exc
-    assert getattr(exc, "code", None) != "maintenance_in_progress"
-
-
 def test_story_runtime_controller_allows_branch_controls_during_maintenance(
     retrieval_session,
 ):
@@ -471,25 +484,119 @@ def test_story_runtime_controller_allows_branch_controls_during_maintenance(
         runtime_maintenance_lock_service=lock_service,
     )
 
-    # create_branch_from_turn fully succeeds despite active maintenance (放行).
-    _snapshot, receipt = controller.create_branch_from_turn(
+    # create_branch_from_turn fully succeeds despite active maintenance (放行) and
+    # makes the new branch active.
+    _snapshot, create_receipt = controller.create_branch_from_turn(
         session_id=session.session_id,
         origin_turn_id=runtime_identity.turn_id,
     )
-    assert receipt.branch_head_id
+    assert create_receipt.branch_head_id
+    assert create_receipt.control_kind == BranchControlKind.BRANCH_CREATED
 
-    # switch/rollback are likewise not maintenance-gated (they may raise their own
-    # domain errors under partial seeding, but never a maintenance block).
-    for method, kwargs in (
-        (controller.switch_branch, {"branch_head_id": "branch:s3e-other"}),
-        (controller.rollback_to_turn, {"target_turn_id": runtime_identity.turn_id}),
-    ):
-        raised: Exception | None = None
-        try:
-            method(session_id=session.session_id, **kwargs)
-        except Exception as exc:  # noqa: BLE001
-            raised = exc
-        _assert_not_maintenance_blocked(raised)
+    # switch_branch back to the origin branch fully succeeds during maintenance.
+    _switch_snapshot, switch_receipt = controller.switch_branch(
+        session_id=session.session_id,
+        branch_head_id=runtime_identity.branch_head_id,
+    )
+    assert switch_receipt.control_kind == BranchControlKind.BRANCH_SWITCHED
+    assert switch_receipt.branch_head_id == runtime_identity.branch_head_id
+    assert switch_receipt.to_branch_head_id == runtime_identity.branch_head_id
+
+    # rollback_to_turn on the now-active origin branch fully succeeds; it is never
+    # maintenance-gated under lock v2.
+    _rollback_snapshot, rollback_receipt = controller.rollback_to_turn(
+        session_id=session.session_id,
+        target_turn_id=runtime_identity.turn_id,
+    )
+    assert rollback_receipt.control_kind == BranchControlKind.ROLLBACK_APPLIED
+    assert rollback_receipt.target_turn_id == runtime_identity.turn_id
+    assert rollback_receipt.branch_head_id == runtime_identity.branch_head_id
+
+
+def test_rollback_cancels_nonterminal_branch_maintenance_proposals(retrieval_session):
+    """Lock v2 hygiene (ruling H): ``rollback_to_turn`` cancels the branch's NON-TERMINAL
+    maintenance proposals (with a ``rolled_back`` trace) so a stale proposal cannot hold
+    the maintenance-exclusion slot forever; already-terminal proposals stay untouched.
+    """
+    session, _chapter, story_session_service = _seed_story_runtime(retrieval_session)
+    repository = ProposalRepository(retrieval_session)
+    runtime_identity = _build_runtime_identity(
+        retrieval_session,
+        session_id=session.session_id,
+    )
+    StoryRuntimeIdentityService(retrieval_session).update_turn_status(
+        turn_id=runtime_identity.turn_id,
+        status=StoryTurnStatus.SETTLED,
+        visible_output_ref="artifact:s3e-rollback-origin",
+        selected_output_ref="artifact:s3e-rollback-origin",
+        settlement_reason="test_rollback_origin_settled",
+    )
+    # (a) a live NON-TERMINAL branch-scoped maintenance proposal — a maintenance cause.
+    nonterminal = _seed_review_required_proposal(
+        retrieval_session, identity=runtime_identity
+    )
+    # (b) an already-TERMINAL proposal on the SAME branch — filtered out of the lock
+    # causes by status alone, so the ONLY thing protecting it from cancel is its terminal
+    # state (not a branch mismatch).
+    terminal = MemoryProposalRecord(
+        proposal_id=f"proposal:s3e-controller-terminal:{runtime_identity.turn_id}",
+        story_id=runtime_identity.story_id,
+        session_id=runtime_identity.session_id,
+        chapter_workspace_id=None,
+        mode="longform",
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        status="applied",
+        policy_decision="notify_apply",
+        submit_source="post_write_worker|worker=longform_memory_worker",
+        operations_json=[],
+        base_refs_json=[],
+        governance_metadata_json={
+            "identity": runtime_identity.model_dump(mode="json"),
+            "worker_id": "longform_memory_worker",
+            "phase": "post_write_maintenance",
+        },
+    )
+    retrieval_session.add(terminal)
+    retrieval_session.flush()
+
+    lock_service = RuntimeMaintenanceLockService(retrieval_session)
+    # Precondition: the non-terminal proposal holds the exclusion slot; the terminal one
+    # is not a cause.
+    proposal_cause_ids = {
+        cause.source_id
+        for cause in lock_service.evaluate(
+            story_id=runtime_identity.story_id,
+            session_id=runtime_identity.session_id,
+            branch_head_id=runtime_identity.branch_head_id,
+        ).causes
+        if cause.source_kind == "proposal"
+    }
+    assert nonterminal.proposal_id in proposal_cause_ids
+    assert terminal.proposal_id not in proposal_cause_ids
+
+    controller = _build_controller(
+        retrieval_session,
+        story_session_service,
+        repository,
+        runtime_maintenance_lock_service=lock_service,
+    )
+    controller.rollback_to_turn(
+        session_id=session.session_id,
+        target_turn_id=runtime_identity.turn_id,
+    )
+
+    # The live maintenance proposal is cancelled with the rollback trace so it stops
+    # holding the exclusion slot.
+    cancelled = repository.get_proposal_record(nonterminal.proposal_id)
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_message == "rolled_back"
+    # The already-terminal proposal is left exactly as it was (not re-cancelled / traced).
+    untouched = repository.get_proposal_record(terminal.proposal_id)
+    assert untouched is not None
+    assert untouched.status == "applied"
+    assert untouched.error_message != "rolled_back"
 
 
 @pytest.mark.asyncio
@@ -502,78 +609,125 @@ async def test_story_runtime_controller_allows_memory_mutations_during_maintenan
         retrieval_session,
         session_id=session.session_id,
     )
+    core_repo = CoreStateStoreRepository(retrieval_session)
+    authoritative_row = core_repo.upsert_authoritative_object(
+        story_id=session.story_id,
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        object_id="chapter.current",
+        scope="story",
+        current_revision=3,
+        data_json={"current_chapter": 1, "title": "Block Store Chapter"},
+        metadata_json={"test_marker": "controller_maintenance_direct_edit"},
+        latest_apply_id="apply-controller-maintenance-direct-edit",
+        payload_schema_ref="schema://core-state/chapter-current",
+    )
+    core_repo.upsert_authoritative_revision(
+        authoritative_object_id=authoritative_row.authoritative_object_id,
+        story_id=session.story_id,
+        session_id=session.session_id,
+        layer=Layer.CORE_STATE_AUTHORITATIVE.value,
+        domain=Domain.CHAPTER.value,
+        domain_path="chapter.current",
+        object_id="chapter.current",
+        scope="story",
+        revision=3,
+        data_json={"current_chapter": 1, "title": "Block Store Chapter"},
+        revision_source_kind="controller_test",
+        source_apply_id="apply-controller-maintenance-direct-edit",
+        metadata_json={"test_marker": "controller_maintenance_direct_edit_revision"},
+    )
+    _seed_visible_archival_source(
+        retrieval_session,
+        identity=runtime_identity,
+        asset_id="archival.maintenance.visible",
+    )
     _seed_review_required_proposal(retrieval_session, identity=runtime_identity)
+    lock_service = RuntimeMaintenanceLockService(retrieval_session)
+    # Precondition: maintenance IS active on the branch (visible read model).
+    assert (
+        lock_service.evaluate(
+            story_id=runtime_identity.story_id,
+            session_id=runtime_identity.session_id,
+            branch_head_id=runtime_identity.branch_head_id,
+        ).active
+        is True
+    )
     controller = _build_controller(
         retrieval_session,
         story_session_service,
         repository,
-        runtime_maintenance_lock_service=RuntimeMaintenanceLockService(
-            retrieval_session
-        ),
+        inject_core_state_resolver=True,
+        wire_memory_inspection_service=True,
+        runtime_maintenance_lock_service=lock_service,
     )
 
-    direct_edit_request = DirectCoreEditRequest(
-        identity=runtime_identity,
-        actor="user.memory_editor",
-        domain=Domain.CHAPTER,
-        domain_path="chapter.current",
-        operations=[
-            {
-                "kind": "patch_fields",
-                "target_ref": {
+    # Core direct edit fully applies through the governed kernel despite active
+    # maintenance (放行), not merely "not maintenance-blocked".
+    direct_receipt = await controller.direct_edit_core_memory(
+        session_id=session.session_id,
+        payload=DirectCoreEditRequest(
+            identity=runtime_identity,
+            actor="user.memory_editor",
+            domain=Domain.CHAPTER,
+            domain_path="chapter.current",
+            operations=[
+                {
+                    "kind": "patch_fields",
+                    "target_ref": {
+                        "object_id": "chapter.current",
+                        "layer": Layer.CORE_STATE_AUTHORITATIVE,
+                        "domain": Domain.CHAPTER,
+                        "domain_path": "chapter.current",
+                        "revision": 3,
+                    },
+                    "field_patch": {"title": "Edit During Maintenance"},
+                }
+            ],
+            base_refs=[
+                {
                     "object_id": "chapter.current",
                     "layer": Layer.CORE_STATE_AUTHORITATIVE,
                     "domain": Domain.CHAPTER,
                     "domain_path": "chapter.current",
-                    "revision": 1,
-                },
-                "field_patch": {"title": "Edit During Maintenance"},
-            }
-        ],
-        base_refs=[
-            {
-                "object_id": "chapter.current",
-                "layer": Layer.CORE_STATE_AUTHORITATIVE,
-                "domain": Domain.CHAPTER,
-                "domain_path": "chapter.current",
-                "scope": "story",
-                "revision": 1,
-            }
-        ],
-        reason="edit during maintenance",
+                    "scope": "story",
+                    "revision": 3,
+                }
+            ],
+            reason="edit during maintenance",
+        ),
     )
-    direct_raised: Exception | None = None
-    try:
-        await controller.direct_edit_core_memory(
-            session_id=session.session_id,
-            payload=direct_edit_request,
-        )
-    except Exception as exc:  # noqa: BLE001
-        direct_raised = exc
-    _assert_not_maintenance_blocked(direct_raised)
+    assert direct_receipt["status"] == "applied"
+    edited_session = story_session_service.get_session(session.session_id)
+    assert edited_session.current_state_json["chapter_digest"]["title"] == (
+        "Edit During Maintenance"
+    )
 
-    archival_request = ArchivalEvolutionRequest(
-        identity=runtime_identity,
-        actor="user.archival_editor",
-        source_asset_id="source-s3e-locked",
-        expected_source_version=1,
-        replacement_sections=[
-            {
-                "text": "Archival replacement during maintenance.",
-                "metadata": {"domain": Domain.WORLD_RULE.value},
-            }
-        ],
-        reason="edit during maintenance",
+    # Archival evolution fully routes through governed evolution during
+    # maintenance and returns a real evolution receipt.
+    archival_receipt = controller.evolve_archival_memory(
+        session_id=session.session_id,
+        request=ArchivalEvolutionRequest(
+            identity=runtime_identity,
+            actor="user.archival_editor",
+            source_asset_id="archival.maintenance.visible",
+            expected_source_version=1,
+            replacement_sections=[
+                {
+                    "text": "Archival replacement during maintenance.",
+                    "metadata": {"domain": Domain.WORLD_RULE.value},
+                }
+            ],
+            reason="edit during maintenance",
+        ),
     )
-    archival_raised: Exception | None = None
-    try:
-        controller.evolve_archival_memory(
-            session_id=session.session_id,
-            request=archival_request,
-        )
-    except Exception as exc:  # noqa: BLE001
-        archival_raised = exc
-    _assert_not_maintenance_blocked(archival_raised)
+    assert archival_receipt["evolution_id"]
+    # Evolution mints a versioned successor asset id (`{root}__v{n}`); the root
+    # here is the seeded asset id and this is the first evolution (v2).
+    assert archival_receipt["source_asset_id"] == "archival.maintenance.visible__v2"
+    assert archival_receipt["new_source_version"] == 2
 
 
 def _utcnow() -> datetime:
@@ -858,6 +1012,73 @@ def _seed_archival_evolution_receipt(
     )
     retrieval_session.flush()
     return receipt
+
+
+def _seed_visible_archival_source(
+    retrieval_session,
+    *,
+    identity: MemoryRuntimeIdentity,
+    asset_id: str,
+) -> None:
+    """Seed a branch-visible archival source asset at version 1 (no evolve yet).
+
+    Mirrors ``_seed_archival_evolution_receipt`` up to ingestion so the controller
+    ``evolve_archival_memory`` path can pass ``_require_visible_material_refs`` and
+    genuinely evolve during active maintenance.
+    """
+
+    collection = RetrievalCollectionService(retrieval_session).ensure_story_collection(
+        story_id=identity.story_id,
+        scope="story",
+        collection_kind="archival",
+    )
+    metadata = build_archival_source_metadata(
+        source_type=FOUNDATION_ENTRY_SOURCE_TYPE,
+        import_event=SETUP_COMMIT_IMPORT_EVENT,
+        workspace_id="workspace-maintenance-mutations",
+        commit_id="commit-maintenance-mutations",
+        step_id="foundation",
+        source_ref=f"setup_commit:commit-maintenance-mutations:{asset_id}",
+        domain=Domain.WORLD_RULE.value,
+        domain_path=f"foundation.world.{asset_id}",
+        extra={"title": f"Archival {asset_id}", "visibility_scope": "story_global"},
+    )
+    metadata["seed_sections"] = [
+        build_archival_seed_section(
+            section_id=f"foundation:{asset_id}",
+            title=f"Archival {asset_id}",
+            path=f"foundation.world.{asset_id}",
+            text=f"{asset_id} original archival text.",
+            metadata=metadata,
+            tags=["archival", "world_rule"],
+        )
+    ]
+    asset = SourceAsset(
+        asset_id=asset_id,
+        story_id=identity.story_id,
+        mode=StoryMode.LONGFORM,
+        collection_id=collection.collection_id,
+        workspace_id="workspace-maintenance-mutations",
+        step_id="foundation",
+        commit_id="commit-maintenance-mutations",
+        asset_kind=FOUNDATION_ENTRY_SOURCE_TYPE,
+        source_ref=f"memory://{asset_id}",
+        title=f"Archival {asset_id}",
+        parse_status="queued",
+        ingestion_status="queued",
+        mapped_targets=["foundation"],
+        metadata=metadata,
+        created_at=_utcnow(),
+        updated_at=_utcnow(),
+    )
+    RetrievalDocumentService(retrieval_session).upsert_source_asset(asset)
+    retrieval_session.flush()
+    RetrievalIngestionService(retrieval_session).ingest_asset(
+        story_id=identity.story_id,
+        asset_id=asset_id,
+        collection_id=collection.collection_id,
+    )
+    retrieval_session.flush()
 
 
 @pytest.mark.asyncio
