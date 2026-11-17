@@ -64,7 +64,3 @@ python -m pytest tests rp/tests
 ```
 
 真实 MCP 集成测试默认跳过；需通过 `--dart-define=CHATBOX_MCP_TEST_API_KEY=<your-key>` 显式配置后运行，模型调用可能产生费用。
-
-主要入口为 [Flutter 客户端](lib/main.dart)、[FastAPI 后端](backend/main.py) 和 [角色扮演模块](backend/rp/)。
-
-API Key、聊天数据和本地构建产物请保留在本地。仓库尚未声明项目级开源许可证。
