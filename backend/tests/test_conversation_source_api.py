@@ -154,6 +154,116 @@ def test_conversation_source_starts_empty_and_supports_append_patch_fork_select(
     assert get_selected.json()["messages"][1]["id"] == "assistant-1"
 
 
+def test_conversation_source_selecting_message_id_returns_full_branch_chain(client):
+    create_response = client.post(
+        "/api/conversations", json={"title": "Branch Selection"}
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    user = client.post(
+        f"/api/conversations/{conversation_id}/source/messages",
+        json={
+            "messages": [
+                _message_payload(
+                    message_id="user-1",
+                    role="user",
+                    content="Choose a branch.",
+                )
+            ]
+        },
+    )
+    assert user.status_code == 200
+    checkpoint_user = user.json()["checkpoint_id"]
+    assert checkpoint_user
+
+    assistant = client.post(
+        f"/api/conversations/{conversation_id}/source/messages",
+        json={
+            "messages": [
+                _message_payload(
+                    message_id="assistant-1",
+                    role="assistant",
+                    content="Branch A, step 1.",
+                )
+            ]
+        },
+    )
+    assert assistant.status_code == 200
+    checkpoint_assistant = assistant.json()["checkpoint_id"]
+    assert checkpoint_assistant
+
+    followup_user = client.post(
+        f"/api/conversations/{conversation_id}/source/messages",
+        json={
+            "messages": [
+                _message_payload(
+                    message_id="user-2",
+                    role="user",
+                    content="Branch A, step 2.",
+                )
+            ]
+        },
+    )
+    assert followup_user.status_code == 200
+
+    followup_assistant = client.post(
+        f"/api/conversations/{conversation_id}/source/messages",
+        json={
+            "messages": [
+                _message_payload(
+                    message_id="assistant-2",
+                    role="assistant",
+                    content="Branch A, step 3.",
+                )
+            ]
+        },
+    )
+    assert followup_assistant.status_code == 200
+    checkpoint_followup = followup_assistant.json()["checkpoint_id"]
+    assert checkpoint_followup
+
+    sibling_branch = client.post(
+        f"/api/conversations/{conversation_id}/source/messages",
+        json={
+            "base_checkpoint_id": checkpoint_user,
+            "messages": [
+                _message_payload(
+                    message_id="assistant-3",
+                    role="assistant",
+                    content="Branch B, alternate path.",
+                )
+            ],
+        },
+    )
+    assert sibling_branch.status_code == 200
+    assert sibling_branch.json()["checkpoint_id"] != checkpoint_followup
+
+    select_by_message = client.put(
+        f"/api/conversations/{conversation_id}/source/selection",
+        json={"message_id": "assistant-1"},
+    )
+    assert select_by_message.status_code == 200
+    selected = select_by_message.json()
+    assert selected["selected_checkpoint_id"] == checkpoint_followup
+    assert [message["id"] for message in selected["messages"]] == [
+        "user-1",
+        "assistant-1",
+        "user-2",
+        "assistant-2",
+    ]
+
+    get_selected = client.get(f"/api/conversations/{conversation_id}/source")
+    assert get_selected.status_code == 200
+    assert get_selected.json()["selected_checkpoint_id"] == checkpoint_followup
+    assert [message["id"] for message in get_selected.json()["messages"]] == [
+        "user-1",
+        "assistant-1",
+        "user-2",
+        "assistant-2",
+    ]
+
+
 def test_conversation_source_returns_not_found_for_missing_checkpoint_and_message(
     client,
 ):

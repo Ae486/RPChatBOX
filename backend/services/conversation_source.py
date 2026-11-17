@@ -706,15 +706,15 @@ class ConversationSourceService:
                     f"Message not found in source tree: {payload.message_id}"
                 )
             state.thread.select_path_to_node(payload.message_id)
+            target_message_id = state.thread.active_leaf_id or payload.message_id
             target_checkpoint_id = self._checkpoint_id_for_message(
                 state,
-                payload.message_id,
+                target_message_id,
             )
             if target_checkpoint_id is None:
                 raise ConversationSourceCheckpointNotFoundError(
-                    f"Checkpoint not found for message: {payload.message_id}"
+                    f"Checkpoint not found for message: {target_message_id}"
                 )
-            target_message_id = payload.message_id
         else:
             target_checkpoint_id = payload.checkpoint_id or record.latest_checkpoint_id
             if target_checkpoint_id is not None:
