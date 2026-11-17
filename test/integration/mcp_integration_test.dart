@@ -2,7 +2,7 @@
 /// 测试完整调用链：McpClientService → McpToolAdapter → HybridLangChainProvider
 ///
 /// 运行方式：
-/// flutter test test/integration/mcp_integration_test.dart --no-pub
+/// `flutter test test/integration/mcp_integration_test.dart --no-pub --dart-define=CHATBOX_MCP_TEST_API_KEY=<your-key>`
 
 import 'dart:async';
 
@@ -28,7 +28,7 @@ class TestConfig {
   // LLM 供应商配置
   static const providerName = 'Gemini Proxy';
   static const providerUrl = 'https://x666.me/v1/chat/completions';
-  static const apiKey = 'sk-M1Gr4Tfu7fXUWyGptbWCngfBUkGbj8JFo8ovT82i5DOjI5SI';
+  static const apiKey = String.fromEnvironment('CHATBOX_MCP_TEST_API_KEY');
   static const modelName = 'gemini-2.5-flash';
 
   // 测试提示词（触发工具调用）
@@ -37,6 +37,17 @@ class TestConfig {
 }
 
 void main() {
+  if (TestConfig.apiKey.isEmpty) {
+    test(
+      'MCP live integration',
+      () {},
+      skip:
+          'Set --dart-define=CHATBOX_MCP_TEST_API_KEY=<your-key>; '
+          'requires native plugins and may incur model charges.',
+    );
+    return;
+  }
+
   late McpClientService mcpService;
   late String testServerId;
 

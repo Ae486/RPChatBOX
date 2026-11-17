@@ -134,6 +134,7 @@ coverage/
 # Markdown docs are local draft/discussion material for now. Re-enable and
 # publish curated docs after the project reaches a stable implementation point.
 *.md
+!/README.md
 
 # Local Trellis execution state and task logs.
 # Keep .trellis/scripts, .trellis/spec, workflow, and config in Git; task/session
@@ -305,3 +306,19 @@ test-storage-sqlite/
 downloaded_files/
 # 发布 APK 为可重建构建产物，不应入库（已 git rm --cached，磁盘保留）。
 /chatboxapp-release.apk
+
+# ==========================================
+# 根目录 scratch 清理 (2026-06-08)
+# codex sandbox 探测 / pytest basetemp / mkdir-mode 残留；均为工具再生噪声，
+# git 本不跟踪空目录，忽略以防其带文件再生时污染 git status。
+# ==========================================
+codex-perm-probe-*/
+codex-write-*/
+codex_tmp_probe_*/
+codex-py-mkdir-*/
+py-mkdir-mode-*/
+py-mode*-probe-*/
+pytest-basetemp-*/
+latest_logs/
+archived_logs/
+.pytest-tmp/
